@@ -190,6 +190,11 @@ button{font-family:inherit;cursor:pointer}
 .mfield input,.mfield select{width:100%;border:1.5px solid var(--line);background:var(--bg);border-radius:10px;padding:10px 12px;font:inherit;font-size:14px}
 .mfield input:focus,.mfield select:focus{outline:none;border-color:var(--brand);background:var(--paper)}
 .mrow2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+/* univerzálny split: 2 stĺpce na PC, pod seba na mobile */
+.split2{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+@media(max-width:700px){.split2{grid-template-columns:1fr;gap:14px}}
+.split2 > .splitcol{min-width:0}
+.splittitle{font-size:13px;font-weight:700;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px;display:flex;align-items:center;gap:6px}
 .modalft{display:flex;gap:10px;padding:16px 22px;border-top:1px solid var(--line);position:sticky;bottom:0;background:var(--paper)}
 .modalft .abtn{flex:1;justify-content:center}
 .abtn.danger{color:var(--neg);border-color:#f0c8d2}
@@ -291,7 +296,7 @@ button{font-family:inherit;cursor:pointer}
 <input type="file" id="ocrInputFile" accept="image/*,application/pdf" style="display:none" onchange="spracujOCR(event)">
 <input type="file" id="gpxInput" accept=".gpx,.csv,.xml,text/csv" style="display:none" onchange="spracujGPX(event)">
 <input type="file" id="vwInput" accept=".xlsx,.xls" style="display:none" onchange="spracujVW(event)">
-<input type="file" id="zseInput" accept=".txt,.csv,text/plain" style="display:none" onchange="spracujZse(event)">
+<input type="file" id="zseInput" accept=".txt,.csv,.pdf,text/plain,application/pdf" style="display:none" onchange="spracujZse(event)">
 <input type="file" id="icsInput" accept=".ics,text/calendar" style="display:none" onchange="spracujICS(event)">
 
 <!-- MODÁL na editovanie -->
@@ -1113,6 +1118,7 @@ const APPS={
   vydavky:  {n:"Výdavky",         ic:"€", c:"#f08a24", d:"Bločky, došlé faktúry, kategórie"},
   banka:    {n:"Banka",           ic:"🏦",c:"#0f7d8c", d:"Pohyby na účte, párovanie"},
   cashflow: {n:"Cashflow",        ic:"⇄", c:"#4557b8", d:"Párovanie platieb, tok peňazí"},
+  pohladavky:{n:"Pohľadávky",     ic:"⇌", c:"#b8557a", d:"Neuhradené faktúry, záväzky, po splatnosti"},
   prognoza: {n:"Prognóza",        ic:"◔", c:"#0f9488", d:"Odhad roka, čo odložiť na dane"},
   dph:      {n:"DPH a dane",      ic:"§", c:"#6b4fbf", d:"DPH, daň z príjmov, odvody"},
   jazdy:    {n:"Kniha jázd",      ic:"🚗",c:"#2e9e6b", d:"Jazdy, km, kniha jázd"},
@@ -1164,6 +1170,7 @@ function renderApp(id){
   if(id==="vydavky") return appVydavky();
   if(id==="banka") return appBanka();
   if(id==="cashflow") return appCashflow();
+  if(id==="pohladavky") return appPohladavky();
   if(id==="prognoza") return appPrognoza();
   if(id==="dph") return appDPH();
   if(id==="jazdy") return appJazdy();
@@ -1518,12 +1525,83 @@ function appBanka(){
       <div class="aminbox"><div class="al">Pohybov</div><div class="av">${vypis.length}</div></div>
       <div class="aminbox"><div class="al">Saldo</div><div class="av ${prijmy-vydaje>=0?'pos':'neg'}">${eur(prijmy-vydaje)}</div></div>
     </div>
-    <div class="atool" style="--_c:${c}">${['vsetky|Všetky','prijem|Príjmy','vydaj|Výdaje'].map(x=>{const[k,l]=x.split('|');return `<span class="achip ${bFilter===k?'on':''}" onclick="bFilter='${k}';appBanka()">${l}</span>`}).join('')}</div>
+    <div class="atool" style="--_c:${c}">${['vsetky|Všetky','nespar|Nespárované','prijem|Príjmy','vydaj|Výdaje'].map(x=>{const[k,l]=x.split('|');return `<span class="achip ${bFilter===k?'on':''}" onclick="bFilter='${k}';appBanka()">${l}</span>`}).join('')}</div>
+    <div class="csub" style="margin:0 2px 12px">Nespárované výdaje môžete ručne zaradiť: <b>+ Výdavok</b> vytvorí výdavok z pohybu, <b>⊘</b> pridá pravidlo na ignorovanie.</div>
     <div class="alist">
-      <div class="arow head" style="grid-template-columns:auto 2fr 1fr 1fr"><div></div><div>Protistrana</div><div>Dátum</div><div style="text-align:right">Suma</div></div>
-      ${list.length?list.slice(0,200).map(t=>{const inc=t.smer==="prijem";return `<div class="arow" style="grid-template-columns:auto 2fr 1fr 1fr"><div style="width:30px;height:30px;border-radius:8px;display:grid;place-items:center;font-weight:700;background:${inc?'#e2f3ea':'#f2f4f7'};color:${inc?'var(--pos)':'var(--ink-soft)'}">${inc?'↓':'↑'}</div><div><div class="acol-strong">${esc(t.proti||"—")}</div><div class="acol-muted">${t.vs?'VS '+esc(t.vs):''}</div></div><div class="acol-muted">${fmtDatum(t.datum)}</div><div class="acol-sum" style="color:${inc?'var(--pos)':'var(--ink)'}">${inc?'+':'−'}${eur(+t.suma||0)}</div></div>`;}).join(''):'<div class="aempty">Žiadne pohyby.</div>'}
-    </div>${list.length>200?'<div class="acol-muted" style="text-align:center;padding:10px">Zobrazených prvých 200 pohybov.</div>':''}`;
+      ${(()=>{
+        let filtered=list;
+        if(bFilter==="nespar") filtered=vypis.filter(t=>{const s=vypisSparuj(t);return !s||(s.istota!=="ista"&&s.typ!=="klasifikacia");});
+        return filtered.length?filtered.slice(0,200).map(t=>{
+          const inc=t.smer==="prijem"; const s=vypisSparuj(t);
+          const ignor=s&&s.ignoruj;
+          let stavTxt,stavCls;
+          if(ignor){stavTxt="ignorované";stavCls="";}
+          else if(!s){stavTxt="nespárované";stavCls="warn";}
+          else if(s.typ==="klasifikacia"){stavTxt={dph:"DPH",danPrijem:"daň",odvodZP:"odvody ZP",odvodSP:"odvody SP",poistenie:"poistenie"}[s.klasifikacia.druh]||"klasifikované";stavCls="ok";}
+          else if(s.typ==="faktura"){stavTxt="faktúra";stavCls=s.istota==="ista"?"ok":"warn";}
+          else {stavTxt=s.istota==="ista"?"výdavok":"možný výdavok";stavCls=s.istota==="ista"?"ok":"warn";}
+          const nespar=!ignor&&(!s||(s.istota!=="ista"&&s.typ!=="klasifikacia"));
+          const akcie=nespar&&t.smer==="vydaj"
+            ? `<div style="display:flex;gap:5px;margin-top:5px"><button class="aabtn" style="padding:2px 8px;font-size:10.5px;border-color:var(--pos);color:var(--pos)" onclick="event.stopPropagation();vypisPridajVydavok('${esc(t.id||t.datum+t.suma)}')">+ Výdavok</button><button class="aabtn" style="padding:2px 8px;font-size:10.5px" onclick="event.stopPropagation();vypisIgnoruj('${esc(t.id||t.datum+t.suma)}')" title="Vždy ignorovať takéto pohyby">⊘</button></div>`
+            : "";
+          return `<div class="arow" style="grid-template-columns:auto 2fr 1fr auto;align-items:start;${ignor?'opacity:.5':nespar?'background:#fdf6ee':''}"><div style="width:30px;height:30px;border-radius:8px;display:grid;place-items:center;font-weight:700;background:${inc?'#e2f3ea':'#f2f4f7'};color:${inc?'var(--pos)':'var(--ink-soft)'}">${inc?'↓':'↑'}</div><div style="min-width:0"><div class="acol-strong" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(t.proti||"—")}</div><div class="acol-muted">${t.vs?'VS '+esc(t.vs)+' · ':''}<span class="apill ${stavCls}" style="font-size:9.5px">${stavTxt}</span></div>${akcie}</div><div class="acol-muted">${fmtDatum(t.datum)}</div><div class="acol-sum" style="color:${inc?'var(--pos)':'var(--ink)'}">${inc?'+':'−'}${eur(+t.suma||0)}</div></div>`;
+        }).join(''):'<div class="aempty">Žiadne pohyby.</div>';
+      })()}
+    </div>
+    <div class="card" style="margin-top:14px">
+      <h2 style="font-size:15px;margin-bottom:4px">Pravidlá ignorovania</h2>
+      <div class="csub" style="margin-bottom:10px">Pohyby zodpovedajúce týmto pravidlám sa automaticky vynechajú (napr. súkromný účet, vlastné vklady).</div>
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        <button class="aabtn" onclick="pridajPravidloIgnoruj('iban')">+ IBAN</button>
+        <button class="aabtn" onclick="pridajPravidloIgnoruj('popis')">+ Kľúčové slovo</button>
+      </div>
+      ${((d.settings&&d.settings.ignorPravidla)||[]).map((p,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--line-soft);font-size:12.5px"><span><b>${p.typ==='iban'?'IBAN':'Kľúčové slovo'}:</b> ${esc(p.hodnota)}</span><button class="aabtn" style="padding:2px 8px;font-size:11px;color:var(--neg)" onclick="zmazPravidloIgnoruj(${i})">×</button></div>`).join('')||'<div class="acol-muted" style="font-size:12px">Žiadne pravidlá.</div>'}
+    </div>`;
   setCrumb(`${vypis.length} pohybov`);
+}
+
+// manuálne párovanie: vytvor výdavok z bankového pohybu
+function vypisNajdiPohyb(txId){ return (firmaData.vypis||[]).find(t=>String(t.id||t.datum+t.suma)===String(txId)); }
+function vypisPridajVydavok(txId){
+  const tx=vypisNajdiPohyb(txId); if(!tx){ alert("Pohyb sa nenašiel."); return; }
+  const datum=(tx.datum||"").slice(0,10);
+  const suma=Math.abs(+tx.suma||0);
+  const sadzba=(firmaData.settings||{}).sadzbaDPH||0.23;
+  const bez=r2(suma/(1+sadzba)), dph=r2(suma-bez);
+  openModal("Výdavok z bankového pohybu", `
+    <div style="background:var(--brand-lite);color:var(--brand-deep);font-size:12px;padding:9px 12px;border-radius:9px;margin-bottom:14px">Vytvárame výdavok z pohybu <b>${esc(tx.proti||"")}</b> · ${eur(suma)}. Skontrolujte rozpad DPH.</div>
+    <div class="mfield"><label>Partner</label><input id="m_partner" value="${esc(tx.proti||'')}"></div>
+    <div class="mfield"><label>Popis</label><input id="m_popis" value=""></div>
+    <div class="mfield"><label>Dátum</label><input id="m_datum" type="date" value="${esc(datum)}"></div>
+    <div class="mfield"><label>Druh</label><select id="m_druh"><option>Bloček</option><option>Došlá faktúra</option><option>PHM (tankovanie)</option></select></div>
+    <div class="mrow2"><div class="mfield"><label>Bez DPH (€)</label><input id="m_bez" type="number" step="0.01" value="${bez}"></div><div class="mfield"><label>DPH (€)</label><input id="m_dph" type="number" step="0.01" value="${dph}"></div></div>
+    <div class="mfield"><label>Spolu (€)</label><input id="m_spolu" type="number" step="0.01" value="${suma}"></div>
+  `, ()=>{
+    const datum=val("m_datum"); if(!datum){ alert("Zadajte dátum."); return false; }
+    const obj={druh:val("m_druh"),partner:val("m_partner"),popis:val("m_popis"),datum,bez:parseFloat(val("m_bez"))||0,dph:parseFloat(val("m_dph"))||0,spolu:parseFloat(val("m_spolu"))||0,mesiac:datum.slice(0,7),zdroj:"vypis",vypisId:tx.id||tx.datum+tx.suma};
+    if(!firmaData.vydavky) firmaData.vydavky=[];
+    firmaData.vydavky.push(obj); poZmene(); appBanka();
+  });
+}
+function vypisIgnoruj(txId){
+  const tx=vypisNajdiPohyb(txId); if(!tx) return;
+  modalConfirmAsk("Pridať pravidlo — pohyby s protistranou „"+(tx.proti||"")+"“ vždy ignorovať?", ()=>{
+    if(!firmaData.settings) firmaData.settings={};
+    if(!firmaData.settings.ignorPravidla) firmaData.settings.ignorPravidla=[];
+    firmaData.settings.ignorPravidla.push({typ:"popis", hodnota:(tx.proti||"").slice(0,40)});
+    poZmene(); appBanka();
+  });
+}
+function pridajPravidloIgnoruj(typ){
+  const hodnota=prompt(typ==="iban"?"IBAN protistrany na ignorovanie:":"Kľúčové slovo v popise/názve na ignorovanie:");
+  if(!hodnota) return;
+  if(!firmaData.settings) firmaData.settings={};
+  if(!firmaData.settings.ignorPravidla) firmaData.settings.ignorPravidla=[];
+  firmaData.settings.ignorPravidla.push({typ, hodnota:hodnota.trim()});
+  poZmene(); appBanka();
+}
+function zmazPravidloIgnoruj(i){
+  if(firmaData.settings&&firmaData.settings.ignorPravidla){ firmaData.settings.ignorPravidla.splice(i,1); poZmene(); appBanka(); }
 }
 
 // ── DPH A DANE ──
@@ -1988,27 +2066,51 @@ function vwOznac(v){ _vwParsed.forEach(j=>{ if(j.km>vwFilterKm) j.vybrane=v; });
 function zseImport(){ document.getElementById("zseInput").click(); }
 function parseZse(text){
   const lines=String(text).split(/\r?\n/); const txns=[]; let karta="";
-  for(const line of lines){
-    const km=line.match(/karta č\.\s*(\d+)/i); if(km) karta=km[1];
+  for(let raw of lines){
+    const line=raw.trim();
+    const km=line.match(/(?:Nabíjacia karta|karta)\s*č\.?\s*(\d+)/i); if(km) karta=km[1];
     const dm=line.match(/(\d{2})\.(\d{2})\.(\d{4})/); if(!dm) continue;
-    if(/Spolu/i.test(line)||/Vytvoren/i.test(line)) continue;
+    if(/Spolu/i.test(line)||/Vytvoren/i.test(line)||/strana/i.test(line)) continue;
     const iso=`${dm[3]}-${dm[2]}-${dm[1]}`;
     const casy=line.match(/(\d{1,2}:\d{2})/g)||[];
-    const sumaM=line.match(/([\d.,]+)\s*€/); const suma=sumaM?parseFloat(sumaM[1].replace(",",".")):0;
-    let kwh=0; const kwhM=line.match(/(\d+\.\d{3})\s+[\d.,]+\s*€/); if(kwhM) kwh=parseFloat(kwhM[1]);
     const poplatok=/poplatok/i.test(line);
-    const typ=poplatok?"Mesačný poplatok":"Nabíjanie";
-    const stanica=(line.match(/(ZSE[^\d]+?)\s+\d{2}\./)?.[1]||"").trim();
+    const typM=line.match(/Nabíjanie\s+(DC|ULTRA|AC)/i);
+    const typ = poplatok ? "Mesačný poplatok" : (typM?"Nabíjanie "+typM[1]:"Nabíjanie");
+    // stanica: text medzi ']' a dátumom
+    let stanica=""; const stM=line.match(/\]\s*(.+?)\s+\d{2}\.\d{2}\.\d{4}/);
+    if(stM){ stanica=stM[1].replace(/\s+/g," ").trim(); if(stanica==="-") stanica=""; }
+    // suma: posledné číslo s € (formát 0.000€ / 3.295€ / 11.681€)
+    let suma=0; const sm=[...line.matchAll(/(\d+[.,]\d{1,3})\s*€/g)]; if(sm.length) suma=parseFloat(sm[sm.length-1][1].replace(",","."));
+    // kWh: len pri nabíjaní, číslo s 3 desatinnými pred sumou
+    let kwh=0; if(!poplatok){ const kwhM=line.match(/(\d+\.\d{3})(?!\d)\s+\d+[.,]\d{1,3}\s*€/); if(kwhM) kwh=parseFloat(kwhM[1]); }
     txns.push({karta,typ,stanica,datum:iso,zaciatok:casy[0]||"",koniec:casy[1]||"",kwh:r2(kwh),suma:r2(suma),mesiac:iso.slice(0,7)});
   }
   return txns;
 }
+async function citajTextZoSuboru(file){
+  // PDF → text cez pdf.js, inak čistý text
+  if(file.type==="application/pdf" || /\.pdf$/i.test(file.name)){
+    const pdfjs=await ensurePdfjs();
+    const buf=await file.arrayBuffer();
+    const pdf=await pdfjs.getDocument({data:buf}).promise;
+    let text="";
+    for(let i=1;i<=pdf.numPages;i++){
+      const page=await pdf.getPage(i);
+      const content=await page.getTextContent();
+      // poskladaj riadky podľa y-pozície
+      const riadky={};
+      content.items.forEach(it=>{ const y=Math.round(it.transform[5]); (riadky[y]=riadky[y]||[]).push(it.str); });
+      Object.keys(riadky).sort((a,b)=>b-a).forEach(y=>{ text+=riadky[y].join(" ")+"\n"; });
+    }
+    return text;
+  }
+  return await file.text();
+}
 function spracujZse(e){
   const file=e.target.files[0]; if(!file) return; e.target.value="";
-  const rd=new FileReader();
-  rd.onload=()=>{
-    const txns=parseZse(String(rd.result));
-    if(!txns.length){ alert("Vo výpise sa nenašli transakcie. Podporovaný je textový výpis ZSE Drive."); return; }
+  citajTextZoSuboru(file).then(text=>{
+    const txns=parseZse(text);
+    if(!txns.length){ alert("Vo výpise sa nenašli transakcie. Podporovaný je výpis ZSE Drive (PDF alebo text)."); return; }
     if(!firmaData.nabijania) firmaData.nabijania=[];
     const key=t=>t.datum+"|"+t.zaciatok+"|"+t.kwh+"|"+t.suma;
     const existing=new Set(firmaData.nabijania.map(key));
@@ -2017,9 +2119,8 @@ function spracujZse(e){
     firmaData.nabijania.sort((a,b)=>(a.datum||"").localeCompare(b.datum||""));
     poZmene(); if(aktualnaApp==="jazdy") appJazdy();
     const kwh=r2(txns.reduce((a,b)=>a+b.kwh,0));
-    alert("ZSE výpis: pridaných "+added+" transakcií, "+kwh+" kWh.");
-  };
-  rd.readAsText(file);
+    alert("ZSE výpis: pridaných "+added+" transakcií, "+kwh.toFixed(2)+" kWh.");
+  }).catch(err=>{ console.error(err); alert("Súbor sa nepodarilo prečítať. Skúste PDF výpis zo ZSE Drive."); });
 }
 
 // export knihy jázd (CSV)
@@ -2325,8 +2426,76 @@ function ulozNastavenia(){
   const m=document.getElementById("cloudMsg2"); if(m){ m.textContent="✓ Nastavenia uložené. Výpočty sa aktualizovali."; m.className="cloudmsg ok"; }
 }
 
+// ── POHĽADÁVKY A ZÁVÄZKY ──
+let pzRok="", pzTab="pohl";
+function pzUhradena(f){
+  // faktúra uhradená: príznak zaplatena, alebo nájdená platba vo výpise (VS/suma)
+  if(f.zaplatena) return true;
+  const suma=(+f.spolu||+f.bez||0);
+  return (firmaData.vypis||[]).some(t=>{ if(t.smer!=="prijem") return false;
+    if(t.vs) return String(t.vs)===String(f.cislo)||String(t.vs)===String(f.vs);
+    return Math.abs((+t.suma||0)-suma)<0.01; });
+}
+function pzZavUhradeny(x){
+  if(x.zaplateny||x.uhradeny) return true;
+  const suma=(+x.spolu||+x.bez||0);
+  return (firmaData.vypis||[]).some(t=>{ if(t.smer!=="vydaj") return false;
+    return Math.abs((+t.suma||0)-suma)<0.01; });
+}
+function dniPoSplatnosti(splat){ if(!splat) return 0; const d=new Date(splat); if(isNaN(d)) return 0; return Math.floor((Date.now()-d)/86400000); }
+function appPohladavky(){
+  const d=firmaData, c=APPS.pohladavky.c;
+  const roky=[...new Set([...(d.faktury||[]).map(f=>String(f.datum||f.vystavenie||"").slice(0,4)),...(d.vydavky||[]).filter(x=>x.druh==="Došlá faktúra").map(x=>String(x.datum||"").slice(0,4))].filter(r=>/^\d{4}$/.test(r)))].sort().reverse();
+  if(!pzRok) pzRok=roky[0]||String(new Date().getFullYear());
+  // pohľadávky = vystavené faktúry roka
+  const pohl=(d.faktury||[]).filter(f=>String(f.datum||f.vystavenie||"").slice(0,4)===pzRok).map(f=>{
+    const uhr=pzUhradena(f); const dni=uhr?0:dniPoSplatnosti(f.splatnost);
+    return {cislo:f.cislo,partner:f.odberatel,vznik:f.datum||f.vystavenie,splatnost:f.splatnost,suma:(+f.spolu||+f.bez||0),uhradena:uhr,poSplat:!uhr&&dni>0,dni};
+  });
+  // záväzky = došlé faktúry roka
+  const zav=(d.vydavky||[]).filter(x=>x.druh==="Došlá faktúra"&&String(x.datum||"").slice(0,4)===pzRok).map(x=>{
+    const uhr=pzZavUhradeny(x);
+    return {partner:x.partner,vznik:x.datum,suma:(+x.spolu||+x.bez||0),uhradeny:uhr};
+  });
+  const otvPohl=pohl.filter(p=>!p.uhradena), otvZav=zav.filter(z=>!z.uhradeny);
+  const poSplat=otvPohl.filter(p=>p.poSplat);
+  const sumaOtvP=r2(otvPohl.reduce((a,p)=>a+p.suma,0)), sumaOtvZ=r2(otvZav.reduce((a,z)=>a+z.suma,0));
+
+  const zoznam = pzTab==="pohl" ? pohl : zav;
+
+  document.getElementById("appScreen").innerHTML=appHlavicka("pohladavky","")+`
+    <div class="atool" style="--_c:${c}">
+      <select onchange="pzRok=this.value;appPohladavky()" style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:13px">
+        ${roky.map(r=>`<option value="${r}" ${r===pzRok?'selected':''}>${r}</option>`).join('')}
+      </select>
+    </div>
+    <div class="amini">
+      <div class="aminbox"><div class="al">Otvorené pohľadávky</div><div class="av ${sumaOtvP?'warn':'pos'}">${eur(sumaOtvP)}</div></div>
+      <div class="aminbox"><div class="al">Po splatnosti</div><div class="av ${poSplat.length?'neg':'pos'}">${poSplat.length}</div></div>
+      <div class="aminbox"><div class="al">Otvorené záväzky</div><div class="av">${eur(sumaOtvZ)}</div></div>
+      <div class="aminbox"><div class="al">Čisté saldo</div><div class="av ${sumaOtvP-sumaOtvZ>=0?'pos':'neg'}">${eur(sumaOtvP-sumaOtvZ)}</div></div>
+    </div>
+    <div class="atool" style="--_c:${c}">
+      <span class="achip ${pzTab==='pohl'?'on':''}" onclick="pzTab='pohl';appPohladavky()">Pohľadávky (${pohl.length})</span>
+      <span class="achip ${pzTab==='zav'?'on':''}" onclick="pzTab='zav';appPohladavky()">Záväzky (${zav.length})</span>
+    </div>
+    <div class="csub" style="margin:0 2px 12px">${pzTab==='pohl'?'Vystavené faktúry — komu a koľko dlhujú vám. Úhrada sa páruje z bankového výpisu.':'Došlé faktúry — komu dlhujete vy.'}</div>
+    <div class="alist">
+      ${pzTab==='pohl'
+        ? (pohl.length?pohl.map(p=>`<div class="arow" style="grid-template-columns:1.6fr 1fr auto;cursor:default;${p.poSplat?'background:#fbf2f4':p.uhradena?'opacity:.6':''}">
+            <div><div class="acol-strong">${esc(p.partner||"—")}</div><div class="acol-muted">${esc(p.cislo||"")} · splatnosť ${fmtDatum(p.splatnost)}</div></div>
+            <div class="acol-muted" style="text-align:right">${p.uhradena?'<span class="apill ok">uhradená</span>':p.poSplat?'<span class="apill neg">po splatnosti '+p.dni+' dní</span>':'<span class="apill warn">otvorená</span>'}</div>
+            <div class="acol-sum">${eur(p.suma)}</div></div>`).join(''):'<div class="aempty">Žiadne pohľadávky v tomto roku.</div>')
+        : (zav.length?zav.map(z=>`<div class="arow" style="grid-template-columns:1.6fr 1fr auto;cursor:default;${z.uhradeny?'opacity:.6':''}">
+            <div><div class="acol-strong">${esc(z.partner||"—")}</div><div class="acol-muted">${fmtDatum(z.vznik)}</div></div>
+            <div class="acol-muted" style="text-align:right">${z.uhradeny?'<span class="apill ok">uhradený</span>':'<span class="apill warn">neuhradený</span>'}</div>
+            <div class="acol-sum">${eur(z.suma)}</div></div>`).join(''):'<div class="aempty">Žiadne záväzky v tomto roku.</div>')}
+    </div>`;
+  setCrumb(`${pzRok} · ${otvPohl.length} pohľadávok · ${otvZav.length} záväzkov`);
+}
+
 // ── CASHFLOW (párovací stôl) ──
-let cfRok="", cfMesiac="", cfSmer="vsetko", cfOtvoreny=-1;
+let cfRok="", cfMesiac="", cfSmer="vsetko", cfOtvoreny="-1";
 function appCashflow(){
   const d=firmaData, c=APPS.cashflow.c;
   const vsetky=(d.vypis||[]).slice().sort((a,b)=>String(b.datum||"").localeCompare(String(a.datum||"")));
@@ -2355,8 +2524,8 @@ function appCashflow(){
     else if(s.typ==="faktura"){ stav="faktúra "+esc(s.zaznam.cislo||""); farba=s.istota==="ista"?"ok":"warn"; }
     else { stav="výdavok"; farba=s.istota==="ista"?"ok":"warn"; }
     const inc=t.smer==="prijem";
-    const otvor=cfOtvoreny===gi;
-    return `<div class="arow" style="grid-template-columns:1fr auto;cursor:pointer;align-items:center" onclick="cfOtvoreny=${otvor?-1:gi};appCashflow()">
+    const otvor=String(cfOtvoreny)===String(gi);
+    return `<div class="arow" style="grid-template-columns:1fr auto;cursor:pointer;align-items:center" onclick="cfOtvoreny=${otvor?'-1':JSON.stringify(String(gi))};appCashflow()">
       <div style="min-width:0">
         <div class="acol-strong" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(t.proti||"—")}</div>
         <div class="acol-muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${fmtDatum(t.datum)} · <span class="apill ${farba}" style="font-size:9.5px">${stav}</span></div>
@@ -2379,18 +2548,23 @@ function appCashflow(){
       <div class="aminbox"><div class="al">Saldo</div><div class="av ${sumaP-sumaV>=0?'pos':'neg'}">${eur(sumaP-sumaV)}</div></div>
     </div>
     <div class="atool" style="--_c:${c};flex-wrap:wrap;gap:8px">
-      <select onchange="cfRok=this.value;cfMesiac='';cfOtvoreny=-1;appCashflow()" style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:13px">
+      <select onchange="cfRok=this.value;cfMesiac='';cfOtvoreny='-1';appCashflow()" style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:13px">
         ${roky.map(r=>`<option value="${r}" ${r===cfRok?'selected':''}>${r}</option>`).join('')}
       </select>
-      <select onchange="cfMesiac=this.value;cfOtvoreny=-1;appCashflow()" style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:13px">
+      <select onchange="cfMesiac=this.value;cfOtvoreny='-1';appCashflow()" style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:13px">
         <option value="">celý rok</option>
         ${mesiace.map(m=>`<option value="${m}" ${m===cfMesiac?'selected':''}>${mesiacLabel(m)}</option>`).join('')}
       </select>
       <div style="flex-basis:100%;height:0"></div>
-      ${['vsetko|Všetko','prijmy|Príjmy','vydaje|Výdaje'].map(x=>{const[k,l]=x.split('|');return `<span class="achip ${cfSmer===k?'on':''}" onclick="cfSmer='${k}';cfOtvoreny=-1;appCashflow()">${l}</span>`}).join('')}
+      ${['vsetko|Všetko','prijmy|Príjmy','vydaje|Výdaje'].map(x=>{const[k,l]=x.split('|');return `<span class="achip ${cfSmer===k?'on':''}" onclick="cfSmer='${k}';cfOtvoreny='-1';appCashflow()">${l}</span>`}).join('')}
     </div>
     <div class="csub" style="margin:0 2px 12px">Ťuknutím na riadok zobrazíte detail párovania. Príjmy sa párujú cez VS a sumu, výdaje cez sumu a klasifikáciu.</div>
-    <div class="alist">${zoznam.length?zoznam.slice(0,200).map((t,i)=>riadok(t,i)).join(''):'<div class="aempty">Žiadne pohyby v tomto filtri.</div>'}</div>`;
+    ${cfSmer==="vsetko"
+      ? `<div class="split2">
+          <div class="splitcol"><div class="splittitle" style="color:var(--pos)">▼ Príjmy (${prijmy.length}) · ${eur(sumaP)}</div><div class="alist">${prijmy.length?prijmy.slice(0,150).map((t)=>riadok(t,"p"+vypis.indexOf(t))).join(''):'<div class="aempty">Žiadne príjmy.</div>'}</div></div>
+          <div class="splitcol"><div class="splittitle">▲ Výdaje (${vydaje.length}) · ${eur(sumaV)}</div><div class="alist">${vydaje.length?vydaje.slice(0,150).map((t)=>riadok(t,"v"+vypis.indexOf(t))).join(''):'<div class="aempty">Žiadne výdaje.</div>'}</div></div>
+        </div>`
+      : `<div class="alist">${zoznam.length?zoznam.slice(0,200).map((t,i)=>riadok(t,i)).join(''):'<div class="aempty">Žiadne pohyby v tomto filtri.</div>'}</div>`}`;
   setCrumb(`${vypis.length} pohybov · ${cfRok}${cfMesiac?' · '+mesiacLabel(cfMesiac):''} · ${sparP+sparV} spárovaných`);
 }
 
@@ -2604,6 +2778,17 @@ function klasifikujPohyb(tx){
 // spáruj pohyb s faktúrou/výdavkom
 function vypisSparuj(tx){
   const d=firmaData;
+  // používateľské pravidlá ignorovania (IBAN / kľúčové slovo)
+  const pravidla=(d.settings&&d.settings.ignorPravidla)||[];
+  if(pravidla.length){
+    const proti=(tx.proti||"").toLowerCase(), iban=(tx.ibanProti||tx.iban||"").toLowerCase(), popis=(tx.popis||"").toLowerCase();
+    for(const p of pravidla){
+      const h=(p.hodnota||"").toLowerCase();
+      if(!h) continue;
+      if(p.typ==="iban" && iban.includes(h)) return {typ:"pravidlo", ignoruj:true, istota:"ista", preco:"pravidlo IBAN"};
+      if(p.typ==="popis" && (proti.includes(h)||popis.includes(h))) return {typ:"pravidlo", ignoruj:true, istota:"ista", preco:"pravidlo: "+p.hodnota};
+    }
+  }
   if(tx.potvrdenaZhoda){
     const pz=tx.potvrdenaZhoda;
     if(pz.typ==="faktura"){ const f=(d.faktury||[]).find(f=>String(f.cislo)===String(pz.cislo)); if(f) return {typ:"faktura", zaznam:f, istota:"ista", preco:"potvrdené ručne"}; }
@@ -2913,28 +3098,37 @@ function parseFakturaText(text){
   R.icdph=allIcDph.find(x=>x!==mojeIcDph)||"";
   const allIco=[...t.matchAll(/IČO:?\s*(\d{8})/gi)].map(x=>x[1]);
   R.ico=allIco.find(x=>x!==mojeIco)||"";
-  // dodávateľ
+  // dodávateľ — krátky názov firmy, nie veta
   let dod="";
-  let mm=t.match(/(?:Predávajúci|Dodávateľ)\s*:?\s*([^\n]*?(?:s\.r\.o\.|a\.s\.|spol\.\s*s\s*r\.o\.))/i);
+  let mm=t.match(/(?:Predávajúci|Dodávateľ)\s*:?\s*([A-ZŽŠČÁÉÍÓÚ][^\n]{2,45}?(?:s\.r\.o\.|a\.s\.|spol\.\s*s\s*r\.o\.|k\.s\.))/i);
   if(mm) dod=mm[1];
-  if(!dod){ mm=t.match(/^([A-ZŽŠČÁÉÍÓÚ][^\n]*(?:s\.r\.o\.|a\.s\.))/m); if(mm) dod=mm[1]; }
-  R.partner=(dod||"").replace(/^(Predávajúci|Dodávateľ)\s*:?\s*/i,"").trim();
+  if(!dod){ mm=t.match(/^([A-ZŽŠČÁÉÍÓÚ][^\n]{2,45}?(?:s\.r\.o\.|a\.s\.|k\.s\.))\s*$/m); if(mm) dod=mm[1]; }
+  dod=(dod||"").replace(/^(Predávajúci|Dodávateľ)\s*:?\s*/i,"").trim();
+  // odmietni ak to vyzerá ako veta (obsahuje typické slová inštrukcií)
+  if(/úhrad|uhrad|použi|pouzi|variabiln|číslo účtu|cislo uctu|ďakujeme|dakujeme/i.test(dod)) dod="";
+  R.partner=dod;
   // číslo dokladu
   let c=t.match(/Faktúra\s*(?:č\.|číslo)\s*:?\s*(\d{4,})/i)||t.match(/(?:doklad|bloček|účtenka)[^\d]{0,15}(\d{4,})/i);
   R.cislo=c?c[1]:"";
   // dátum
   let dt=t.match(/(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})/);
   if(dt) R.datum=dt[3]+"-"+String(dt[2]).padStart(2,"0")+"-"+String(dt[1]).padStart(2,"0");
-  // DPH rozpis (sadzba základ daň)
+  // DPH rozpis (sadzba základ daň) — čísla bez medzier vnútri
+  const cislo="(\\d{1,6}(?:[,.]\\d{2})?)";
   const rozpis=[]; const seen=new Set(); let x;
-  const reA=/(\d{1,2})\s*%\s+([\d\s]*\d[,.]\d{2})\s+([\d\s]*\d[,.]\d{2})/g;
+  const reA=/(\d{1,2})\s*%\s+(\d{1,6}[,.]\d{2})\s+(\d{1,6}[,.]\d{2})/g;
   while((x=reA.exec(t))){ const s=+x[1],z=num(x[2]),dph=num(x[3]);
     if([23,19,10,5].includes(s)&&z>0&&!seen.has(s)){ rozpis.push({sadzba:s,bez:z,dph}); seen.add(s); } }
   R.bez=r2(rozpis.reduce((a,y)=>a+y.bez,0));
   R.dph=r2(rozpis.reduce((a,y)=>a+y.dph,0));
-  // celková suma
-  let sm=t.match(/(?:Spolu|Celkom|Suma k úhrade|Čiastka na zaplatenie)[^\d]{0,10}([\d\s]*\d[,.]\d{2})/i)||t.match(/([\d\s]*\d[,.]\d{2})\s*(?:EUR|€)/i);
-  R.spolu=sm?num(sm[1]):r2(R.bez+R.dph);
+  // celková suma — striktný formát (žiadne zlepovanie cez medzery), rozumný strop
+  let sm=t.match(/(?:Spolu|Celkom|Suma k úhrade|Suma na úhradu|Čiastka na zaplatenie|K úhrade)[^\d]{0,12}(\d{1,6}[,.]\d{2})/i)||t.match(/(\d{1,6}[,.]\d{2})\s*(?:EUR|€)/i);
+  let spolu=sm?num(sm[1]):0;
+  // sanity: ak je suma nezmyselne veľká oproti rozpisu, ignoruj
+  if(spolu>100000) spolu=0;
+  R.spolu=spolu||r2(R.bez+R.dph);
+  // ak máme rozpis aj sumu a nesedia, ver rozpisu
+  if(R.bez>0 && R.spolu>0 && Math.abs(R.spolu-(R.bez+R.dph))>1){ R.spolu=r2(R.bez+R.dph); }
   if(!R.bez && R.spolu){ // odvoď základ a DPH z celkovej sumy (23%)
     R.bez=r2(R.spolu/1.23); R.dph=r2(R.spolu-R.bez);
   }
