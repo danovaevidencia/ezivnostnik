@@ -586,21 +586,25 @@ function calcDanRow(mesiacIdx, rok, S){
   // ostatné náklady = výdavky mesiaca bez DPH (okrem odpisovaného majetku)
   const ostatne=r2((firmaData.vydavky||[]).filter(x=>String(x.datum||"").slice(0,7)===mk && !x.zaradenyOdpisovany).reduce((a,x)=>a+(+x.bez||0),0));
   const nakladySpolu=r2(odpis+ostatne);
-  const ciastkZaklad=r2(faktB-nakladySpolu);
-  // zdravotné poistné (vymeriavací základ × sadzba) — mesačný preddavok ZP z nastavení
+  const ciastkZaklad=r2(faktB-nakladySpolu);              // čiastkový základ dane
+  // SKUTOČNÉ zdravotné poistné z vymeriavacieho základu (nie preddavok!)
+  const vzKoef=(+S.vzKoef||0.672948), zdravSadzba=(+S.zdravSadzba||0.15);
+  const vymZaklad=r2(Math.max(0,ciastkZaklad)*vzKoef);    // mesačný vymeriavací základ ZP
+  const zdrav=r2(Math.max(0, vymZaklad*zdravSadzba));     // skutočné zdravotné poistné
+  // preddavok ZP — reálne mesačne platený preddavok
   const preddavokZP=(+S.preddavokZP||0);
-  const zdrav=preddavokZP; // reálne platený preddavok = zdravotné za mesiac
   // preddavok na daň — štvrťročný / 3, ak mesiac >= preddavokDanOd
   const danPreddMes=monthActiveOd(mesiacIdx, rok, S.preddavokDanOd) ? r2((+S.preddavokDanQ||0)/3) : 0;
   // sociálne odvody — od socOdvodyOd
   const soc=monthActiveOd(mesiacIdx, rok, S.socOdvodyOd) ? (+S.socOdvodyMes||0) : 0;
-  const vyslZaklad=r2(ciastkZaklad-zdrav-soc);
+  const vyslZaklad=r2(ciastkZaklad-zdrav);                // výsledný základ dane (znížený o skutočné ZP)
   const sadzba=(+S.danPrijem||0.15);
   const dan=r2(Math.max(vyslZaklad,0)*sadzba);
-  const odvodyDan=r2(zdrav+dan+soc);
+  const odvodyDan=r2(zdrav+dan+soc);                      // skutočné odvody + daň
+  // Odložiť = skutočné (zdrav+daň+soc) − už zaplatené preddavky (ZP + daň)
   const odlozit=r2(odvodyDan-preddavokZP-danPreddMes);
   const cisty=r2(faktB-odvodyDan);
-  return {mesiacIdx, mk, faktB, odpis, ostatne, nakladySpolu, ciastkZaklad, zdrav, preddavokZP, danPreddavok:danPreddMes, soc, vyslZaklad, dan, odvodyDan, odlozit, cisty, aktivny:jeAktivny};
+  return {mesiacIdx, mk, faktB, odpis, ostatne, nakladySpolu, ciastkZaklad, vymZaklad, zdrav, preddavokZP, danPreddavok:danPreddMes, soc, vyslZaklad, dan, odvodyDan, odlozit, cisty, aktivny:jeAktivny};
 }
 function danTotals(rok, S){
   const t={faktB:0,odpis:0,ostatne:0,nakladySpolu:0,ciastkZaklad:0,zdrav:0,preddavokZP:0,dan:0,danPreddavok:0,soc:0,odvodyDan:0,odlozit:0,cisty:0};
@@ -884,57 +888,47 @@ function dashWidgetKatalog(){
       metriky:[{k:"dan", l:"Odhad dane "+rok, render:()=>{const dan=deDanovyVypocet(rok,"skutocne");const R=deRocnySuhrn(rok);const celok=Math.max(R.prijmy,1);const pDan=Math.round(dan.dan/celok*100),pOdv=Math.round(R.odvodyRok/celok*100),pCisty=Math.max(0,100-pDan-pOdv);return `<div class="wbig warn">${eur(dan.dan)}</div><div class="wmeta">základ ${eur(dan.zaklad)} · NČZD ${eur(dan.nczd)}</div><div class="wtax"><i style="width:${pCisty}%;background:var(--pos)"></i><i style="width:${pDan}%;background:var(--warn)"></i><i style="width:${pOdv}%;background:var(--neg)"></i></div><div class="wleg"><span><span class="sw" style="background:var(--pos)"></span>čistý</span><span><span class="sw" style="background:var(--warn)"></span>daň</span><span><span class="sw" style="background:var(--neg)"></span>odvody</span></div>`;}}]
     },
     faktury: {
-      nazov:"Faktúry", ic:"▤", velkost:"w-s3",
+      nazov:"Faktúry", ic:"▤", velkost:"w-s4",
       metriky:[
-        {k:"vystavene", l:"Vystavené (rok)", val:()=>{const f=(d.faktury||[]).filter(x=>String(x.datum||x.vystavenie||"").slice(0,4)===String(rok));return {v:eur(f.reduce((a,x)=>a+(+x.spolu||0),0)), m:f.length+" faktúr", cls:"pos"};}},
-        {k:"uhradene", l:"Uhradené (rok)", val:()=>{const f=(d.faktury||[]).filter(x=>String(x.datum||x.vystavenie||"").slice(0,4)===String(rok)&&x.zaplatena);return {v:eur(f.reduce((a,x)=>a+(+x.spolu||0),0)), m:f.length+" uhradených", cls:"pos"};}},
-        {k:"neuhradene", l:"Neuhradené", val:()=>{const f=(d.faktury||[]).filter(x=>!x.zaplatena);return {v:eur(f.reduce((a,x)=>a+(+x.spolu||0),0)), m:f.length+" čaká", cls:f.length?"neg":"pos"};}},
-        {k:"bezDph", l:"Bez DPH (rok)", val:()=>{const f=(d.faktury||[]).filter(x=>String(x.datum||x.vystavenie||"").slice(0,4)===String(rok));return {v:eur(f.reduce((a,x)=>a+(+x.bez||0),0)), m:"základ dane", cls:""};}}
+        {k:"vystavene", l:"Vystavené (rok)", val:()=>{const f=(d.faktury||[]).filter(x=>String(x.datum||x.vystavenie||"").slice(0,4)===String(rok));const uhr=f.filter(x=>x.zaplatena);const neuhr=f.filter(x=>!x.zaplatena);return {v:eur(f.reduce((a,x)=>a+(+x.spolu||0),0)), m:f.length+" faktúr vystavených", cls:"pos", vedlajsie:[{l:"uhradené",v:eur(uhr.reduce((a,x)=>a+(+x.spolu||0),0)),cls:"pos"},{l:"neuhradené",v:eur(neuhr.reduce((a,x)=>a+(+x.spolu||0),0)),cls:neuhr.length?"neg":""}]};}},
+        {k:"bezDph", l:"Bez DPH (rok)", val:()=>{const f=(d.faktury||[]).filter(x=>String(x.datum||x.vystavenie||"").slice(0,4)===String(rok));return {v:eur(f.reduce((a,x)=>a+(+x.bez||0),0)), m:"základ dane", cls:"", vedlajsie:[{l:"s DPH",v:eur(f.reduce((a,x)=>a+(+x.spolu||0),0))},{l:"DPH",v:eur(f.reduce((a,x)=>a+(+x.dph||0),0))}]};}}
       ]
     },
     vydavky: {
-      nazov:"Výdavky", ic:"€", velkost:"w-s3",
+      nazov:"Výdavky", ic:"€", velkost:"w-s4",
       metriky:[
-        {k:"spolu", l:"Výdavky (rok)", val:()=>{const v=(d.vydavky||[]).filter(x=>String(x.datum||"").slice(0,4)===String(rok));return {v:eur(v.reduce((a,x)=>a+(+x.bez||0),0)), m:v.length+" dokladov", cls:""};}},
-        {k:"faktury", l:"Došlé faktúry", val:()=>{const v=(d.vydavky||[]).filter(x=>String(x.datum||"").slice(0,4)===String(rok)&&x.druh==="Došlá faktúra");return {v:v.length+"", m:"kusov", cls:""};}},
-        {k:"blocky", l:"Bločky", val:()=>{const v=(d.vydavky||[]).filter(x=>String(x.datum||"").slice(0,4)===String(rok)&&x.druh==="Bloček");return {v:v.length+"", m:"kusov", cls:""};}},
-        {k:"dph", l:"DPH na odpočet", val:()=>{const v=(d.vydavky||[]).filter(x=>String(x.datum||"").slice(0,4)===String(rok));return {v:eur(v.reduce((a,x)=>a+(+x.dph||0),0)), m:"odpočet", cls:"pos"};}}
+        {k:"spolu", l:"Výdavky (rok)", val:()=>{const v=(d.vydavky||[]).filter(x=>String(x.datum||"").slice(0,4)===String(rok));const fa=v.filter(x=>x.druh==="Došlá faktúra").length,bl=v.filter(x=>x.druh==="Bloček").length;return {v:eur(v.reduce((a,x)=>a+(+x.bez||0),0)), m:v.length+" dokladov", cls:"", vedlajsie:[{l:"DPH na odpočet",v:eur(v.reduce((a,x)=>a+(+x.dph||0),0)),cls:"pos"},{l:"faktúry / bločky",v:fa+" / "+bl}]};}},
+        {k:"parovanie", l:"Párovanie", val:()=>{const vp=(d.vypis||[]).filter(t=>t.smer==="vydaj"&&String(t.datum||"").slice(0,4)===String(rok));let spar=0;vp.forEach(t=>{const s=vypisSparuj(t);if(s&&(s.istota==="ista"||s.typ==="klasifikacia"))spar++;});return {v:spar+" / "+vp.length, m:"spárovaných výdajov", cls:"", vedlajsie:[{l:"nespárované",v:(vp.length-spar)+"",cls:vp.length-spar?"warn":""}]};}}
       ]
     },
     dph: {
-      nazov:"DPH", ic:"%", velkost:"w-s3",
+      nazov:"DPH", ic:"%", velkost:"w-s4",
       metriky:[
-        {k:"saldo", l:"DPH na úhradu", val:()=>{const dph=dphSaldoRok(rok);return {v:eur(dph.saldo), m:"výstup − vstup", cls:dph.saldo>=0?"warn":"pos"};}},
-        {k:"vystup", l:"DPH vo faktúrach", val:()=>{const dph=dphSaldoRok(rok);return {v:eur(dph.out), m:"výstupná DPH", cls:""};}},
-        {k:"vstup", l:"DPH na odpočet", val:()=>{const dph=dphSaldoRok(rok);return {v:eur(dph.inp), m:"vstupná DPH", cls:"pos"};}}
+        {k:"saldo", l:"DPH na úhradu", val:()=>{const dph=dphSaldoRok(rok);return {v:eur(dph.saldo), m:"výstup − vstup", cls:dph.saldo>=0?"warn":"pos", vedlajsie:[{l:"DPH vo faktúrach",v:eur(dph.out)},{l:"DPH na odpočet",v:eur(dph.inp),cls:"pos"}]};}}
       ]
     },
     km: {
-      nazov:"Kniha jázd", ic:"🚗", velkost:"w-s3",
+      nazov:"Kniha jázd", ic:"🚗", velkost:"w-s4",
       metriky:[
-        {k:"rok", l:"Km od začiatku roka", val:()=>{const km=(d.jazdy||[]).filter(j=>{const dt=jazdaDatum(j);return dt&&dt.getFullYear()===rok;}).reduce((a,j)=>a+(+j.km||0),0);return {v:Math.round(km).toLocaleString('sk'), m:"km "+rok, cls:""};}},
-        {k:"mesiac", l:"Km tento mesiac", val:()=>{const mk=rok+"-"+String(new Date().getMonth()+1).padStart(2,"0");const km=(d.jazdy||[]).filter(j=>jazdaMonthKey(j)===mk).reduce((a,j)=>a+(+j.km||0),0);return {v:Math.round(km).toLocaleString('sk'), m:"km tento mesiac", cls:""};}},
-        {k:"celkom", l:"Km celkom", val:()=>{const km=(d.jazdy||[]).reduce((a,j)=>a+(+j.km||0),0);return {v:Math.round(km).toLocaleString('sk'), m:(d.jazdy||[]).length+" jázd", cls:""};}}
+        {k:"rok", l:"Kniha jázd", val:()=>{const jaz=d.jazdy||[];const kmRok=jaz.filter(j=>{const dt=jazdaDatum(j);return dt&&dt.getFullYear()===rok;}).reduce((a,j)=>a+(+j.km||0),0);const mk=rok+"-"+String(new Date().getMonth()+1).padStart(2,"0");const kmMes=jaz.filter(j=>jazdaMonthKey(j)===mk).reduce((a,j)=>a+(+j.km||0),0);const kmAll=jaz.reduce((a,j)=>a+(+j.km||0),0);return {v:Math.round(kmRok).toLocaleString('sk')+" km", m:"od začiatku roka", cls:"", vedlajsie:[{l:"tento mesiac",v:Math.round(kmMes).toLocaleString('sk')+" km"},{l:"celkom",v:Math.round(kmAll).toLocaleString('sk')+" km"}]};}}
       ]
     },
     vykazy: {
       nazov:"Výkazy prác", ic:"🗓", velkost:"w-s3",
       metriky:[
-        {k:"pocet", l:"Počet výkazov", val:()=>({v:(d.vykazy||[]).length+"", m:"výkazov", cls:""})},
-        {k:"dni", l:"Odpracované dni", val:()=>{const dni=(d.vykazy||[]).reduce((a,w)=>a+(w.polozky||[]).length,0);return {v:dni+"", m:"dní vo výkazoch", cls:""};}}
+        {k:"pocet", l:"Výkazy prác", val:()=>{const dni=(d.vykazy||[]).reduce((a,w)=>a+(w.polozky||[]).length,0);return {v:(d.vykazy||[]).length+"", m:"výkazov", cls:"", vedlajsie:[{l:"odpracovaných dní",v:dni+""}]};}}
       ]
     },
     dovolenka: {
       nazov:"Dovolenka", ic:"🏖", velkost:"w-s3",
       metriky:[
-        {k:"cerpana", l:"Vyčerpaná dovolenka", val:()=>{const dov=(d.dovolenka&&d.dovolenka[rok])||{cerpane:0};return {v:(+dov.cerpane||0)+"", m:"dní "+rok, cls:""};}}
+        {k:"cerpana", l:"Dovolenka", val:()=>{const dov=(d.dovolenka&&d.dovolenka[rok])||{cerpane:0};return {v:(+dov.cerpane||0)+" dní", m:"vyčerpané "+rok, cls:""};}}
       ]
     },
     majetok: {
       nazov:"Majetok", ic:"⌂", velkost:"w-s3",
       metriky:[
-        {k:"spolu", l:"Majetok spolu", val:()=>({v:eur((d.majetok||[]).reduce((a,m)=>a+(+m.vstupnaCena||0),0)), m:(d.majetok||[]).length+" položiek", cls:""})},
-        {k:"odpis", l:"Odpis tento rok", val:()=>({v:eur(odpisRokCelkom(rok)), m:"odpisy "+rok, cls:""})}
+        {k:"spolu", l:"Majetok", val:()=>({v:eur((d.majetok||[]).reduce((a,m)=>a+(+m.vstupnaCena||0),0)), m:(d.majetok||[]).length+" položiek", cls:"", vedlajsie:[{l:"odpis "+rok,v:eur(odpisRokCelkom(rok))}]})}
       ]
     }
   };
@@ -995,7 +989,8 @@ function renderWidget(wkey){
     telo=metrika.render();
   } else if(metrika.val){
     const r=metrika.val();
-    telo=`<div class="wbig ${r.cls||''}">${r.v}</div><div class="wmeta">${r.m||''}</div>`;
+    const vedlajsie=(r.vedlajsie&&r.vedlajsie.length)?`<div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid var(--line-soft)">${r.vedlajsie.map(x=>`<div><div style="font-size:15px;font-weight:700;color:${x.cls?'var(--'+x.cls+')':'var(--ink)'}">${x.v}</div><div style="font-size:10.5px;color:var(--ink-soft)">${x.l}</div></div>`).join("")}</div>`:"";
+    telo=`<div class="wbig ${r.cls||''}">${r.v}</div><div class="wmeta">${r.m||''}</div>${vedlajsie}`;
   }
   return `<div class="w ${kat.velkost}">
     <div class="wl" style="display:flex;align-items:center;gap:6px">${kat.ic} ${viacero?'':kat.nazov}${prepinac}</div>
@@ -2380,13 +2375,21 @@ function appPrognoza(){
       <div class="dphline"><span>Odpis auta (rok)</span><b>−${eur(t.odpis)}</b></div>
       <div class="dphline"><span>Ostatné náklady</span><b>−${eur(t.ostatne)}</b></div>
       <div class="dphline"><span>Čiastkový základ dane</span><b>${eur(t.ciastkZaklad)}</b></div>
-      <div class="dphline"><span>Zdravotné poistné (preddavky)</span><b>${eur(t.zdrav)}</b></div>
+      <div class="dphline"><span>Skutočné zdravotné poistné</span><b>${eur(t.zdrav)}</b></div>
       <div class="dphline"><span>Sociálne odvody</span><b>${eur(t.soc)}</b></div>
       <div class="dphline"><span>Daň z príjmu</span><b style="color:var(--warn)">${eur(t.dan)}</b></div>
       <div class="dphline" style="border-top:1px solid var(--line)"><span><b>Odvody + daň spolu</b></span><b>${eur(t.odvodyDan)}</b></div>
       <div class="dphline"><span>Zaplatené preddavky (ZP + daň)</span><b>−${eur(zaplatenePreddavky)}</b></div>
       <div class="dphline" style="font-size:15px"><span><b>Doplatiť / odložiť</b></span><b style="color:var(--accent-deep)">${eur(t.odlozit)}</b></div>
       <div class="dphline" style="border-top:2px solid var(--line);font-size:15px"><span><b>Čistý príjem</b></span><b style="color:var(--pos)">${eur(t.cisty)}</b></div>
+    </div>
+
+    <div class="card" style="margin-bottom:14px">
+      <h2 style="font-size:16px;margin-bottom:4px">🏥 Ročné zúčtovanie zdravotného poistenia</h2>
+      <div class="csub" style="margin-bottom:12px">Preddavky sú len záloha. Skutočné poistné sa vypočíta z vymeriavacieho základu. Rozdiel je nedoplatok alebo preplatok.</div>
+      <div class="dphline"><span>Skutočné zdravotné poistné (rok)</span><b>${eur(t.zdrav)}</b></div>
+      <div class="dphline"><span>Zaplatené preddavky ZP (rok)</span><b>−${eur(t.preddavokZP)}</b></div>
+      <div class="dphline" style="border-top:1px solid var(--line);font-size:15px"><span><b>${t.zdrav-t.preddavokZP>=0?'Nedoplatok ZP (doplatíte)':'Preplatok ZP (vrátia vám)'}</b></span><b style="color:${t.zdrav-t.preddavokZP>=0?'var(--accent-deep)':'var(--pos)'}">${eur(Math.abs(t.zdrav-t.preddavokZP))}</b></div>
     </div>
 
     ${P?`<div class="card">
