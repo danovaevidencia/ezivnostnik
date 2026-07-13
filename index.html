@@ -515,13 +515,15 @@ function deRocnySuhrn(rok){
   const odpis=r2(M.reduce((a,m)=>a+m.odpis,0));
   const vydavkySkutSpolu=r2(vydavkySkut+odpis);
   const pausal=r2(Math.min(prijmy*0.6, 20000));
-  const zpRok=r2((+S.preddavokZP||0)*12);
+  // základ dane sa znižuje o SKUTOČNE ZAPLATENÉ poistné (z výpisu), nie preddavok × 12
+  const zpZapl=zaplateneZPRok(rok);
+  const zpRok=zpZapl.suma;
   let socMes=12; if(S.socOdvodyOd){ const fm=parseInt(String(S.socOdvodyOd).split("-")[1])||13; socMes=Math.max(0,12-fm+1); }
   const socRok=r2((+S.socOdvodyMes||0)*socMes);
   const odvodyRok=r2(zpRok+socRok);
   const zakladSkut=r2(prijmy-vydavkySkutSpolu-odvodyRok);
   const zakladPausal=r2(prijmy-pausal-odvodyRok);
-  return {rok,mesiace:M,prijmy,vydavkySkut,odpis,vydavkySkutSpolu,pausal,zpRok,socRok,odvodyRok,zakladSkut,zakladPausal,pausalVyhodnejsi:zakladPausal<zakladSkut};
+  return {rok,mesiace:M,prijmy,vydavkySkut,odpis,vydavkySkutSpolu,pausal,zpRok,zpZdroj:zpZapl.zdroj,socRok,odvodyRok,zakladSkut,zakladPausal,pausalVyhodnejsi:zakladPausal<zakladSkut};
 }
 
 function deVypocetDane(zaklad, S){
@@ -560,6 +562,21 @@ function dphSaldoRok(rok){
   return {out:r2(out), inp:r2(inp), saldo:r2(out-inp)};
 }
 
+// skutočne ZAPLATENÉ zdravotné poistné za rok — z bankového výpisu (klasifikované ako odvodZP)
+function zaplateneZPRok(rok){
+  const S=firmaData.settings||{};
+  const vypis=(firmaData.vypis||[]).filter(t=>t.smer==="vydaj" && String(t.datum||"").startsWith(String(rok)));
+  let zaplatene=0, najdene=0;
+  vypis.forEach(t=>{ const kl=klasifikujPohyb(t); if(kl && kl.druh==="odvodZP"){ zaplatene=r2(zaplatene+(+t.suma||0)); najdene++; } });
+  if(najdene>0) return {suma:zaplatene, zdroj:"vypis", pocet:najdene};
+  const preddavok=(+S.preddavokZP||0);
+  let mesiacov=0;
+  for(let mi=0;mi<12;mi++){ const mk=rok+"-"+String(mi+1).padStart(2,"0");
+    const akt=(firmaData.faktury||[]).some(f=>String(f.datum||f.vystavenie||"").slice(0,7)===mk)||(firmaData.vydavky||[]).some(x=>String(x.datum||"").slice(0,7)===mk);
+    if(akt) mesiacov++; }
+  return {suma:r2(preddavok*Math.max(mesiacov,1)), zdroj:"preddavok", pocet:0};
+}
+
 // PROGNÓZA ROKA (verne zo starej appky): reálne do posledného mesiaca + extrapolácia priemeru
 function dePrognoza(rok){
   const M=deMesiacneData(rok), S=firmaData.settings||{};
@@ -575,14 +592,20 @@ function dePrognoza(rok){
   const rocVydavkyBezOdpis=r2(doterajsieVydavky+priemMesVydavky*zostavaMes);
   const odpisRok=r2((+S.odpisAutoMes||0)*12);
   const rocVydavkySpolu=r2(rocVydavkyBezOdpis+odpisRok);
-  const zpRok=r2((+S.preddavokZP||0)*12);
+  // ZDRAVOTNÉ: základ dane sa znižuje o SKUTOČNE ZAPLATENÉ poistné (z výpisu),
+  // extrapolované na celý rok — nie o teoretický preddavok × 12
+  const zpZapl=zaplateneZPRok(rok);
+  const zpDoteraz=zpZapl.suma;
+  const zpRok = zpZapl.zdroj==="vypis"
+    ? r2(zpDoteraz/poslednyMesiac*12)      // extrapolácia skutočne zaplateného
+    : r2((+S.preddavokZP||0)*12);          // fallback: preddavok × 12
   let socMesiacov=12; if(S.socOdvodyOd){ const fm=parseInt(String(S.socOdvodyOd).split("-")[1])||13; socMesiacov=Math.max(0,12-fm+1); }
   const socRok=r2((+S.socOdvodyMes||0)*socMesiacov);
   const odvodyRok=r2(zpRok+socRok);
   const zaklad=r2(Math.max(0, rocPrijmy-rocVydavkySpolu-odvodyRok));
   const D=deVypocetDane(zaklad, S);
   const cistyZisk=r2(rocPrijmy-rocVydavkySpolu-odvodyRok-D.dan);
-  return {poslednyMesiac, zostavaMes, doterajsiePrijmy, priemMesPrijem, rocPrijmy, rocVydavkyBezOdpis, odpisRok, rocVydavkySpolu, zpRok, socRok, odvodyRok, zaklad, nczd:D.nczd, dan:D.dan, cistyZisk, danOdlozit:D.dan, prekrocenaHranica:rocPrijmy>100000};
+  return {poslednyMesiac, zostavaMes, doterajsiePrijmy, priemMesPrijem, rocPrijmy, rocVydavkyBezOdpis, odpisRok, rocVydavkySpolu, zpRok, zpZdroj:zpZapl.zdroj, socRok, odvodyRok, zaklad, nczd:D.nczd, dan:D.dan, cistyZisk, danOdlozit:D.dan, prekrocenaHranica:rocPrijmy>100000};
 }
 
 // ═══════════════════════════════════════════════════
@@ -1267,6 +1290,7 @@ const APPS={
   cashflow: {n:"Cashflow",        ic:"⇄", c:"#4557b8", d:"Párovanie platieb, tok peňazí"},
   pohladavky:{n:"Pohľadávky",     ic:"⇌", c:"#b8557a", d:"Neuhradené faktúry, záväzky, po splatnosti"},
   prognoza: {n:"Prognóza",        ic:"◔", c:"#0f9488", d:"Odhad roka, čo odložiť na dane"},
+  priznania:{n:"Priznania",       ic:"§", c:"#7a6a2c", d:"Import priznaní, porovnanie rokov"},
   dph:      {n:"DPH a dane",      ic:"§", c:"#6b4fbf", d:"DPH, daň z príjmov, odvody"},
   jazdy:    {n:"Kniha jázd",      ic:"🚗",c:"#2e9e6b", d:"Jazdy, km, kniha jázd"},
   majetok:  {n:"Majetok",         ic:"⌂", c:"#a06a2c", d:"Dlhodobý majetok, odpisy"},
@@ -1319,6 +1343,7 @@ function renderApp(id){
   if(id==="cashflow") return appCashflow();
   if(id==="pohladavky") return appPohladavky();
   if(id==="prognoza") return appPrognoza();
+  if(id==="priznania") return appPriznania();
   if(id==="dph") return appDPH();
   if(id==="jazdy") return appJazdy();
   if(id==="majetok") return appMajetok();
@@ -1328,6 +1353,138 @@ function renderApp(id){
 // ═══════════════════════════════════════════════════
 //  VÝKAZY PRÁC + IMPORT Z KALENDÁRA (ICS)
 // ═══════════════════════════════════════════════════
+// ── DOCX generovanie (Release 4): výkaz prác + akceptačný protokol pre KPMG ──
+function getDocxLib(){ return window.docx || (typeof docx!=="undefined"?docx:null) || null; }
+let _docxLoading=null;
+function ensureDocx(){
+  const have=getDocxLib(); if(have) return Promise.resolve(have);
+  if(_docxLoading) return _docxLoading;
+  const urls=[
+    "https://cdnjs.cloudflare.com/ajax/libs/docx/8.5.0/docx.umd.min.js",
+    "https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.min.js",
+    "https://unpkg.com/docx@8.5.0/build/index.umd.min.js",
+  ];
+  _docxLoading=new Promise((resolve,reject)=>{
+    let idx=0;
+    const tryNext=()=>{
+      if(idx>=urls.length){ _docxLoading=null; reject(new Error("docx sa nepodarilo načítať")); return; }
+      const s=document.createElement("script"); s.src=urls[idx++]; s.async=true;
+      s.onload=()=>{ const lib=getDocxLib(); if(lib) resolve(lib); else tryNext(); };
+      s.onerror=tryNext;
+      document.head.appendChild(s);
+    };
+    tryNext();
+  });
+  return _docxLoading;
+}
+function stiahniBlob(blob, nazov){
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=nazov; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+}
+function vykazDni(w){ return (w.polozky||[]).length; }
+function vykazHodiny(w){ return (w.polozky||[]).reduce((a,p)=>a+(+p.hodiny||0),0); }
+function vykazClovekodni(w){ const h=vykazHodiny(w); return Math.round(h/8*100)/100; }
+
+function exportVykazDocx(idx){
+  const w=firmaData.vykazy[idx]; if(!w){ alert("Výkaz sa nenašiel."); return; }
+  ensureDocx().then(D=>buildVykazDocx(w,D)).catch(()=>alert("DOCX knižnicu sa nepodarilo načítať. Skontrolujte pripojenie."));
+}
+function buildVykazDocx(w,D){
+  const S=firmaData.settings||{};
+  const {Document,Packer,Paragraph,TextRun,Table,TableRow,TableCell,WidthType,HeadingLevel}=D;
+  const metaP=(l,val)=>new Paragraph({tabStops:[{type:"left",position:2600}],children:[new TextRun({text:l+"\t",bold:true}),new TextRun(val||"")]});
+  const hdrCell=t=>new TableCell({children:[new Paragraph({children:[new TextRun({text:t,bold:true})]})],shading:{fill:"F0F0F0"}});
+  const cell=t=>new TableCell({children:[new Paragraph(String(t==null?"":t))]});
+  const rows=[new TableRow({children:[hdrCell("Dátum"),hdrCell("Počet hodín"),hdrCell("Poznámka")]})];
+  (w.polozky||[]).forEach(p=>{
+    const akt=Array.isArray(p.aktivity)?p.aktivity:(p.aktivita?[p.aktivita]:(p.poznamka?[p.poznamka]:[]));
+    const noteCell=akt.length?new TableCell({children:akt.map(a=>new Paragraph(String(a)))}):cell("");
+    rows.push(new TableRow({children:[cell(fmtDatum(p.datum)+(p.znacka?"°":"")),cell(p.hodiny||""),noteCell]}));
+  });
+  rows.push(new TableRow({children:[
+    new TableCell({children:[new Paragraph({children:[new TextRun({text:"Spolu človekohodín",bold:true})]})]}),
+    new TableCell({children:[new Paragraph({children:[new TextRun({text:String(vykazHodiny(w)),bold:true})]})]}),
+    new TableCell({children:[new Paragraph({children:[new TextRun({text:"Spolu človekodní: "+vykazClovekodni(w),bold:true})]})]}),
+  ]}));
+  const doc=new Document({sections:[{children:[
+    new Paragraph({text:"Výkaz prác",heading:HeadingLevel.HEADING_1}),
+    new Paragraph(""),
+    metaP("Interné číslo zákazky:",w.zakazka),
+    metaP("Projekt:",w.projekt),
+    metaP("Pracovník:",w.pracovnik),
+    metaP("Obdobie:",w.obdobie),
+    new Paragraph(""),
+    new Table({width:{size:100,type:WidthType.PERCENTAGE},rows}),
+    new Paragraph(""),new Paragraph(""),
+    new Paragraph("Za Odberateľa schválil: "+(S.odberatelSchvalil||"")),
+    new Paragraph(""),
+    new Paragraph("Dátum a podpis: __________________________________"),
+  ]}]});
+  Packer.toBlob(doc).then(b=>stiahniBlob(b,"vykaz_"+(w.zakazka||"prac").replace(/[^\w.-]+/g,"_")+".docx"));
+}
+
+function exportProtokolDocx(idx){
+  const w=firmaData.vykazy[idx]; if(!w){ alert("Výkaz sa nenašiel."); return; }
+  ensureDocx().then(D=>buildProtokolDocx(w,D)).catch(()=>alert("DOCX knižnicu sa nepodarilo načítať. Skontrolujte pripojenie."));
+}
+function buildProtokolDocx(w,D){
+  const S=firmaData.settings||{}, m=firmaData.meta||{};
+  const {Document,Packer,Paragraph,TextRun,Table,TableRow,TableCell,WidthType,AlignmentType,BorderStyle,ImageRun}=D;
+  const NBSP="\u00a0";
+  const dni=vykazClovekodni(w);
+  const tarifa=+S.tarifa||+S.denTarifa||350;
+  const suma=r2(dni*tarifa);
+  const dnesSk=new Date().toLocaleDateString("sk-SK");
+  const mesROK=(w.obdobie||"").match(/(\d{2})[\/.](\d{4})/);
+  const nadpis="Akceptačný protokol"+(mesROK?("_"+mesROK[1]+"_"+mesROK[2]):"");
+  const TABPOS=1900;
+  const tabStops=[{type:"left",position:TABPOS}];
+  const tab=(label,val,bold)=>new Paragraph({tabStops,children:[new TextRun({text:label,bold:true}),new TextRun({text:"\t"+(val||""),bold:!!bold})]});
+  const cont=(val)=>new Paragraph({tabStops,children:[new TextRun("\t"+(val||""))]});
+  const noBorder={top:{style:BorderStyle.NONE},bottom:{style:BorderStyle.NONE},left:{style:BorderStyle.NONE},right:{style:BorderStyle.NONE}};
+  const b64ToBytes=(b64)=>{ const bin=atob(String(b64).split(",").pop()); const arr=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i); return arr; };
+  const sigCell=(titulok,meno,podpis)=>{
+    const kids=[new Paragraph(titulok),new Paragraph(""),new Paragraph("Meno: "+(meno||"")),new Paragraph("")];
+    if(podpis && S.podpisB64 && ImageRun){
+      try{ kids.push(new Paragraph({children:[new ImageRun({type:"png",data:b64ToBytes(S.podpisB64),transformation:{width:120,height:53}})]})); }
+      catch(_){ kids.push(new Paragraph("")); }
+    } else { kids.push(new Paragraph("")); kids.push(new Paragraph("")); }
+    kids.push(new Paragraph("Podpis: .........................................."));
+    return new TableCell({borders:noBorder,width:{size:50,type:WidthType.PERCENTAGE},children:kids});
+  };
+  const objednavatel=S.odberatelNazov||"KPMG Slovensko Advisory, k.s.";
+  const objAdresa=S.odberatelAdresa||"Dvořákovo nábrežie 10, 811 02 Bratislava";
+  const objIco=S.odberatelIco||"31403417";
+  const doc=new Document({sections:[{children:[
+    new Paragraph({alignment:AlignmentType.CENTER,children:[new TextRun({text:nadpis,bold:true})]}),
+    new Paragraph(""),
+    tab("Objednávateľ:",objednavatel,true),
+    cont(objAdresa),
+    cont("IČO: "+objIco),
+    new Paragraph(""),
+    tab("Dodávateľ:",m.nazov||"",true),
+    cont(m.adresa||""),
+    cont("IČO: "+(m.ico||"")),
+    cont("IČ DPH: "+(m.icdph||"")),
+    new Paragraph(""),new Paragraph(""),
+    new Paragraph({alignment:AlignmentType.JUSTIFIED,children:[
+      new TextRun({text:"Na základe uvedeného objednávateľ potvrdzuje prevzatie a akceptáciu poskytnutých služieb v rozsahu "}),
+      new TextRun({text:dni+" človekodní",bold:true}),
+      new TextRun({text:", v"+NBSP+"celkovej hodnote "}),
+      new TextRun({text:eur(suma).replace("€","Eur")+" bez DPH"}),
+      new TextRun({text:" (t. j. "+dni+" človekodní ocenených jednotkovou cenou "+tarifa+" Eur bez DPH) za obdobie "+(w.obdobie||"")+"."}),
+    ]}),
+    new Paragraph(""),new Paragraph(""),new Paragraph(""),
+    new Paragraph("V"+NBSP+"Bratislave, dňa "+dnesSk),
+    new Paragraph(""),new Paragraph(""),
+    new Table({width:{size:100,type:WidthType.PERCENTAGE},borders:{top:{style:BorderStyle.NONE},bottom:{style:BorderStyle.NONE},left:{style:BorderStyle.NONE},right:{style:BorderStyle.NONE},insideHorizontal:{style:BorderStyle.NONE},insideVertical:{style:BorderStyle.NONE}},rows:[new TableRow({children:[
+      sigCell("Za objednávateľa:",S.odberatelSchvalil||"",false),
+      sigCell("Za dodávateľa:",w.pracovnik||m.nazov||"",true),
+    ]})]}),
+  ]}]});
+  Packer.toBlob(doc).then(b=>stiahniBlob(b,nadpis.replace(/[^\w.-]+/g,"_")+".docx"));
+}
+
 function appVykazy(){
   const d=firmaData, c=APPS.vykazy.c;
   const vyk=(d.vykazy||[]);
@@ -1337,17 +1494,21 @@ function appVykazy(){
     ${vyk.length?vyk.map((w,i)=>{
       const dni=(w.polozky||[]).length;
       const hod=(w.polozky||[]).reduce((a,p)=>a+(+p.hodiny||0),0);
-      return `<div class="card" style="margin-bottom:14px;cursor:pointer" onclick="editVykaz(${i})">
-        <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:6px">
+      return `<div class="card" style="margin-bottom:14px">
+        <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:6px;cursor:pointer" onclick="editVykaz(${i})">
           <b style="font-family:'Fraunces',serif;font-size:16px">${esc(w.projekt||"Výkaz")}</b>
           ${w.zakazka?`<span class="apill" style="background:var(--brand-lite);color:var(--brand)">${esc(w.zakazka)}</span>`:''}
           <div class="sp" style="flex:1"></div>
           <span class="acol-muted">${esc(w.obdobie||"")}</span>
         </div>
-        <div class="statgrid">
+        <div class="statgrid" style="cursor:pointer" onclick="editVykaz(${i})">
           <div class="sbox"><div class="sn" style="font-size:18px">${dni}</div><div class="sl">dní</div></div>
           <div class="sbox"><div class="sn" style="font-size:18px">${hod}</div><div class="sl">hodín</div></div>
           <div class="sbox"><div class="sn" style="font-size:18px">${esc(w.pracovnik||"—")}</div><div class="sl">pracovník</div></div>
+        </div>
+        <div class="atool" style="--_c:${c};margin-top:12px">
+          <button class="aabtn" style="--_c:${c}" onclick="event.stopPropagation();exportVykazDocx(${i})">↧ Výkaz (Word)</button>
+          <button class="aabtn" style="--_c:${c}" onclick="event.stopPropagation();exportProtokolDocx(${i})">↧ Akceptačný protokol (Word)</button>
         </div>
       </div>`;
     }).join(''):'<div class="aempty">Žiadne výkazy. Vytvorte nový alebo importujte z kalendára.</div>'}`;
@@ -1744,7 +1905,7 @@ function appBanka(){
     <div class="alist">
       ${(()=>{
         let filtered=list;
-        if(bFilter==="nespar") filtered=vypis.filter(t=>{const s=vypisSparuj(t);return !s||(s.istota!=="ista"&&s.typ!=="klasifikacia");});
+        if(bFilter==="nespar") filtered=vypis.filter(t=>{const s=vypisSparuj(t); const uzMaZaznam=s&&(s.typ==="vydavok"||s.typ==="faktura"||s.typ==="klasifikacia"); return !(s&&s.ignoruj)&&!uzMaZaznam;});
         return filtered.length?filtered.slice(0,200).map(t=>{
           const inc=t.smer==="prijem"; const s=vypisSparuj(t);
           const ignor=s&&s.ignoruj;
@@ -1754,7 +1915,10 @@ function appBanka(){
           else if(s.typ==="klasifikacia"){stavTxt={dph:"DPH",danPrijem:"daň",odvodZP:"odvody ZP",odvodSP:"odvody SP",poistenie:"poistenie"}[s.klasifikacia.druh]||"klasifikované";stavCls="ok";}
           else if(s.typ==="faktura"){stavTxt="faktúra";stavCls=s.istota==="ista"?"ok":"warn";}
           else {stavTxt=s.istota==="ista"?"výdavok":"možný výdavok";stavCls=s.istota==="ista"?"ok":"warn";}
-          const nespar=!ignor&&(!s||(s.istota!=="ista"&&s.typ!=="klasifikacia"));
+          // "+ Výdavok" ponúkni LEN ak transakcia nie je spárovaná so žiadnym existujúcim
+          // záznamom (výdavok/faktúra) ani klasifikovaná — inak by vznikla duplicita
+          const uzMaZaznam = s && (s.typ==="vydavok" || s.typ==="faktura" || s.typ==="klasifikacia");
+          const nespar=!ignor && !uzMaZaznam;
           const akcie=nespar&&t.smer==="vydaj"
             ? `<div style="display:flex;gap:5px;margin-top:5px"><button class="aabtn" style="padding:2px 8px;font-size:10.5px;border-color:var(--pos);color:var(--pos)" onclick="event.stopPropagation();vypisPridajVydavok('${esc(t.id||t.datum+t.suma)}')">+ Výdavok</button><button class="aabtn" style="padding:2px 8px;font-size:10.5px" onclick="event.stopPropagation();vypisIgnoruj('${esc(t.id||t.datum+t.suma)}')" title="Vždy ignorovať takéto pohyby">⊘</button></div>`
             : "";
@@ -2572,6 +2736,10 @@ function appData(){
         <button class="abtn" onclick="ulozFirmu()">☁ Uložiť do cloudu</button>
         <button class="abtn" onclick="exportFirmu()">⬇ Stiahnuť zálohu</button>
       </div>
+      <div style="border-top:1px solid var(--line-soft);margin:14px 0 12px"></div>
+      <div class="csub" style="margin-bottom:10px">Kompletný prehľad všetkých dát do jedného formátovaného Excelu so záložkami (daň, jazdy, faktúry, výdavky, výkazy).</div>
+      <button class="abtn" onclick="exportVsetkoXlsx()" style="width:100%">📊 Kompletný export XLSX</button>
+      <div class="cloudmsg" id="xlsxMsg" style="margin-top:8px"></div>
       <div class="cloudmsg" id="cloudMsg"></div>
     </div>
     <div class="card" style="margin-bottom:14px">
@@ -2632,6 +2800,23 @@ function appData(){
         <div class="mfield"><label>Názov projektu</label><input id="set_projekt" value="${esc((d.settings||{}).projektNazov||'')}"></div>
       </div>
       <div class="mfield"><label>IBAN (pre QR platbu na faktúre)</label><input id="set_iban" value="${esc((d.meta||{}).iban||'')}" placeholder="SK00 0000 0000 0000 0000 0000"></div>
+      <div style="border-top:1px solid var(--line-soft);margin:14px 0 12px"></div>
+      <div class="csub" style="margin-bottom:10px">Pre výkazy a akceptačné protokoly do Wordu (odberateľ KPMG).</div>
+      <div class="mfield"><label>Meno schvaľovateľa u odberateľa (KPMG)</label><input id="set_schvalil" value="${esc((d.settings||{}).odberatelSchvalil||'')}" placeholder="napr. Ing. Ján Novák"></div>
+      <div class="mrow2">
+        <div class="mfield"><label>Názov odberateľa</label><input id="set_odbNazov" value="${esc((d.settings||{}).odberatelNazov||'KPMG Slovensko Advisory, k.s.')}"></div>
+        <div class="mfield"><label>IČO odberateľa</label><input id="set_odbIco" value="${esc((d.settings||{}).odberatelIco||'31403417')}"></div>
+      </div>
+      <div class="mfield"><label>Adresa odberateľa</label><input id="set_odbAdresa" value="${esc((d.settings||{}).odberatelAdresa||'Dvořákovo nábrežie 10, 811 02 Bratislava')}"></div>
+      <div class="mfield">
+        <label>Podpis do protokolu (obrázok PNG)</label>
+        <div style="display:flex;align-items:center;gap:10px">
+          <input type="file" id="set_podpisFile" accept="image/png,image/jpeg" style="display:none" onchange="nacitajPodpis(event)">
+          <button type="button" class="aabtn" onclick="document.getElementById('set_podpisFile').click()">📎 Nahrať podpis</button>
+          <span id="podpisStav" style="font-size:12px;color:var(--ink-soft)">${(d.settings||{}).podpisB64?'✓ podpis nahraný':'zatiaľ bez podpisu'}</span>
+        </div>
+        ${(d.settings||{}).podpisB64?`<img src="${(d.settings).podpisB64}" style="max-height:50px;margin-top:8px;border:1px solid var(--line);border-radius:6px;padding:4px;background:#fff">`:''}
+      </div>
       <button class="abtn pri" style="margin-top:10px" onclick="ulozNastavenia()">Uložiť všetky nastavenia</button>
       <div class="cloudmsg" id="cloudMsg2"></div>
     </div>`;
@@ -2662,13 +2847,32 @@ function ulozNastavenia(){
   s.kjCenaElektro=num("set_kjCenaElektro",0.15);
   // dokumenty
   s.denTarifa=num("set_denTarifa",350);
+  s.tarifa=s.denTarifa; // alias pre protokol
   s.stravneDen=num("set_stravne",5.12);
   s.zakazkaCislo=val("set_zakazka")||"";
   s.projektNazov=val("set_projekt")||"";
+  s.odberatelSchvalil=val("set_schvalil")||"";
+  s.odberatelNazov=val("set_odbNazov")||"";
+  s.odberatelIco=val("set_odbIco")||"";
+  s.odberatelAdresa=val("set_odbAdresa")||"";
   if(!firmaData.meta) firmaData.meta={};
   firmaData.meta.iban=val("set_iban")||"";
   poZmene();
   const m=document.getElementById("cloudMsg2"); if(m){ m.textContent="✓ Nastavenia uložené. Výpočty sa aktualizovali."; m.className="cloudmsg ok"; }
+}
+// načítanie obrázka podpisu do base64 (pre akceptačný protokol)
+function nacitajPodpis(e){
+  const file=e.target.files[0]; if(!file) return; e.target.value="";
+  if(file.size>500000){ alert("Obrázok podpisu je príliš veľký (max 500 kB). Použite menší/orezaný obrázok."); return; }
+  const r=new FileReader();
+  r.onload=ev=>{
+    if(!firmaData.settings) firmaData.settings={};
+    firmaData.settings.podpisB64=ev.target.result;
+    poZmene();
+    const s=document.getElementById("podpisStav"); if(s) s.textContent="✓ podpis nahraný";
+    appData(); // prekresli, nech sa zobrazí náhľad
+  };
+  r.readAsDataURL(file);
 }
 
 // ── POHĽADÁVKY A ZÁVÄZKY ──
@@ -2815,6 +3019,179 @@ function appCashflow(){
 
 // ── PROGNÓZA ──
 let progRok="";
+// ═══ DAŇOVÉ PRIZNANIA — import + porovnanie rokov (Release 7) ═══
+// BEZPEČNÉ: číta oficiálne XML priznanie z FS, neráta priznanie. Prognóza = naše správne konštanty.
+function parseDPFO(xmlText){
+  let doc;
+  try{ doc=new DOMParser().parseFromString(xmlText,"text/xml"); }catch(_){ return null; }
+  if(!doc || (doc.getElementsByTagName && doc.getElementsByTagName("parsererror").length)) return null;
+  const g=(tag)=>{ const el=doc.getElementsByTagName(tag)[0]; return el?el.textContent.trim():""; };
+  const n=(tag)=>{ const v=parseFloat(g(tag)); return isNaN(v)?0:v; };
+  const rok=g("rok")||"";
+  if(!rok) return null;
+  let prijmyPodn=0, vydavkyPodn=0;
+  const t1r10=doc.getElementsByTagName("t1r10")[0];
+  if(t1r10){ const s1=t1r10.getElementsByTagName("s1")[0], s2=t1r10.getElementsByTagName("s2")[0];
+    prijmyPodn=s1?parseFloat(s1.textContent)||0:0; vydavkyPodn=s2?parseFloat(s2.textContent)||0:0; }
+  const poistnePreddavky=n("vydavkyPoistPar6ods11_ods1a2");
+  const ciastkZaklad=n("r41")||(n("r39")-n("r40"));
+  const S=firmaData.settings||{};
+  const koef=+S.zpKoeficient||1.486;
+  const sadzba=rok>="2026"?(+S.zpSadzba2026||0.15):(+S.zdravSadzba||0.15);
+  const vymZaklad=ciastkZaklad>0?r2(ciastkZaklad/koef):0;
+  const zdravSkutocny=r2(vymZaklad*sadzba);
+  const zdravNedoplatok=r2(zdravSkutocny-poistnePreddavky);
+  return {
+    rok, zdroj:"DPFO typ B (import)",
+    prijmySkut: n("r39")||prijmyPodn,
+    prijmy: n("r39")||prijmyPodn,
+    vydavky: n("r40")||vydavkyPodn,
+    zaklad: n("r41"),
+    zakladPoOdvodoch: n("r72")||n("r41"),
+    zakladDane: n("r72"),
+    nezdanitCast: n("r73"),
+    danCelkom: n("r96"),
+    danovaPovinnost: n("r116")||n("r124"),
+    preddavkyZaplatene: n("r131"),
+    danNaUhradu: n("r135")||n("r124"),
+    danovyBonus: n("r116")<0?Math.abs(n("r116")):0,
+    preddavkyZP: poistnePreddavky,
+    zdrav: zdravSkutocny,
+    zdravNedoplatok,
+    vymZaklad,
+    importDatum: new Date().toISOString().slice(0,10),
+  };
+}
+// prognóza roka — NAŠE správne konštanty (15 %, NČZD /3 pre 2026)
+function prognozaRok(rok){
+  const S=firmaData.settings||{};
+  const faktury=(firmaData.faktury||[]).filter(f=>String(f.datum||f.vystavenie||"").startsWith(String(rok)));
+  const prijmySkut=r2(faktury.reduce((a,f)=>a+(+f.bez||0),0));
+  const mesiaceSFakturou=new Set(faktury.map(f=>String(f.datum||f.vystavenie||"").slice(0,7)));
+  const mesDoteraz=Math.max(mesiaceSFakturou.size,1);
+  const faktor=12/mesDoteraz;
+  // skutočné odvody z evidencie (naša calcDanRow)
+  let zdravSkut=0, socSkut=0, preddavkyDanSkut=0;
+  for(let mi=0;mi<12;mi++){ const c=calcDanRow(mi,+rok,S); zdravSkut+=c.zdrav; socSkut+=c.soc; preddavkyDanSkut+=c.danPreddavok; }
+  const prijmyRok=r2(prijmySkut*faktor);
+  const odpisRok=r2((+S.odpisAutoMes||0)*12);
+  const vydavkyRealRok=r2((firmaData.vydavky||[]).filter(x=>String(x.datum||"").startsWith(String(rok))).reduce((a,x)=>a+(+x.bez||0),0));
+  const vydavkyRok=r2(vydavkyRealRok+odpisRok);
+  const zdravRok=r2(zdravSkut*faktor);
+  let socMesiacov=0;
+  if(S.socOdvodyOd){ const fm=parseInt(String(S.socOdvodyOd).split("-")[1])||13; socMesiacov=Math.max(0,12-fm+1); }
+  const socRok=r2((+S.socOdvodyMes||0)*socMesiacov);
+  const preddavkyZPRok=r2((+S.preddavokZP||0)*12);
+  const preddavkyDanRok=r2(preddavkyDanSkut*faktor);
+  const ciastkovyZaklad=r2(prijmyRok-vydavkyRok);
+  const zakladPoOdvodoch=r2(ciastkovyZaklad-zdravRok-socRok);
+  // NČZD 2026 — NAŠE správne konštanty (/3)
+  const plnaNczd=+S.nezdanitCast2026||5966.73;
+  const hrPlna=26083.13, kKonst=14661.11, hrZanik=43983.32;
+  let nezdanit;
+  if(zakladPoOdvodoch<=hrPlna) nezdanit=plnaNczd;
+  else if(zakladPoOdvodoch>=hrZanik) nezdanit=0;
+  else nezdanit=Math.max(0, r2(kKonst-(zakladPoOdvodoch/3)));
+  nezdanit=Math.min(nezdanit, Math.max(zakladPoOdvodoch,0));
+  const zakladDane=Math.max(r2(zakladPoOdvodoch-nezdanit),0);
+  // sadzba: 15 % pre podnikanie do 100 000 € príjmov (Romanov prípad)
+  const sadzba=(+S.danPrijem||0.15);
+  const dan=r2(zakladDane*sadzba);
+  const koef=+S.zpKoeficient||1.486;
+  const zpSadzba=+S.zdravSadzba||0.15;
+  const vymZaklad=ciastkovyZaklad>0?r2(ciastkovyZaklad/koef):0;
+  const zdravRocny=r2(vymZaklad*zpSadzba);
+  const zdravNedoplatok=r2(zdravRocny-preddavkyZPRok);
+  return {
+    rok:String(rok), zdroj:"Prognóza (odhad za celý rok)",
+    mesDoteraz, faktor:r2(faktor),
+    prijmySkut, prijmy:prijmyRok, vydavky:vydavkyRok,
+    zaklad:ciastkovyZaklad, zakladPoOdvodoch, ostatne:"",
+    nezdanitCast:nezdanit, zakladDane,
+    danCelkom:dan, danovaPovinnost:dan,
+    preddavkyZaplatene:preddavkyDanRok, danNaUhradu:r2(dan-preddavkyDanRok),
+    zdrav:zdravRocny, soc:socRok, preddavkyZP:preddavkyZPRok, zdravNedoplatok, vymZaklad,
+  };
+}
+function importDanovePriznanie(){ document.getElementById("dpFileInput").click(); }
+function dpSpracuj(e){
+  const f=e.target.files[0]; if(!f) return; e.target.value="";
+  const rd=new FileReader();
+  rd.onload=()=>{
+    const parsed=parseDPFO(String(rd.result));
+    if(!parsed){ alert("Súbor sa nepodarilo načítať ako DPFO XML (typ B). Skontrolujte, či je to oficiálne priznanie z Finančnej správy."); return; }
+    if(!firmaData.danovePriznania) firmaData.danovePriznania={};
+    firmaData.danovePriznania[parsed.rok]=parsed;
+    poZmene(); appPriznania();
+    setTimeout(()=>alert("Daňové priznanie "+parsed.rok+" načítané (príjmy "+eur(parsed.prijmy)+")."),100);
+  };
+  rd.readAsText(f);
+}
+function zmazPriznanie(rok){
+  if(!confirm("Odstrániť načítané priznanie "+rok+"?")) return;
+  if(firmaData.danovePriznania) delete firmaData.danovePriznania[rok];
+  poZmene(); appPriznania();
+}
+function appPriznania(){
+  const c=APPS.priznania.c;
+  firmaData.danovePriznania=firmaData.danovePriznania||{};
+  const aktualnyRok=new Date().getFullYear();
+  const prog=prognozaRok(aktualnyRok);
+  const nacitane=Object.keys(firmaData.danovePriznania).sort();
+  const roky=[...new Set([...nacitane,String(aktualnyRok)])].sort();
+  const data={}; nacitane.forEach(r=>data[r]=firmaData.danovePriznania[r]); data[String(aktualnyRok)]=prog;
+  const riadok=(label,key,hint="")=>`<tr><td style="padding:6px 8px">${label}${hint?` <span style="font-size:10px;opacity:.6">${hint}</span>`:''}</td>${roky.map(r=>{
+    const val=data[r]&&data[r][key]; return `<td style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums">${val!=null&&val!==""?eur(val):'—'}</td>`;
+  }).join("")}</tr>`;
+  const sekcia=(nazov)=>`<tr style="background:var(--brand-lite)"><td colspan="${roky.length+1}" style="padding:6px 8px;font-weight:700">${nazov}</td></tr>`;
+  document.getElementById("appScreen").innerHTML=appHlavicka("priznania",
+    `<button class="aabtn pri" style="--_c:${c}" onclick="importDanovePriznanie()">↥ Načítať priznanie (XML)</button>`)+`
+    <div class="amini">
+      <div class="aminbox"><div class="al">Odhad príjmov ${aktualnyRok}</div><div class="av">${eur(prog.prijmy)}</div><div style="font-size:10px;color:var(--ink-soft)">skut. ${eur(prog.prijmySkut)} za ${prog.mesDoteraz} mes. → ×${prog.faktor}</div></div>
+      <div class="aminbox"><div class="al">Odhad dane ${aktualnyRok}</div><div class="av warn">${eur(prog.danCelkom)}</div><div style="font-size:10px;color:var(--ink-soft)">základ po odvodoch a NČZD</div></div>
+      <div class="aminbox"><div class="al">Nedoplatok zdravotné ${aktualnyRok}</div><div class="av">${eur(prog.zdravNedoplatok)}</div><div style="font-size:10px;color:var(--ink-soft)">ročné zúčtovanie (odhad)</div></div>
+    </div>
+    <div style="background:#fdf9f2;border-left:3px solid #c9a84a;border-radius:8px;padding:11px 14px;margin:12px 0;font-size:12.5px">
+      <b>Pasívny prehľad.</b> Minulé roky sú načítané z oficiálnych XML priznaní (DPFO typ B) z Finančnej správy. Rok ${aktualnyRok} je <b>odhad za celý rok</b> — skutočnosť za doterajších ${prog.mesDoteraz} mes. sa extrapoluje na 12 (×${prog.faktor}). Slúži na orientáciu, nenahrádza priznanie ani daňového poradcu.
+    </div>
+    <div class="card">
+      <h2 style="font-size:16px;margin-bottom:12px">Porovnanie rokov</h2>
+      <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">
+        <thead><tr><th style="padding:6px 8px;text-align:left">Položka</th>${roky.map(r=>`<th style="padding:6px 8px;text-align:right">${r}${data[r]&&data[r].zdroj&&data[r].zdroj.includes("Prognóza")?' <span style="font-weight:400;font-size:9px;opacity:.6">(odhad)</span>':''}</th>`).join("")}</tr></thead>
+        <tbody>
+          ${sekcia("Príjmy a výdavky")}
+          ${riadok("Príjmy (skutočnosť doteraz)","prijmySkut")}
+          ${riadok("Príjmy z podnikania (rok)","prijmy")}
+          ${riadok("Výdavky","vydavky")}
+          ${riadok("Čiastkový základ dane","zaklad")}
+          ${sekcia("Daň")}
+          ${riadok("Základ po odvodoch","zakladPoOdvodoch")}
+          ${riadok("Nezdaniteľná časť","nezdanitCast",prog.nezdanitCast<(+((firmaData.settings||{}).nezdanitCast2026)||5966.73)?"(krátená)":"")}
+          ${riadok("Základ dane (znížený)","zakladDane")}
+          ${riadok("Daň celkom","danCelkom")}
+          ${riadok("Preddavky na daň zaplatené","preddavkyZaplatene")}
+          ${riadok("Daň na úhradu / preplatok","danNaUhradu")}
+          ${sekcia("Zdravotné poistenie (ročné zúčtovanie)")}
+          ${riadok("Vymeriavací základ","vymZaklad")}
+          ${riadok("Zdravotný odvod (skutočný)","zdrav")}
+          ${riadok("Preddavky ZP zaplatené","preddavkyZP")}
+          ${riadok("Nedoplatok na zdravotnom","zdravNedoplatok")}
+          ${riadok("Sociálne odvody","soc")}
+        </tbody>
+      </table></div>
+    </div>
+    ${nacitane.length?`<div class="card" style="margin-top:14px">
+      <h2 style="font-size:16px;margin-bottom:12px">Načítané priznania</h2>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+      ${nacitane.map(r=>`<div style="border:1px solid var(--line);border-radius:9px;padding:10px 14px;display:flex;gap:10px;align-items:center">
+        <span><b>${r}</b> <span style="font-size:11px;color:var(--ink-soft)">· import ${esc(firmaData.danovePriznania[r].importDatum||'')}</span></span>
+        <span onclick="zmazPriznanie('${r}')" style="cursor:pointer;color:var(--neg);font-weight:700">✕</span>
+      </div>`).join("")}
+      </div>
+    </div>`:`<div class="aempty" style="margin-top:14px">Žiadne načítané priznania. Načítajte XML priznanie (DPFO typ B) z Finančnej správy — rok ${aktualnyRok} sa medzitým počíta ako prognóza z vašich dát.</div>`}
+    <input type="file" id="dpFileInput" accept=".xml,text/xml,application/xml" style="display:none" onchange="dpSpracuj(event)">`;
+  setCrumb(`${nacitane.length} načítaných · ${aktualnyRok} odhad`);
+}
 function appPrognoza(){
   const c=APPS.prognoza.c;
   const roky=[...new Set([...(firmaData.faktury||[]).map(f=>String(f.datum||f.vystavenie||"").slice(0,4)),...(firmaData.vydavky||[]).map(x=>String(x.datum||"").slice(0,4))].filter(r=>/^\d{4}$/.test(r)))].sort().reverse();
@@ -2912,6 +3289,138 @@ function appPrognoza(){
       ${P.zostavaMes>0?`<div style="background:var(--bg);border-radius:10px;padding:11px 14px;margin-top:10px;font-size:13px">Zostáva ${P.zostavaMes} ${P.zostavaMes<5?'mesiace':'mesiacov'} → na daň odkladajte cca <b>${eur(P.zostavaMes?P.dan/P.zostavaMes:P.dan)}/mesiac</b>.</div>`:''}
     </div>`:''}`;
   setCrumb(`daň ${rok} · odložiť ${eur(t.odlozit)}`);
+}
+// ═══ KOMPLETNÝ XLSX EXPORT so záložkami (Release 5, verne zo starej appky) ═══
+const XK_MONTHS=["Január","Február","Marec","Apríl","Máj","Jún","Júl","August","September","Október","November","December"];
+let _xlsxStyleLoading=null, _fflateLoading=null;
+function ensureXlsxStyle(){
+  if(window.XLSXStyle) return Promise.resolve(window.XLSXStyle);
+  if(_xlsxStyleLoading) return _xlsxStyleLoading;
+  const urls=["https://cdnjs.cloudflare.com/ajax/libs/xlsx-js-style/1.2.0/xlsx.bundle.js","https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js","https://unpkg.com/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"];
+  _xlsxStyleLoading=new Promise((resolve,reject)=>{ let i=0; const next=()=>{ if(i>=urls.length){_xlsxStyleLoading=null;reject(new Error("xlsx-js-style"));return;} const s=document.createElement("script"); s.src=urls[i++]; s.async=true; s.onload=()=>{ if(window.XLSX && window.XLSX.utils && window.XLSX.utils.book_new){ window.XLSXStyle=window.XLSX; resolve(window.XLSXStyle); } else next(); }; s.onerror=next; document.head.appendChild(s); }; next(); });
+  return _xlsxStyleLoading;
+}
+function ensureFflate(){
+  if(window.fflate) return Promise.resolve(window.fflate);
+  if(_fflateLoading) return _fflateLoading;
+  const urls=["https://cdnjs.cloudflare.com/ajax/libs/fflate/0.8.2/umd/index.js","https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js","https://unpkg.com/fflate@0.8.2/umd/index.js"];
+  _fflateLoading=new Promise((resolve,reject)=>{ let i=0; const next=()=>{ if(i>=urls.length){_fflateLoading=null;reject(new Error("fflate"));return;} const s=document.createElement("script"); s.src=urls[i++]; s.async=true; s.onload=()=>window.fflate?resolve(window.fflate):next(); s.onerror=next; document.head.appendChild(s); }; next(); });
+  return _fflateLoading;
+}
+function xkStyles(){
+  const C={moss:"2F6B4F",mossD:"24503B",clay:"B5663C",gold:"B08838",goldL:"F6EFD9",ink:"1A2520",inkSoft:"5A6B62",line:"D8DDD8",white:"FFFFFF",zebra:"F7FAF8",head:"2F6B4F"};
+  const F="Calibri";
+  const bd=(c=C.line)=>({top:{style:"thin",color:{rgb:c}},bottom:{style:"thin",color:{rgb:c}},left:{style:"thin",color:{rgb:c}},right:{style:"thin",color:{rgb:c}}});
+  return {C,
+    title:{font:{name:F,sz:16,bold:true,color:{rgb:C.mossD}}},
+    sub:{font:{name:F,sz:10,italic:true,color:{rgb:C.inkSoft}}},
+    hdr:{font:{name:F,sz:10,bold:true,color:{rgb:C.white}},fill:{fgColor:{rgb:C.head}},alignment:{horizontal:"center",vertical:"center",wrapText:true},border:bd(C.mossD)},
+    cell:{font:{name:F,sz:10,color:{rgb:C.ink}},alignment:{vertical:"center"},border:bd()},
+    cellZ:{font:{name:F,sz:10,color:{rgb:C.ink}},alignment:{vertical:"center"},border:bd(),fill:{fgColor:{rgb:C.zebra}}},
+    num:{font:{name:F,sz:10,color:{rgb:C.ink}},alignment:{horizontal:"right",vertical:"center"},border:bd()},
+    numZ:{font:{name:F,sz:10,color:{rgb:C.ink}},alignment:{horizontal:"right",vertical:"center"},border:bd(),fill:{fgColor:{rgb:C.zebra}}},
+    eur:{font:{name:F,sz:10,color:{rgb:C.ink}},alignment:{horizontal:"right",vertical:"center"},border:bd(),numFmt:'#,##0.00" €"'},
+    eurZ:{font:{name:F,sz:10,color:{rgb:C.ink}},alignment:{horizontal:"right",vertical:"center"},border:bd(),numFmt:'#,##0.00" €"',fill:{fgColor:{rgb:C.zebra}}},
+    foot:{font:{name:F,sz:10,bold:true,color:{rgb:C.ink}},fill:{fgColor:{rgb:C.goldL}},alignment:{vertical:"center"},border:bd(C.gold)},
+    footN:{font:{name:F,sz:10,bold:true,color:{rgb:C.ink}},fill:{fgColor:{rgb:C.goldL}},alignment:{horizontal:"right",vertical:"center"},border:bd(C.gold)},
+    footE:{font:{name:F,sz:10,bold:true,color:{rgb:C.ink}},fill:{fgColor:{rgb:C.goldL}},alignment:{horizontal:"right",vertical:"center"},border:bd(C.gold),numFmt:'#,##0.00" €"'},
+  };
+}
+function xkCell(v,s){ return {v:v==null?"":v,t:typeof v==="number"?"n":"s",s}; }
+function xkMonthLbl(ym){ const m=String(ym).match(/(\d{4})-(\d{2})/); return m?XK_MONTHS[+m[2]-1]+" "+m[1]:ym; }
+function xkSheetName(s){ return String(s).replace(/[\\\/\?\*\[\]:]/g,"").slice(0,31); }
+function xkApplyFreeze(X,fflate,buf,freezeMap){
+  const files=fflate.unzipSync(new Uint8Array(buf));
+  const dec=new TextDecoder(),enc=new TextEncoder();
+  Object.keys(freezeMap).forEach(idx=>{ const path="xl/worksheets/sheet"+(+idx+1)+".xml"; if(!files[path])return; const fz=freezeMap[idx];
+    let sx=dec.decode(files[path]); const topCell=X.utils.encode_cell({r:fz.y,c:fz.x});
+    const pane=`<pane ${fz.x?`xSplit="${fz.x}" `:""}ySplit="${fz.y}" topLeftCell="${topCell}" activePane="bottomRight" state="frozen"/><selection pane="bottomRight"/>`;
+    sx=sx.replace(/<sheetView workbookViewId="0"\/>/,'<sheetView workbookViewId="0">'+pane+'</sheetView>');
+    files[path]=enc.encode(sx);
+  });
+  return fflate.zipSync(files);
+}
+function xkBuild(X){
+  const S=xkStyles(); const wb=X.utils.book_new(); const D=firmaData, SET=D.settings||{};
+  const fmtSk=iso=>{ const m=String(iso).match(/(\d{4})-(\d{2})-(\d{2})/); return m?`${+m[3]}.${+m[2]}.${m[1]}`:(iso||""); };
+  // --- Daňová evidencia: hárok na rok ---
+  const danRoky=[...new Set([...(D.faktury||[]).map(f=>String(f.datum||f.vystavenie||"").slice(0,4)),...(D.vydavky||[]).map(x=>String(x.datum||"").slice(0,4))].filter(y=>y&&y.length===4))].sort();
+  (danRoky.length?danRoky:[String(new Date().getFullYear())]).forEach(rok=>{
+    const head=["Mesiac","Fakt. bez DPH","Odpis auta","Ostatné nákl.","Náklady spolu","Čiastk. základ","Zdravotné","Preddavok ZP","Daň 15%","Predd. daň","Sociálne","Odvody+daň","Odložiť","Čistý príjem"];
+    const aoa=[[xkCell("Daňová evidencia "+rok,S.title)],[xkCell((D.meta&&D.meta.nazov||"")+" · IČO "+(D.meta&&D.meta.ico||""),S.sub)],[],head.map(h=>xkCell(h,S.hdr))];
+    const t={}; head.slice(1).forEach((_,k)=>t[k]=0);
+    for(let mi=0;mi<12;mi++){ const c=calcDanRow(mi,+rok,SET); if(!c.aktivny && c.faktB===0 && c.ostatne===0) continue; const z=mi%2===1; const sc=z?S.cellZ:S.cell, se=z?S.eurZ:S.eur;
+      const vals=[c.faktB,c.odpis,c.ostatne,c.nakladySpolu,c.ciastkZaklad,c.zdrav,c.preddavokZP,c.dan,c.danPreddavok,c.soc,c.odvodyDan,c.odlozit,c.cisty];
+      aoa.push([xkCell(XK_MONTHS[mi],sc),...vals.map(v=>xkCell(r2(v),se))]); vals.forEach((v,k)=>t[k]+=(+v||0)); }
+    aoa.push([xkCell("Spolu",S.foot),...Object.keys(t).map(k=>xkCell(r2(t[k]),S.footE))]);
+    const ws=X.utils.aoa_to_sheet(aoa); ws['!cols']=[{wch:12},...Array(13).fill({wch:13})];
+    ws['!merges']=[{s:{r:0,c:0},e:{r:0,c:5}},{s:{r:1,c:0},e:{r:1,c:5}}]; ws['!freeze']={xSplit:1,ySplit:4}; ws['!rows']=[{hpt:22},{hpt:14},{hpt:6},{hpt:30}];
+    X.utils.book_append_sheet(wb,ws,xkSheetName("Daň "+rok));
+  });
+  // --- Kniha jázd: prehľad ---
+  const months=[...new Set((D.jazdy||[]).map(j=>j.mesiac||String(j.datum||j.dt||"").slice(0,7)).filter(Boolean))].sort();
+  if(months.length){
+    const aoa=[[xkCell("Kniha jázd — prehľad",S.title)],[xkCell("Vozidlo "+((D.meta&&D.meta.vozidlo)||(D.majetok&&D.majetok[0]&&D.majetok[0].nazov)||""),S.sub)],[],
+      [xkCell("Mesiac",S.hdr),xkCell("Počet jázd",S.hdr),xkCell("Km",S.hdr),xkCell("kWh",S.hdr),xkCell("Poč. stav km",S.hdr),xkCell("Kon. stav km",S.hdr)]];
+    let tk=0,tw=0,tj=0;
+    months.forEach((m,i)=>{ const list=(D.jazdy||[]).filter(j=>(j.mesiac||String(j.datum||j.dt||"").slice(0,7))===m).sort((a,b)=>String(a.datum||a.dt||"").localeCompare(String(b.datum||b.dt||"")));
+      const km=r2(list.reduce((a,b)=>a+(+b.km||0),0)), kwh=r2(list.reduce((a,b)=>a+(+b.celkKWh||+b.kwh||0),0));
+      const poc=list[0]?(list[0].poc||list[0].tachometerOd||0):0, kon=list.length?(list[list.length-1].kon||list[list.length-1].tachometerDo||0):0; const z=i%2===1, sc=z?S.cellZ:S.cell, sn=z?S.numZ:S.num;
+      aoa.push([xkCell(xkMonthLbl(m),sc),xkCell(list.length,sn),xkCell(km,sn),xkCell(kwh,sn),xkCell(+poc||0,sn),xkCell(+kon||0,sn)]); tk+=km;tw+=kwh;tj+=list.length; });
+    aoa.push([xkCell("Spolu",S.foot),xkCell(tj,S.footN),xkCell(r2(tk),S.footN),xkCell(r2(tw),S.footN),xkCell("",S.foot),xkCell("",S.foot)]);
+    const ws=X.utils.aoa_to_sheet(aoa); ws['!cols']=[{wch:16},{wch:11},{wch:11},{wch:10},{wch:13},{wch:13}];
+    ws['!merges']=[{s:{r:0,c:0},e:{r:0,c:5}},{s:{r:1,c:0},e:{r:1,c:5}}]; ws['!freeze']={xSplit:0,ySplit:4}; ws['!rows']=[{hpt:22},{hpt:14},{hpt:6},{hpt:20}];
+    X.utils.book_append_sheet(wb,ws,"Jazdy prehľad");
+  }
+  // --- Faktúry ---
+  if((D.faktury||[]).length){ const aoa=[[xkCell("Prehľad faktúr",S.title)],[],
+    [xkCell("Číslo",S.hdr),xkCell("Odberateľ",S.hdr),xkCell("Dátum",S.hdr),xkCell("Splatnosť",S.hdr),xkCell("Človekodní",S.hdr),xkCell("Bez DPH",S.hdr),xkCell("DPH",S.hdr),xkCell("Spolu",S.hdr),xkCell("Stav",S.hdr)]];
+    let tb=0,td=0,ts=0;
+    D.faktury.slice().sort((a,b)=>String(a.datum||"").localeCompare(String(b.datum||""))).forEach((f,i)=>{ const z=i%2===1, sc=z?S.cellZ:S.cell, sn=z?S.numZ:S.num, se=z?S.eurZ:S.eur;
+      const cd=(f.polozky||[]).reduce((a,p)=>{const mj=(p.mj||"").toLowerCase();return a+(/člov|clov|deň|den|md/.test(mj)?(+p.mn||0):0);},0);
+      const odb=typeof f.odberatel==="string"?f.odberatel:(f.odberatel&&f.odberatel.nazov)||"";
+      aoa.push([xkCell(f.cislo,sc),xkCell(odb,sc),xkCell(fmtSk(f.datum||f.vystavenie),sc),xkCell(fmtSk(f.splatnost),sc),xkCell(+cd||0,sn),xkCell(r2(f.bez),se),xkCell(r2(f.dph),se),xkCell(r2(f.spolu),se),xkCell(f.zaplatena?"Zaplatená":"Nezaplatená",sc)]); tb+=+f.bez||0;td+=+f.dph||0;ts+=+f.spolu||0; });
+    aoa.push([xkCell("Spolu",S.foot),xkCell("",S.foot),xkCell("",S.foot),xkCell("",S.foot),xkCell("",S.foot),xkCell(r2(tb),S.footE),xkCell(r2(td),S.footE),xkCell(r2(ts),S.footE),xkCell("",S.foot)]);
+    const ws=X.utils.aoa_to_sheet(aoa); ws['!cols']=[{wch:12},{wch:28},{wch:14},{wch:12},{wch:11},{wch:13},{wch:12},{wch:13},{wch:13}];
+    ws['!merges']=[{s:{r:0,c:0},e:{r:0,c:4}}]; ws['!freeze']={xSplit:0,ySplit:3}; ws['!rows']=[{hpt:22},{hpt:6},{hpt:24}];
+    X.utils.book_append_sheet(wb,ws,"Faktúry"); }
+  // --- Výdavky ---
+  if((D.vydavky||[]).length){ const aoa=[[xkCell("Výdavky — zoznam dokladov",S.title)],[],
+    [xkCell("Číslo dokladu",S.hdr),xkCell("Dátum",S.hdr),xkCell("Partner",S.hdr),xkCell("Popis",S.hdr),xkCell("Druh",S.hdr),xkCell("Bez DPH",S.hdr),xkCell("DPH",S.hdr),xkCell("Spolu",S.hdr)]];
+    let tb=0,td=0,ts=0;
+    D.vydavky.slice().sort((a,b)=>String(a.datum||"").localeCompare(String(b.datum||""))).forEach((x,i)=>{ const z=i%2===1, sc=z?S.cellZ:S.cell, se=z?S.eurZ:S.eur;
+      aoa.push([xkCell(x.cislo||"",sc),xkCell(fmtSk(x.datum),sc),xkCell(x.partner||"",sc),xkCell(x.popis||"",sc),xkCell(x.druh||"",sc),xkCell(r2(x.bez),se),xkCell(r2(x.dph),se),xkCell(r2(x.spolu),se)]); tb+=+x.bez||0;td+=+x.dph||0;ts+=+x.spolu||0; });
+    aoa.push([xkCell("Spolu",S.foot),xkCell("",S.foot),xkCell("",S.foot),xkCell("",S.foot),xkCell("",S.foot),xkCell(r2(tb),S.footE),xkCell(r2(td),S.footE),xkCell(r2(ts),S.footE)]);
+    const ws=X.utils.aoa_to_sheet(aoa); ws['!cols']=[{wch:14},{wch:14},{wch:26},{wch:32},{wch:14},{wch:13},{wch:12},{wch:13}];
+    ws['!merges']=[{s:{r:0,c:0},e:{r:0,c:4}}]; ws['!freeze']={xSplit:0,ySplit:3}; ws['!rows']=[{hpt:22},{hpt:6},{hpt:24}];
+    X.utils.book_append_sheet(wb,ws,"Výdavky"); }
+  // --- Výkazy ---
+  if((D.vykazy||[]).length){ const aoa=[[xkCell("Výkazy prác",S.title)],[],
+    [xkCell("Projekt",S.hdr),xkCell("Zákazka",S.hdr),xkCell("Obdobie",S.hdr),xkCell("Pracovník",S.hdr),xkCell("Dní",S.hdr),xkCell("Hodín",S.hdr)]];
+    D.vykazy.forEach((w,i)=>{ const z=i%2===1, sc=z?S.cellZ:S.cell, sn=z?S.numZ:S.num;
+      const dni=(w.polozky||[]).length, hod=(w.polozky||[]).reduce((a,p)=>a+(+p.hodiny||0),0);
+      aoa.push([xkCell(w.projekt||"",sc),xkCell(w.zakazka||"",sc),xkCell(w.obdobie||"",sc),xkCell(w.pracovnik||"",sc),xkCell(dni,sn),xkCell(hod,sn)]); });
+    const ws=X.utils.aoa_to_sheet(aoa); ws['!cols']=[{wch:26},{wch:14},{wch:14},{wch:24},{wch:8},{wch:8}];
+    ws['!merges']=[{s:{r:0,c:0},e:{r:0,c:3}}]; ws['!freeze']={xSplit:0,ySplit:3}; ws['!rows']=[{hpt:22},{hpt:6},{hpt:24}];
+    X.utils.book_append_sheet(wb,ws,"Výkazy"); }
+  return wb;
+}
+function exportVsetkoXlsx(){
+  const stav=document.getElementById("xlsxMsg");
+  if(stav){ stav.textContent="Pripravujem kompletný export…"; stav.className="cloudmsg"; }
+  Promise.all([ensureXlsxStyle(),ensureFflate()]).then(([X,fflate])=>{
+    try{
+      const wb=xkBuild(X);
+      const freezeMap={};
+      wb.SheetNames.forEach((name,i)=>{ const f=wb.Sheets[name]['!freeze']; if(f) freezeMap[i]={x:f.xSplit||0,y:f.ySplit||0}; });
+      const buf=X.write(wb,{type:"array",bookType:"xlsx"});
+      const final=xkApplyFreeze(X,fflate,buf,freezeMap);
+      const blob=new Blob([final],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+      const nm=((firmaData.meta&&firmaData.meta.nazov)||"export").replace(/[^\w.-]+/g,"_")+"_kompletny_"+new Date().toISOString().slice(0,10)+".xlsx";
+      stiahniBlob(blob,nm);
+      if(stav){ stav.textContent="✓ Kompletný export hotový ("+wb.SheetNames.length+" hárkov)."; stav.className="cloudmsg ok"; }
+    }catch(e){ console.error(e); if(stav){ stav.textContent="Chyba pri exporte: "+e.message; stav.className="cloudmsg err"; } }
+  }).catch(()=>{ if(stav){ stav.textContent="Knižnicu na export sa nepodarilo načítať. Skontrolujte pripojenie."; stav.className="cloudmsg err"; } });
 }
 // export daňovej tabuľky do XLS
 function exportDanXLS(rok){
