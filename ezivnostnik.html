@@ -534,6 +534,7 @@ const SUPABASE_URL = "https://jriuljhmacgvxyrptbme.supabase.co";
 const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 // ═══════════════════════════════════════════════════
 
+const APP_VERZIA = "2026.07.15-B";  // build s opraveným PDF template faktúry
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -4138,6 +4139,7 @@ function appData(){
       <button class="abtn" onclick="exportVsetkoXlsx()" style="width:100%">📊 Kompletný export XLSX</button>
       <div class="cloudmsg" id="xlsxMsg" style="margin-top:8px"></div>
       <div class="cloudmsg" id="cloudMsg"></div>
+      <div style="text-align:center;font-size:11px;color:var(--ink-soft);margin-top:10px">eživnostník · verzia ${APP_VERZIA}</div>
     </div>
     <div class="card" style="margin-bottom:14px">
       <h2 style="font-size:16px;margin-bottom:4px">Režim výdavkov</h2>
@@ -5628,54 +5630,129 @@ async function generujPayBySquareQR(f, m){
   }catch(e){ console.warn("QR sa nepodarilo vygenerovať:",e); return null; }
 }
 
-// PDF faktúry (s položkami + QR platbou)
+// PDF faktúry — premakaný template (dodávateľ/odberateľ, tabuľka položiek, rekapitulácia DPH, QR)
 async function exportFakturaPDF(idx){
   const f=firmaData.faktury[idx]; const m=firmaData.meta||{};
-  const s=faktSumy(f);
+  const s=faktSumy(f); const S=firmaData.settings||{};
   const { jsPDF }=window.jspdf;
-  const doc=new jsPDF();
-  doc.setFontSize(20); doc.setTextColor(31,95,168);
-  doc.text("FAKTÚRA "+(f.cislo||""), 14, 22);
-  doc.setTextColor(40,40,40); doc.setFontSize(10);
-  doc.setFont(undefined,"bold"); doc.text("DODÁVATEĽ", 14, 38);
-  doc.setFont(undefined,"normal");
-  doc.text([m.nazov||"", m.adresa||"", "IČO: "+(m.ico||"")+"   DIČ: "+(m.dic||""), "IČ DPH: "+(m.icdph||"")], 14, 44);
-  doc.setFont(undefined,"bold"); doc.text("ODBERATEĽ", 120, 38);
-  doc.setFont(undefined,"normal");
-  doc.text([f.odberatel||"", f.ico?("IČO: "+f.ico):"", f.icdph?("IČ DPH: "+f.icdph):""].filter(Boolean), 120, 44);
-  doc.text([
-    "Dátum vystavenia: "+fmtDatum(f.datum||f.vystavenie),
-    "Splatnosť: "+fmtDatum(f.splatnost||""),
-    "Variabilný symbol: "+(f.vs||f.cislo||""),
-    m.iban?("IBAN: "+m.iban):""
-  ].filter(Boolean), 14, 66);
-  // položky
-  let y=92;
-  doc.setFont(undefined,"bold"); doc.setFontSize(9);
-  doc.text("Položka", 14, y); doc.text("Množ.", 110, y); doc.text("Cena/j", 135, y); doc.text("Spolu", 170, y);
-  doc.setFont(undefined,"normal"); y+=2; doc.line(14,y,196,y); y+=6;
-  (f.polozky||[]).forEach(p=>{
-    const suma=r2((+p.mn||0)*(+p.cena||0));
-    doc.text(String(p.nazov||"").slice(0,55), 14, y);
-    doc.text(String(p.mn||0)+" "+(p.mj||""), 110, y);
-    doc.text(eur(+p.cena||0), 135, y);
-    doc.text(eur(suma), 170, y);
-    y+=6;
+  const doc=new jsPDF({unit:"mm",format:"a4"});
+  const BRAND=[31,95,168], INK=[40,40,40], MUTED=[110,120,135], LINE=[210,220,232];
+  const eur0=v=>(+v||0).toLocaleString("sk-SK",{minimumFractionDigits:2,maximumFractionDigits:2})+" €";
+  const eurP=v=>(+v||0).toLocaleString("sk-SK",{minimumFractionDigits:2,maximumFractionDigits:2});
+  const R=210-14; // pravý okraj
+
+  // ── HLAVIČKA ──
+  doc.setFont("helvetica","bold"); doc.setFontSize(20); doc.setTextColor(...BRAND);
+  doc.text("FAKTÚRA "+(f.cislo||""), R, 22, {align:"right"});
+
+  // ── DODÁVATEĽ (vľavo) ──
+  let yL=40;
+  doc.setFontSize(9); doc.setTextColor(...MUTED); doc.setFont("helvetica","bold");
+  doc.text("DODÁVATEĽ", 14, yL);
+  doc.setTextColor(...INK); doc.setFont("helvetica","normal"); doc.setFontSize(9.5);
+  yL+=6; doc.setFont("helvetica","bold"); doc.text(String(m.nazov||""), 14, yL); doc.setFont("helvetica","normal");
+  const dodLines=[ m.adresa||"", "IČO: "+(m.ico||"")+"   DIČ: "+(m.dic||""), m.icdph?("IČ DPH: "+m.icdph):"" ].filter(Boolean);
+  dodLines.forEach(l=>{ yL+=5; doc.text(l, 14, yL); });
+  if(S.kontaktTel||S.email){ yL+=7; doc.setTextColor(...MUTED); doc.setFontSize(8.5); doc.text("Kontakt", 14, yL); doc.setTextColor(...INK); doc.setFontSize(9);
+    if(S.kontaktTel){ yL+=5; doc.text(String(S.kontaktTel), 14, yL); }
+    if(S.email){ yL+=5; doc.text(String(S.email), 14, yL); } }
+
+  // ── ODBERATEĽ (vpravo) ──
+  let yR=40; const xR=112;
+  doc.setFontSize(9); doc.setTextColor(...MUTED); doc.setFont("helvetica","bold");
+  doc.text("ODBERATEĽ", xR, yR);
+  doc.setTextColor(...INK); doc.setFont("helvetica","bold"); doc.setFontSize(9.5);
+  yR+=6; doc.text(String(f.odberatel||"—"), xR, yR); doc.setFont("helvetica","normal");
+  const odbLines=[ f.adresa||"", f.ico?("IČO: "+f.ico):"", f.icdph?("IČ DPH: "+f.icdph):"" ].filter(Boolean);
+  odbLines.forEach(l=>{ yR+=5; doc.text(l, xR, yR); });
+
+  // ── PLATOBNÝ BLOK (rámik vpravo) ──
+  let yBox=Math.max(yL,yR)+8; if(yBox<78) yBox=78;
+  const boxY=yBox, boxH=32;
+  doc.setDrawColor(...LINE); doc.setFillColor(247,250,253);
+  doc.roundedRect(xR-4, boxY, R-(xR-4), boxH, 2, 2, "FD");
+  doc.setFontSize(9); doc.setTextColor(...INK);
+  let yb=boxY+7;
+  const payRow=(lbl,val,bold)=>{ doc.setFont("helvetica","normal"); doc.setTextColor(...MUTED); doc.text(lbl, xR, yb);
+    doc.setFont("helvetica",bold?"bold":"normal"); doc.setTextColor(...INK); doc.text(String(val), R, yb, {align:"right"}); yb+=6; };
+  payRow("Spôsob úhrady:", S.uhrada||"Bankový prevod");
+  payRow("Suma:", eur0(s.spolu), true);
+  payRow("Variabilný symbol:", f.vs||f.cislo||"", true);
+  if(m.iban) payRow("IBAN:", m.iban, true);
+
+  // ── DÁTUMY (vľavo pod dodávateľom) ──
+  let yD=boxY+2;
+  doc.setFontSize(9); doc.setTextColor(...INK);
+  const dRow=(lbl,val,bold)=>{ doc.setFont("helvetica","normal"); doc.setTextColor(...MUTED); doc.text(lbl, 14, yD);
+    doc.setFont("helvetica",bold?"bold":"normal"); doc.setTextColor(...INK); doc.text(String(val||"—"), 58, yD); yD+=6; };
+  dRow("Dátum vystavenia:", fmtDatum(f.vystavenie||f.datum));
+  dRow("Dátum dodania:", fmtDatum(f.datum||f.vystavenie));
+  dRow("Splatnosť:", fmtDatum(f.splatnost||""), true);
+
+  // ── POPISNÝ TEXT ──
+  let y=Math.max(yD, boxY+boxH)+8;
+  if(f.popis || S.faktText){ doc.setFont("helvetica","normal"); doc.setFontSize(9); doc.setTextColor(...INK);
+    const txt=doc.splitTextToSize(String(f.popis||S.faktText||""), R-14); doc.text(txt, 14, y); y+=txt.length*5+4; }
+
+  // ── TABUĽKA POLOŽIEK ──
+  const cols=[14, 24, 108, 132, 156, R]; // Č | NÁZOV | MNOŽSTVO | CENA BEZ DPH | DPH% | SPOLU BEZ DPH
+  doc.setFillColor(...BRAND); doc.rect(14, y, R-14, 7, "F");
+  doc.setTextColor(255,255,255); doc.setFont("helvetica","bold"); doc.setFontSize(8);
+  doc.text("Č.", cols[0]+1, y+4.7);
+  doc.text("NÁZOV", cols[1], y+4.7);
+  doc.text("MNOŽSTVO", cols[2], y+4.7, {align:"right"});
+  doc.text("CENA BEZ DPH", cols[3]+6, y+4.7, {align:"right"});
+  doc.text("DPH %", cols[4]+4, y+4.7, {align:"right"});
+  doc.text("SPOLU BEZ DPH", R, y+4.7, {align:"right"});
+  y+=7;
+  doc.setTextColor(...INK); doc.setFont("helvetica","normal"); doc.setFontSize(9);
+  const sadzbaPct=Math.round(s.sadzba*100);
+  (f.polozky||[]).forEach((p,i)=>{
+    const lineBez=r2((+p.mn||0)*(+p.cena||0));
+    if(i%2===1){ doc.setFillColor(247,250,252); doc.rect(14, y, R-14, 7, "F"); }
+    doc.text(String(i+1)+".", cols[0]+1, y+5);
+    doc.text(doc.splitTextToSize(String(p.nazov||""),80)[0], cols[1], y+5);
+    doc.text(eurP(p.mn)+" "+(p.mj||""), cols[2], y+5, {align:"right"});
+    doc.text(eurP(p.cena), cols[3]+6, y+5, {align:"right"});
+    doc.text(String(sadzbaPct), cols[4]+4, y+5, {align:"right"});
+    doc.text(eurP(lineBez), R, y+5, {align:"right"});
+    y+=7;
   });
-  y+=4; doc.line(120,y,196,y); y+=7;
-  doc.text("Základ bez DPH:", 120, y); doc.text(eur(s.bez), 170, y); y+=6;
-  doc.text("DPH "+Math.round(s.sadzba*100)+" %:", 120, y); doc.text(eur(s.dph), 170, y); y+=8;
-  doc.setFontSize(13); doc.setFont(undefined,"bold"); doc.setTextColor(31,95,168);
-  doc.text("SPOLU:", 120, y); doc.text(eur(s.spolu), 170, y);
-  // QR platba
+  y+=3;
+
+  // ── REKAPITULÁCIA DPH ──
+  doc.setDrawColor(...LINE); doc.line(112, y, R, y); y+=6;
+  doc.setFontSize(8); doc.setTextColor(...MUTED); doc.setFont("helvetica","bold");
+  doc.text("SADZBA DPH", 112, y); doc.text("ZÁKLAD", 148, y, {align:"right"});
+  doc.text("DPH", 172, y, {align:"right"}); doc.text("SPOLU", R, y, {align:"right"});
+  y+=5; doc.setTextColor(...INK); doc.setFont("helvetica","normal"); doc.setFontSize(9);
+  doc.text(sadzbaPct+" %", 112, y); doc.text(eurP(s.bez), 148, y, {align:"right"});
+  doc.text(eurP(s.dph), 172, y, {align:"right"}); doc.text(eurP(s.spolu), R, y, {align:"right"}); y+=5;
+  doc.setDrawColor(...LINE); doc.line(112, y, R, y); y+=5;
+  doc.setFont("helvetica","bold");
+  doc.text("Súčet", 112, y); doc.text(eurP(s.bez), 148, y, {align:"right"});
+  doc.text(eurP(s.dph), 172, y, {align:"right"}); doc.text(eurP(s.spolu), R, y, {align:"right"}); y+=9;
+
+  // ── SPOLU (farebný pruh) ──
+  doc.setFillColor(240,244,250); doc.rect(112, y-6, R-112, 10, "F");
+  doc.setFontSize(13); doc.setFont("helvetica","bold"); doc.setTextColor(...BRAND);
+  doc.text("Spolu", 114, y+1); doc.text(eur0(s.spolu), R, y+1, {align:"right"});
+
+  // ── QR PAY by square (vľavo pri súčte) ──
   const qr=await generujPayBySquareQR(f, m);
   if(qr){
-    doc.addImage(qr,"PNG",14,y-12,34,34);
-    doc.setTextColor(120,120,120); doc.setFontSize(8); doc.setFont(undefined,"normal");
-    doc.text("Naskenujte a zaplaťte (PAY by square)", 14, y+26);
+    doc.addImage(qr,"PNG",14,y-8,30,30);
+    doc.setTextColor(...MUTED); doc.setFontSize(7.5); doc.setFont("helvetica","normal");
+    doc.text("Naskenujte a zaplaťte", 14, y+25); doc.text("(PAY by square)", 14, y+28.5);
   }
-  doc.setTextColor(150,150,150); doc.setFontSize(8); doc.setFont(undefined,"normal");
-  doc.text("Vytvorené v eživnostník", 14, 285);
+
+  // ── PÄTIČKA ──
+  doc.setTextColor(...MUTED); doc.setFontSize(7.5); doc.setFont("helvetica","normal");
+  if(S.registracia) doc.text(String(S.registracia), 105, 280, {align:"center"});
+  doc.text("Vytvorené v eživnostník", 105, 288, {align:"center"});
+  doc.setTextColor(...MUTED);
+  doc.text("OF "+(f.cislo||""), 14, 288); doc.text("Strana 1/1", R, 288, {align:"right"});
+
   doc.save("faktura_"+(f.cislo||"export")+".pdf");
 }
 
