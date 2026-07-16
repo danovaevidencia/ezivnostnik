@@ -737,6 +737,19 @@ function modulPovolenyPreModul(m){
   if(!kat) return true;              // neznámy modul → nechaj (kalendár a pod.)
   return modulPovoleny(kat);
 }
+// mapovanie dashboard widgetov na konfiguračné kategórie
+const WIDGET_KATEGORIA={
+  faktury:"faktury", vystavene:"faktury", vykazy:"faktury", pohladavky:"faktury", prijmy:"faktury",
+  vydavky:"vydavky", spolu:"vydavky",
+  banka:"banka", parovanie:"banka", cashflow:"banka",
+  dph:"dph", saldo:"dph", priznanie:"priznanie", priznanieB:"priznanie",
+  km:"jazdy", jazdy:"jazdy", majetok:"jazdy"
+};
+function dashWidgetPovoleny(w){
+  const kat=WIDGET_KATEGORIA[w];
+  if(!kat) return true;              // neznámy widget (termíny, kalendár) → vždy
+  return modulPovoleny(kat);
+}
 // efektívny režim výdavkov: admin konfigurácia má prednosť, inak nastavenie zákazníka
 function vydavkyRezimEfektivny(){
   if(firmaConfig && (firmaConfig.vydavky_rezim==="pausal" || firmaConfig.vydavky_rezim==="skutocne")){
@@ -1752,7 +1765,7 @@ function vykresliDashboard(){
 
   // vykresli zvolené widgety (vynechaj tie, čo v katalógu nie sú — napr. DPH pre neplatiteľa)
   const katK=dashWidgetKatalog();
-  let html=cfg.widgety.filter(w=>katK[w]).map(renderWidget).join("");
+  let html=cfg.widgety.filter(w=>katK[w] && dashWidgetPovoleny(w)).map(renderWidget).join("");
 
   // termíny (vždy) + tlačidlo konfigurácie
   html+=`<div class="w w-s5">
@@ -2889,11 +2902,18 @@ function feHladajFirmu(q, vstupId){
 }
 function feMapFirmu(r){
   // RPO niekedy vracia hodnoty ako objekt {value:"..."} — bezpečne vytiahni text
-  const T=v=>{ if(v==null) return ""; if(typeof v==="object") return String(v.value||v.name||v.nazov||""); return String(v); };
+  const T=v=>{ if(v==null) return ""; if(typeof v==="object") return String(v.value||v.name||v.nazov||v.number||""); return String(v); };
   const nazov=(r.fullNames&&r.fullNames[0]&&r.fullNames[0].value)||(r.names&&r.names[0]&&r.names[0].value)||"";
   const ico=(r.identifiers&&r.identifiers[0]&&r.identifiers[0].value)||r.ico||"";
-  const dic=(r.taxNumbers&&r.taxNumbers[0])||"";
-  let icdph=""; if(r.identifiers){ const v=r.identifiers.find(x=>/dph|vat/i.test(x.type||"")); if(v) icdph=v.value; }
+  // DIČ — RPO ho môže mať vo viacerých poliach; skús ich po poradí
+  let dic="";
+  if(r.taxNumbers && r.taxNumbers.length){ dic=T(r.taxNumbers[0]); }
+  if(!dic && r.taxpayerIdentificationNumbers && r.taxpayerIdentificationNumbers.length){ dic=T(r.taxpayerIdentificationNumbers[0]); }
+  if(!dic && r.dic){ dic=T(r.dic); }
+  // niekedy je DIČ medzi identifiers s typom obsahujúcim "DIČ"/"tax"
+  if(!dic && r.identifiers){ const v=r.identifiers.find(x=>/di[čc]|tax/i.test(x.type||x.name||"")); if(v) dic=T(v.value||v); }
+  dic=dic.replace(/[^\d]/g,"");   // len číslice
+  let icdph=""; if(r.identifiers){ const v=r.identifiers.find(x=>/dph|vat/i.test(x.type||x.name||"")); if(v) icdph=T(v.value||v); }
   let adresa=""; const a=(r.addresses&&r.addresses[0])||null;
   if(a){
     const ulica=T(a.street)||T(a.municipality);
@@ -2902,7 +2922,7 @@ function feMapFirmu(r){
     const mesto=T(a.municipality);
     adresa=[ (ulica+(cislo?" "+cislo:"")).trim(), (psc+" "+mesto).trim() ].filter(Boolean).join(", ");
   }
-  return {nazov:T(nazov), ico:T(ico), dic:T(dic), icdph:T(icdph), adresa};
+  return {nazov:T(nazov), ico:T(ico), dic, icdph, adresa};
 }
 // jednotné dotiahnutie firmy z RPO podľa IČO → {nazov,ico,dic,icdph,adresa} alebo null
 async function rpoDotiahni(ico){
@@ -7506,8 +7526,8 @@ function obKrokObsah(k){
       </div>
       <div class="ob-field"><label>Adresa</label><input id="ob_adresa" value="${esc(o.adresa)}" placeholder="Ulica 1, 000 00 Mesto"></div>
       <div class="ob-row2">
-        <div class="ob-field"><label>DIČ</label><input id="ob_dic" value="${esc(o.dic)}"></div>
-        <div class="ob-field"><label>IČ DPH (ak ste platiteľ)</label><input id="ob_icdph" value="${esc(o.icdph)}" placeholder="SK0000000000"></div>
+        <div class="ob-field"><label>DIČ</label><input id="ob_dic" value="${esc(o.dic)}" oninput="_ob.dic=this.value" placeholder="1234567890"></div>
+        <div class="ob-field"><label>IČ DPH (ak ste platiteľ)</label><input id="ob_icdph" value="${esc(o.icdph)}" placeholder="SK0000000000" oninput="obZadajIcDph(this.value)"></div>
       </div>
       <div class="ob-field" style="background:var(--bg);border-radius:10px;padding:11px 13px">
         <label style="display:block;margin-bottom:7px">Ste platiteľ DPH?</label>
@@ -7515,8 +7535,7 @@ function obKrokObsah(k){
           <input type="checkbox" id="ob_platca" ${o.icdph||o.platca?'checked':''} onchange="obTogglePlatca(this.checked)" style="width:17px;height:17px">
           Áno, som platiteľ DPH (mesačný/štvrťročný)
         </label>
-        ${(o.icdphNavrh && !o.icdph) ? `<div style="margin-top:9px;font-size:12px;color:var(--ink-soft)">Návrh z DIČ: <b>${esc(o.icdphNavrh)}</b>
-          <button class="aabtn pri" style="--_c:var(--brand);padding:3px 10px;font-size:12px;margin-left:6px" onclick="obPouziNavrhIcDph()">Použiť</button></div>` : ''}
+        <div style="margin-top:7px;font-size:11.5px;color:var(--ink-soft)">DIČ a IČ DPH register neposkytuje — nájdete ich na svojich dokladoch. Po zadaní IČ DPH sa DIČ doplní automaticky.</div>
       </div>
       ${obNav(1, !!o.nazov || true)}`;
   }
@@ -7723,24 +7742,28 @@ function obVyberFirmu(i){
   const v=_obNasepData[i]; if(!v) return;
   _ob.nazov=v.nazov||""; _ob.ico=v.ico||""; _ob.adresa=v.adresa||""; _ob.dic=v.dic||"";
   if(v.icdph){ _ob.icdph=v.icdph; _ob.platca=true; }
-  else if(v.dic){ _ob.icdphNavrh="SK"+String(v.dic).replace(/\s/g,""); }
   document.getElementById("ob_nasep").style.display="none";
   renderOnboarding();
 }
 
-// zaškrtnutie "som platca" — ak máme návrh IČ DPH, predvyplň ho
+// zadanie IČ DPH → ulož a dopočítaj DIČ (DIČ = IČ DPH bez "SK"), bez re-renderu (nech kurzor ostane)
+function obZadajIcDph(v){
+  _ob.icdph = v;
+  const d = String(v||"").replace(/^SK/i,"").replace(/\s/g,"");
+  if(/^\d{9,10}$/.test(d)){
+    _ob.dic = d;
+    const dicPole = document.getElementById("ob_dic");
+    if(dicPole && !dicPole.value) dicPole.value = d;
+    _ob.platca = true;
+    const chk = document.getElementById("ob_platca");
+    if(chk) chk.checked = true;
+  }
+}
+// zaškrtnutie "som platca"
 function obTogglePlatca(checked){
   _ob.platca = checked;
-  if(checked){
-    if(!_ob.icdph && _ob.icdphNavrh) _ob.icdph = _ob.icdphNavrh;
-  } else {
-    _ob.icdph = "";  // neplatca → vyčisti IČ DPH
-  }
+  if(!checked){ _ob.icdph = ""; }   // neplatca → vyčisti IČ DPH
   renderOnboarding();
-}
-// použi navrhované IČ DPH (odvodené z DIČ)
-function obPouziNavrhIcDph(){
-  if(_ob.icdphNavrh){ _ob.icdph = _ob.icdphNavrh; _ob.platca = true; renderOnboarding(); }
 }
 
 async function obDoplnICO(){
@@ -7761,10 +7784,6 @@ async function obDoplnICO(){
     if(F.adresa)_ob.adresa=F.adresa;
     if(F.dic)_ob.dic=F.dic;
     if(F.icdph){ _ob.icdph=F.icdph; _ob.platca=true; }
-    else if(F.dic){
-      // RPO nemá IČ DPH → odvoď návrh SK+DIČ (používateľ potvrdí, či je platca)
-      _ob.icdphNavrh = "SK"+String(F.dic).replace(/\s/g,"");
-    }
     renderOnboarding();
     const s2=document.getElementById("ob_icoStav");
     if(s2){ s2.textContent="✓ Údaje doplnené z registra. Skontrolujte ich."; s2.className="ob-hint ok"; }
