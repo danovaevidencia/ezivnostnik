@@ -324,6 +324,12 @@ button{font-family:inherit;cursor:pointer}
 .ob-card h2{font-family:'Fraunces',Georgia,serif;font-size:23px;font-weight:600;letter-spacing:-.3px;margin-bottom:6px}
 .ob-card .ob-lead{font-size:14px;color:var(--ink-soft);margin-bottom:20px;line-height:1.55}
 .ob-field{margin-bottom:15px}
+.fe-nasep{position:absolute;left:0;right:0;top:100%;z-index:50;background:var(--paper,#fff);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 28px rgba(19,28,43,.14);max-height:280px;overflow:auto;margin-top:4px}
+.fe-nasep-item{padding:10px 13px;cursor:pointer;border-bottom:1px solid var(--line-soft,#eef2f6)}
+.fe-nasep-item:last-child{border-bottom:none}
+.fe-nasep-item:hover{background:var(--brand-lite,#eef4fb)}
+.fe-nasep-nazov{font-weight:600;font-size:13.5px;color:var(--ink)}
+.fe-nasep-detail{font-size:11.5px;color:var(--ink-soft);margin-top:2px}
 .ob-field label{display:block;font-size:12.5px;font-weight:600;color:var(--ink-soft);margin-bottom:6px}
 .ob-field input,.ob-field select{width:100%;border:1.5px solid var(--line);background:var(--bg);border-radius:11px;padding:12px 14px;font:inherit;font-size:14px;transition:.15s}
 .ob-field input:focus,.ob-field select:focus{outline:none;border-color:var(--brand);background:var(--paper)}
@@ -2882,13 +2888,21 @@ function feHladajFirmu(q, vstupId){
   }, 350);
 }
 function feMapFirmu(r){
+  // RPO niekedy vracia hodnoty ako objekt {value:"..."} — bezpečne vytiahni text
+  const T=v=>{ if(v==null) return ""; if(typeof v==="object") return String(v.value||v.name||v.nazov||""); return String(v); };
   const nazov=(r.fullNames&&r.fullNames[0]&&r.fullNames[0].value)||(r.names&&r.names[0]&&r.names[0].value)||"";
   const ico=(r.identifiers&&r.identifiers[0]&&r.identifiers[0].value)||r.ico||"";
   const dic=(r.taxNumbers&&r.taxNumbers[0])||"";
   let icdph=""; if(r.identifiers){ const v=r.identifiers.find(x=>/dph|vat/i.test(x.type||"")); if(v) icdph=v.value; }
   let adresa=""; const a=(r.addresses&&r.addresses[0])||null;
-  if(a){ adresa=[(a.street||a.municipality||"")+(a.buildingNumber?" "+a.buildingNumber:""),(a.postalCodes&&a.postalCodes[0]||"")+" "+(a.municipality||"")].filter(Boolean).join(", "); }
-  return {nazov, ico, dic, icdph, adresa};
+  if(a){
+    const ulica=T(a.street)||T(a.municipality);
+    const cislo=T(a.buildingNumber)||T(a.regNumber);
+    const psc=T(a.postalCodes&&a.postalCodes[0])||T(a.postalCode);
+    const mesto=T(a.municipality);
+    adresa=[ (ulica+(cislo?" "+cislo:"")).trim(), (psc+" "+mesto).trim() ].filter(Boolean).join(", ");
+  }
+  return {nazov:T(nazov), ico:T(ico), dic:T(dic), icdph:T(icdph), adresa};
 }
 // jednotné dotiahnutie firmy z RPO podľa IČO → {nazov,ico,dic,icdph,adresa} alebo null
 async function rpoDotiahni(ico){
@@ -4347,16 +4361,9 @@ async function doplnFirmuPodlaICO(){
     const data=await res.json();
     const r=(data.results&&data.results[0])||null;
     if(!r) throw new Error("firma sa nenašla");
-    // názov
-    const nazov=(r.fullNames&&r.fullNames[0]&&r.fullNames[0].value) || (r.names&&r.names[0]&&r.names[0].value) || "";
-    // adresa
-    let adresa="";
-    const a=(r.addresses&&r.addresses[0])||null;
-    if(a){ adresa=[ (a.street||a.municipality||"")+(a.buildingNumber?" "+a.buildingNumber:""), (a.postalCodes&&a.postalCodes[0]||"")+" "+(a.municipality||"") ].filter(Boolean).join(", "); }
-    // DIČ / IČ DPH
-    const dic=(r.taxNumbers&&r.taxNumbers[0])||"";
-    let icdph="";
-    if(r.identifiers){ const v=r.identifiers.find(x=>/dph|vat/i.test(x.type||"")); if(v) icdph=v.value; }
+    // použi jednotný mapovač (bezpečne rieši objekty → [object Object] bug)
+    const F=feMapFirmu(r);
+    const nazov=F.nazov, adresa=F.adresa, dic=F.dic, icdph=F.icdph;
     // vyplň polia
     if(nazov && document.getElementById("set_nazov")) document.getElementById("set_nazov").value=nazov;
     if(adresa && document.getElementById("set_adresa")) document.getElementById("set_adresa").value=adresa;
@@ -7451,7 +7458,7 @@ const KONST_2026 = {
 function spustiOnboarding(){
   if(!_ob) _ob = {
     krok:1,
-    ico:"", nazov:"", adresa:"", dic:"", icdph:"",
+    ico:"", nazov:"", adresa:"", dic:"", icdph:"", icdphNavrh:"",
     evidencia:"danova",        // danova | jednoduche
     platca:null,               // true | false
     vydavkyRezim:"skutocne",   // skutocne | pausal (paušál len pre neplatiteľa)
@@ -7485,19 +7492,31 @@ function obKrokObsah(k){
   const o=_ob;
   if(k===1){
     return `<h2>Vitajte 👋 Nastavme vašu firmu</h2>
-      <div class="ob-lead">Zadajte IČO a údaje doplníme z registra. Ak IČO nemáte poruke, vyplňte názov ručne — všetko sa dá neskôr upraviť.</div>
-      <div class="ob-field"><label>IČO</label>
+      <div class="ob-lead">Začnite písať názov firmy — ponúkneme vám firmy z registra. Ak názov nenájdete, zadajte IČO. Všetko sa dá neskôr upraviť.</div>
+      <div class="ob-field" style="position:relative"><label>Názov / meno firmy</label>
+        <input id="ob_nazov" value="${esc(o.nazov)}" autocomplete="off" placeholder="Začnite písať názov firmy…" oninput="obHladajFirmu(this.value)">
+        <div id="ob_nasep" class="fe-nasep" style="display:none"></div>
+      </div>
+      <div class="ob-field"><label>IČO <span style="font-weight:400;color:var(--ink-soft);font-size:12px">(alebo doplňte podľa neho)</span></label>
         <div style="display:flex;gap:8px">
           <input id="ob_ico" value="${esc(o.ico)}" placeholder="napr. 56649797" style="flex:1" inputmode="numeric">
           <button class="btn" style="width:auto;padding:12px 16px;margin:0;white-space:nowrap" onclick="obDoplnICO()">Doplniť</button>
         </div>
         <div id="ob_icoStav" class="ob-hint"></div>
       </div>
-      <div class="ob-field"><label>Názov / meno firmy</label><input id="ob_nazov" value="${esc(o.nazov)}" placeholder="Ing. Ján Novák – živnosť"></div>
       <div class="ob-field"><label>Adresa</label><input id="ob_adresa" value="${esc(o.adresa)}" placeholder="Ulica 1, 000 00 Mesto"></div>
       <div class="ob-row2">
         <div class="ob-field"><label>DIČ</label><input id="ob_dic" value="${esc(o.dic)}"></div>
         <div class="ob-field"><label>IČ DPH (ak ste platiteľ)</label><input id="ob_icdph" value="${esc(o.icdph)}" placeholder="SK0000000000"></div>
+      </div>
+      <div class="ob-field" style="background:var(--bg);border-radius:10px;padding:11px 13px">
+        <label style="display:block;margin-bottom:7px">Ste platiteľ DPH?</label>
+        <label style="display:inline-flex;align-items:center;gap:7px;cursor:pointer;font-size:14px">
+          <input type="checkbox" id="ob_platca" ${o.icdph||o.platca?'checked':''} onchange="obTogglePlatca(this.checked)" style="width:17px;height:17px">
+          Áno, som platiteľ DPH (mesačný/štvrťročný)
+        </label>
+        ${(o.icdphNavrh && !o.icdph) ? `<div style="margin-top:9px;font-size:12px;color:var(--ink-soft)">Návrh z DIČ: <b>${esc(o.icdphNavrh)}</b>
+          <button class="aabtn pri" style="--_c:var(--brand);padding:3px 10px;font-size:12px;margin-left:6px" onclick="obPouziNavrhIcDph()">Použiť</button></div>` : ''}
       </div>
       ${obNav(1, !!o.nazov || true)}`;
   }
@@ -7665,6 +7684,65 @@ function obDalej(){ obUlozAktualne(); if(_ob.krok<OB_KROKOV){ _ob.krok++; render
 function obPredch(){ obUlozAktualne(); if(_ob.krok>1){ _ob.krok--; renderOnboarding(); } }
 
 // IČO → RPO (znovupoužije existujúcu logiku doplnFirmuPodlaICO cez dočasné polia)
+// našeptávač firiem v onboardingu (podľa názvu, s debounce)
+let _obHladajTimer=null, _obHladajPosledny="";
+function obHladajFirmu(q){
+  q=(q||"").trim();
+  _ob.nazov=q;
+  const box=document.getElementById("ob_nasep");
+  if(_obHladajTimer) clearTimeout(_obHladajTimer);
+  if(q.length<3){ if(box){box.style.display="none";} return; }
+  _obHladajTimer=setTimeout(async ()=>{
+    _obHladajPosledny=q;
+    try{
+      const jeIco=/^\d{3,8}$/.test(q.replace(/\s/g,""));
+      const url=jeIco
+        ? "https://api.statistics.sk/rpo/v1/search?identifier="+encodeURIComponent(q.replace(/\s/g,""))
+        : "https://api.statistics.sk/rpo/v1/search?fullName="+encodeURIComponent(q)+"&onlyActive=true";
+      const res=await fetch(url,{headers:{"Accept":"application/json"}});
+      if(!res.ok) throw new Error("register");
+      const data=await res.json();
+      if(q!==_obHladajPosledny) return;   // medzitým používateľ písal ďalej
+      const vysledky=(data.results||[]).slice(0,8).map(feMapFirmu).filter(x=>x.nazov);
+      obZobrazNasep(vysledky);
+    }catch(_){ if(box) box.style.display="none"; }
+  }, 350);
+}
+function obZobrazNasep(vysledky){
+  const box=document.getElementById("ob_nasep");
+  if(!box) return;
+  if(!vysledky.length){ box.style.display="none"; return; }
+  box.innerHTML=vysledky.map((v,i)=>`<div class="fe-nasep-item" onclick="obVyberFirmu(${i})">
+    <div class="fe-nasep-nazov">${esc(v.nazov)}</div>
+    <div class="fe-nasep-detail">${v.ico?'IČO '+esc(v.ico):''}${v.adresa?' · '+esc(v.adresa):''}</div></div>`).join("");
+  box.style.display="block";
+  _obNasepData=vysledky;
+}
+let _obNasepData=[];
+function obVyberFirmu(i){
+  const v=_obNasepData[i]; if(!v) return;
+  _ob.nazov=v.nazov||""; _ob.ico=v.ico||""; _ob.adresa=v.adresa||""; _ob.dic=v.dic||"";
+  if(v.icdph){ _ob.icdph=v.icdph; _ob.platca=true; }
+  else if(v.dic){ _ob.icdphNavrh="SK"+String(v.dic).replace(/\s/g,""); }
+  document.getElementById("ob_nasep").style.display="none";
+  renderOnboarding();
+}
+
+// zaškrtnutie "som platca" — ak máme návrh IČ DPH, predvyplň ho
+function obTogglePlatca(checked){
+  _ob.platca = checked;
+  if(checked){
+    if(!_ob.icdph && _ob.icdphNavrh) _ob.icdph = _ob.icdphNavrh;
+  } else {
+    _ob.icdph = "";  // neplatca → vyčisti IČ DPH
+  }
+  renderOnboarding();
+}
+// použi navrhované IČ DPH (odvodené z DIČ)
+function obPouziNavrhIcDph(){
+  if(_ob.icdphNavrh){ _ob.icdph = _ob.icdphNavrh; _ob.platca = true; renderOnboarding(); }
+}
+
 async function obDoplnICO(){
   const ico=(document.getElementById("ob_ico").value||"").replace(/\s/g,"").trim();
   const stav=document.getElementById("ob_icoStav");
@@ -7676,14 +7754,20 @@ async function obDoplnICO(){
     const data=await res.json();
     const r=(data.results&&data.results[0])||null;
     if(!r) throw new Error("firma sa nenašla");
-    const nazov=(r.fullNames&&r.fullNames[0]&&r.fullNames[0].value)||(r.names&&r.names[0]&&r.names[0].value)||"";
-    let adresa=""; const a=(r.addresses&&r.addresses[0])||null;
-    if(a){ adresa=[(a.street||a.municipality||"")+(a.buildingNumber?" "+a.buildingNumber:""),(a.postalCodes&&a.postalCodes[0]||"")+" "+(a.municipality||"")].filter(Boolean).join(", "); }
-    const dic=(r.taxNumbers&&r.taxNumbers[0])||"";
-    let icdph=""; if(r.identifiers){ const vv=r.identifiers.find(x=>/dph|vat/i.test(x.type||"")); if(vv) icdph=vv.value; }
-    _ob.ico=ico; if(nazov)_ob.nazov=nazov; if(adresa)_ob.adresa=adresa; if(dic)_ob.dic=dic; if(icdph){_ob.icdph=icdph; _ob.platca=true;}
+    // jednotný mapovač (rieši [object Object], adresu, DIČ)
+    const F=feMapFirmu(r);
+    _ob.ico=ico;
+    if(F.nazov)_ob.nazov=F.nazov;
+    if(F.adresa)_ob.adresa=F.adresa;
+    if(F.dic)_ob.dic=F.dic;
+    if(F.icdph){ _ob.icdph=F.icdph; _ob.platca=true; }
+    else if(F.dic){
+      // RPO nemá IČ DPH → odvoď návrh SK+DIČ (používateľ potvrdí, či je platca)
+      _ob.icdphNavrh = "SK"+String(F.dic).replace(/\s/g,"");
+    }
     renderOnboarding();
-    const s2=document.getElementById("ob_icoStav"); if(s2){ s2.textContent="✓ Údaje doplnené z registra. Skontrolujte ich."; s2.className="ob-hint ok"; }
+    const s2=document.getElementById("ob_icoStav");
+    if(s2){ s2.textContent="✓ Údaje doplnené z registra. Skontrolujte ich."; s2.className="ob-hint ok"; }
   }catch(err){
     stav.textContent="Register sa nepodarilo osloviť — vyplňte údaje ručne."; stav.className="ob-hint warn";
   }
