@@ -569,6 +569,15 @@ async function boot(){
   const ok = initSupabase();
   hide("loading");
 
+  // RESET HESLA: návrat z e-mailu (token je v URL hash, type=recovery)
+  const hash = location.hash || "";
+  if(ok && /type=recovery/.test(hash)){
+    // Supabase automaticky vytvorí dočasnú session z tokenu v URL
+    show("authView");
+    ukazNoveHeslo();
+    return;
+  }
+
   // vstupný režim z landing page (?vstup=demo|register|login)
   const vstup = new URLSearchParams(location.search).get("vstup");
 
@@ -641,11 +650,37 @@ async function doPrimary(){
   }
 }
 
+// zobraz formulár na zadanie nového hesla (po klik z reset e-mailu)
+function ukazNoveHeslo(){
+  const kart=document.querySelector("#authView .authcard");
+  if(!kart) return;
+  kart.innerHTML=`
+    <div class="authlogo"><b>e<i>živnostník</i></b></div>
+    <div class="authsub">Zvoľte si nové heslo k účtu</div>
+    <div class="authmsg" id="nhMsg"></div>
+    <div class="field"><label for="nh1">Nové heslo</label><input type="password" id="nh1" placeholder="aspoň 6 znakov"></div>
+    <div class="field"><label for="nh2">Zopakujte heslo</label><input type="password" id="nh2" placeholder="••••••••"></div>
+    <button class="btn" onclick="ulozNoveHeslo()">Uložiť nové heslo</button>`;
+}
+async function ulozNoveHeslo(){
+  const m=document.getElementById("nhMsg");
+  const h1=document.getElementById("nh1").value, h2=document.getElementById("nh2").value;
+  if(h1.length<6){ if(m){m.textContent="Heslo musí mať aspoň 6 znakov.";m.className="authmsg err";} return; }
+  if(h1!==h2){ if(m){m.textContent="Heslá sa nezhodujú.";m.className="authmsg err";} return; }
+  if(m){ m.textContent="Ukladám…"; m.className="authmsg"; }
+  const { error } = await sb.auth.updateUser({ password: h1 });
+  if(error){ if(m){m.textContent="Nepodarilo sa: "+prelozChybu(error.message);m.className="authmsg err";} return; }
+  history.replaceState(null,"",location.pathname);
+  if(m){ m.textContent="Heslo zmenené. Prihlasujem…"; m.className="authmsg ok"; }
+  const { data:{ session } }=await sb.auth.getSession();
+  if(session) enterApp(session.user); else location.reload();
+}
+
 async function doReset(){
   if(!sb){ msg("Cloud nie je napojený.","err"); return; }
   const email = document.getElementById("email").value.trim();
   if(!email){ msg("Zadajte e-mail, na ktorý pošleme obnovenie hesla.","info"); return; }
-  const { error } = await sb.auth.resetPasswordForEmail(email);
+  const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
   if(error) msg(prelozChybu(error.message),"err");
   else msg("Poslali sme vám e-mail na obnovenie hesla.","ok");
 }
