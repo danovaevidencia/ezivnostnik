@@ -6499,7 +6499,10 @@ function parseFakturaText(text){
   R.ico=allIco.find(x=>x!==mojeIco)||"";
   // dodávateľ — krátky názov firmy, nie veta
   let dod="";
-  let mm=t.match(/(?:Predávajúci|Dodávateľ)\s*:?\s*([A-ZŽŠČÁÉÍÓÚ][^\n]{2,45}?(?:s\.r\.o\.|a\.s\.|spol\.\s*s\s*r\.o\.|k\.s\.))/i);
+  // bločky: názov firmy býva cez 2 riadky ("Saba Parking SK\ns.r.o.") — spoj ich
+  let mBl=t.match(/([A-ZŽŠČÁÉÍÓÚ][A-Za-zÀ-ž0-9&.,\- ]{2,40})\s*\n\s*(s\.\s*r\.\s*o\.|a\.\s*s\.|k\.\s*s\.|spol\.\s*s\s*r\.\s*o\.)/i);
+  if(mBl){ dod=(mBl[1].trim()+" "+mBl[2].replace(/\s+/g,"")).replace(/\s+/g," ").trim(); }
+  let mm=dod?null:t.match(/(?:Predávajúci|Dodávateľ)\s*:?\s*([A-ZŽŠČÁÉÍÓÚ][^\n]{2,45}?(?:s\.r\.o\.|a\.s\.|spol\.\s*s\s*r\.o\.|k\.s\.))/i);
   if(mm) dod=mm[1];
   if(!dod){ mm=t.match(/^([A-ZŽŠČÁÉÍÓÚ][^\n]{2,45}?(?:s\.r\.o\.|a\.s\.|k\.s\.))\s*$/m); if(mm) dod=mm[1]; }
   // ak stále nič: prvá firma s právnou formou kdekoľvek (napr. hlavička faktúry bez slova "Dodávateľ").
@@ -6523,6 +6526,8 @@ function parseFakturaText(text){
   // ak na riadku ostalo aj naše meno za názvom dodávateľa, odrež ho
   { const mojnaz=(m.nazov||"").replace(/\s+/g," ").trim(); if(mojnaz && dod.includes(mojnaz)) dod=dod.slice(0,dod.indexOf(mojnaz)).trim(); }
   if(/úhrad|uhrad|použi|pouzi|variabiln|číslo účtu|cislo uctu|ďakujeme|dakujeme/i.test(dod)) dod="";
+  // odrež šum z hlavičky pred názvom firmy (POZOR, ZMENA BANKOVÉHO ÚČTU a pod.)
+  dod=dod.replace(/^.*?(?:ZMENA BANKOV[EÉ]HO [UÚ][CČ]TU|POZOR|UPOZORNENIE)[\s,:.]*/i,"").trim();
   R.partner=dod;
   // ── ZAHRANIČNÁ / ANGLICKÁ FAKTÚRA ──
   // reverse charge detekcia (zahraničný doklad bez SK DPH)
@@ -6543,6 +6548,16 @@ function parseFakturaText(text){
   // číslo dokladu (SK aj EN)
   let c=t.match(/Faktúra\s*(?:č\.|číslo)\s*:?\s*(\d{4,})/i)||t.match(/Invoice\s*(?:number|#|no\.?)\s*:?\s*([A-Z0-9\-]{4,})/i)||t.match(/(?:doklad|bloček|účtenka)[^\d]{0,15}(\d{4,})/i);
   R.cislo=c?c[1]:"";
+  // variabilný symbol — ak nie je uvedený, pri mnohých faktúrach = číslo faktúry
+  let vsM=t.match(/variabiln[ýy]\s*symbol\s*:?\s*(\d{4,})/i)||t.match(/\bVS\s*:?\s*(\d{4,})/i);
+  R.vs = vsM ? vsM[1] : (R.cislo||"");
+  // IČO a IČ DPH DODÁVATEĽA — vylúč naše vlastné (z m.ico / m.icdph)
+  const nasIco=String((m.ico||"")).replace(/\s/g,"");
+  const nasIcDph=String((m.icdph||"")).replace(/\s/g,"").toUpperCase();
+  const vsetkyIco=[...t.matchAll(/I[ČC]O\s*:?\s*(\d{6,8})/gi)].map(x=>x[1]).filter(v=>v!==nasIco);
+  if(vsetkyIco.length) R.dodavatelIco=vsetkyIco[0];
+  const vsetkyIcDph=[...t.matchAll(/I[ČC]\s*DPH\s*:?\s*(SK\d{9,10})/gi)].map(x=>x[1].toUpperCase()).filter(v=>v!==nasIcDph);
+  if(vsetkyIcDph.length) R.dodavatelIcDph=vsetkyIcDph[0];
   // dátum (SK DD.MM.YYYY alebo EN "July 10, 2026")
   let dt=t.match(/(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})/);
   if(dt) R.datum=dt[3]+"-"+String(dt[2]).padStart(2,"0")+"-"+String(dt[1]).padStart(2,"0");
@@ -6567,10 +6582,15 @@ function parseFakturaText(text){
   }
   R.bez=r2(rozpis.reduce((a,y)=>a+y.bez,0));
   R.dph=r2(rozpis.reduce((a,y)=>a+y.dph,0));
+  // sadzba: ak je jedna, ulož ju (napr. ZSE 19 %); pri viacerých ostáva rozpis
+  if(rozpis.length===1) R.sadzba=rozpis[0].sadzba;
+  // fallback: sadzba samostatne v texte (bločky "147,60 EUR 23%"), ak sa rozpis nechytil
+  if(!R.sadzba){ const sM=t.match(/\b(23|19|10|5)\s*%/); if(sM) R.sadzba=+sM[1]; }
   // ak doklad má viac sadzieb → ulož rozpis (pre KV DPH rozdelenie)
   if(rozpis.length>1){ R.rozpis=rozpis; R.viacSadzieb=true; }
   // celková suma — SK aj EN kľúčové slová, € pred aj za číslom
-  let sm=t.match(new RegExp("(?:Spolu|Celkom|Suma k úhrade|Suma na úhradu|Čiastka na zaplatenie|K úhrade|Amount due|Total|Grand total)[^\\d€]{0,12}€?\\s*("+NUMG+")","i"))
+  let sm=t.match(new RegExp("(?:Spolu|Celkom|Suma k úhrade|Suma na úhradu|Čiastka na zaplatenie|čiastka|K úhrade|Amount due|Total|Grand total)\\s*:?\\s*(?:EUR|€)?\\s*(?:EUR|€)?\\s*("+NUMG+")","i"))
+       || t.match(new RegExp("(?:EUR|€)\\s*("+NUMG+")","i"))
        || t.match(new RegExp("€\\s*("+NUMG+")","i"))
        || t.match(new RegExp("("+NUMG+")\\s*(?:EUR|€)","i"));
   let spolu=sm?num(sm[1]):0;
@@ -6761,7 +6781,8 @@ function parseEkasaQR(raw){
   return {
     ekasaId: ekasaId||"",
     suma,
-    overUrl: ekasaId?("https://ekasa.financnasprava.sk/mdu/api/v1/opd/receipt/find?receiptId="+encodeURIComponent(ekasaId)):"",
+    // verejná overovacia stránka FS (funguje cez prehliadač); API endpoint vyžaduje POST a padá na CORS
+    overUrl: (idMatch && idMatch[0] && /^https?:/i.test(s)) ? s : (ekasaId?("https://ekasa.financnasprava.sk/#/receipt/"+encodeURIComponent(ekasaId)):""),
     raw:s
   };
 }
