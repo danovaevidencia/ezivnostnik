@@ -6647,7 +6647,10 @@ function parseFakturaText(text){
   // IČO a IČ DPH DODÁVATEĽA — vylúč naše vlastné (z m.ico / m.icdph)
   const nasIco=String((m.ico||"")).replace(/\s/g,"");
   const nasIcDph=String((m.icdph||"")).replace(/\s/g,"").toUpperCase();
-  const vsetkyIco=[...t.matchAll(/(?:I[ČC]O|1[ČC]O|\[CO|ICO)\s*:?\s*(\d{6,8})/gi)].map(x=>x[1]).filter(v=>v!==nasIco);
+  // IČO: bežné tvary + OCR zámeny. "160" berieme len s presne 8 číslicami (inak by to bolo bežné číslo)
+  let vsetkyIco=[...t.matchAll(/(?:I[ČC]O|1[ČC]O|\[CO|ICO|IC0|1C0)\s*:?\s*(\d{6,8})/gi)].map(x=>x[1]);
+  vsetkyIco=vsetkyIco.concat([...t.matchAll(/(?:160|16O|1[Č6]0)\s*:?\s*(\d{8})\b/gi)].map(x=>x[1]));
+  vsetkyIco=vsetkyIco.filter(v=>v!==nasIco);
   if(vsetkyIco.length) R.dodavatelIco=vsetkyIco[0];
   const vsetkyIcDph=[...t.matchAll(/I[ČC]\s*DPH\s*:?\s*(SK\d{9,10})/gi)].map(x=>x[1].toUpperCase()).filter(v=>v!==nasIcDph);
   if(vsetkyIcDph.length){
@@ -6655,6 +6658,16 @@ function parseFakturaText(text){
     const platne=vsetkyIcDph.find(v=>platneICDPH(v));
     if(platne){ R.dodavatelIcDph=platne; }
     else { R.dodavatelIcDph=vsetkyIcDph[0]; R._icdphPodozrive=true; }  // vyčítané, ale neprešlo kontrolou
+  }
+  // DIČ dodávateľa (nie naše) — a rekonštrukcia IČ DPH z DIČ, ak OCR verzia IČ DPH je poškodená
+  const nasDic=String((m.dic||"")).replace(/\D/g,"");
+  const vsetkyDic=[...t.matchAll(/DI[ČC]\s*:?\s*(\d{9,10})/gi)].map(x=>x[1]).filter(v=>v!==nasDic);
+  const platnyDic=vsetkyDic.find(v=>platneDIC(v));
+  if(platnyDic) R.dodavatelDic=platnyDic;
+  // ak IČ DPH chýba alebo je podozrivé, ale máme platné DIČ → IČ DPH = SK + DIČ
+  if((!R.dodavatelIcDph || R._icdphPodozrive) && platnyDic){
+    const rekon="SK"+platnyDic;
+    if(platneICDPH(rekon)){ R.dodavatelIcDph=rekon; R._icdphZDic=true; R._icdphPodozrive=false; }
   }
   // dátum: najprv pri kľúčových slovách (dátum vystavenia / čas a dátum), potom fallback
   let dt=null;
@@ -6983,6 +6996,14 @@ function otvorOcrVysledok(R){
       <input id="m_partner" value="${esc(R.partner||'')}" autocomplete="off" oninput="feHladajFirmu(this.value,'m_partner')" placeholder="Názov alebo IČO…">
       <div id="feNasepP" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:30;background:var(--paper);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px -8px rgba(19,28,43,.25);max-height:240px;overflow-y:auto;margin-top:2px"></div>
     </div>
+    <div class="mrow2">
+      <div class="mfield"><label>IČO dodávateľa</label><input id="m_dodIco" value="${esc(R.dodavatelIco||'')}" placeholder="nepovinné" inputmode="numeric"></div>
+      <div class="mfield"><label>IČ DPH dodávateľa</label><input id="m_dodIcDph" value="${esc(R.dodavatelIcDph||'')}" placeholder="pri došlej faktúre povinné" oninput="skontrolujICDPHpole(this)"><div id="m_dodIcDphStav" class="ocr-hint"></div></div>
+    </div>
+    <div class="mrow2">
+      <div class="mfield"><label>Číslo dokladu</label><input id="m_cislo" value="${esc(R.cislo||'')}" placeholder="nepovinné"></div>
+      <div class="mfield"><label>Variabilný symbol</label><input id="m_vs" value="${esc(R.vs||'')}" placeholder="nepovinné"></div>
+    </div>
     <div class="mfield"><label>Popis</label><input id="m_popis" value=""></div>
     <div class="mfield"><label>Dátum</label><input id="m_datum" type="date" value="${esc((R.datum||'').slice(0,10))}"></div>
     <div class="mrow2"><div class="mfield"><label>Bez DPH (€)</label><input id="m_bez" type="number" step="0.01" value="${esc(R.bez||'')}"></div><div class="mfield"><label>DPH (€)</label><input id="m_dph" type="number" step="0.01" value="${esc(R.dph||'')}"></div></div>
@@ -6994,9 +7015,24 @@ function otvorOcrVysledok(R){
   `, async ()=>{
     const datum=val("m_datum");
     if(!datum){ alert("Doklad musí mať dátum — bez neho sa nezapočíta do daňovej evidencie. Doplňte ho, prosím."); return false; }
+    const druh=val("m_druh");
+    const dodIcDph=val("m_dodIcDph")||"";
+    const jeZahr=document.getElementById("m_zahranicny").checked;
+    // KV DPH: došlá faktúra od slovenského platiteľa MUSÍ mať platné IČ DPH (oddiel B2)
+    if(druh==="Došlá faktúra" && !jeZahr){
+      if(!dodIcDph){
+        alert("Došlá faktúra musí mať IČ DPH dodávateľa.\n\nJe povinné pre kontrolný výkaz DPH (oddiel B2). Doplňte ho z dokladu — nájdete ho aj v sekcii „Čo appka prečítala z dokladu\".");
+        return false;
+      }
+      if(!platneICDPH(dodIcDph)){
+        alert("IČ DPH dodávateľa \""+dodIcDph+"\" neprešlo kontrolou platnosti (deliteľnosť 11).\n\nToto je dôležité pre kontrolný výkaz DPH — nesprávne IČ DPH Finančná správa odmietne. Skontrolujte a opravte ho podľa dokladu.");
+        return false;
+      }
+    }
     const litre=parseFloat(val("m_litre"))||0;
-    const obj={druh:val("m_druh"),partner:val("m_partner"),popis:val("m_popis"),datum:datum,bez:parseFloat(val("m_bez"))||0,dph:parseFloat(val("m_dph"))||0,spolu:parseFloat(val("m_spolu"))||0,mesiac:datum.slice(0,7),zdroj:R.ekasaId?"ekasa":"ocr",
-      zahranicny:document.getElementById("m_zahranicny").checked, kodKrajiny:val("m_kodKrajiny")||""};
+    const obj={druh:druh,partner:val("m_partner"),cislo:val("m_cislo")||"",variabilny:val("m_vs")||"",popis:val("m_popis"),datum:datum,bez:parseFloat(val("m_bez"))||0,dph:parseFloat(val("m_dph"))||0,spolu:parseFloat(val("m_spolu"))||0,mesiac:datum.slice(0,7),zdroj:R.ekasaId?"ekasa":"ocr",
+      dodavatelIco:val("m_dodIco")||"", dodavatelIcDph:dodIcDph,
+      zahranicny:jeZahr, kodKrajiny:val("m_kodKrajiny")||""};
     if(R.ekasaId){ obj.ekasaId=R.ekasaId; obj.cislo=obj.cislo||R.ekasaId; }
     if(litre>0) obj.litre=litre;
     // ulož originál dokladu do cloudu
