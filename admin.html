@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>eživnostník — admin</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* ── admin identita: tmavá „prevádzková" paleta, mono akcenty (odlíšenie od zákazníckej appky) ── */
+  :root{
+    --bg:#0f141b; --panel:#161d27; --panel2:#1c2530; --line:#28323f;
+    --ink:#e6ecf3; --soft:#93a1b3; --mut:#5f6d7e;
+    --accent:#4a9eff; --accent2:#3ad6a0; --warn:#f0a34a; --neg:#f0616d;
+    --radius:12px;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:var(--bg);color:var(--ink);font-family:'Inter',sans-serif;font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  .mono{font-family:'IBM Plex Mono',monospace}
+  a{color:var(--accent);text-decoration:none}
+
+  /* topbar */
+  .top{display:flex;align-items:center;gap:12px;padding:14px 22px;background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20}
+  .top .logo{width:30px;height:30px;border-radius:8px;background:linear-gradient(150deg,var(--accent),#2b6fd4);display:grid;place-items:center;font-weight:700;color:#fff}
+  .top .ttl{font-weight:700;font-size:15px;letter-spacing:.2px}
+  .top .ttl b{color:var(--accent)}
+  .top .badge{font-family:'IBM Plex Mono',monospace;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--warn);border:1px solid var(--warn);border-radius:5px;padding:2px 7px}
+  .top .sp{flex:1}
+  .top .who{font-size:12px;color:var(--soft)}
+  .top button{background:var(--panel2);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:7px 13px;font-size:13px;font-weight:600;cursor:pointer}
+  .top button:hover{border-color:var(--accent)}
+
+  .wrap{max-width:1080px;margin:0 auto;padding:22px}
+
+  /* login */
+  .login{max-width:360px;margin:12vh auto;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:28px}
+  .login h1{font-size:19px;margin-bottom:5px}
+  .login p{color:var(--soft);font-size:13px;margin-bottom:20px}
+  .field{margin-bottom:14px}
+  .field label{display:block;font-size:12px;color:var(--soft);margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px}
+  .field input{width:100%;background:var(--bg);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:11px 13px;font-size:14px}
+  .field input:focus{outline:none;border-color:var(--accent)}
+  .btn{width:100%;background:var(--accent);color:#fff;border:none;border-radius:8px;padding:12px;font-size:14px;font-weight:700;cursor:pointer}
+  .btn:hover{background:#3a8ae8}
+  .err{color:var(--neg);font-size:13px;margin-top:10px;min-height:18px}
+
+  /* KPI karty */
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:22px}
+  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px}
+  .kpi .n{font-family:'IBM Plex Mono',monospace;font-size:24px;font-weight:600;letter-spacing:-.5px}
+  .kpi .l{font-size:12px;color:var(--soft);margin-top:3px}
+  .kpi.a .n{color:var(--accent)} .kpi.g .n{color:var(--accent2)} .kpi.w .n{color:var(--warn)}
+
+  /* sekcia */
+  .sec{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);margin-bottom:20px;overflow:hidden}
+  .sec .head{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px}
+  .sec .head h2{font-size:14px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--soft)}
+  .sec .head .sp{flex:1}
+  .sec .body{padding:4px 0}
+
+  /* tabuľka zákazníkov */
+  table{width:100%;border-collapse:collapse}
+  thead th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--mut);padding:10px 18px;border-bottom:1px solid var(--line)}
+  thead th.r,tbody td.r{text-align:right}
+  tbody td{padding:12px 18px;border-bottom:1px solid var(--line);font-size:13px}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr:hover{background:var(--panel2)}
+  .name{font-weight:600}
+  .email{color:var(--soft);font-size:12px}
+  .pill{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px}
+  .pill.free{background:#26303c;color:var(--soft)}
+  .pill.standard{background:#173a52;color:var(--accent)}
+  .pill.pro{background:#12402f;color:var(--accent2)}
+  .pill.off{background:#3a2226;color:var(--neg)}
+  .amt{font-family:'IBM Plex Mono',monospace}
+  .rowbtn{background:var(--panel2);border:1px solid var(--line);color:var(--ink);border-radius:6px;padding:5px 11px;font-size:12px;font-weight:600;cursor:pointer}
+  .rowbtn:hover{border-color:var(--accent)}
+
+  .empty{padding:40px;text-align:center;color:var(--mut)}
+  .hidden{display:none}
+  .loading{padding:40px;text-align:center;color:var(--soft)}
+
+  /* modal konfigurácie */
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:50;padding:20px}
+  .modal.on{display:flex}
+  .modal .box{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);width:100%;max-width:460px;max-height:90vh;overflow:auto}
+  .modal .mh{padding:16px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center}
+  .modal .mh h3{font-size:15px}
+  .modal .mh .x{margin-left:auto;background:none;border:none;color:var(--soft);font-size:20px;cursor:pointer}
+  .modal .mb{padding:20px}
+  .modal .mf{padding:14px 20px;border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end}
+  .chk{display:flex;align-items:center;gap:9px;padding:8px 0;font-size:13px}
+  .chk input{width:16px;height:16px;accent-color:var(--accent)}
+  select{width:100%;background:var(--bg);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:10px 12px;font-size:14px}
+
+  @media(max-width:720px){ .kpis{grid-template-columns:repeat(2,1fr)} .hide-sm{display:none} }
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="loginView">
+  <div class="login">
+    <h1>Admin — eživnostník</h1>
+    <p>Prevádzkový panel. Prístup len pre správcov.</p>
+    <div class="field"><label>E-mail</label><input id="email" type="email" autocomplete="username"></div>
+    <div class="field"><label>Heslo</label><input id="heslo" type="password" autocomplete="current-password"></div>
+    <button class="btn" onclick="prihlas()">Prihlásiť sa</button>
+    <div class="err" id="loginErr"></div>
+  </div>
+</div>
+
+<!-- ADMIN -->
+<div id="adminView" class="hidden">
+  <div class="top">
+    <div class="logo">e</div>
+    <div class="ttl">e<b>živnostník</b></div>
+    <div class="badge">admin</div>
+    <div class="sp"></div>
+    <div class="who" id="whoami"></div>
+    <button onclick="odhlas()">Odhlásiť</button>
+  </div>
+
+  <div class="wrap">
+    <div class="kpis" id="kpis">
+      <div class="kpi a"><div class="n" id="kZak">–</div><div class="l">Zákazníkov</div></div>
+      <div class="kpi g"><div class="n" id="kAkt">–</div><div class="l">Aktívnych</div></div>
+      <div class="kpi"><div class="n amt" id="kFakt">–</div><div class="l">Fakturované spolu</div></div>
+      <div class="kpi w"><div class="n" id="kPlat">–</div><div class="l">Platcov DPH</div></div>
+    </div>
+
+    <div class="sec">
+      <div class="head"><h2>Zákazníci</h2><div class="sp"></div></div>
+      <div class="body">
+        <div id="zakLoading" class="loading">Načítavam zákazníkov…</div>
+        <table id="zakTable" class="hidden">
+          <thead><tr>
+            <th>Firma</th>
+            <th class="hide-sm">Plán</th>
+            <th class="r">Faktúry</th>
+            <th class="r hide-sm">Fakturované</th>
+            <th class="r">Akcia</th>
+          </tr></thead>
+          <tbody id="zakBody"></tbody>
+        </table>
+        <div id="zakEmpty" class="empty hidden">Zatiaľ žiadni zákazníci.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: detail zákazníka (read-only) -->
+<div class="modal" id="detailModal">
+  <div class="box" style="max-width:560px">
+    <div class="mh"><h3 id="detailTitle">Detail zákazníka</h3><button class="x" onclick="zavriDetail()">×</button></div>
+    <div class="mb" id="detailBody"><div class="loading">Načítavam…</div></div>
+    <div class="mf"><button class="rowbtn" onclick="zavriDetail()">Zavrieť</button></div>
+  </div>
+</div>
+
+<!-- MODAL: konfigurácia firmy -->
+<div class="modal" id="cfgModal">
+  <div class="box">
+    <div class="mh"><h3 id="cfgTitle">Konfigurácia firmy</h3><button class="x" onclick="zavriCfg()">×</button></div>
+    <div class="mb">
+      <div class="field"><label>Plán</label>
+        <select id="cfgPlan"><option value="free">Free</option><option value="standard">Standard</option><option value="pro">Pro</option></select>
+      </div>
+      <div class="field"><label>Účet aktívny</label>
+        <label class="chk"><input type="checkbox" id="cfgAktivny"> Účet je aktívny (odškrtnuté = pozastavený)</label>
+      </div>
+      <div class="field"><label>Moduly (rozsah pre zákazníka)</label>
+        <label class="chk"><input type="checkbox" value="faktury" class="cfgMod"> Faktúry</label>
+        <label class="chk"><input type="checkbox" value="dph" class="cfgMod"> DPH</label>
+        <label class="chk"><input type="checkbox" value="jazdy" class="cfgMod"> Kniha jázd</label>
+        <label class="chk"><input type="checkbox" value="vydavky" class="cfgMod"> Výdavky</label>
+        <label class="chk"><input type="checkbox" value="banka" class="cfgMod"> Banka</label>
+        <label class="chk"><input type="checkbox" value="priznanie" class="cfgMod"> Daňové priznanie</label>
+      </div>
+      <div class="field"><label>Režim DPH</label>
+        <select id="cfgDph"><option value="">— nechať na zákazníka —</option><option value="platca">Platca DPH</option><option value="neplatca">Neplatca DPH</option></select>
+      </div>
+      <div class="field"><label>Režim výdavkov</label>
+        <select id="cfgVyd"><option value="">— nechať na zákazníka —</option><option value="skutocne">Skutočné výdavky</option><option value="pausal">Paušálne výdavky</option></select>
+      </div>
+      <div class="err" id="cfgErr"></div>
+      <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:16px">
+        <label style="display:block;font-size:12px;color:var(--soft);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">GDPR</label>
+        <div style="display:flex;gap:10px">
+          <button class="rowbtn" onclick="gdprExport()">📦 Export dát</button>
+          <button class="rowbtn" style="border-color:var(--neg);color:var(--neg)" onclick="gdprZmazat()">🗑 Zmazať účet</button>
+        </div>
+      </div>
+    </div>
+    <div class="mf">
+      <button class="rowbtn" onclick="zavriCfg()">Zrušiť</button>
+      <button class="btn" style="width:auto;padding:10px 20px" onclick="ulozCfg()">Uložiť</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─────────────────────────────────────────────────────────────
+//  KONFIGURÁCIA — rovnaké Supabase ako zákaznícka appka
+// ─────────────────────────────────────────────────────────────
+const SUPABASE_URL = "https://jriuljhmacgvxyrptbme.supabase.co";
+const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";  // ANON (public) kľúč — NIE service-role!
+
+let sb = null, currentUser = null, cfgFirmaId = null;
+
+function init(){
+  if(!SUPABASE_KEY || SUPABASE_KEY.startsWith("SEM_")){
+    document.getElementById("loginErr").textContent = "Chýba Supabase ANON kľúč v admin.html (riadok SUPABASE_KEY).";
+    return;
+  }
+  sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  // skús existujúcu session
+  sb.auth.getSession().then(({data})=>{ if(data.session){ overAdmin(data.session.user); } });
+}
+
+async function prihlas(){
+  const email = document.getElementById("email").value.trim();
+  const heslo = document.getElementById("heslo").value;
+  const err = document.getElementById("loginErr"); err.textContent = "";
+  if(!email || !heslo){ err.textContent = "Zadaj e-mail a heslo."; return; }
+  const { data, error } = await sb.auth.signInWithPassword({ email, password: heslo });
+  if(error){ err.textContent = "Prihlásenie zlyhalo: " + error.message; return; }
+  overAdmin(data.user);
+}
+
+// ── KĽÚČOVÉ: over, že user je naozaj admin (číta profily.is_admin cez RLS) ──
+async function overAdmin(user){
+  const err = document.getElementById("loginErr");
+  const { data, error } = await sb.from("profily").select("is_admin,email").eq("id", user.id).maybeSingle();
+  if(error){ err.textContent = "Nepodarilo sa overiť oprávnenie: " + error.message; return; }
+  if(!data || !data.is_admin){
+    err.textContent = "Tento účet nemá admin oprávnenie.";
+    await sb.auth.signOut();
+    return;
+  }
+  currentUser = user;
+  document.getElementById("whoami").textContent = data.email || user.email;
+  document.getElementById("loginView").classList.add("hidden");
+  document.getElementById("adminView").classList.remove("hidden");
+  nacitajPrehlad();
+}
+
+async function odhlas(){
+  await sb.auth.signOut();
+  location.reload();
+}
+
+// ── PREHĽAD: agregované view admin_prehlad (bez čítania celého citlivého JSON) ──
+async function nacitajPrehlad(){
+  const { data, error } = await sb.from("admin_prehlad").select("*").order("posledna_zmena", { ascending: false });
+  const loading = document.getElementById("zakLoading");
+  if(error){ loading.textContent = "Chyba načítania: " + error.message; return; }
+  loading.classList.add("hidden");
+
+  const rows = data || [];
+  // KPI
+  document.getElementById("kZak").textContent = rows.length;
+  document.getElementById("kAkt").textContent = rows.filter(r=>r.aktivny!==false).length;
+  document.getElementById("kFakt").textContent = eur(rows.reduce((a,r)=>a+(+r.fakturovane_spolu||0),0));
+  document.getElementById("kPlat").textContent = rows.filter(r=>r.platca_dph===true).length;
+
+  const tbody = document.getElementById("zakBody");
+  if(!rows.length){ document.getElementById("zakEmpty").classList.remove("hidden"); return; }
+  document.getElementById("zakTable").classList.remove("hidden");
+  tbody.innerHTML = rows.map(r=>{
+    const plan = r.plan || "free";
+    const planPill = r.aktivny===false ? '<span class="pill off">pozastavený</span>' : `<span class="pill ${plan}">${plan}</span>`;
+    return `<tr>
+      <td><div class="name">${esc(r.nazov||"—")}</div><div class="email hide-sm">${esc(r.email||"")}</div></td>
+      <td class="hide-sm">${planPill}</td>
+      <td class="r amt">${r.pocet_faktur||0}</td>
+      <td class="r amt hide-sm">${eur(r.fakturovane_spolu)}</td>
+      <td class="r"><button class="rowbtn" onclick='otvorDetail(${JSON.stringify(r.firma_id)}, ${JSON.stringify(r.nazov||"")})'>Detail</button> <button class="rowbtn" onclick='otvorCfg(${JSON.stringify(r.firma_id)}, ${JSON.stringify(r.nazov||"")})'>Konfig</button></td>
+    </tr>`;
+  }).join("");
+}
+
+// ── KONFIGURÁCIA firmy (admin upravuje firma_config) ──
+async function otvorCfg(firmaId, nazov){
+  cfgFirmaId = firmaId;
+  document.getElementById("cfgTitle").textContent = "Konfigurácia — " + (nazov||"firma");
+  document.getElementById("cfgErr").textContent = "";
+  // načítaj existujúcu konfiguráciu
+  const { data } = await sb.from("firma_config").select("*").eq("firma_id", firmaId).maybeSingle();
+  const c = data || { plan:"free", moduly:["faktury","dph","jazdy","vydavky","banka","priznanie"], aktivny:true, platca_dph:null, vydavky_rezim:null };
+  document.getElementById("cfgPlan").value = c.plan || "free";
+  document.getElementById("cfgAktivny").checked = c.aktivny !== false;
+  const moduly = Array.isArray(c.moduly) ? c.moduly : [];
+  document.querySelectorAll(".cfgMod").forEach(chk=>{ chk.checked = moduly.includes(chk.value); });
+  document.getElementById("cfgDph").value = c.platca_dph===true ? "platca" : (c.platca_dph===false ? "neplatca" : "");
+  document.getElementById("cfgVyd").value = c.vydavky_rezim || "";
+  document.getElementById("cfgModal").classList.add("on");
+}
+
+function zavriCfg(){ document.getElementById("cfgModal").classList.remove("on"); cfgFirmaId = null; }
+
+async function ulozCfg(){
+  if(!cfgFirmaId) return;
+  const err = document.getElementById("cfgErr"); err.textContent = "";
+  const moduly = [...document.querySelectorAll(".cfgMod:checked")].map(c=>c.value);
+  const dphVal = document.getElementById("cfgDph").value;
+  const rec = {
+    firma_id: cfgFirmaId,
+    plan: document.getElementById("cfgPlan").value,
+    aktivny: document.getElementById("cfgAktivny").checked,
+    moduly,
+    platca_dph: dphVal==="platca" ? true : (dphVal==="neplatca" ? false : null),
+    vydavky_rezim: document.getElementById("cfgVyd").value || null,
+    upravene: new Date().toISOString()
+  };
+  const { error } = await sb.from("firma_config").upsert(rec, { onConflict: "firma_id" });
+  if(error){ err.textContent = "Uloženie zlyhalo: " + error.message; return; }
+  zavriCfg();
+  nacitajPrehlad();
+}
+
+// ── DETAIL zákazníka (read-only pre podporu — bez impersonation) ──
+async function otvorDetail(firmaId, nazov){
+  document.getElementById("detailTitle").textContent = "Detail — " + (nazov||"firma");
+  const body = document.getElementById("detailBody");
+  body.innerHTML = '<div class="loading">Načítavam…</div>';
+  document.getElementById("detailModal").classList.add("on");
+  // admin číta celú firmu cez RLS (admin SELECT politika)
+  const { data, error } = await sb.from("firmy").select("*").eq("id", firmaId).maybeSingle();
+  if(error || !data){ body.innerHTML = '<div class="empty">Nepodarilo sa načítať dáta.</div>'; return; }
+  const d = data.data || {};
+  const meta = d.meta || {}, S = d.settings || {};
+  const faktury = d.faktury || [], vydavky = d.vydavky || [], jazdy = d.jazdy || [];
+  const sumF = faktury.reduce((a,f)=>a+(+f.spolu||0),0);
+  const poslF = [...faktury].sort((a,b)=>String(b.datum||"").localeCompare(String(a.datum||""))).slice(0,5);
+  body.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px">
+      <div><div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px">Firma</div>
+        <div style="font-weight:600;margin-top:3px">${esc(meta.nazov||data.nazov||"—")}</div>
+        <div class="email">${esc(meta.adresa||"")}</div></div>
+      <div><div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px">IČO / IČ DPH</div>
+        <div class="mono" style="margin-top:3px">${esc(meta.ico||"—")}</div>
+        <div class="mono email">${esc(meta.icdph||"neplatca")}</div></div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px">
+      <div class="kpi" style="padding:12px"><div class="n mono" style="font-size:18px">${faktury.length}</div><div class="l">Faktúr</div></div>
+      <div class="kpi" style="padding:12px"><div class="n mono" style="font-size:18px">${vydavky.length}</div><div class="l">Výdavkov</div></div>
+      <div class="kpi" style="padding:12px"><div class="n mono" style="font-size:18px">${jazdy.length}</div><div class="l">Jázd</div></div>
+    </div>
+    <div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Fakturované spolu: <b class="mono" style="color:var(--accent)">${eur(sumF)}</b></div>
+    ${poslF.length ? `<div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px;margin:14px 0 8px">Posledné faktúry</div>
+      ${poslF.map(f=>`<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line);font-size:13px">
+        <span>${esc(f.cislo||"—")} · ${esc(f.odberatel||"—")}</span><span class="mono">${eur(f.spolu)}</span></div>`).join("")}` : ""}
+    <div style="margin-top:16px;font-size:11px;color:var(--mut)">Len na čítanie (podpora). Úpravy robí zákazník vo svojej aplikácii.</div>
+  `;
+}
+function zavriDetail(){ document.getElementById("detailModal").classList.remove("on"); }
+
+// ── GDPR: export a zmazanie cez edge-function (serverová operácia) ──
+async function gdprExport(){
+  if(!cfgFirmaId) return;
+  const err=document.getElementById("cfgErr"); err.textContent="Pripravujem export…";
+  try{
+    const { data:{ session } } = await sb.auth.getSession();
+    const res = await fetch(SUPABASE_URL + "/functions/v1/gdpr", {
+      method:"POST",
+      headers:{ "Content-Type":"application/json", "Authorization":"Bearer "+session.access_token },
+      body: JSON.stringify({ akcia:"export", firma_id:cfgFirmaId })
+    });
+    if(!res.ok){ const e=await res.json().catch(()=>({})); err.textContent="Export zlyhal: "+(e.error||res.status); return; }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href=url; a.download="export.json"; a.click();
+    URL.revokeObjectURL(url);
+    err.textContent="";
+  }catch(e){ err.textContent="Chyba: "+e.message; }
+}
+
+async function gdprZmazat(){
+  if(!cfgFirmaId) return;
+  if(!confirm("Naozaj zmazať tento účet a VŠETKY jeho dáta? Túto akciu nie je možné vrátiť.")) return;
+  const err=document.getElementById("cfgErr"); err.textContent="Mažem…";
+  try{
+    const { data:{ session } } = await sb.auth.getSession();
+    const res = await fetch(SUPABASE_URL + "/functions/v1/gdpr", {
+      method:"POST",
+      headers:{ "Content-Type":"application/json", "Authorization":"Bearer "+session.access_token },
+      body: JSON.stringify({ akcia:"zmazat", firma_id:cfgFirmaId })
+    });
+    const r = await res.json().catch(()=>({}));
+    if(!res.ok || !r.ok){ err.textContent="Zmazanie zlyhalo: "+(r.error||res.status); return; }
+    zavriCfg();
+    nacitajPrehlad();
+  }catch(e){ err.textContent="Chyba: "+e.message; }
+}
+
+// ── pomocné ──
+function eur(v){ return (+v||0).toLocaleString("sk-SK",{minimumFractionDigits:0,maximumFractionDigits:0}) + " €"; }
+function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g, m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m])); }
+
+init();
+</script>
+</body>
+</html>
