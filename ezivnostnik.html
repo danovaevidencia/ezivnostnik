@@ -3204,7 +3204,7 @@ function appVydavky(){
   let list=vyd;
   if(vFilter==="faktury") list=vyd.filter(x=>x.druh==="Došlá faktúra");
   else if(vFilter==="blocky") list=vyd.filter(x=>x.druh==="Bloček");
-  document.getElementById("appScreen").innerHTML=appHlavicka("vydavky",`<button class="aabtn" style="--_c:${c}" onclick="ocrVydavok()">📷 Odfotiť</button><button class="aabtn" style="--_c:${c}" onclick="faktPdfImport()">📥 Import faktúr (XML/PDF)</button><button class="aabtn pri" style="--_c:${c}" onclick="editVydavok()">＋ Nový výdavok</button>`)+`
+  document.getElementById("appScreen").innerHTML=appHlavicka("vydavky",`<button class="aabtn" style="--_c:${c}" onclick="rychlyDoklad()">🧾 Odfotiť / načítať doklad</button><button class="aabtn" style="--_c:${c}" onclick="faktPdfImport()">📥 Import faktúr (XML/PDF)</button><button class="aabtn pri" style="--_c:${c}" onclick="editVydavok()">＋ Nový výdavok</button>`)+`
     <div class="amini">
       <div class="aminbox"><div class="al">Výdavky bez DPH</div><div class="av">${eur(bezSpolu)}</div></div>
       <div class="aminbox"><div class="al">DPH na odpočet</div><div class="av pos">${eur(dphSpolu)}</div></div>
@@ -6224,11 +6224,10 @@ async function exportFakturaPDF(idx){
   // platobný rámik vpravo (+ QR ak je IBAN)
   const qr=await generujPayBySquareQR(f, m);
   const pbX=colR-6, pbW=R-pbX;
-  // výška: 3 základné riadky + IBAN (2 riadky) + SWIFT + QR
+  // výška bloku: 3 základné riadky + IBAN (2 riadky) + SWIFT
   let pbH=3*5.4+8;
   if(m.iban) pbH+=9.6;   // IBAN label + hodnota pod ním
   if(m.swift) pbH+=5.4;
-  if(qr) pbH=Math.max(pbH,40);
   setF(BGSOFT); setD(LINE); doc.setLineWidth(0.3); doc.roundedRect(pbX,blokY-5,pbW,pbH,2.5,2.5,"FD");
   let py=blokY+1; const px=pbX+5; const pvX=pbX+34;
   const pravyOkraj=pbX+pbW-5;
@@ -6238,7 +6237,6 @@ async function exportFakturaPDF(idx){
     const sirka=doc.getTextWidth(String(v));
     if(pvX+sirka > pravyOkraj){
       py+=4.2; doc.setFontSize(8.2);
-      // ešte zmenši ak treba, aby sa IBAN zmestil na plnú šírku bloku
       let fs=8.2; while(doc.getTextWidth(String(v))>(pravyOkraj-px) && fs>6){ fs-=0.4; doc.setFontSize(fs); }
       doc.text(String(v), px, py); py+=5.4;
     } else {
@@ -6250,10 +6248,14 @@ async function exportFakturaPDF(idx){
   payR("Variabilný symbol:", f.vs||f.cislo||"—");
   if(m.iban) payR("IBAN:", m.iban, true);
   if(m.swift) payR("SWIFT/BIC:", m.swift, true);
-  // QR vpravo v rámiku
-  if(qr){ const qsz=24; doc.addImage(qr,"PNG",R-qsz-4,blokY-3,qsz,qsz);
-    doc.setFont(FONT,"normal"); doc.setFontSize(6.5); setC(MUTED); doc.text("PAY by square", R-qsz/2-4, blokY-3+qsz+3, {align:"center"}); }
-  y=Math.max(y,blokY-5+pbH)+9;
+  // QR POD platobným blokom (vycentrovaný v šírke bloku) — aby sa neprekrýval s textom
+  let blokKoniec=blokY-5+pbH;
+  if(qr){ const qsz=26; const qx=pbX+(pbW-qsz)/2; const qy=blokKoniec+3;
+    doc.addImage(qr,"PNG",qx,qy,qsz,qsz);
+    doc.setFont(FONT,"normal"); doc.setFontSize(6.8); setC(MUTED); doc.text("PAY by square — naskenujte a zaplaťte", pbX+pbW/2, qy+qsz+3, {align:"center"});
+    blokKoniec=qy+qsz+5;
+  }
+  y=Math.max(y,blokKoniec)+9;
 
   // ── POPIS ──
   const popis=f.popis||S.faktText||"";
@@ -6968,9 +6970,9 @@ function rychlyDoklad(){
   menu.id="rdMenu";
   menu.style.cssText="position:absolute;top:52px;right:12px;z-index:200;background:var(--paper,#fff);border:1px solid var(--line);border-radius:12px;box-shadow:0 10px 30px rgba(19,28,43,.16);overflow:hidden;min-width:210px";
   menu.innerHTML=`
-    <button onclick="rdVyber('foto')" style="display:flex;align-items:center;gap:10px;width:100%;border:none;background:none;padding:13px 15px;font-size:14px;cursor:pointer;text-align:left;color:var(--ink)">📷 Odfotiť doklad</button>
+    <button onclick="rdVyber('foto')" style="display:flex;align-items:center;gap:10px;width:100%;border:none;background:none;padding:13px 15px;font-size:14px;cursor:pointer;text-align:left;color:var(--ink)">📷 Odfotiť bloček / doklad</button>
     <div style="height:1px;background:var(--line)"></div>
-    <button onclick="rdVyber('subor')" style="display:flex;align-items:center;gap:10px;width:100%;border:none;background:none;padding:13px 15px;font-size:14px;cursor:pointer;text-align:left;color:var(--ink)">📄 Nahrať PDF / obrázok</button>`;
+    <button onclick="rdVyber('subor')" style="display:flex;align-items:center;gap:10px;width:100%;border:none;background:none;padding:13px 15px;font-size:14px;cursor:pointer;text-align:left;color:var(--ink)">🖼 Načítať zo súboru (PDF / foto)</button>`;
   document.body.appendChild(menu);
   // zavri pri kliku mimo
   setTimeout(()=>{ document.addEventListener("click", function zavri(e){ if(!menu.contains(e.target) && e.target!==btn){ menu.remove(); document.removeEventListener("click", zavri); } }); }, 10);
@@ -7008,12 +7010,22 @@ function najdiDuplicityVydavku(nov, ignorujId){
     const xIco=String(x.dodavatelIco||"").replace(/\D/g,"");
     // 1) rovnaké číslo dokladu (a nie je prázdne) → takmer istá duplicita
     if(nCislo && xCislo && nCislo===xCislo) return true;
-    // 2) rovnaká suma + rovnaký dátum → podozrenie
+    // 2) rovnaká suma + rovnaký dátum → silný signál duplicity
     if(nSpolu && xSpolu===nSpolu && nDatum && xDatum===nDatum){
-      // ak máme aj partnera/IČO, zosilni: zhoda potvrdí, rozdiel vylúči
+      // ak OBAJA majú IČO: rozhodni podľa neho (zhoda = duplicita, rozdiel = nie)
       if(nIco && xIco) return nIco===xIco;
-      if(nPartner && xPartner) return nPartner===xPartner || xPartner.includes(nPartner) || nPartner.includes(xPartner);
-      return true;  // suma+dátum sedí a nemáme čím rozlíšiť → podozrenie
+      // ak OBAJA majú partnera: zhoda alebo prekryv slov → duplicita
+      if(nPartner && xPartner){
+        if(nPartner===xPartner || xPartner.includes(nPartner) || nPartner.includes(xPartner)) return true;
+        // porovnaj významné slová v názve (napr. "cash","carry","metro") — OCR verzie sa líšia
+        const slova=s=>String(s||"").toLowerCase().match(/[a-zá-ž]{3,}/gi)||[];
+        const a=slova(nov.partner), b=slova(x.partner);
+        const spolocne=a.filter(w=>b.includes(w) && !["sro","spol","dph"].includes(w));
+        if(spolocne.length>=1) return true;   // aspoň jedno spoločné významné slovo
+        return false;   // suma+dátum sedí, ale partneri sú zjavne iní → nie duplicita
+      }
+      // aspoň jeden nemá partnera ani IČO na porovnanie → suma+dátum stačí ako podozrenie
+      return true;
     }
     return false;
   });
@@ -7140,18 +7152,27 @@ async function precitajQRzObrazka(file){
       if(codes && codes.length) return codes[0].rawValue;
     }
   }catch(_){}
-  // 2) fallback jsQR (načíta cez canvas)
+  // 2) fallback jsQR — skúsi viac mierok (desktop bez BarcodeDetector, zošikmené/veľké fotky)
   try{
     const jsQRmod=await import("https://esm.sh/jsqr@1.4.0");
     const jsQR=jsQRmod.default||jsQRmod;
     const url=URL.createObjectURL(file);
     const img=await new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=url; });
-    const cv=document.createElement("canvas"); cv.width=img.naturalWidth; cv.height=img.naturalHeight;
-    const ctx=cv.getContext("2d"); ctx.drawImage(img,0,0);
-    const data=ctx.getImageData(0,0,cv.width,cv.height);
     URL.revokeObjectURL(url);
-    const code=jsQR(data.data, cv.width, cv.height);
-    return code?code.data:null;
+    const W=img.naturalWidth, H=img.naturalHeight;
+    // skúšaj postupne rôzne šírky (jsQR je spoľahlivejší na ~600-1200px než na obrovských fotkách)
+    const sirky=[Math.min(W,1000), Math.min(W,700), Math.min(W,1400), W];
+    for(const cielW of sirky){
+      const scale=cielW/W;
+      const cw=Math.round(W*scale), ch=Math.round(H*scale);
+      const cv=document.createElement("canvas"); cv.width=cw; cv.height=ch;
+      const ctx=cv.getContext("2d"); ctx.drawImage(img,0,0,cw,ch);
+      const data=ctx.getImageData(0,0,cw,ch);
+      // skús normálne aj s inverziou (jsQR podporuje oboje)
+      let code=jsQR(data.data, cw, ch, {inversionAttempts:"attemptBoth"});
+      if(code && code.data) return code.data;
+    }
+    return null;
   }catch(_){ return null; }
 }
 // rozpozná eKasa QR a vytiahne ID dokladu (O-...) a prípadne sumu
@@ -7202,6 +7223,11 @@ async function spracujOCR(e){
     }
     const R=parseFakturaText(text);
     R._surovyText=text;   // DIAGNOSTIKA: surový OCR/PDF text
+    // ak QR čítač zlyhal (zošikmená/rozmazaná fotka), skús vytiahnuť UID:O-... priamo z OCR textu
+    if(!ekasa){
+      const uidM=text.match(/UID\s*:?\s*(O-[A-Z0-9]{20,})/i) || text.match(/\b(O-[A-Z0-9]{28,})\b/);
+      if(uidM){ ekasa=parseEkasaQR(uidM[1]) || {ekasaId:uidM[1].toUpperCase(), overUrl:"https://ekasa.financnasprava.sk/#/receipt/"+encodeURIComponent(uidM[1].toUpperCase())}; }
+    }
     if(ekasa){ R.ekasaId=ekasa.ekasaId; R.ekasaOverUrl=ekasa.overUrl; if(ekasa.suma && !R.spolu) R.spolu=ekasa.suma; if(!R.cislo && ekasa.ekasaId) R.cislo=ekasa.ekasaId; R._druh="Bloček"; }
     // dotiahnutie z registra: keď máme IČO a názov chýba/je šumový, prepíš ho presným
     try{
@@ -7231,7 +7257,7 @@ function otvorOcrVysledok(R){
         ${R.ekasaOverUrl?`<a href="${esc(R.ekasaOverUrl)}" target="_blank" style="color:var(--brand);font-size:12px">overiť na FS</a>`:''}
         <span id="ekasaStav" style="font-size:11.5px;color:var(--ink-soft)"></span>
       </div>
-      <div style="margin-top:5px;font-size:11px;color:var(--ink-soft)">Údaje z FS sú presné (QR obsahuje len ID). Vyžaduje nasadenú proxy.</div></div>`:''}
+      <div style="margin-top:5px;font-size:11px;color:var(--ink-soft)">Údaje z FS sú presné — QR obsahuje len ID dokladu, sumu a dodávateľa dopĺňame priamo z Finančnej správy.</div></div>`:''}
     <details style="margin-bottom:14px;background:var(--bg);border-radius:10px;padding:10px 13px">
       <summary style="cursor:pointer;font-size:12.5px;color:var(--ink-soft);font-weight:600;list-style:none">📄 Čo appka prečítala z dokladu</summary>
       <div style="font-size:11.5px;color:var(--ink-soft);margin:8px 0 6px">Ak niektorý údaj hore nesedí, tu vidíte presný text z dokladu — pomôže vám ho rýchlo doplniť ručne.</div>
