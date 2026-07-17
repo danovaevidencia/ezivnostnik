@@ -3236,12 +3236,25 @@ async function rpoDotiahni(ico){
   return r?feMapFirmu(r):null;
 }
 // dotiahnutie podľa názvu (ak nemáme IČO) → prvý výsledok alebo null
+// register je citlivý na formát ("s.r.o." vs "s. r. o."), tak skúsime viac variantov
 async function rpoDotiahniNazvom(nazov){
   const q=String(nazov||"").trim();
-  if(q.length<4) return null;
-  const results=await rpoFetch({fullName:q});
-  const r=results[0]||null;
-  return r?feMapFirmu(r):null;
+  if(q.length<3) return null;
+  // priprav varianty názvu na skúšanie (od najpresnejšieho po najvšeobecnejší)
+  const varianty=[];
+  varianty.push(q);
+  // normalizuj právnu formu na verziu s medzerami (s.r.o. → s. r. o.)
+  const sMedzerami=q.replace(/s\.?\s*r\.?\s*o\.?/i,"s. r. o.").replace(/a\.?\s*s\.?/i,"a. s.").replace(/\s+/g," ").trim();
+  if(sMedzerami!==q) varianty.push(sMedzerami);
+  // základ názvu bez právnej formy (odstráň s.r.o./a.s./spol./k.s. a pod.)
+  const zaklad=q.replace(/,?\s*(s\.?\s*r\.?\s*o\.?|a\.?\s*s\.?|spol\.?\s*s\s*r\.?\s*o\.?|k\.?\s*s\.?|v\.?\s*o\.?\s*s\.?|s\.?\s*p\.?)\s*\.?$/i,"").trim();
+  if(zaklad.length>=3 && zaklad!==q && !varianty.includes(zaklad)) varianty.push(zaklad);
+  // skús varianty po poradí, vráť prvý s výsledkom
+  for(const v of varianty){
+    const results=await rpoFetch({fullName:v});
+    if(results && results.length){ return feMapFirmu(results[0]); }
+  }
+  return null;
 }
 // KRÍŽOVÁ KONTROLA: dotiahne firmu z registra podľa najspoľahlivejšieho identifikátora.
 // Poradie: platné IČO (8 čísel) → názov → IČO inej dĺžky. Vracia {najdene, zdroj} alebo null.
