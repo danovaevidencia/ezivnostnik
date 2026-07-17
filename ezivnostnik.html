@@ -7726,31 +7726,51 @@ function splitSparuj(txIdVal, typ, cislo){
 }
 // dialóg výberu dvoch modulov
 function splitVyberModuly(){
-  const opts=Object.keys(SPLIT_MODULY);
-  const riadok=(strana, aktualny)=>`<div style="display:flex;flex-wrap:wrap;gap:7px">${opts.map(id=>{
-    const m=SPLIT_MODULY[id];
-    return `<span class="achip ${aktualny===id?'on':''}" style="--_c:${m.c}" onclick="splitPickTmp('${strana}','${id}');">${m.ic} ${m.n}</span>`;
-  }).join("")}<span class="achip ${aktualny==='doklady'&&strana==='p'?'on':''}" onclick="splitPickTmp('${strana}','doklady')">▤ Doklady (na párovanie)</span></div>`;
+  // moduly, ktoré split vie vykresliť ako náhľad (zoznamové)
+  const PODPOROVANE=["banka","faktury","vydavky","pohladavky","jazdy","vykazy","dokumenty","kalendar"];
+  const modulChip=(strana, id, aktualny)=>{
+    const m=SPLIT_MODULY[id]||APPS[id]; if(!m) return "";
+    return `<span class="achip ${aktualny===id?'on':''}" style="--_c:${m.c}" onclick="splitPickTmp('${strana}','${id}')">${m.ic} ${m.n}</span>`;
+  };
+  const skupinaBlok=(strana, aktualny)=>{
+    let html="";
+    SKUPINY.forEach(g=>{
+      let moduly=g.moduly.filter(id=>PODPOROVANE.includes(id) && modulPovolenyPreModul(id));
+      if(!moduly.length) return;
+      html+=`<div style="margin-bottom:9px">
+        <div style="font-size:11px;font-weight:700;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.04em;margin-bottom:5px">${g.ic} ${g.n}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">${moduly.map(id=>modulChip(strana,id,aktualny)).join("")}</div>
+      </div>`;
+    });
+    // samostatné: kalendár + doklady (párovanie)
+    html+=`<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:2px">
+      ${modulChip(strana,'kalendar',aktualny)}
+      <span class="achip ${aktualny==='doklady'&&strana==='p'?'on':''}" onclick="splitPickTmp('${strana}','doklady')">▤ Doklady (na párovanie)</span>
+    </div>`;
+    return html;
+  };
   window.__splTmpL=splitLavy; window.__splTmpP=splitPravy;
   openModal("Rozdeliť obrazovku", `
-    <div class="csub" style="margin-bottom:12px">Vyberte dva moduly. Na mobile budú pod sebou, na tablete/PC vedľa seba. Kombinácia <b>Banka + Doklady</b> zapne párovanie.</div>
-    <div class="mfield"><label>Ľavý / horný panel</label><div id="splL">${riadok('l', splitLavy)}</div></div>
-    <div class="mfield"><label>Pravý / dolný panel</label><div id="splP">${riadok('p', splitPravy)}</div></div>
+    <div class="csub" style="margin-bottom:14px">Vyberte dva panely — na mobile pod sebou, na tablete/PC vedľa seba. Kombinácia <b>Banka + Doklady</b> zapne párovanie platieb.</div>
+    <div class="mfield"><label>Ľavý / horný panel</label><div id="splL">${skupinaBlok('l', splitLavy)}</div></div>
+    <div class="mfield" style="margin-top:14px"><label>Pravý / dolný panel</label><div id="splP">${skupinaBlok('p', splitPravy)}</div></div>
   `, ()=>{
     const l=window.__splTmpL||"banka", pr=window.__splTmpP||"faktury";
     splitVybranyPohyb=null;
-    // otvor split obrazovku (nielen prekresli — mohla byť skrytá)
     otvorSplit(l, pr);
   });
 }
 function splitPickTmp(strana, id){
   if(strana==='l'){ window.__splTmpL=id; } else { window.__splTmpP=id; }
-  // prekresli chipy v dialógu
+  // prekresli zvýraznenie v danej strane
   const box=document.getElementById(strana==='l'?'splL':'splP');
-  if(box){ box.querySelectorAll('.achip').forEach(ch=>ch.classList.remove('on'));
-    const chips=[...box.querySelectorAll('.achip')];
-    const opts=Object.keys(SPLIT_MODULY).concat(['doklady']);
-    const idx=opts.indexOf(id); if(chips[idx]) chips[idx].classList.add('on');
+  if(box){
+    box.querySelectorAll('.achip').forEach(ch=>ch.classList.remove('on'));
+    // nájdi chip podľa onclick obsahujúceho '${id}'
+    [...box.querySelectorAll('.achip')].forEach(ch=>{
+      const oc=ch.getAttribute('onclick')||"";
+      if(oc.includes("'"+id+"'")) ch.classList.add('on');
+    });
   }
 }
 // ═══ ZMLUVY A DOKUMENTY — evidencia dôležitých firemných dokumentov ═══
