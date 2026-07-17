@@ -7295,7 +7295,10 @@ function parseFakturaText(text){
   // IČ DPH dodávateľa (nie moje)
   const allIcDph=[...t.matchAll(/(?:I[ČC]|1[C6]|16)\s*DPH:?\s*[S$]K\s*(\d[\d\s]{8,}\d)/gi)].map(x=>("SK"+x[1].replace(/\s/g,"")));
   R.icdph=allIcDph.find(x=>x!==mojeIcDph)||"";
-  const allIco=[...t.matchAll(/IČO:?\s*(\d{8})/gi)].map(x=>x[1]);
+  // IČO — toleruj medzery (36 421 928) aj OCR varianty (IČO/ICO/1CO/IC0/160)
+  const allIco=[...t.matchAll(/(?:I[ČC]O|1[C6]O|IC0|160|16O)\s*:?\s*(\d[\d\s]{6,10}\d)/gi)]
+    .map(x=>x[1].replace(/\s/g,""))
+    .filter(x=>/^\d{8}$/.test(x));   // po odstránení medzier musí byť presne 8 číslic
   R.ico=allIco.find(x=>x!==mojeIco)||"";
   // dodávateľ — krátky názov firmy, nie veta
   let dod="";
@@ -7779,13 +7782,19 @@ async function spracujOCR(e){
       if(uidRaw){ ekasa=parseEkasaQR(uidRaw) || {ekasaId:uidRaw, overUrl:"https://ekasa.financnasprava.sk/#/receipt/"+encodeURIComponent(uidRaw)}; }
     }
     if(ekasa){ R.ekasaId=ekasa.ekasaId; R.ekasaOverUrl=ekasa.overUrl; if(ekasa.suma && !R.spolu) R.spolu=ekasa.suma; if(!R.cislo && ekasa.ekasaId) R.cislo=ekasa.ekasaId; R._druh="Bloček"; }
-    // dotiahnutie z registra: keď máme IČO a názov chýba/je šumový, prepíš ho presným
+    // dotiahnutie z registra pri importe — automaticky doplní chýbajúce údaje
     try{
       const ico=String(R.ico||R.dodavatelIco||"").replace(/\s/g,"");
       if(/^\d{6,8}$/.test(ico) && nazovJeSumovy(R.partner)){
+        // máme IČO, ale názov je šumový → dotiahni presný názov
         setStav("Dopĺňam z registra…");
         const f=await rpoDotiahni(ico);
         if(f && f.nazov){ R.partner=f.nazov; if(!R.icdph&&f.icdph)R.icdph=f.icdph; R._doplneneZRegistra=true; }
+      } else if(!ico && R.partner && String(R.partner).trim().length>=3 && !nazovJeSumovy(R.partner)){
+        // máme názov, ale chýba IČO → dotiahni IČO (a DIČ) podľa názvu
+        setStav("Dopĺňam z registra…");
+        const f=await rpoDotiahniNazvom(R.partner);
+        if(f && f.ico){ R.ico=f.ico; if(f.nazov)R.partner=f.nazov; if(!R.icdph&&f.icdph)R.icdph=f.icdph; R._doplneneZRegistra=true; }
       }
     }catch(_){}
     otvorOcrVysledok(R);
@@ -7828,7 +7837,7 @@ function otvorOcrVysledok(R){
       <div id="feNasepP" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:30;background:var(--paper);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px -8px rgba(19,28,43,.25);max-height:240px;overflow-y:auto;margin-top:2px"></div>
     </div>
     <div class="mrow2">
-      <div class="mfield"><label>IČO dodávateľa</label><input id="m_dodIco" value="${esc(R.dodavatelIco||'')}" placeholder="nepovinné" inputmode="numeric"></div>
+      <div class="mfield"><label>IČO dodávateľa</label><input id="m_dodIco" value="${esc(R.dodavatelIco||R.ico||'')}" placeholder="nepovinné" inputmode="numeric"></div>
       <div class="mfield"><label>IČ DPH dodávateľa</label><input id="m_dodIcDph" value="${esc(R.dodavatelIcDph||'')}" placeholder="povinné pri doklade s DPH" oninput="skontrolujICDPHpole(this)"><div id="m_dodIcDphStav" class="ocr-hint"></div></div>
     </div>
     <div style="margin:-4px 0 10px"><button type="button" class="aabtn" style="font-size:12px;padding:5px 11px" onclick="doplnZRegistra()">🔎 Skontrolovať / doplniť z registra</button><span id="regStav" style="font-size:11.5px;margin-left:8px;color:var(--ink-soft)"></span></div>
