@@ -78,6 +78,7 @@
   .pill{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px}
   .pill.free{background:#26303c;color:var(--soft)}
   .pill.standard{background:#173a52;color:var(--accent)}
+  .pill.profi{background:#12402f;color:var(--accent2)}
   .pill.pro{background:#12402f;color:var(--accent2)}
   .pill.off{background:#3a2226;color:var(--neg)}
   .amt{font-family:'IBM Plex Mono',monospace}
@@ -172,18 +173,31 @@
     <div class="mh"><h3 id="cfgTitle">Konfigurácia firmy</h3><button class="x" onclick="zavriCfg()">×</button></div>
     <div class="mb">
       <div class="field"><label>Plán</label>
-        <select id="cfgPlan"><option value="free">Free</option><option value="standard">Standard</option><option value="pro">Pro</option></select>
+        <select id="cfgPlan">
+          <option value="free">Free</option>
+          <option value="standard">Štandard (3,90 € / 39 €)</option>
+          <option value="profi">Profi (7,90 € / 79 €)</option>
+        </select>
+      </div>
+      <div class="field"><label>Platnosť predplatného</label>
+        <input type="date" id="cfgPlanDo" style="width:100%">
+        <div style="font-size:11px;color:var(--soft);margin-top:4px">
+          Prázdne = neobmedzene (darovaný prístup). Vyplnené = plán po tomto dátume vyprší.
+        </div>
       </div>
       <div class="field"><label>Účet aktívny</label>
         <label class="chk"><input type="checkbox" id="cfgAktivny"> Účet je aktívny (odškrtnuté = pozastavený)</label>
       </div>
-      <div class="field"><label>Moduly (rozsah pre zákazníka)</label>
-        <label class="chk"><input type="checkbox" value="faktury" class="cfgMod"> Faktúry</label>
-        <label class="chk"><input type="checkbox" value="dph" class="cfgMod"> DPH</label>
-        <label class="chk"><input type="checkbox" value="jazdy" class="cfgMod"> Kniha jázd</label>
-        <label class="chk"><input type="checkbox" value="vydavky" class="cfgMod"> Výdavky</label>
-        <label class="chk"><input type="checkbox" value="banka" class="cfgMod"> Banka</label>
-        <label class="chk"><input type="checkbox" value="priznanie" class="cfgMod"> Daňové priznanie</label>
+      <div class="field"><label>Moduly — ručné prepísanie plánu</label>
+        <label class="chk"><input type="checkbox" id="cfgModOverride" onchange="prepniModuly()"> Nastaviť moduly ručne (inak rozhoduje plán)</label>
+        <div id="cfgModBox" style="opacity:.45;pointer-events:none;margin-top:8px">
+          <label class="chk"><input type="checkbox" value="faktury" class="cfgMod"> Faktúry</label>
+          <label class="chk"><input type="checkbox" value="dph" class="cfgMod"> DPH</label>
+          <label class="chk"><input type="checkbox" value="jazdy" class="cfgMod"> Kniha jázd</label>
+          <label class="chk"><input type="checkbox" value="vydavky" class="cfgMod"> Výdavky</label>
+          <label class="chk"><input type="checkbox" value="banka" class="cfgMod"> Banka</label>
+          <label class="chk"><input type="checkbox" value="priznanie" class="cfgMod"> Daňové priznanie</label>
+        </div>
       </div>
       <div class="field"><label>Režim DPH</label>
         <select id="cfgDph"><option value="">— nechať na zákazníka —</option><option value="platca">Platca DPH</option><option value="neplatca">Neplatca DPH</option></select>
@@ -277,7 +291,15 @@ async function nacitajPrehlad(){
   document.getElementById("zakTable").classList.remove("hidden");
   tbody.innerHTML = rows.map(r=>{
     const plan = r.plan || "free";
-    const planPill = r.aktivny===false ? '<span class="pill off">pozastavený</span>' : `<span class="pill ${plan}">${plan}</span>`;
+    const stav = r.stav_planu || "free";
+    const stavText = {
+      free:"", neobmedzene:"∞", aktivne:(r.dni_do_konca!=null?r.dni_do_konca+" dní":""),
+      expiruje_coskoro:"⚠ "+(r.dni_do_konca||0)+" dní", expirovane:"expirovalo"
+    }[stav] || "";
+    const stavFarba = { expiruje_coskoro:"#c77d3e", expirovane:"#c0504a", neobmedzene:"#1a7d4a" }[stav] || "var(--soft)";
+    const planPill = r.aktivny===false
+      ? '<span class="pill off">pozastavený</span>'
+      : `<span class="pill ${plan}">${plan}</span>${stavText?`<div style="font-size:10.5px;color:${stavFarba};margin-top:3px">${stavText}</div>`:''}`;
     return `<tr>
       <td><div class="name">${esc(r.nazov||"—")}</div><div class="email hide-sm">${esc(r.email||"")}</div></td>
       <td class="hide-sm">${planPill}</td>
@@ -295,14 +317,28 @@ async function otvorCfg(firmaId, nazov){
   document.getElementById("cfgErr").textContent = "";
   // načítaj existujúcu konfiguráciu
   const { data } = await sb.from("firma_config").select("*").eq("firma_id", firmaId).maybeSingle();
-  const c = data || { plan:"free", moduly:["faktury","dph","jazdy","vydavky","banka","priznanie"], aktivny:true, platca_dph:null, vydavky_rezim:null };
+  const c = data || { plan:"free", moduly:null, aktivny:true, platca_dph:null, vydavky_rezim:null, plan_do:null };
   document.getElementById("cfgPlan").value = c.plan || "free";
   document.getElementById("cfgAktivny").checked = c.aktivny !== false;
+  // platnosť predplatného (len dátumová časť)
+  document.getElementById("cfgPlanDo").value = c.plan_do ? String(c.plan_do).slice(0,10) : "";
+  // moduly: prázdne/null = rozhoduje plán; vyplnené = ručné prepísanie
   const moduly = Array.isArray(c.moduly) ? c.moduly : [];
+  const override = moduly.length > 0;
+  document.getElementById("cfgModOverride").checked = override;
   document.querySelectorAll(".cfgMod").forEach(chk=>{ chk.checked = moduly.includes(chk.value); });
+  prepniModuly();
   document.getElementById("cfgDph").value = c.platca_dph===true ? "platca" : (c.platca_dph===false ? "neplatca" : "");
   document.getElementById("cfgVyd").value = c.vydavky_rezim || "";
   document.getElementById("cfgModal").classList.add("on");
+}
+
+// zapne/vypne ručný výber modulov
+function prepniModuly(){
+  const on = document.getElementById("cfgModOverride").checked;
+  const box = document.getElementById("cfgModBox");
+  box.style.opacity = on ? "1" : ".45";
+  box.style.pointerEvents = on ? "auto" : "none";
 }
 
 function zavriCfg(){ document.getElementById("cfgModal").classList.remove("on"); cfgFirmaId = null; }
@@ -310,11 +346,15 @@ function zavriCfg(){ document.getElementById("cfgModal").classList.remove("on");
 async function ulozCfg(){
   if(!cfgFirmaId) return;
   const err = document.getElementById("cfgErr"); err.textContent = "";
-  const moduly = [...document.querySelectorAll(".cfgMod:checked")].map(c=>c.value);
+  // moduly ukladáme LEN ak je zapnuté ručné prepísanie; inak null = rozhoduje plán
+  const override = document.getElementById("cfgModOverride").checked;
+  const moduly = override ? [...document.querySelectorAll(".cfgMod:checked")].map(c=>c.value) : null;
   const dphVal = document.getElementById("cfgDph").value;
+  const planDo = document.getElementById("cfgPlanDo").value;
   const rec = {
     firma_id: cfgFirmaId,
     plan: document.getElementById("cfgPlan").value,
+    plan_do: planDo ? new Date(planDo + "T23:59:59").toISOString() : null,
     aktivny: document.getElementById("cfgAktivny").checked,
     moduly,
     platca_dph: dphVal==="platca" ? true : (dphVal==="neplatca" ? false : null),
