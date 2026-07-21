@@ -25,7 +25,7 @@ function sadzbaCislo(v, des){
 function sadzbaEur(v){ return sadzbaCislo(v)+" €"; }
 function sadzbaEsc(s){ return String(s==null?"":s).replace(/[&<>"']/g, m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m])); }
 function sadzbaDatum(d){ if(!d) return ""; const p=String(d).split("-"); return p.length===3 ? (+p[2])+". "+(+p[1])+". "+p[0] : String(d); }
-const SADZBY_MODUL_VERZIA = "2026.07.20-BQ";
+const SADZBY_MODUL_VERZIA = "2026.07.20-BS";
 
 // ═══════════════════════════════════════════════════════════════
 //  SADZBY V ČASE
@@ -59,27 +59,38 @@ const SADZBY = {
   sadzbaDPH:      {n:"Základná sadzba DPH", sk:"dph", mienaSa:"zriedka", overenost:"zdroj", kontrola:"2026-07-21",
     h:[{od:"2025-01-01", v:0.23, zdroj:"§ 27 zákona o DPH — 23 % od 1. 1. 2025"}]},
   zdravSadzba:    {n:"Zdravotné poistné SZČO", sk:"odvody", mienaSa:"rocne", overenost:"zdroj", kontrola:"2026-07-21",
-    h:[{od:"2026-01-01", v:0.16, zdroj:"§ 38ezk zák. 580/2004 — 16 % prechodne pre roky 2026 a 2027 (predtým 15 %)"}]},
+    h:[{od:"2025-01-01", v:0.15, zdroj:"sadzba poistného SZČO do 31. 12. 2025"},
+       {od:"2026-01-01", v:0.16, zdroj:"§ 38ezk zák. 580/2004 — 16 % prechodne pre roky 2026 a 2027 (predtým 15 %)"}]},
   minVZmesZP:     {n:"Min. mesačný vymeriavací základ ZP", sk:"odvody", mienaSa:"rocne", overenost:"zdroj", kontrola:"2026-07-21",
-    h:[{od:"2026-01-01", v:762, zdroj:"50 % priemernej mzdy za 2024 (1 524 €)"}]},
+    h:[{od:"2025-01-01", v:715, zdroj:"minimálny vymeriavací základ ZP 2025"},
+       {od:"2026-01-01", v:762, zdroj:"50 % priemernej mzdy za 2024 (1 524 €)"}]},
   minOdvodZP:     {n:"Min. mesačný odvod ZP", sk:"odvody", mienaSa:"rocne", overenost:"zdroj", kontrola:"2026-07-21",
-    h:[{od:"2026-01-01", v:121.92, zdroj:"16 % zo 762 € — potvrdzuje Dôvera aj Podnikajte.sk"}]},
+    h:[{od:"2025-01-01", v:107.25, zdroj:"15 % zo 715 € — o 14,67 € menej než v 2026"},
+       {od:"2026-01-01", v:121.92, zdroj:"16 % zo 762 € — potvrdzuje Dôvera aj Podnikajte.sk"}]},
   vzKoef:         {n:"Koeficient vymeriavacieho základu", sk:"odvody", mienaSa:"zriedka", overenost:"kod", kontrola:null,
     h:[{od:null, v:0.672948, zdroj:"koeficient na výpočet vymeriavacieho základu"}]},
   nezdanitCast:   {n:"NČZD na daňovníka", sk:"nczd", mienaSa:"rocne", overenost:"zdroj", kontrola:"2026-07-21",
-    h:[{od:"2026-01-01", v:5966.73, zdroj:"§ 11 ZDP — 21-násobok ŽM 284,13 €"}]},
+    h:[{od:"2025-01-01", v:5753.79, zdroj:"§ 11 ZDP — 21-násobok ŽM 273,99 € (2025)"},
+       {od:"2026-01-01", v:5966.73, zdroj:"§ 11 ZDP — 21-násobok ŽM 284,13 €"}]},
   nczdHranicaPlna:{n:"Hranica plnej NČZD", sk:"nczd", mienaSa:"rocne", overenost:"zdroj", kontrola:"2026-07-21",
-    h:[{od:"2026-01-01", v:26083.13, zdroj:"91,8-násobok ŽM"}]},
+    h:[{od:"2025-01-01", v:25426.27, zdroj:"92,8-násobok ŽM 2025"},
+       {od:"2026-01-01", v:26083.13, zdroj:"91,8-násobok ŽM"}]},
   nczdKonstanta:  {n:"Konštanta vo vzorci NČZD", sk:"nczd", mienaSa:"rocne", overenost:"zdroj", kontrola:"2026-07-21",
-    h:[{od:"2026-01-01", v:14661.11, zdroj:"51,6-násobok ŽM; krátenie deleno 3 (od 2026, predtým 5)"}]},
+    h:[{od:"2025-01-01", v:12110.36, zdroj:"44,2-násobok ŽM 2025"},
+       {od:"2026-01-01", v:14661.11, zdroj:"51,6-násobok ŽM 2026"}]},
   nczdZanik:      {n:"Základ, pri ktorom NČZD zaniká", sk:"nczd", mienaSa:"rocne", overenost:"zdroj", kontrola:"2026-07-21",
-    h:[{od:"2026-01-01", v:43983.32, zdroj:"154,8-násobok ŽM"}]},
+    h:[{od:"2025-01-01", v:48441.43, zdroj:"176,8-násobok ŽM 2025"},
+       {od:"2026-01-01", v:43983.32, zdroj:"154,8-násobok ŽM"}]},
   nczdManzelMax:  {n:"Max. NČZD na manžela/manželku", sk:"nczd", mienaSa:"rocne", overenost:"zdroj", kontrola:"2026-07-21",
-    h:[{od:"2026-01-01", v:5455.30, zdroj:"19,2-násobok ŽM"}]},
+    h:[{od:"2025-01-01", v:5260.61, zdroj:"19,2-násobok ŽM 2025"},
+       {od:"2026-01-01", v:5455.30, zdroj:"19,2-násobok ŽM"}]},
   nczdManzelHranica:{n:"Hranica pre NČZD na manželku", sk:"nczd", mienaSa:"rocne", overenost:"zdroj", kontrola:"2026-07-21",
     h:[{od:"2026-01-01", v:43983.32, zdroj:"154,8-násobok ŽM — nad ním sa uplatní vzorec"}]},
   nczdManzelKonst:{n:"Konštanta NČZD na manželku", sk:"nczd", mienaSa:"rocne", overenost:"zdroj", kontrola:"2026-07-21",
     h:[{od:"2026-01-01", v:20116.40, zdroj:"vzorec 20 116,40 − ZD/3; nuluje sa pri 60 349,21 €"}]},
+  nczdDelitel:    {n:"Deliteľ vo vzorci krátenia NČZD", sk:"nczd", mienaSa:"zriedka", overenost:"zdroj", kontrola:"2026-07-21",
+    h:[{od:"2025-01-01", v:4, zdroj:"§ 11 ZDP — krátenie ZD/4 v roku 2025"},
+       {od:"2026-01-01", v:3, zdroj:"§ 11 ZDP — od 2026 strmšie krátenie ZD/3"}]},
   nczd3pilierMax: {n:"Strop odpočtu III. piliera", sk:"nczd", mienaSa:"zriedka", overenost:"zdroj", kontrola:"2026-07-21",
     h:[{od:null, v:180, zdroj:"§ 11 ods. 8 ZDP — 180 € ročne"}]},
   bonusDo15:      {n:"Daňový bonus do 15 rokov (mesačne)", sk:"bonus", mienaSa:"rocne", overenost:"zdroj", kontrola:"2026-07-21",
@@ -87,7 +98,8 @@ const SADZBY = {
   bonus15az18:    {n:"Daňový bonus 15–18 rokov (mesačne)", sk:"bonus", mienaSa:"rocne", overenost:"zdroj", kontrola:"2026-07-21",
     h:[{od:"2026-01-01", v:50, zdroj:"§ 33 ZDP — 50 €/mes. 15–18 rokov"}]},
   bonusKratHranica:{n:"Základ, od ktorého sa bonus kráti", sk:"bonus", mienaSa:"rocne", overenost:"zdroj", kontrola:"2026-07-21",
-    h:[{od:"2026-01-01", v:27432, zdroj:"1,5-násobok priem. mzdy = 2 286 €/mes. × 12"}]},
+    h:[{od:"2025-01-01", v:25740, zdroj:"ročná hranica krátenia bonusu 2025 (FS)"},
+       {od:"2026-01-01", v:27432, zdroj:"1,5-násobok priem. mzdy = 2 286 €/mes. × 12"}]},
   obratRocny:     {n:"Obrat — platiteľom od nasl. roka", sk:"dph", mienaSa:"zriedka", overenost:"zdroj", kontrola:"2026-07-21",
     h:[{od:"2025-01-01", v:50000, zdroj:"§ 4 zákona o DPH"}]},
   obratOkamzity:  {n:"Obrat — platiteľom dňom dodania", sk:"dph", mienaSa:"zriedka", overenost:"zdroj", kontrola:"2026-07-21",
@@ -121,12 +133,32 @@ function sadzbaKuDnu(kluc, datum){
   zoz.forEach(z=>{ if(!z.od || (d && z.od<=d)) { if(!najdene || !najdene.od || (z.od && z.od>=najdene.od)) najdene=z; } });
   return najdene ? najdene.v : undefined;
 }
+// Chýbajúca sadzba nesmie skončiť ako undefined vo výpočte — z toho vznikne NaN
+// alebo tichá nula a nikto si to nevšimne. Keď sa pýtame na obdobie staršie než
+// najstarší záznam, vrátime NAJSTARŠIU známu hodnotu a nahlásime to. Je to
+// priznaný odhad, nie výpočet: lepšie než NaN, horšie než doplnená história.
+const SADZBY_CHYBAJUCE = {};
+function sadzbaSPoistkou(kluc, datum, popisObdobia){
+  const v=sadzbaKuDnu(kluc, datum);
+  if(v!==undefined) return v;
+  const zoz=(SADZBY[kluc]||{}).h;
+  if(!zoz || !zoz.length) return undefined;
+  const najstarsia=zoz[0];
+  const k=kluc+"@"+(popisObdobia||datum);
+  if(!SADZBY_CHYBAJUCE[k]){
+    SADZBY_CHYBAJUCE[k]={kluc, obdobie:popisObdobia||datum, pouzite:najstarsia.v, platneOd:najstarsia.od};
+    console.warn("Sadzba \u00ab"+kluc+"\u00bb pre "+(popisObdobia||datum)+" nie je v tabu\u013ake. Pou\u017eije sa najstar\u0161ia zn\u00e1ma ("+najstarsia.v+" od "+najstarsia.od+").");
+  }
+  return najstarsia.v;
+}
+function sadzbyChybajuce(){ return Object.keys(SADZBY_CHYBAJUCE).map(k=>SADZBY_CHYBAJUCE[k]); }
+
 // Hodnota platná pre zdaňovacie obdobie. Ročné sadzby určuje zákon účinný v tom
 // roku, preto sa pozeráme na jeho koniec — priznanie za rok N sa podáva v roku
 // N+1 a musí počítať sadzbami roka N, nie tými, čo platia pri podávaní.
 function sadzbaRoka(kluc, rok){
   const r=+rok || new Date().getFullYear();
-  return sadzbaKuDnu(kluc, r+"-12-31");
+  return sadzbaSPoistkou(kluc, r+"-12-31", "rok "+r);
 }
 
 // ═══════════════════════════════════════════════════════════════
