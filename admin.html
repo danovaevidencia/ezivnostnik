@@ -13,6 +13,7 @@
 <meta name="theme-color" content="#0f141b">
 <meta name="robots" content="noindex, nofollow">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="sadzby.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   /* ── admin identita: tmavá „prevádzková" paleta, mono akcenty (odlíšenie od zákazníckej appky) ── */
@@ -86,7 +87,12 @@
   .rowbtn:hover{border-color:var(--accent)}
 
   .empty{padding:40px;text-align:center;color:var(--mut)}
-  .hidden{display:none}
+  .hint{background:#f6f8fb;border-radius:8px;padding:9px 11px;margin:8px 0;font-size:13px;line-height:1.5}
+.hint.warn{border-left:3px solid #d98b00}
+.warnTxt{color:#d98b00}
+.muted{color:#7a8699;font-size:12px;line-height:1.45}
+tr.chce td{background:#fffaf0}
+.hidden{display:none}
   .loading{padding:40px;text-align:center;color:var(--soft)}
 
   /* modal konfigurácie */
@@ -136,6 +142,15 @@
       <div class="kpi g"><div class="n" id="kAkt">–</div><div class="l">Aktívnych</div></div>
       <div class="kpi"><div class="n amt" id="kFakt">–</div><div class="l">Fakturované spolu</div></div>
       <div class="kpi w"><div class="n" id="kPlat">–</div><div class="l">Platcov DPH</div></div>
+    </div>
+
+    <!-- SADZBY -->
+    <div class="sec">
+      <div class="head"><h2>Sadzby a hranice</h2><div class="sp"></div>
+        <span id="sadzbyStav" class="who"></span></div>
+      <div class="body" id="sadzbyBody">
+        <div class="loading">Načítavam sadzby…</div>
+      </div>
     </div>
 
     <div class="sec">
@@ -265,6 +280,7 @@ async function overAdmin(user){
   document.getElementById("loginView").classList.add("hidden");
   document.getElementById("adminView").classList.remove("hidden");
   nacitajPrehlad();
+  vykresliSadzby();
 }
 
 async function odhlas(){
@@ -443,6 +459,118 @@ async function gdprZmazat(){
 }
 
 // ── pomocné ──
+// ═══════════════════════════════════════════════════════════════
+//  SADZBY — editor
+//  Tabuľka, kontroly aj export sú v sadzby.js, ktorý načítava aj appka.
+//  Tu je len obsluha formulára. Zámerne sa nič nezapisuje do databázy:
+//  výstupom je súbor sadzby.json, ktorý sa commitne. Git je tým auditom —
+//  kto, kedy a z čoho na čo, s možnosťou vrátiť sa.
+// ═══════════════════════════════════════════════════════════════
+let _edSadzba = "";
+let _edChyby = [], _edUpoz = [];
+
+async function vykresliSadzby(){
+  try { await sadzbyNacitaj(); } catch(e){ /* ostane zabudovaná tabuľka */ }
+  konceptNacitaj();
+  const stav = document.getElementById("sadzbyStav");
+  const P = sadzbyPrehlad();
+  if(stav) stav.textContent = SADZBY_PODVOD.zdroj + (SADZBY_PODVOD.verzia ? " · " + SADZBY_PODVOD.verzia : "")
+    + " · " + (P.spolu - P.chceKontrolu) + "/" + P.spolu + " overených";
+  document.getElementById("sadzbyBody").innerHTML = sadzbyFormular() + sadzbyKonceptHtml() + sadzbyZoznamHtml();
+}
+
+function sadzbyVyber(k){ _edSadzba = k; _edChyby = []; _edUpoz = []; vykresliSadzby(); }
+function sadzbyPridaj(){
+  const hod = parseFloat(String(document.getElementById("s_hodnota").value).replace(",", "."));
+  const v = konceptPridaj(_edSadzba, hod,
+    document.getElementById("s_od").value, document.getElementById("s_zdroj").value);
+  _edChyby = v.chyby || []; _edUpoz = v.upozornenia || [];
+  if(v.ok) _edSadzba = "";
+  vykresliSadzby();
+}
+function sadzbyOdober(i){ konceptOdober(i); vykresliSadzby(); }
+function sadzbyZahod(){ if(confirm("Zahodiť celý koncept?")){ konceptVycisti(); vykresliSadzby(); } }
+function sadzbyStiahni(){
+  const dnes = new Date().toISOString().slice(0,10);
+  const data = konceptDoSuboru(dnes);
+  const chyby = sadzbyOverSubor(data), Z = sadzbyOverZmenu(data);
+  if(chyby.length || Z.chyby.length){
+    alert("Súbor sa nedá vyexportovať:\n\n" + chyby.concat(Z.chyby).join("\n"));
+    return;
+  }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], {type:"application/json"}));
+  a.download = "sadzby.json"; a.click();
+}
+
+function sadzbyFormular(){
+  const S = _edSadzba ? SADZBY[_edSadzba] : null;
+  const akt = S ? S.h[S.h.length-1] : null;
+  const moznosti = Object.keys(SADZBY).map(k=>{
+    const s = SADZBY[k], a = s.h[s.h.length-1];
+    return `<option value="${k}" ${k===_edSadzba?"selected":""}>${esc(s.n)} — ${esc(sadzbaFormat(k, a.v))}</option>`;
+  }).join("");
+  let telo = "";
+  if(S){
+    const jePole = Array.isArray(akt.v);
+    telo = `
+      <div class="hint"><b>Teraz:</b> ${esc(sadzbaFormat(_edSadzba, akt.v))}${akt.od ? " od " + sadzbaDatum(akt.od) : " (odjakživa)"}
+        <br><span class="muted">${esc(akt.zdroj)}</span></div>
+      <div class="field"><label>Nová hodnota</label>
+        <input id="s_hodnota" ${jePole?"disabled":""} placeholder="${jePole?"pásma sa upravujú priamo v súbore":esc(String(akt.v))}"></div>
+      <div class="field"><label>Platí od</label><input type="date" id="s_od"></div>
+      <div class="field"><label>Zdroj</label><input id="s_zdroj" placeholder="paragraf, oznámenie alebo číslo predpisu">
+        <div class="muted">Bez zdroja sa hodnota uložiť nedá — je to jediné, čo o rok povie, odkiaľ to číslo je.</div></div>
+      ${_edChyby.length ? `<div class="err">${_edChyby.map(esc).join("<br>")}</div>` : ""}
+      <button class="btn" onclick="sadzbyPridaj()">Pridať do konceptu</button>`;
+  }
+  return `<div class="muted" style="margin-bottom:10px;line-height:1.55">
+      Hodnota <b>sa nikdy neprepisuje</b> — vždy sa pridáva nová s dátumom, odkedy platí.
+      Výstupom je súbor <b>sadzby.json</b>, ktorý nahradíš v repozitári a commitneš.
+      Kým sa nenasadí, appka počíta po starom.
+    </div>
+    <div class="field"><label>Ktorá sadzba</label>
+      <select id="s_kluc" onchange="sadzbyVyber(this.value)">
+        <option value="">— vyberte —</option>${moznosti}</select></div>
+    ${telo}
+    ${_edUpoz.length ? `<div class="hint warn">${_edUpoz.map(esc).join("<br>")}</div>` : ""}`;
+}
+
+function sadzbyKonceptHtml(){
+  if(!sadzbyKoncept.length) return "";
+  const riadky = sadzbyKoncept.map((z,i)=>{
+    const u = (z.upozornenia||[]).length ? `<br><span class="warnTxt">${z.upozornenia.map(esc).join("<br>")}</span>` : "";
+    return `<tr><td>${esc((SADZBY[z.kluc]||{}).n || z.kluc)}<div class="muted">${esc(z.zaznam.zdroj)}${u}</div></td>
+      <td>${sadzbaDatum(z.zaznam.od)}</td>
+      <td><b>${esc(sadzbaFormat(z.kluc, z.zaznam.v))}</b></td>
+      <td><a href="#" onclick="sadzbyOdober(${i});return false">✕</a></td></tr>`;
+  }).join("");
+  return `<h3 style="margin:18px 0 8px">Koncept — ${sadzbyKoncept.length} ${sadzbyKoncept.length===1?"zmena":"zmien"}</h3>
+    <table><thead><tr><th>Sadzba</th><th>Platí od</th><th>Nová hodnota</th><th></th></tr></thead><tbody>${riadky}</tbody></table>
+    <div style="margin-top:10px;display:flex;gap:8px">
+      <button class="btn" onclick="sadzbyStiahni()">Stiahnuť sadzby.json</button>
+      <button onclick="sadzbyZahod()">Zahodiť</button>
+    </div>
+    <div class="muted" style="margin-top:8px">Dopad na skutočné čísla si pozri v appke — má dáta, ktoré admin nemá.</div>`;
+}
+
+function sadzbyZoznamHtml(){
+  const P = sadzbyPrehlad();
+  const znak = {zdroj:"✓", dokumentacia:"~", kod:"!"};
+  const riadky = P.polozky.map(p=>`<tr${p.chceKontrolu?' class="chce"':''}>
+      <td>${znak[p.overenost]||"!"}</td>
+      <td>${esc(p.nazov)}<div class="muted">${esc(p.zdroj)}</div></td>
+      <td>${p.od ? sadzbaDatum(p.od) : "odjakživa"}</td>
+      <td>${p.kontrola ? sadzbaDatum(p.kontrola) : "—"}</td>
+      <td><b>${esc(sadzbaFormat(p.kluc, p.hodnota))}</b></td></tr>`).join("");
+  return `<h3 style="margin:18px 0 8px">Prehľad — ${P.chceKontrolu} z ${P.spolu} si pýta kontrolu</h3>
+    <table><thead><tr><th></th><th>Sadzba</th><th>Platí od</th><th>Kontrola</th><th>Hodnota</th></tr></thead>
+    <tbody>${riadky}</tbody></table>
+    <div class="muted" style="margin-top:8px">
+      ✓ overené proti zákonu · ~ prevzaté z dokumentácie · ! prepísané z kódu, zdroj nikto nekontroloval
+    </div>`;
+}
+
 function eur(v){ return (+v||0).toLocaleString("sk-SK",{minimumFractionDigits:0,maximumFractionDigits:0}) + " €"; }
 function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g, m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m])); }
 

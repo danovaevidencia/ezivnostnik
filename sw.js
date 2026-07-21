@@ -5,17 +5,27 @@
 //   · ezivnostnik.html  → NAJPRV SIEŤ, cache len ako záloha pri výpadku.
 //     Cache-first by znamenal, že nová verzia sa k používateľovi nedostane
 //     nikdy — presne ten problém, kvôli ktorému bolo treba appku preinštalovať.
+//   · sadzby.js          → NAJPRV SIEŤ, tak ako HTML. Je to KÓD, nie statika —
+//     cache-first by znamenal, že oprava vo výpočte sadzieb sa nikdy nedoručí.
+//     Do cache ale patrí, lebo bez neho sa appka offline vôbec nespustí.
+//   · sadzby.json        → LEN SIEŤ, necachujeme vôbec. Sú to daňové sadzby;
+//     stará kópia by znamenala počítanie starým zákonom. Appka si posledný
+//     platný súbor drží sama v pamäti zariadenia, takže offline je pokrytý
+//     a druhá kópia tu by len prekážala. Bez tejto vetvy by súbor spadol do
+//     „najprv cache" a keďže sa ťahá s ?v=<čas>, pribúdal by NOVÝ záznam
+//     v cache pri každom spustení appky.
 //   · ikony, manifest    → najprv cache (menia sa výnimočne)
 //   · CDN knižnice       → nechávame na HTTP cache prehliadača, sem nesiahame
 //
 //  Pri zmene appky staci zvysit VERZIA — stary cache sa vymaze pri aktivacii.
 // ═══════════════════════════════════════════════════════════════════════════
-const VERZIA = "2026.07.19-J";
+const VERZIA = "2026.07.20-BQ";
 const CACHE  = "ezivnostnik-" + VERZIA;
 
 // minimum na to, aby sa appka otvorila aj bez signálu
 const ZAKLAD = [
   "/ezivnostnik.html",
+  "/sadzby.js",
   "/site.webmanifest",
   "/icon-192.png",
   "/icon-512.png",
@@ -50,11 +60,23 @@ self.addEventListener("fetch", e => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;   // CDN a Supabase neriešime
 
-  const jeHTML = req.mode === "navigate"
-              || req.destination === "document"
-              || url.pathname.endsWith(".html");
+  // Sadzby: vždy zo siete, nikdy do cache. Keď sieť nie je, vrátime chybu —
+  // appka to očakáva a spadne späť na svoju uloženú kópiu, resp. na zabudovanú
+  // tabuľku. Radšej priznaná nedostupnosť než ticho podstrčená stará sadzba.
+  if (url.pathname.endsWith("/sadzby.json") || url.pathname === "/sadzby.json") {
+    e.respondWith(
+      fetch(req).catch(() => new Response("", { status: 504 }))
+    );
+    return;
+  }
 
-  if (jeHTML) {
+  // Kód sa obsluhuje rovnako ako HTML: najprv sieť, cache je len záloha.
+  const jeKod = req.mode === "navigate"
+             || req.destination === "document"
+             || url.pathname.endsWith(".html")
+             || url.pathname.endsWith("/sadzby.js");
+
+  if (jeKod) {
     // NAJPRV SIEŤ — nová verzia sa prejaví hneď po nasadení
     e.respondWith((async () => {
       try {
