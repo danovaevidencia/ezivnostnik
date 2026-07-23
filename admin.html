@@ -153,6 +153,31 @@ tr.chce td{background:#fffaf0}
       </div>
     </div>
 
+    <!-- VYSTAVENÉ FAKTÚRY ZA PREDPLATNÉ (naše tržby, nie tržby zákazníkov) -->
+    <div class="sec">
+      <div class="head"><h2>Vystavené faktúry za predplatné</h2><div class="sp"></div>
+        <select id="sfRok" onchange="nacitajSaasFaktury()" style="background:var(--bg2);color:var(--txt);border:1px solid var(--line);border-radius:7px;padding:5px 9px;font-size:13px"></select>
+        <button class="btn" onclick="exportSaasCsv()" style="margin-left:8px">CSV</button>
+      </div>
+      <div class="body">
+        <div id="sfLoading" class="loading">Načítavam faktúry…</div>
+        <div id="sfSuhrn" class="hidden" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px"></div>
+        <table id="sfTable" class="hidden">
+          <thead><tr>
+            <th>Číslo</th>
+            <th class="hide-sm">Dátum</th>
+            <th>Odberateľ</th>
+            <th class="hide-sm">IČ DPH</th>
+            <th class="r">Základ</th>
+            <th class="r">DPH</th>
+            <th class="r">Spolu</th>
+          </tr></thead>
+          <tbody id="sfBody"></tbody>
+        </table>
+        <div id="sfEmpty" class="empty hidden">V tomto roku zatiaľ žiadne faktúry.</div>
+      </div>
+    </div>
+
     <div class="sec">
       <div class="head"><h2>Zákazníci</h2><div class="sp"></div></div>
       <div class="body">
@@ -227,6 +252,14 @@ tr.chce td{background:#fffaf0}
           <button class="rowbtn" onclick="gdprExport()">📦 Export dát</button>
           <button class="rowbtn" style="border-color:var(--neg);color:var(--neg)" onclick="gdprZmazat()">🗑 Zmazať účet</button>
         </div>
+        <label class="chk" style="margin-top:10px;display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--mut)">
+          <input type="checkbox" id="cfgTestovaci">
+          Testovací zákazník — zmazať aj vystavené faktúry
+        </label>
+        <div style="margin-top:6px;font-size:11.5px;color:var(--mut);line-height:1.45">
+          Bez zaškrtnutia sa faktúry za predplatné <b>ponechajú</b> — sú to vaše daňové
+          doklady s archivačnou povinnosťou 10 rokov, nie dáta zákazníka.
+        </div>
       </div>
     </div>
     <div class="mf">
@@ -281,6 +314,111 @@ async function overAdmin(user){
   document.getElementById("adminView").classList.remove("hidden");
   nacitajPrehlad();
   vykresliSadzby();
+  pripravRokySaas();
+  nacitajSaasFaktury();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  VYSTAVENÉ FAKTÚRY ZA PREDPLATNÉ
+//
+//  Toto sú NAŠE tržby — faktúry, ktoré sme vystavili zákazníkom.
+//  Nepatria do bežného účtu (utopili by sa medzi konzultačnými faktúrami
+//  a majú vlastný číselný rad S<rok><poradie>), preto sú tu, za admin
+//  autentifikáciou. Prístup dáva politika `sfakt_admin_all`.
+//
+//  Rozdelenie podľa IČ DPH nie je kozmetika: odberateľ s IČ DPH ide do
+//  kontrolného výkazu do A.1, bez neho do D.2. Bez tohto rozpisu sa KV
+//  DPH z predplatného zostaviť nedá.
+// ═══════════════════════════════════════════════════════════════════
+let _saasFakturyAdmin = [];
+
+function penaz(v){ return (+v||0).toLocaleString("sk-SK",{minimumFractionDigits:2,maximumFractionDigits:2}) + " €"; }
+
+function pripravRokySaas(){
+  const sel = document.getElementById("sfRok");
+  const teraz = new Date().getFullYear();
+  sel.innerHTML = "";
+  for(let r = teraz; r >= teraz - 3; r--){
+    const o = document.createElement("option");
+    o.value = r; o.textContent = r;
+    sel.appendChild(o);
+  }
+}
+
+async function nacitajSaasFaktury(){
+  const rok = +document.getElementById("sfRok").value || new Date().getFullYear();
+  const loading = document.getElementById("sfLoading");
+  const tabulka = document.getElementById("sfTable");
+  const prazdne = document.getElementById("sfEmpty");
+  const suhrn = document.getElementById("sfSuhrn");
+  loading.classList.remove("hidden"); loading.textContent = "Načítavam faktúry…";
+  tabulka.classList.add("hidden"); prazdne.classList.add("hidden"); suhrn.classList.add("hidden");
+
+  const { data, error } = await sb.from("saas_faktury")
+    .select("cislo, vystavene, odb_nazov, odb_ico, odb_icdph, zaklad, dph, spolu, sadzba_dph")
+    .gte("vystavene", rok + "-01-01")
+    .lte("vystavene", rok + "-12-31T23:59:59")
+    .order("vystavene", { ascending: false });
+
+  if(error){ loading.textContent = "Chyba načítania: " + error.message; return; }
+  loading.classList.add("hidden");
+  _saasFakturyAdmin = data || [];
+
+  if(!_saasFakturyAdmin.length){ prazdne.classList.remove("hidden"); return; }
+
+  // súhrn — zvlášť platitelia DPH (KV DPH A.1) a neplatitelia (D.2)
+  const s = { poc:0, zaklad:0, dph:0, spolu:0,
+              pocA1:0, zakladA1:0, dphA1:0,
+              pocD2:0, zakladD2:0, dphD2:0 };
+  _saasFakturyAdmin.forEach(f=>{
+    const z = +f.zaklad||0, d = +f.dph||0, c = +f.spolu||0;
+    s.poc++; s.zaklad += z; s.dph += d; s.spolu += c;
+    if(String(f.odb_icdph||"").trim()){ s.pocA1++; s.zakladA1 += z; s.dphA1 += d; }
+    else { s.pocD2++; s.zakladD2 += z; s.dphD2 += d; }
+  });
+
+  suhrn.innerHTML = `
+    <div class="kpi" style="padding:12px"><div class="n mono" style="font-size:17px">${s.poc}</div><div class="l">Faktúr</div></div>
+    <div class="kpi" style="padding:12px"><div class="n mono amt" style="font-size:17px">${penaz(s.zaklad)}</div><div class="l">Základ spolu</div></div>
+    <div class="kpi w" style="padding:12px"><div class="n mono amt" style="font-size:17px">${penaz(s.dph)}</div><div class="l">DPH na výstupe</div></div>
+    <div class="kpi g" style="padding:12px"><div class="n mono amt" style="font-size:17px">${penaz(s.spolu)}</div><div class="l">Spolu s DPH</div></div>
+    <div class="kpi" style="padding:12px"><div class="n mono" style="font-size:15px">${s.pocA1} · ${penaz(s.zakladA1)}</div><div class="l">KV DPH — A.1 (s IČ DPH)</div></div>
+    <div class="kpi" style="padding:12px"><div class="n mono" style="font-size:15px">${s.pocD2} · ${penaz(s.zakladD2)}</div><div class="l">KV DPH — D.2 (bez IČ DPH)</div></div>
+  `;
+  suhrn.classList.remove("hidden");
+
+  document.getElementById("sfBody").innerHTML = _saasFakturyAdmin.map(f=>`
+    <tr>
+      <td class="mono">${esc(f.cislo||"—")}</td>
+      <td class="hide-sm">${esc(String(f.vystavene||"").slice(0,10))}</td>
+      <td>${esc(f.odb_nazov||"—")}<div class="email mono">${esc(f.odb_ico||"")}</div></td>
+      <td class="hide-sm mono">${f.odb_icdph ? esc(f.odb_icdph) : '<span style="color:var(--mut)">neplatca</span>'}</td>
+      <td class="r mono">${penaz(f.zaklad)}</td>
+      <td class="r mono">${penaz(f.dph)}</td>
+      <td class="r mono"><b>${penaz(f.spolu)}</b></td>
+    </tr>`).join("");
+  tabulka.classList.remove("hidden");
+}
+
+function exportSaasCsv(){
+  if(!_saasFakturyAdmin.length){ alert("Nie je čo exportovať."); return; }
+  const rok = document.getElementById("sfRok").value;
+  const hlavicka = ["Cislo","Datum","Odberatel","ICO","IC DPH","Zaklad","DPH","Spolu","Sadzba"];
+  const riadky = _saasFakturyAdmin.map(f=>[
+    f.cislo||"", String(f.vystavene||"").slice(0,10), f.odb_nazov||"",
+    f.odb_ico||"", f.odb_icdph||"",
+    (+f.zaklad||0).toFixed(2), (+f.dph||0).toFixed(2), (+f.spolu||0).toFixed(2),
+    Math.round((+f.sadzba_dph||0)*100) + "%",
+  ]);
+  const csv = [hlavicka, ...riadky]
+    .map(r=>r.map(x=>`"${String(x).replace(/"/g,'""')}"`).join(";")).join("\r\n");
+  // BOM, aby Excel otvoril diakritiku správne
+  const blob = new Blob(["\uFEFF"+csv], { type:"text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `saas_faktury_${rok}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 async function odhlas(){
@@ -442,19 +580,39 @@ async function gdprExport(){
 
 async function gdprZmazat(){
   if(!cfgFirmaId) return;
+  const err=document.getElementById("cfgErr");
+
+  // Testovací režim zmaže aj vystavené faktúry. Pri ostrom zákazníkovi sa
+  // nesmie stať omylom — je to zásah do účtovnej evidencie s 10-ročnou
+  // archivačnou povinnosťou, nie upratovanie.
+  const jeTest = document.getElementById("cfgTestovaci")?.checked === true;
+
   if(!confirm("Naozaj zmazať tento účet a VŠETKY jeho dáta? Túto akciu nie je možné vrátiť.")) return;
-  const err=document.getElementById("cfgErr"); err.textContent="Mažem…";
+
+  if(jeTest){
+    if(!confirm("TESTOVACÍ REŽIM\n\nZmažú sa AJ vystavené faktúry za predplatné, "+
+                "teda vaše daňové doklady.\n\nPri skutočnom zákazníkovi to NEROBTE — "+
+                "faktúry musíte archivovať 10 rokov.\n\nPokračovať?")) return;
+  }
+
+  err.textContent="Mažem…";
   try{
     const { data:{ session } } = await sb.auth.getSession();
     const res = await fetch(SUPABASE_URL + "/functions/v1/gdpr", {
       method:"POST",
       headers:{ "Content-Type":"application/json", "Authorization":"Bearer "+session.access_token },
-      body: JSON.stringify({ akcia:"zmazat", firma_id:cfgFirmaId })
+      body: JSON.stringify({ akcia:"zmazat", firma_id:cfgFirmaId, testovaci:jeTest })
     });
     const r = await res.json().catch(()=>({}));
     if(!res.ok || !r.ok){ err.textContent="Zmazanie zlyhalo: "+(r.error||res.status); return; }
+    const z = r.zmazane || {};
+    alert("Účet zmazaný.\n\n"+
+          (z.faktury!=null ? "Zmazaných faktúr: "+z.faktury+"\n"
+                           : "Faktúry ponechané (archivačná povinnosť): "+(z.faktury_ponechane??0)+"\n")+
+          "Zmazaných súborov: "+(z.subory??0));
     zavriCfg();
     nacitajPrehlad();
+    nacitajSaasFaktury();
   }catch(e){ err.textContent="Chyba: "+e.message; }
 }
 
