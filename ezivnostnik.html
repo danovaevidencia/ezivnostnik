@@ -760,7 +760,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.07.23-CL";  // zdieľaný generátor PDF faktúr (faktura_pdf.js)
+const APP_VERZIA = "2026.07.23-CM";  // zdieľaný generátor PDF faktúr + kontrola fakturačných údajov
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -10239,8 +10239,39 @@ async function zaevidujVsetkySaasFaktury(){
   otvorSaasFaktury();
 }
 
+// ── Fakturačné údaje sa do daňového dokladu zapíšu V MOMENTE PLATBY a už sa
+//    nemenia. Doklad vystavený s neúplnými údajmi sa dá opraviť len opravnou
+//    faktúrou, takže kontrola musí byť TU, pred odchodom na platobnú bránu —
+//    potom je neskoro.
+function chybajuceFakturacneUdaje(){
+  const m=firmaData.meta||{}, chyba=[];
+  if(!String(m.nazov||"").trim())  chyba.push("názov firmy");
+  if(!String(m.adresa||"").trim()) chyba.push("adresa");
+  if(!String(m.ico||"").trim())    chyba.push("IČO");
+  return chyba;
+}
+
 async function spustiPredplatne(plan, obdobie){
   if(localMode || !sb || !firmaId){ alert("Predplatné je dostupné len v prihlásenom (cloud) režime."); return; }
+
+  // bez týchto údajov by faktúra nespĺňala náležitosti daňového dokladu
+  const chyba=chybajuceFakturacneUdaje();
+  if(chyba.length){
+    alert("Pred zaplatením doplňte fakturačné údaje — inak vám vystavíme faktúru,\n"+
+          "ktorá nespĺňa náležitosti daňového dokladu.\n\n"+
+          "Chýba: "+chyba.join(", ")+"\n\n"+
+          "Doplňte ich v Nastaveniach → Údaje firmy a skúste znova.");
+    return;
+  }
+  // IČ DPH sa nedá vyžadovať tvrdo — väčšina živnostníkov nie je platiteľ DPH.
+  // Kto ale platiteľ je a IČ DPH nevyplní, dostane doklad, z ktorého si DPH
+  // neodpočíta, a nám rozbije kontrolný výkaz.
+  if(typeof jePlatcaDPH==="function" && jePlatcaDPH() && !String((firmaData.meta||{}).icdph||"").trim()){
+    if(!confirm("Máte nastavené, že ste platiteľ DPH, ale IČ DPH nemáte vyplnené.\n\n"+
+                "Na faktúre potom bude chýbať a nebudete si z nej môcť odpočítať DPH.\n\n"+
+                "Pokračovať aj tak?")) return;
+  }
+
   try{
     const { data:{ session } }=await sb.auth.getSession();
     const res=await fetch(SUPABASE_URL+"/functions/v1/stripe-checkout",{
