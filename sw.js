@@ -5,7 +5,7 @@
 //   · ezivnostnik.html  → NAJPRV SIEŤ, cache len ako záloha pri výpadku.
 //     Cache-first by znamenal, že nová verzia sa k používateľovi nedostane
 //     nikdy — presne ten problém, kvôli ktorému bolo treba appku preinštalovať.
-//   · sadzby.js          → NAJPRV SIEŤ, tak ako HTML. Je to KÓD, nie statika —
+//   · sadzby.js, faktura_pdf.js → NAJPRV SIEŤ, tak ako HTML. Je to KÓD, nie statika —
 //     cache-first by znamenal, že oprava vo výpočte sadzieb sa nikdy nedoručí.
 //     Do cache ale patrí, lebo bez neho sa appka offline vôbec nespustí.
 //   · sadzby.json        → LEN SIEŤ, necachujeme vôbec. Sú to daňové sadzby;
@@ -19,13 +19,14 @@
 //
 //  Pri zmene appky staci zvysit VERZIA — stary cache sa vymaze pri aktivacii.
 // ═══════════════════════════════════════════════════════════════════════════
-const VERZIA = "2026.07.22-CK";
+const VERZIA = "2026.07.23-CL";
 const CACHE  = "ezivnostnik-" + VERZIA;
 
 // minimum na to, aby sa appka otvorila aj bez signálu
 const ZAKLAD = [
   "/ezivnostnik.html",
   "/sadzby.js",
+  "/faktura_pdf.js",
   "/site.webmanifest",
   "/icon-192.png",
   "/icon-512.png",
@@ -71,10 +72,13 @@ self.addEventListener("fetch", e => {
   }
 
   // Kód sa obsluhuje rovnako ako HTML: najprv sieť, cache je len záloha.
+  // Každý vlastný .js je KÓD — nie statika. Cache-first by znamenal, že oprava
+  // vo výpočte sadzieb alebo v generátore faktúr sa k používateľovi nedostane.
+  // Preto sa tu netestuje zoznam mien, ale prípona: nový modul sa nezabudne.
   const jeKod = req.mode === "navigate"
              || req.destination === "document"
              || url.pathname.endsWith(".html")
-             || url.pathname.endsWith("/sadzby.js");
+             || url.pathname.endsWith(".js");
 
   if (jeKod) {
     // NAJPRV SIEŤ — nová verzia sa prejaví hneď po nasadení
