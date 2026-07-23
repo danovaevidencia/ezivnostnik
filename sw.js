@@ -19,7 +19,7 @@
 //
 //  Pri zmene appky staci zvysit VERZIA — stary cache sa vymaze pri aktivacii.
 // ═══════════════════════════════════════════════════════════════════════════
-const VERZIA = "2026.07.23-CM";
+const VERZIA = "2026.07.23-CN";
 const CACHE  = "ezivnostnik-" + VERZIA;
 
 // minimum na to, aby sa appka otvorila aj bez signálu

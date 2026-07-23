@@ -760,7 +760,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.07.23-CM";  // zdieľaný generátor PDF faktúr + kontrola fakturačných údajov
+const APP_VERZIA = "2026.07.23-CN";  // filter SaaS faktúr na vlastnú firmu (admin videl cudzie)
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -10045,6 +10045,12 @@ async function nacitajSaasFaktury(){
     const { data, error } = await sb.from("saas_faktury")
       .select("cislo, popis, obdobie_od, obdobie_do, zaklad, sadzba_dph, dph, spolu, mena, vystavene, "+
               "odb_nazov, odb_adresa, odb_ico, odb_dic, odb_icdph")
+      // FILTER JE POVINNÝ, nestačí RLS. Politika `sfakt_select` púšťa okrem
+      // vlastníka aj administrátora — takže adminovi vráti faktúry VŠETKÝCH
+      // zákazníkov a `autoZaevidujSaasFaktury` mu ich zaúčtuje do výdavkov
+      // ako cudzie náklady. Reálne sa to stalo: vlastná tržba skončila
+      // v našich výdavkoch. Appka si dáta scopuje sama, RLS je až druhá obrana.
+      .eq("firma_id", firmaId)
       .order("vystavene", { ascending:false }).limit(24);
     if(error) throw error;
     _saasFaktury = data || [];
