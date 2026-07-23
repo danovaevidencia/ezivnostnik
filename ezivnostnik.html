@@ -453,6 +453,14 @@ button{font-family:inherit;cursor:pointer}
 .ob-card .ob-lead{font-size:14px;color:var(--ink-soft);margin-bottom:20px;line-height:1.55}
 .ob-field{margin-bottom:15px}
 .fe-nasep{position:absolute;left:0;right:0;top:100%;z-index:50;background:var(--paper,#fff);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 28px rgba(19,28,43,.14);max-height:280px;overflow:auto;margin-top:4px}
+/* indikátor hľadania v registri — RPO cez proxy odpovedá aj niekoľko sekúnd,
+   bez spätnej väzby to vyzerá, že našepkávač nefunguje */
+.ob-hladam{position:absolute;right:12px;bottom:13px;display:flex;align-items:center;gap:7px;
+  font-size:12px;color:var(--ink-soft);background:var(--paper,#fff);padding-left:8px;pointer-events:none}
+.ob-spin{width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--brand,#1f5fa8);
+  border-radius:50%;display:inline-block;animation:obSpin .7s linear infinite;flex:none}
+@keyframes obSpin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.ob-spin{animation-duration:2.4s}}
 .fe-nasep-item{padding:10px 13px;cursor:pointer;border-bottom:1px solid var(--line-soft,#eef2f6)}
 .fe-nasep-item:last-child{border-bottom:none}
 .fe-nasep-item:hover{background:var(--brand-lite,#eef4fb)}
@@ -760,7 +768,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.07.23-CN";  // filter SaaS faktúr na vlastnú firmu (admin videl cudzie)
+const APP_VERZIA = "2026.07.23-CP";  // indikátor hľadania v registri pri onboardingu
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -7773,7 +7781,30 @@ async function doplnFirmuPodlaICO(){
     if(stav){ stav.textContent="Register sa nepodarilo osloviť — vyplňte údaje ručne."; stav.style.color="var(--warn)"; }
   }
 }
-function ulozNastavenia(){
+async function ulozNastavenia(){
+  // ── IČO musí byť jedinečné naprieč účtami ──
+  // Kontrola ide PRED akoukoľvek zmenou stavu, aby sa pri odmietnutí neuložilo
+  // nič napoly. Appka cudzie firmy kvôli RLS nevidí, preto sa pýta databázy
+  // cez `ico_obsadene` (security definer) — tá vráti len true/false.
+  // Skutočnú záruku dáva unikátny index `firmy_ico_unik`; toto je len slušná
+  // hláška namiesto surovej chyby z databázy, preto výpadok kontroly
+  // (offline, chyba RPC) ukladanie nezablokuje — index podrží.
+  if(document.getElementById("set_ico") && sb && !localMode){
+    const noveIco = String(val("set_ico")||"").replace(/\s/g,"");
+    if(noveIco){
+      try{
+        const { data, error } = await sb.rpc("ico_obsadene", { p_ico: noveIco });
+        if(!error && data === true){
+          alert("IČO "+noveIco+" už používa iný účet.\n\n"+
+                "Na jedno IČO môže byť založený len jeden účet. Ak ste si omylom "+
+                "vytvorili dva, prihláste sa do toho pôvodného alebo nás kontaktujte "+
+                "na podpora@ezivnostnik.eu.");
+          return;
+        }
+      }catch(_){ /* kontrola je pomôcka, nie podmienka — index podrží */ }
+    }
+  }
+
   if(!firmaData.settings) firmaData.settings={};
   const s=firmaData.settings, num=(id,def)=>{const v=parseFloat(val(id));return isNaN(v)?def:v;};
   // daňové sadzby
@@ -14892,7 +14923,16 @@ async function ulozFirmu(){
     if(res.error) throw res.error;
     firmaId=res.data.id; firmaDirty=false;
     cloudMsg("Uložené do cloudu ✓ Dáta sú teraz bezpečne online.","ok"); setSync("saved"); zobrazFirmu();
-  }catch(e){ cloudMsg("Uloženie zlyhalo: "+e.message,"err"); setSync("offline"); }
+  }catch(e){
+    // Index `firmy_ico_unik` je skutočná záruka jedinečnosti IČO a ohlási sa
+    // až tu, surovou hláškou z databázy. Preložíme ju do zrozumiteľnej vety —
+    // používateľ nemá vedieť, ako sa volá náš index.
+    const hlaska = /firmy_ico_unik|duplicate key/i.test(String(e.message||""))
+      ? "Na toto IČO už existuje iný účet. Na jedno IČO môže byť založený len "+
+        "jeden účet — prihláste sa do pôvodného alebo napíšte na podpora@ezivnostnik.eu."
+      : "Uloženie zlyhalo: "+e.message;
+    cloudMsg(hlaska,"err"); setSync("offline");
+  }
 }
 
 function exportFirmu(){
@@ -15035,6 +15075,7 @@ function obKrokObsah(k){
       <div class="ob-lead">Začnite písať názov firmy — ponúkneme vám firmy z registra. Ak názov nenájdete, zadajte IČO. Všetko sa dá neskôr upraviť.</div>
       <div class="ob-field" style="position:relative"><label>Názov / meno firmy</label>
         <input id="ob_nazov" value="${esc(o.nazov)}" autocomplete="off" placeholder="Začnite písať názov firmy…" oninput="obHladajFirmu(this.value)">
+        <div id="ob_hladam" class="ob-hladam" style="display:none"><span class="ob-spin"></span><span id="ob_hladamText">Hľadám v registri…</span></div>
         <div id="ob_nasep" class="fe-nasep" style="display:none"></div>
       </div>
       <div class="ob-field"><label>IČO <span style="font-weight:400;color:var(--ink-soft);font-size:12px">(alebo doplňte podľa neho)</span></label>
@@ -15224,13 +15265,33 @@ function obPredch(){ obUlozAktualne(); if(_ob.krok>1){ _ob.krok--; renderOnboard
 
 // IČO → RPO (znovupoužije existujúcu logiku doplnFirmuPodlaICO cez dočasné polia)
 // našeptávač firiem v onboardingu (podľa názvu, s debounce)
-let _obHladajTimer=null, _obHladajPosledny="";
+// Register (RPO cez proxy) odpovedá aj niekoľko sekúnd. Bez spätnej väzby to
+// pôsobí, že našepkávač nefunguje, a používateľ dopíše názov ručne. Preto sa
+// hneď po treťom znaku zobrazí indikátor a po chvíli aj vysvetlenie, na čo sa čaká.
+let _obHladajTimer=null, _obHladajPosledny="", _obDlhoTimer=null;
+
+function obIndikator(zapnut, text){
+  const el=document.getElementById("ob_hladam");
+  if(!el) return;
+  if(_obDlhoTimer){ clearTimeout(_obDlhoTimer); _obDlhoTimer=null; }
+  if(!zapnut){ el.style.display="none"; return; }
+  const t=document.getElementById("ob_hladamText");
+  if(t) t.textContent=text||"Hľadám v registri…";
+  el.style.display="flex";
+  // ak to trvá, povedz prečo — mlčiaci spinner je horší než žiadny
+  _obDlhoTimer=setTimeout(()=>{
+    const t2=document.getElementById("ob_hladamText");
+    if(t2) t2.textContent="Register odpovedá pomaly, o chvíľu ponúkneme názvy…";
+  }, 2500);
+}
+
 function obHladajFirmu(q){
   q=(q||"").trim();
   _ob.nazov=q;
   const box=document.getElementById("ob_nasep");
   if(_obHladajTimer) clearTimeout(_obHladajTimer);
-  if(q.length<3){ if(box){box.style.display="none";} return; }
+  if(q.length<3){ if(box){box.style.display="none";} obIndikator(false); return; }
+  obIndikator(true);
   _obHladajTimer=setTimeout(async ()=>{
     _obHladajPosledny=q;
     try{
@@ -15238,8 +15299,9 @@ function obHladajFirmu(q){
       const results=await rpoFetch(jeIco ? {identifier:q.replace(/\s/g,"")} : {fullName:q});
       if(q!==_obHladajPosledny) return;   // medzitým používateľ písal ďalej
       const vysledky=(results||[]).slice(0,8).map(feMapFirmu).filter(x=>x.nazov);
+      obIndikator(false);
       obZobrazNasep(vysledky);
-    }catch(_){ if(box) box.style.display="none"; }
+    }catch(_){ obIndikator(false); if(box) box.style.display="none"; }
   }, 350);
 }
 function obZobrazNasep(vysledky){
