@@ -768,7 +768,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.07.23-CP";  // indikátor hľadania v registri pri onboardingu
+const APP_VERZIA = "2026.07.24-CS";  // kontrola konzistencie na všetkých cestách importu
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -4205,6 +4205,23 @@ function feMapFirmu(r){
   }
   return {nazov:T(nazov), ico:T(ico), dic, icdph, adresa};
 }
+// Odvodí sadzbu DPH z prečítaných hodnôt. Pri OCR chybe býva nesprávna
+// VEĽKOSŤ čísel, nie ich pomer — 9,36 a 2,15 dá 22,97 %, teda zjavne 23 %.
+// Výsledok sa priloží k najbližšej zákonnej sadzbe; ak sa odvodiť nedá,
+// vráti základnú.
+const ZAKONNE_SADZBY_DPH = [0, 0.05, 0.19, 0.23];
+function odvodSadzbuDPH(bez, dph, zaloha){
+  const b=+bez||0, d=+dph||0;
+  if(b>0 && d>0){
+    const pomer=d/b;
+    if(pomer>0 && pomer<0.5){
+      return ZAKONNE_SADZBY_DPH.reduce((a,x)=>Math.abs(x-pomer)<Math.abs(a-pomer)?x:a, 0.23);
+    }
+  }
+  const zo=(firmaData&&firmaData.settings&&firmaData.settings.sadzbaDPH);
+  return (zaloha!=null?zaloha:(zo!=null?+zo:0.23));
+}
+
 // UI: dotiahne doklad z FS a vyplní OCR formulár (partner, suma, IČO, IČ DPH, dátum)
 async function ekasaDoplnDoFormulara(receiptId){
   const stav=document.getElementById("ekasaStav");
@@ -4219,9 +4236,27 @@ async function ekasaDoplnDoFormulara(receiptId){
   if(d.ico) set("m_dodIco", d.ico);
   if(d.icdph){ set("m_dodIcDph", d.icdph); const el=document.getElementById("m_dodIcDph"); if(el) skontrolujICDPHpole(el); }
   if(d.suma!=null){ set("m_spolu", d.suma);
-    // dopočítaj základ/DPH z 23% ak nie sú
+    // FS je AUTORITA nad OCR. Predtým tu bolo `if(bez && !bez.value)`, teda
+    // prepočet len do prázdneho poľa — lenže OCR ich už vyplnilo, často zle.
+    // Doklad potom niesol správnu sumu z FS a k nej základ a DPH z OCR, ktoré
+    // s ňou nesedeli, a appka napísala „Doplnené z FS". Reálny prípad:
+    // spolu 71,51 z FS, ale základ 9,36 + DPH 2,15 = 11,51 z OCR.
     const bez=document.getElementById("m_bez"), dph=document.getElementById("m_dph");
-    if(bez && !bez.value){ const z=r2(d.suma/1.23); bez.value=z; if(dph) dph.value=r2(d.suma-z); }
+    if(bez){
+      const bezV=parseFloat(bez.value)||0, dphV=parseFloat(dph&&dph.value)||0;
+      const sediaSFS = bezV>0 && Math.abs(r2(bezV+dphV)-r2(d.suma))<=0.02;
+      if(!sediaSFS){
+        // ak proxy pošle rozpis z FS, má prednosť pred akýmkoľvek dopočtom
+        if(d.zaklad!=null && d.dphSuma!=null){
+          bez.value=r2(d.zaklad); if(dph) dph.value=r2(d.dphSuma);
+        } else {
+          // sadzbu odvodíme z toho, čo prečítalo OCR — chybná býva veľkosť,
+          // nie pomer; ak sa odvodiť nedá, ideme na základnú sadzbu
+          const s=odvodSadzbuDPH(bezV, dphV);
+          const z=r2(d.suma/(1+s)); bez.value=z; if(dph) dph.value=r2(d.suma-z);
+        }
+      }
+    }
   }
   if(d.datum){ const el=document.getElementById("m_datum"); if(el){ const dd=String(d.datum).slice(0,10); if(/^\d{4}-\d{2}-\d{2}$/.test(dd)) el.value=dd; } }
   // IČ DPH: FS ho v odpovedi často nemá — skús zapamätaného partnera podľa IČO
@@ -4734,6 +4769,24 @@ function editVydavok(idx){
     } else {
       obj.bez=parseFloat(val("m_bez"))||0; obj.dph=parseFloat(val("m_dph"))||0; obj.spolu=parseFloat(val("m_spolu"))||r2(obj.bez+obj.dph);
       delete obj.rozpis; delete obj.viacSadzieb;
+      // rovnaká kontrola ako pri doklade z fotky — tu chytá preklepy
+      const nez=dokladNekonzistentny(obj.bez, obj.dph, obj.spolu);
+      if(nez){
+        const opravit=confirm(
+          "Sumy si odporujú:\n\n"+
+          "  základ "+eur(obj.bez)+" + DPH "+eur(obj.dph)+" = "+eur(nez.sucet)+"\n"+
+          "  ale Spolu je "+eur(obj.spolu)+"\n\n"+
+          "Prepočítať základ a DPH zo sumy Spolu pri sadzbe "+Math.round(nez.sadzba*100)+" %?\n\n"+
+          "  základ "+eur(nez.navrhBez)+" + DPH "+eur(nez.navrhDph)+"\n\n"+
+          "OK = opraviť · Zrušiť = opravím ručne");
+        if(opravit){
+          const eb=document.getElementById("m_bez"), ed=document.getElementById("m_dph");
+          if(eb) eb.value=nez.navrhBez;
+          if(ed) ed.value=nez.navrhDph;
+          if(typeof mAktualizujOddiel==="function") mAktualizujOddiel();
+        }
+        return false;
+      }
     }
     // KV DPH: doklad s DPH (od slovenského platiteľa) MUSÍ mať platné IČ DPH pre odpočet
     const dphSuma=(+obj.dph)||0;
@@ -4964,6 +5017,23 @@ function vypisPridajVydavok(txId){
   `, ()=>{
     const datum=val("m_datum"); if(!datum){ alert("Zadajte dátum."); return false; }
     const obj={druh:val("m_druh"),partner:val("m_partner"),popis:val("m_popis"),datum,bez:parseFloat(val("m_bez"))||0,dph:parseFloat(val("m_dph"))||0,spolu:parseFloat(val("m_spolu"))||0,mesiac:datum.slice(0,7),zdroj:"vypis",vypisId:tx.id||tx.datum+tx.suma};
+    // hodnoty sú predvyplnené konzistentne, ale používateľ ich môže prepísať
+    const nez=dokladNekonzistentny(obj.bez, obj.dph, obj.spolu);
+    if(nez){
+      const opravit=confirm(
+        "Sumy si odporujú:\n\n"+
+        "  základ "+eur(obj.bez)+" + DPH "+eur(obj.dph)+" = "+eur(nez.sucet)+"\n"+
+        "  ale Spolu je "+eur(obj.spolu)+"\n\n"+
+        "Prepočítať zo sumy Spolu pri sadzbe "+Math.round(nez.sadzba*100)+" %?\n\n"+
+        "  základ "+eur(nez.navrhBez)+" + DPH "+eur(nez.navrhDph)+"\n\n"+
+        "OK = opraviť · Zrušiť = opravím ručne");
+      if(opravit){
+        const eb=document.getElementById("m_bez"), ed=document.getElementById("m_dph");
+        if(eb) eb.value=nez.navrhBez;
+        if(ed) ed.value=nez.navrhDph;
+      }
+      return false;
+    }
     if(!firmaData.vydavky) firmaData.vydavky=[];
     obj.id = obj.id || ("v"+Date.now().toString(36)+Math.random().toString(36).slice(2,7));
     firmaData.vydavky.push(obj); zapamatajPartnera(obj); poZmene(); appBanka();
@@ -5166,6 +5236,21 @@ function jeNa5Centov(suma){
   return c%5===0;
 }
 // zistí zaokrúhlenie: rozdiel medzi zaplatenou a rozpísanou sumou
+// Sedí doklad sám so sebou? Vracia null keď je v poriadku, inak popis nezhody.
+// JEDNO miesto pre celé pravidlo — používa ho OCR dialóg, ručný formulár aj
+// hromadný import. Kopírovať ho na tri miesta by znamenalo, že sa raz rozídu.
+// Hotovostné zaokrúhlenie (do 2 centov na násobok 5) je legitímne, nie chyba.
+function dokladNekonzistentny(bez, dph, spolu){
+  const b=+bez||0, d=+dph||0, s=+spolu||0;
+  if(s<=0) return null;                       // bez sumy niet čo porovnávať
+  const rozdiel=r2(r2(b+d)-r2(s));
+  if(Math.abs(rozdiel)<=0.005) return null;   // sedí
+  if(zistiZaokruhlenie(b,d,s)!==0) return null; // hotovostné zaokrúhlenie
+  const sadzba=odvodSadzbuDPH(b,d);
+  const navrhBez=r2(s/(1+sadzba));
+  return { rozdiel, sadzba, navrhBez, navrhDph:r2(s-navrhBez), sucet:r2(b+d) };
+}
+
 function zistiZaokruhlenie(bez, dph, spolu){
   const rozpis=r2((+bez||0)+(+dph||0));
   const zapl=r2(+spolu||0);
@@ -13621,6 +13706,16 @@ async function faktPdfSpracuj(e){
       const R=await spracujDokladSubor(f, setStav);
       R._nazovSuboru=f.name;
       if(!R._chyba){
+        // Doklad, ktorý si sám odporuje, sa neprepašuje do evidencie ani tu.
+        // Pri hromadnom importe sa nepýtame na každý súbor zvlášť — to by pri
+        // dvadsiatich dokladoch znamenalo dvadsať okien. Prepočítame ho zo sumy
+        // Spolu a označíme, aby to používateľ videl v náhľade pred importom.
+        const nez=dokladNekonzistentny(R.bez, R.dph, R.spolu);
+        if(nez && !(R.rozpis&&R.rozpis.length>1)){
+          R._povodneBez=R.bez; R._povodneDph=R.dph;
+          R.bez=nez.navrhBez; R.dph=nez.navrhDph;
+          R._opravene=true;
+        }
         R._duplicita=faktPdfJeDuplicita(R.cislo, R.spolu);
         R._import=!R._duplicita;
       }
@@ -13672,9 +13767,13 @@ function faktPdfNahlad(){
     // KV DPH potrebuje IČ DPH dodávateľa — upozorni, ak chýba (a nie je to zahraničný reverse charge)
     const chybaIcDph = !R.zahranicny && !(R.dodavatelIcDph||R.icdph);
     const icdphBadge = chybaIcDph?'<span class="apill warn" style="font-size:9px" title="Bez IČ DPH bude doklad neúplný v kontrolnom výkaze">chýba IČ DPH</span>':'';
+    // doklad, ktorého základ + DPH nesedeli so sumou — prepočítali sme ho
+    const opravBadge = R._opravene
+      ? '<span class="apill warn" style="font-size:9px" title="Základ '+eur(R._povodneBez||0)+' + DPH '+eur(R._povodneDph||0)+' nesedeli so sumou '+eur(R.spolu||0)+'. Prepočítali sme ich zo sumy Spolu — skontrolujte podľa originálu.">prepočítané</span>'
+      : '';
     return `<div class="arow" style="grid-template-columns:auto 2fr 1fr;align-items:start;gap:8px">
       <input type="checkbox" ${R._import?'checked':''} ${R._duplicita?'':''} onchange="_faktPdfData[${i}]._import=this.checked" style="margin-top:3px">
-      <div style="min-width:0"><div class="acol-strong" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(R.partner||"—")} ${efaktBadge}${vlastnaBadge}${dupBadge}${zahrBadge}${viacBadge}${icdphBadge}</div><div class="acol-muted">${R.cislo?'č. '+esc(R.cislo)+' · ':''}${R.datum?fmtDatum(R.datum):'bez dátumu'}${(R.dodavatelIcDph||R.icdph)?' · '+esc(R.dodavatelIcDph||R.icdph):''}</div></div>
+      <div style="min-width:0"><div class="acol-strong" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(R.partner||"—")} ${efaktBadge}${vlastnaBadge}${dupBadge}${zahrBadge}${viacBadge}${icdphBadge}${opravBadge}</div><div class="acol-muted">${R.cislo?'č. '+esc(R.cislo)+' · ':''}${R.datum?fmtDatum(R.datum):'bez dátumu'}${(R.dodavatelIcDph||R.icdph)?' · '+esc(R.dodavatelIcDph||R.icdph):''}</div></div>
       <div class="acol-sum">${eur(R.spolu||0)}</div>
     </div>`;
   }).join('');
@@ -13704,7 +13803,11 @@ function faktPdfNahlad(){
       firmaData.vydavky.push(obj); zapamatajPartnera(obj); pridane++;
     });
     poZmene(); appVydavky();
-    setTimeout(()=>alert("Importovaných "+pridane+" faktúr."+(preskocene?"\nPreskočených "+preskocene+" duplicít (už evidované).":"")),100);
+    const opravenych=_faktPdfData.filter(R=>R._import&&R._opravene).length;
+    setTimeout(()=>alert("Importovaných "+pridane+" faktúr."
+      +(preskocene?"\nPreskočených "+preskocene+" duplicít (už evidované).":"")
+      +(opravenych?"\n\n⚠ Pri "+opravenych+" dokladoch nesedel základ + DPH so sumou Spolu — "
+        +"prepočítali sme ich zo sumy Spolu. Skontrolujte ich podľa originálov.":"")),100);
   });
 }
 // ── eKASA: čítanie QR kódu z pokladničného bločku (Release 10) ──
@@ -13888,6 +13991,48 @@ function otvorOcrVysledok(R){
       }
     }
     const litre=parseFloat(val("m_litre"))||0;
+
+    // ── Doklad musí sedieť sám so sebou ──
+    // OCR sa pri fotke bločku mýli a mýliť sa bude vždy. Appka si však vie
+    // overiť, že základ + DPH = spolu, a bez toho doklad prijať nesmie:
+    // do daňovej evidencie by sa dostalo číslo, ktoré neexistuje na papieri.
+    // Reálny prípad: 9,36 + 2,15 = 11,51 pri sume 71,51.
+    const bezV=parseFloat(val("m_bez"))||0;
+    const dphV=parseFloat(val("m_dph"))||0;
+    const spoluV=parseFloat(val("m_spolu"))||0;
+    const nezhoda=dokladNekonzistentny(bezV, dphV, spoluV);
+    if(nezhoda){
+      const opravit=confirm(
+        "Údaje na doklade si odporujú:\n\n"+
+        "  základ "+eur(bezV)+" + DPH "+eur(dphV)+" = "+eur(nezhoda.sucet)+"\n"+
+        "  ale v poli Spolu je "+eur(spoluV)+"\n\n"+
+        "Býva to chyba pri čítaní dokladu. Ak je suma Spolu správna, prepočítame "+
+        "základ a DPH pri sadzbe "+Math.round(nezhoda.sadzba*100)+" %:\n\n"+
+        "  základ "+eur(nezhoda.navrhBez)+" + DPH "+eur(nezhoda.navrhDph)+"\n\n"+
+        "OK = opraviť · Zrušiť = opravím ručne");
+      if(opravit){
+        const eb=document.getElementById("m_bez"), ed=document.getElementById("m_dph");
+        if(eb) eb.value=nezhoda.navrhBez;
+        if(ed) ed.value=nezhoda.navrhDph;
+        if(typeof mAktualizujOddiel==="function") mAktualizujOddiel();
+      }
+      // v oboch prípadoch sa vraciame do formulára, nech používateľ vidí,
+      // s akými číslami doklad naozaj uloží
+      return false;
+    }
+
+    // ── Litre: cena za liter musí byť v rozumnom rozsahu ──
+    // `mKontrolaLitre` to zobrazuje pri písaní, ale pri hodnotách z OCR sa
+    // nikdy nespustí — do poľa nikto nepíše. Preto kontrola aj tu.
+    if(litre>0 && spoluV>0){
+      const cenaZaLiter=spoluV/litre;
+      if(cenaZaLiter>2.5 || cenaZaLiter<0.8){
+        if(!confirm("Cena "+cenaZaLiter.toFixed(2)+" €/l je nezvyčajná.\n\n"+
+                    "Pri sume "+eur(spoluV)+" a "+litre+" l to vyzerá na chybu v litroch.\n"+
+                    "Litre idú do knihy jázd a do spotreby, takže chyba sa prenesie ďalej.\n\n"+
+                    "Naozaj uložiť s týmito litrami?")) return false;
+      }
+    }
     const obj={druh:druh,partner:val("m_partner"),cislo:val("m_cislo")||"",variabilny:val("m_vs")||"",popis:val("m_popis"),datum:datum,bez:parseFloat(val("m_bez"))||0,dph:parseFloat(val("m_dph"))||0,spolu:parseFloat(val("m_spolu"))||0,mesiac:datum.slice(0,7),zdroj:R.ekasaId?"ekasa":"ocr",
       dodavatelIco:val("m_dodIco")||"", dodavatelIcDph:dodIcDph,
       zahranicny:jeZahr, kodKrajiny:val("m_kodKrajiny")||""};
@@ -13921,6 +14066,9 @@ function otvorOcrVysledok(R){
   // názov firmy over v registri podľa IČO — OCR sa v názve mýli častejšie než v čísle
   setTimeout(ocrNazovZRegistra, 200);
   if(typeof mAktualizujOddiel==="function") setTimeout(mAktualizujOddiel, 40);
+  // Kontrola litrov visela len na `oninput`, takže pri hodnotách predvyplnených
+  // z OCR sa nikdy nespustila — presne tam, kde je chyba najpravdepodobnejšia.
+  if(typeof mKontrolaLitre==="function") setTimeout(mKontrolaLitre, 40);
 }
 
 // ═══ DAŇOVÝ KALENDÁR — reálne povinnosti dopočítané z profilu ═══
