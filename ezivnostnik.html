@@ -768,7 +768,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.07.25-CW";  // oprava: prázdne Párovanie (parJednoznacny × nový tvar kandidátov), súhrn Banky na mobile
+const APP_VERZIA = "2026.07.25-CY";  // kniha jázd: tachometer naprieč knihou, kontrola oproti vozidlu a tankovaniam
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -1807,6 +1807,83 @@ function optimalizujMesiac(month){
   return {novy:vysledok, povodneKm, novyKm, rozdelenych:naRozdelenie.length, novychDni:novejazdy.length, ponechanych:ponechane.length};
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  TACHOMETER — spojitosť naprieč celou knihou
+//
+//  Stav tachometra nie je nezávislý údaj: `kon` jednej jazdy MUSÍ byť `poc`
+//  nasledujúcej, inak kniha nedáva zmysel a pri kontrole je to prvé, čo sa
+//  overuje. Dovtedy ho reťazila len optimalizácia, a to per mesiac — import
+//  viacerých mesiacov naraz teda nechal jazdy bez tachometra úplne.
+//
+//  Funkcia prepočítava OD KOTVY: poslednej jazdy pred `odDatumu`, ktorá má
+//  platný `kon`. Staršie jazdy sa nedotýkajú — prepisovať historickú knihu
+//  kvôli importu nových mesiacov by bola strata dát, nie oprava.
+//  Bez kotvy sa použije `settings.tachometer` (ručne zadaný počiatočný stav).
+// ═══════════════════════════════════════════════════════════════
+function prepocitajTachometer(odDatumu, dryRun){
+  const jazdy=(firmaData.jazdy||[]).slice()
+    .filter(j=>jazdaDatum(j))
+    .sort((a,b)=>{ const da=jazdaDatum(a), db=jazdaDatum(b);
+      if(da-db) return da-db;
+      return String(a.dt||"").localeCompare(String(b.dt||"")); });
+  if(!jazdy.length) return {upravenych:0, odKm:0, doKm:0};
+
+  const hranica = odDatumu ? new Date(odDatumu) : null;
+  let stav=null, i=0;
+  if(hranica){
+    // kotva = posledná jazda PRED hranicou s platným koncovým stavom
+    for(let k=0;k<jazdy.length;k++){
+      if(jazdaDatum(jazdy[k])>=hranica) break;
+      if(+jazdy[k].kon>0){ stav=+jazdy[k].kon; i=k+1; }
+      else i=k+1;
+    }
+  }
+  if(stav==null){
+    // bez kotvy: prvá jazda si nesie vlastný počiatok, inak ručný stav z nastavení
+    stav = +jazdy[i]?.poc || +(firmaData.settings&&firmaData.settings.tachometer) || 0;
+  }
+  if(!(stav>0)) return {upravenych:0, doplnenych:0, posunutych:0, odKm:0, doKm:0, bezKotvy:true};
+
+  const odKm=stav; let doplnenych=0, posunutych=0;
+  for(; i<jazdy.length; i++){
+    const j=jazdy[i], km=+j.km||0;
+    const novyPoc=r2(stav), novyKon=r2(stav+km);
+    const maloTacho = (+j.poc>0 || +j.kon>0);
+    if(j.poc!==novyPoc || j.kon!==novyKon){
+      // rozlíšenie je podstatné: DOPLNENIE prázdneho poľa je bezpečné,
+      // POSUN existujúceho stavu prepisuje už vedený záznam
+      if(maloTacho) posunutych++; else doplnenych++;
+      if(!dryRun){ j.poc=novyPoc; j.kon=novyKon; }
+    }
+    stav=novyKon;
+  }
+  return {upravenych:doplnenych+posunutych, doplnenych, posunutych, odKm, doKm:r2(stav)};
+}
+
+// Miesta, kde sa reťaz tachometra pretrhla (kon ≠ poc nasledujúcej).
+function tachometerDiery(){
+  const jazdy=(firmaData.jazdy||[]).slice()
+    .filter(j=>jazdaDatum(j) && (+j.poc>0 || +j.kon>0))
+    .sort((a,b)=>{ const da=jazdaDatum(a), db=jazdaDatum(b);
+      if(da-db) return da-db;
+      return String(a.dt||"").localeCompare(String(b.dt||"")); });
+  const out=[];
+  for(let i=1;i<jazdy.length;i++){
+    const pred=jazdy[i-1], akt=jazdy[i];
+    const kon=+pred.kon||0, poc=+akt.poc||0;
+    if(!kon || !poc) continue;
+    const rozdiel=r2(poc-kon);
+    // Znamienko rozhoduje o závažnosti:
+    //  · KLADNÝ rozdiel = medzi jazdami sa jazdilo bez záznamu. Pri aute
+    //    v obchodnom majetku je to bežné (súkromné jazdy) a nie je to chyba —
+    //    len to treba vedieť vysvetliť.
+    //  · ZÁPORNÝ rozdiel = jazda začína skôr, než skončila predošlá. To je
+    //    prekryv, teda dvojité započítanie kilometrov — vždy chyba.
+    if(Math.abs(rozdiel)>0.5) out.push({pred, akt, rozdiel, prekryv:rozdiel<0});
+  }
+  return out;
+}
+
 // strážca konzistencie knihy jázd
 function jazdyKontrola(){
   const out=[]; const jazdy=(firmaData.jazdy||[]).slice();
@@ -1820,6 +1897,21 @@ function jazdyKontrola(){
   if(sukr && autoRezim()==="100") out.push(`${sukr} ${sukr===1?'jazda je označená ako súkromná':'jázd je označených ako súkromných'} — pri plnom odpočte DPH na to nemáte nárok.`);
   const vikendBezUcelu=jazdy.filter(j=>{ const dw=dowOf(j); return (dw===0||dw===6) && !jazdaSukromna(j) && !String(j.ucel||"").trim(); }).length;
   if(vikendBezUcelu) out.push(`${vikendBezUcelu} víkendových jázd nemá účel ani príznak súkromnej — pri kontrole sa naň pýtajú ako prvé.`);
+
+  // Spojitosť tachometra: `kon` jazdy musí byť `poc` nasledujúcej. Je to prvá
+  // vec, ktorú kontrola pri knihe jázd overuje, a dovtedy sa nesledovala vôbec.
+  const bezTacho=jazdy.filter(j=>jazdaDatum(j) && !(+j.poc>0) && !(+j.kon>0)).length;
+  if(bezTacho) out.push(`${bezTacho} ${bezTacho===1?'jazda nemá':'jázd nemá'} stav tachometra — spustite Prepočet tachometra v knihe jázd.`);
+  const diery=tachometerDiery();
+  const prekryvy=diery.filter(d=>d.prekryv), medzery=diery.filter(d=>!d.prekryv);
+  if(prekryvy.length){
+    const d0=prekryvy[0];
+    out.push(`Tachometer sa prekrýva na ${prekryvy.length} ${prekryvy.length===1?'mieste':'miestach'} — jazda ${fmtDatum(d0.akt.datum)} začína na ${Math.round(+d0.akt.poc)} km, hoci predošlá skončila na ${Math.round(+d0.pred.kon)} km. ${Math.abs(Math.round(d0.rozdiel))} km je započítaných dvakrát.`);
+  }
+  if(medzery.length){
+    const spolu=Math.round(medzery.reduce((a,d)=>a+d.rozdiel,0));
+    out.push(`Medzi jazdami je ${spolu} km bez záznamu (${medzery.length} ${medzery.length===1?'medzera':'medzier'}). Nemusí ísť o chybu — takto sa prejavia súkromné jazdy — ale pri kontrole to budete vysvetľovať.`);
+  }
   return out;
 }
 
@@ -6883,8 +6975,11 @@ function appJazdy(){
         <div class="sp" style="flex:1"></div>
         <input id="kj_tach" type="number" value="${tachStav||''}" placeholder="napr. 48210" style="width:120px;border:1.5px solid var(--line);border-radius:9px;padding:7px 10px;font:inherit">
         <button class="aabtn" onclick="kjUlozTachometer()">Uložiť</button>
+        <button class="aabtn" onclick="kjPrepocitajTacho()" title="Zreťazí stav tachometra naprieč celou knihou">↻ Prepočítať</button>
       </div>
       <div class="csub">Aktuálny stav + najazdené za rok = ${tachStav?((tachStav+kmAll).toLocaleString('sk')+' km odhad ku koncu roka'):'zadajte stav pre dopočet'}</div>
+      ${(()=>{ const d=tachometerDiery(); if(!d.length) return "";
+        return `<div style="margin-top:8px;font-size:12px;color:var(--neg)">⚠ Tachometer nie je spojitý na ${d.length} ${d.length===1?'mieste':'miestach'} — tlačidlom <b>↻ Prepočítať</b> sa reťaz obnoví.</div>`; })()}
     </div>
 
     <div class="atool" style="--_c:${c};flex-wrap:wrap;gap:8px">
@@ -6941,6 +7036,31 @@ return `<div class="arow" style="grid-template-columns:2fr 1.4fr 1fr" ${klik}><d
 let kjTriedenie="datum", kjHladaj="", _kjHladajTimer=null;
 function kjHladajDebounce(){ clearTimeout(_kjHladajTimer); _kjHladajTimer=setTimeout(()=>{ const pos=document.getElementById("kjHladaj")?.selectionStart; appJazdy(); const el=document.getElementById("kjHladaj"); if(el){ el.focus(); if(pos!=null) el.setSelectionRange(pos,pos); } }, 250); }
 function mesiacLabel(mk){ const [r,m]=mk.split("-"); return MES_SK[(+m)-1]+" "+r; }
+// Ručný prepočet celej knihy. Bez argumentu → od úplného začiatku, teda
+// vrátane historických jázd; preto sa pýta na potvrdenie a povie, čo sa zmení.
+function kjPrepocitajTacho(){
+  // NAJPRV nasucho — používateľ musí vidieť rozsah zásahu skôr, než ho povolí.
+  // Jediný zlom v starej časti knihy posunie stavy VŠETKÝCH nasledujúcich jázd;
+  // v reálnej knihe to bolo 552 z 660 záznamov kvôli jednej chybe z augusta.
+  const nahlad=prepocitajTachometer(null, true);
+  if(nahlad.bezKotvy){ alert("Nemám od čoho začať — zadajte počiatočný stav tachometra a uložte ho."); return; }
+  if(!nahlad.upravenych){ alert("Tachometer je spojitý, nie je čo prepočítať."); return; }
+
+  const diery=tachometerDiery();
+  const medzery=diery.filter(d=>!d.prekryv);
+  let text="Prepočítať stav tachometra?\n\n";
+  if(nahlad.doplnenych) text+="• doplní sa "+nahlad.doplnenych+" jázd bez tachometra\n";
+  if(nahlad.posunutych) text+="• PREPÍŠE sa "+nahlad.posunutych+" jázd, ktoré stav už majú\n";
+  text+="\nVýsledok: "+Math.round(nahlad.odKm)+" → "+Math.round(nahlad.doKm)+" km. Kilometre jázd sa nemenia.";
+  if(medzery.length) text+="\n\n⚠ V knihe je "+Math.round(medzery.reduce((a,d)=>a+d.rozdiel,0))+
+    " km medzier. Ak sú to súkromné jazdy, prepočet ich ZMAŽE a kniha bude tvrdiť, že sa jazdilo súvisle.";
+  if(!confirm(text)) return;
+
+  const r=prepocitajTachometer(null);
+  poZmene(); appJazdy();
+  alert("Doplnených "+r.doplnenych+", prepísaných "+r.posunutych+" jázd.\n"+
+        "Tachometer "+Math.round(r.odKm)+" → "+Math.round(r.doKm)+" km.");
+}
 function kjUlozTachometer(){
   if(!firmaData.settings) firmaData.settings={};
   firmaData.settings.tachometer=parseFloat(val("kj_tach"))||0;
@@ -7201,7 +7321,56 @@ function parseSkDateTime(s){
   if(!m) return null;
   return new Date(+m[3],+m[2]-1,+m[1],+m[4],+m[5]);
 }
-let _vwParsed=[];
+let _vwParsed=[], _vwMeta=null, _vwTankovania=[];
+
+// „27,731 km" — VW tu používa anglický formát, čiarka je oddeľovač tisícov.
+// Rozlíšenie: čiarka nasledovaná PRÁVE tromi číslicami a bez desatinnej bodky
+// je tisícka; inak je to desatinná čiarka (slovenský zápis).
+function vwCislo(txt){
+  let t=String(txt||"").replace(/\s|km/gi,"");
+  if(/^\d{1,3}(,\d{3})+$/.test(t)) t=t.replace(/,/g,"");   // 27,731 → 27731
+  else t=t.replace(",",".");
+  const n=parseFloat(t);
+  return isNaN(n)?0:n;
+}
+
+// Hlavička exportu: VIN, stav tachometra, dátum vyhotovenia. Sú v riadku,
+// kde stojí „Počet kilometrov:" — pozícia stĺpca sa medzi verziami líši,
+// preto sa hľadá podľa textu, nie podľa indexu.
+function vwHlavicka(rows, doRiadku){
+  const meta={vin:"", tachometer:0, exportDna:""};
+  for(let i=0;i<Math.min(doRiadku,rows.length);i++){
+    const r=rows[i]||[];
+    for(let c=0;c<r.length;c++){
+      const v=String(r[c]||"");
+      if(/^WVG|^[A-HJ-NPR-Z\d]{17}$/.test(v.trim()) && !meta.vin) meta.vin=v.trim();
+      if(/Počet kilometrov/i.test(v)) meta.tachometer=vwCislo(r[c+1]);
+      if(/Export vyhotoven/i.test(v)) meta.exportDna=String(r[c+1]||"").trim();
+    }
+  }
+  return meta;
+}
+
+// Hárok „Od tankovania" — jeden riadok = úsek medzi dvoma tankovaniami.
+// Počet riadkov teda zodpovedá počtu tankovaní a `Celková spotreba v l`
+// je palivo natankované v tom úseku. Slúži na krížovú kontrolu s bločkami.
+function vwOdTankovania(wb){
+  const sh=wb.Sheets["Od tankovania"]; if(!sh) return [];
+  const rows=XLSX.utils.sheet_to_json(sh,{header:1});
+  const hi=rows.findIndex(r=>r&&String(r[0]||"").includes("Koniec jazdy"));
+  if(hi<0) return [];
+  const out=[];
+  for(let i=hi+1;i<rows.length;i++){
+    const r=rows[i]; if(!r||!r[0]) continue;
+    const d=parseSkDateTime(r[0]); if(!d) continue;
+    const litre=vwCislo(r[6]);
+    if(litre<=0) continue;                       // elektrický úsek — netankovalo sa
+    out.push({ datum:`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`,
+               km:vwCislo(r[1]), litre:r2(litre) });
+  }
+  return out;
+}
+
 async function spracujVW(e){
   const file=e.target.files[0]; if(!file) return; e.target.value="";
   try{
@@ -7211,35 +7380,115 @@ async function spracujVW(e){
     const rows=XLSX.utils.sheet_to_json(sheet,{header:1});
     const hi=rows.findIndex(r=>r&&String(r[0]||"").includes("Koniec jazdy"));
     if(hi<0){ alert("Toto nevyzerá ako VW TripStatistics export. Hľadám hárok „Krátkodobé údaje“ so stĺpcom „Koniec jazdy“."); return; }
+    _vwMeta=vwHlavicka(rows, hi);
+    _vwTankovania=vwOdTankovania(wb);
     const parsed=[];
     for(let i=hi+1;i<rows.length;i++){ const r=rows[i]; if(!r||!r[0]) continue;
       const d=parseSkDateTime(r[0]); if(!d) continue;
       const km=Math.round(parseFloat(String(r[1]).replace(",","."))||0);
       if(!km) continue;
+      const denKey=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
       parsed.push({ dt:d.toISOString(), datum:`${d.getDate()}. ${d.getMonth()+1}. ${d.getFullYear()}`,
+        denKey, mesiacKey:denKey.slice(0,7),
         km, doba:r[2]||"", rychlost:Math.round(+r[3]||0),
         celkKWh:parseFloat(String(r[7]).replace(",","."))||0, celkL:parseFloat(String(r[6]).replace(",","."))||0,
         vybrane:true });
     }
     if(!parsed.length){ alert("V súbore sa nenašli žiadne jazdy."); return; }
     _vwParsed=parsed.sort((a,b)=>a.dt.localeCompare(b.dt));
+    vwSprievodca._init=false;   // nový súbor → odznačovanie vedených dní nanovo
     vwSprievodca();
   }catch(err){ alert("Súbor sa nepodarilo prečítať: "+err.message); }
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  KRÍŽOVÉ KONTROLY VOČI EXPORTU Z VOZIDLA
+//  Vozidlo je autoritatívny zdroj — jeho tachometer a spotreba paliva sa
+//  nedajú „zabudnúť zaevidovať". Rozdiel oproti knihe teda ukazuje presne
+//  na diery v evidencii, a to je vec, ktorú pri kontrole hľadajú ako prvú.
+// ═══════════════════════════════════════════════════════════════
+
+// Stav tachometra vozidla vs. koniec knihy jázd.
+function vwKontrolaTachometra(meta){
+  if(!meta || !(meta.tachometer>0)) return null;
+  const jazdy=(firmaData.jazdy||[]).filter(j=>jazdaDatum(j) && +j.kon>0)
+    .sort((a,b)=>jazdaDatum(a)-jazdaDatum(b));
+  if(!jazdy.length) return {vozidlo:meta.tachometer, kniha:0, rozdiel:meta.tachometer, prazdna:true};
+  const kniha=+jazdy[jazdy.length-1].kon||0;
+  return {vozidlo:meta.tachometer, kniha, rozdiel:r2(meta.tachometer-kniha),
+          poslednaJazda:jazdy[jazdy.length-1].datum};
+}
+
+// Natankované litre podľa vozidla vs. litre z bločkov (PHM výdavky).
+// Porovnáva sa len obdobie, ktoré export pokrýva — mimo neho by rozdiel
+// nič nehovoril.
+function vwKontrolaTankovani(vwTank){
+  if(!vwTank || !vwTank.length) return null;
+  const od=vwTank.reduce((a,t)=>t.datum<a?t.datum:a, vwTank[0].datum);
+  const doD=vwTank.reduce((a,t)=>t.datum>a?t.datum:a, vwTank[0].datum);
+  const vozidloL=r2(vwTank.reduce((a,t)=>a+(+t.litre||0),0));
+  const nase=(firmaData.tankovania||[]).filter(t=>{
+    const d=String(t.datum||"").slice(0,10); return d>=od && d<=doD; });
+  const naseL=r2(nase.reduce((a,t)=>a+(+t.litre||0),0));
+  return {od, doD, vozidloL, naseL, rozdiel:r2(vozidloL-naseL),
+          pocetVozidlo:vwTank.length, pocetNase:nase.length};
+}
+
 let vwFilterKm=0;
+// Duplicitná ochrana má DVE úrovne, lebo export z vozidla môže pokrývať aj
+// obdobie, ktoré je v knihe už spracované:
+//  1. rovnaký presný čas (dt) → tá istá jazda, natvrdo sa preskočí;
+//  2. deň už v knihe vedie INÉ jazdy (optimalizované, ručné, GPS) — presný čas
+//     nesedí, ale deň je vybavený. `kjOptPrepis` nahrádza jazdy mesiaca
+//     syntetickými s novým časom, takže dt-dedup ich nikdy nechytí a mesiac by
+//     sa zdvojil. Takéto jazdy sa DEFAULTNE ODZNAČIA (nie zakážu — doplniť
+//     druhú jazdu do vedeného dňa je legitímne, len to nemá byť default).
 function vwSprievodca(){
   const S=firmaData.settings||{};
   const zoradene=_vwParsed;
   const vybrane=zoradene.filter(j=>j.vybrane && j.km>vwFilterKm);
   const spolu=vybrane.reduce((a,j)=>a+j.km,0);
   const existDt=new Set((firmaData.jazdy||[]).map(j=>j.dt));
-  const duplicit=zoradene.filter(j=>existDt.has(j.dt)).length;
+  const existDni=new Set((firmaData.jazdy||[]).map(j=>jazdaDayKey(j)).filter(Boolean));
+  const jeDupDt=j=>existDt.has(j.dt);
+  const jeDenVedeny=j=>!jeDupDt(j) && existDni.has(j.denKey);
+  const duplicit=zoradene.filter(jeDupDt).length;
+  const vedenych=zoradene.filter(jeDenVedeny).length;
+  // prvé otvorenie: jazdy do už vedených dní odznač (dá sa vrátiť ručne alebo mesačným checkboxom)
+  if(!vwSprievodca._init){ vwSprievodca._init=true; zoradene.forEach(j=>{ if(jeDenVedeny(j)) j.vybrane=false; }); }
+  // mesačné skupiny — pri viacmesačnom exporte je to hlavné ovládanie
+  const mesiace=[...new Set(zoradene.map(j=>j.mesiacKey))].sort();
+  const MEN=["","jan","feb","mar","apr","máj","jún","júl","aug","sep","okt","nov","dec"];
+  const mesLabel=mk=>MEN[+mk.slice(5)]+" "+mk.slice(0,4);
 
   openModal(`Import jázd z vozidla (${zoradene.length} nájdených)`, `
     <div style="background:var(--brand-lite);color:var(--brand-deep);font-size:12.5px;padding:10px 13px;border-radius:9px;margin-bottom:12px">
-      Našli sme <b>${zoradene.length} jázd</b> v exporte z vozidla. Odškrtnite tie, ktoré nechcete (súkromné, duplicity). Krátke mestské jazdy dostanú predvolenú trasu, dlhé si doplníte.${duplicit?`<br>⚠ <b>${duplicit}</b> jázd už v knihe existuje (rovnaký čas) — tie sa preskočia.`:''}
+      Export pokrýva <b>${mesLabel(mesiace[0])} – ${mesLabel(mesiace[mesiace.length-1])}</b> (${zoradene.length} jázd). Odškrtnite, čo nechcete.${duplicit?`<br>⚠ <b>${duplicit}</b> jázd už v knihe je (rovnaký čas) — preskočia sa.`:''}${vedenych?`<br>⚠ <b>${vedenych}</b> jázd padá do dní, ktoré už v knihe vediete (napr. po optimalizácii) — sú odznačené, aby sa dni nezdvojili.`:''}
     </div>
+    ${(()=>{
+      const tk=vwKontrolaTachometra(_vwMeta), tn=vwKontrolaTankovani(_vwTankovania);
+      if(!tk && !tn) return "";
+      const riadky=[];
+      if(tk && !tk.prazdna){
+        const zle=Math.abs(tk.rozdiel)>50;
+        riadky.push(`<div style="display:flex;justify-content:space-between;gap:10px;padding:4px 0">
+          <span>Tachometer vozidla</span>
+          <span class="mono"><b>${eur0(tk.vozidlo).replace(" €"," km")}</b> · kniha ${eur0(tk.kniha).replace(" €"," km")} ·
+          <span style="color:${zle?'var(--neg)':'var(--pos)'}">${tk.rozdiel>0?'chýba ':''}${eur0(Math.abs(tk.rozdiel)).replace(" €"," km")}</span></span></div>`);
+      } else if(tk && tk.prazdna){
+        riadky.push(`<div style="padding:4px 0">Tachometer vozidla: <b>${eur0(tk.vozidlo).replace(" €"," km")}</b> — kniha je zatiaľ prázdna.</div>`);
+      }
+      if(tn){
+        const zle=Math.abs(tn.rozdiel)>5;
+        riadky.push(`<div style="display:flex;justify-content:space-between;gap:10px;padding:4px 0">
+          <span>Natankované palivo</span>
+          <span class="mono">vozidlo <b>${tn.vozidloL.toFixed(2)} l</b> · bločky ${tn.naseL.toFixed(2)} l ·
+          <span style="color:${zle?'var(--neg)':'var(--pos)'}">${tn.rozdiel>0?'chýba ':'navyše '}${Math.abs(tn.rozdiel).toFixed(2)} l</span></span></div>`);
+        if(zle && tn.rozdiel>0) riadky.push(`<div class="acol-muted" style="font-size:11.5px;padding-top:2px">Vozidlo eviduje ${tn.pocetVozidlo} tankovaní, vy máte ${tn.pocetNase} bločkov za rovnaké obdobie — chýbajúce doklady si nemôžete uplatniť do výdavkov.</div>`);
+      }
+      return `<div style="background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:9px 12px;margin-bottom:12px;font-size:12.5px">
+        <div style="font-weight:700;margin-bottom:4px">Kontrola oproti vozidlu</div>${riadky.join("")}</div>`;
+    })()}
     <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
       <label style="font-size:12px;color:var(--ink-soft)">Skryť jazdy kratšie ako:</label>
       <select onchange="vwFilterKm=+this.value;vwSprievodca()" style="border:1px solid var(--line);border-radius:8px;padding:5px 9px;font:inherit;font-size:12px">
@@ -7255,37 +7504,98 @@ function vwSprievodca(){
       <button type="button" class="aabtn" style="flex:1" onclick="vwOznac(false)">Odznačiť všetky</button>
     </div>
     <div class="alist" style="max-height:320px;overflow:auto">
-      ${zoradene.filter(j=>j.km>vwFilterKm).map((j)=>{const gi=_vwParsed.indexOf(j);const dup=existDt.has(j.dt);return `<div class="arow" style="grid-template-columns:auto 1fr auto auto;cursor:pointer${dup?';opacity:.5':''}" onclick="vwToggle(${gi})">
-        <input type="checkbox" ${j.vybrane&&!dup?'checked':''} ${dup?'disabled':''} style="width:auto" onclick="event.stopPropagation();vwToggle(${gi})">
-        <div><div class="acol-strong" style="font-size:13px">${esc(j.datum)}</div><div class="acol-muted">${j.doba} · ⌀${j.rychlost} km/h${dup?' · už existuje':''}</div></div>
-        <div class="acol-sum" style="font-size:13px">${j.km} km</div>
-        <div></div>
-      </div>`;}).join('')}
+      ${mesiace.map(mk=>{
+        const vMes=zoradene.filter(j=>j.mesiacKey===mk && j.km>vwFilterKm);
+        if(!vMes.length) return "";
+        const volne=vMes.filter(j=>!jeDupDt(j));
+        const zapnute=volne.filter(j=>j.vybrane).length;
+        const kmMes=vMes.filter(j=>j.vybrane&&!jeDupDt(j)).reduce((a,j)=>a+j.km,0);
+        const stavMes = !volne.length ? "" : (zapnute===volne.length ? "checked" : (zapnute? 'data-ciastocne="1"' : ""));
+        return `<div style="position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:8px;background:var(--bg);border-bottom:1px solid var(--line);padding:7px 10px;font-size:12.5px">
+          <input type="checkbox" ${stavMes} ${!volne.length?'disabled':''} style="width:auto" onclick="event.stopPropagation();vwOznacMesiac('${mk}', this.checked)">
+          <b>${mesLabel(mk)}</b>
+          <span class="acol-muted">${vMes.length} jázd${kmMes?` · ${kmMes} km vybraných`:''}</span>
+        </div>`+vMes.map(j=>{const gi=_vwParsed.indexOf(j);const dup=jeDupDt(j);const veden=jeDenVedeny(j);return `<div class="arow" style="grid-template-columns:auto 1fr auto;cursor:pointer${dup?';opacity:.45':(veden&&!j.vybrane?';opacity:.65':'')}" onclick="vwToggle(${gi})">
+          <input type="checkbox" ${j.vybrane&&!dup?'checked':''} ${dup?'disabled':''} style="width:auto" onclick="event.stopPropagation();vwToggle(${gi})">
+          <div><div class="acol-strong" style="font-size:13px">${esc(j.datum)}</div><div class="acol-muted">${j.doba} · ⌀${j.rychlost} km/h${dup?' · <b>už importovaná</b>':(veden?' · <span style="color:var(--accent-deep,#b06a1e)">deň už vedený v knihe</span>':'')}</div></div>
+          <div class="acol-sum" style="font-size:13px">${j.km} km</div>
+        </div>`;}).join('');
+      }).join('')}
     </div>
   `, ()=>{
     const existDt2=new Set((firmaData.jazdy||[]).map(j=>j.dt));
     const naImport=_vwParsed.filter(j=>j.vybrane && j.km>vwFilterKm && !existDt2.has(j.dt));
     if(!naImport.length){ alert("Nič na import (všetko odznačené alebo duplicitné)."); return false; }
-    // priraď stav tachometra kontinuálne
     const limit=+S.kjAutoLimit||50;
     const trasaDef=S.kjTrasaDefault||"Bernolákovo - BA - Bernolákovo";
     const ucelDef=S.kjUcel||"Konzultačné služby";
+    const vodic=S.kjVodic||"";
+    const DNI=["nedeľa","pondelok","utorok","streda","štvrtok","piatok","sobota"];
     if(!firmaData.jazdy) firmaData.jazdy=[];
     naImport.forEach(p=>{
       const auto=p.km<=limit;
+      const d=new Date(p.dt);
+      // jazda sa ukladá KOMPLETNÁ (mesiac, deň, vodič, prepočítané spotreby),
+      // aby kniha sedela aj bez následnej optimalizácie — tá dopĺňa už len
+      // trasy, účely a kontinuálny tachometer
       firmaData.jazdy.push({
-        dt:p.dt, datum:p.datum, km:p.km, doba:p.doba, rychlost:p.rychlost,
+        id:"vw"+Date.now()+Math.random().toString(36).slice(2,7),
+        dt:p.dt, datum:p.datum, den:DNI[d.getDay()]||"", vodic,
+        mesiac:p.mesiacKey,
+        km:p.km, doba:p.doba, rychlost:p.rychlost,
         celkKWh:p.celkKWh, celkL:p.celkL,
+        spotrebaKWh: p.km>0 ? r2(p.celkKWh/p.km*100) : 0,
+        spotrebaL:   p.km>0 ? r2(p.celkL/p.km*100)   : 0,
         cesta: auto?trasaDef:"", ucel: auto?ucelDef:"", zdroj:"vw",
         doplnene: auto
       });
     });
+    vwSprievodca._init=false;
+
+    // Tachometer sa zreťazí HNEĎ, od najstaršej importovanej jazdy. Dovtedy to
+    // robila až optimalizácia a len per mesiac — pri importe siedmich mesiacov
+    // naraz by kniha ostala bez tachometra a nedala by sa odovzdať.
+    //
+    // Ak by reťazenie prepísalo aj jazdy, ktoré stav UŽ MAJÚ (import doprostred
+    // knihy), pýtame sa. Prepis existujúcich záznamov nie je vedľajší účinok
+    // importu, o ktorom sa používateľ dozvie až potom.
+    const najstarsi=naImport.reduce((a,p)=>p.dt<a?p.dt:a, naImport[0].dt);
+    const nahlad=prepocitajTachometer(najstarsi, true);
+    let tacho={upravenych:0, doplnenych:0, posunutych:0};
+    if(nahlad.posunutych>0){
+      if(confirm("Doplniť stav tachometra k importovaným jazdám?\n\n"+
+          "• doplní sa "+nahlad.doplnenych+" nových jázd\n"+
+          "• PREPÍŠE sa "+nahlad.posunutych+" jázd, ktoré stav už majú (import padol doprostred knihy)\n\n"+
+          "Bez prepočtu ostanú nové jazdy bez tachometra a doplníte ho neskôr."))
+        tacho=prepocitajTachometer(najstarsi);
+    } else {
+      tacho=prepocitajTachometer(najstarsi);
+    }
+
     poZmene(); appJazdy();
-    alert("Importovaných "+naImport.length+" jázd z vozidla.");
+    const mesTouch=[...new Set(naImport.map(p=>p.mesiacKey))].sort();
+    let sprava="Importovaných "+naImport.length+" jázd ("+mesTouch.join(", ")+").";
+    if(tacho.upravenych) sprava+="\n\nTachometer: doplnených "+tacho.doplnenych+
+      (tacho.posunutych?", prepísaných "+tacho.posunutych:"")+" jázd ("+
+      Math.round(tacho.odKm)+" → "+Math.round(tacho.doKm)+" km).";
+    else if(tacho.bezKotvy) sprava+="\n\n⚠ Tachometer sa nedal zreťaziť — zadajte počiatočný stav v knihe jázd.";
+    else sprava+="\n\nTachometer nebol prepočítaný — doplňte ho tlačidlom ↻ Prepočítať v knihe jázd.";
+    // kontrola voči vozidlu má zmysel až PO importe, keď je kniha doplnená
+    const tk=vwKontrolaTachometra(_vwMeta);
+    if(tk && !tk.prazdna && Math.abs(tk.rozdiel)>50)
+      sprava+="\n\n⚠ Vozidlo hlási "+Math.round(tk.vozidlo)+" km, kniha končí na "+Math.round(tk.kniha)+
+              " km (rozdiel "+Math.round(tk.rozdiel)+" km) — pravdepodobne chýba staršie obdobie.";
+    const tn=vwKontrolaTankovani(_vwTankovania);
+    if(tn && tn.rozdiel>5)
+      sprava+="\n\n⚠ Podľa vozidla ste natankovali "+tn.vozidloL.toFixed(2)+" l, z bločkov máte "+
+              tn.naseL.toFixed(2)+" l — chýba "+tn.rozdiel.toFixed(2)+" l dokladov.";
+    sprava+="\n\nDlhým jazdám doplňte trasu a účel.";
+    alert(sprava);
   });
 }
 function vwToggle(gi){ if(_vwParsed[gi]){ _vwParsed[gi].vybrane=!_vwParsed[gi].vybrane; vwSprievodca(); } }
 function vwOznac(v){ _vwParsed.forEach(j=>{ if(j.km>vwFilterKm) j.vybrane=v; }); vwSprievodca(); }
+function vwOznacMesiac(mk, v){ _vwParsed.forEach(j=>{ if(j.mesiacKey===mk && j.km>vwFilterKm) j.vybrane=v; }); vwSprievodca(); }
 
 // ═══ ZSE Drive import nabíjaní (textový výpis) ═══
 function zseImport(){ document.getElementById("zseInput").click(); }
