@@ -769,7 +769,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.07.25-DE";  // ošetrenie vypršanej session pri volaní edge funkcií
+const APP_VERZIA = "2026.07.25-DF";  // fáza 2: roly, prístupy k firme, pozvánky
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -830,7 +830,7 @@ async function boot(){
 
   // over, či je používateľ už prihlásený
   const { data:{ session } } = await sb.auth.getSession();
-  if(session){ enterApp(session.user); return; }
+  if(session){ enterApp(session.user); spracujPozvanku(); return; }
 
   show("authView");
   if(vstup==="register") nastavMode("register");
@@ -909,7 +909,7 @@ async function ulozNoveHeslo(){
   history.replaceState(null,"",location.pathname);
   if(m){ m.textContent="Heslo zmenené. Prihlasujem…"; m.className="authmsg ok"; }
   const { data:{ session } }=await sb.auth.getSession();
-  if(session) enterApp(session.user); else location.reload();
+  if(session){ enterApp(session.user); spracujPozvanku(); } else location.reload();
 }
 
 async function doReset(){
@@ -1159,6 +1159,7 @@ let firmyZoznam = [];
 // faktúry (kap. 10.4). Každá nová modulová premenná patrí SEM.
 function resetStavuModulov(){
   firmaData=null; firmaId=null; firmaVerzia=null; firmaConfig=null; firmaDirty=false;
+  pristupyFirmy=[];   // prístupy sú PER FIRMU — inak by platili oprávnenia predošlej
   fFilter="vsetky"; fakVybrane=new Set(); fakPoslednyList=[];
   vFilter="vsetky"; vRok=""; vMesiac=""; vydVybrane=new Set(); vydPoslednyList=[];
   bFilter="vsetky"; bMesiac=""; vypisRozbaleny=null;
@@ -1171,6 +1172,216 @@ function resetStavuModulov(){
   try{ closeModal(); }catch(_){}
   document.getElementById("splitScreen")?.classList.add("hidden");
   document.getElementById("appScreen")?.classList.add("hidden");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  ROLY A OPRÁVNENIA (fáza 2 plánu Účtovník, kap. 38.11)
+//
+//  RLS drží oprávnenia na serveri — zápis role `nahlad` tam neprejde. UI to
+//  MUSÍ odzrkadliť, inak používateľ vyplní formulár, ktorý sa ticho neuloží,
+//  a bude si myslieť, že uložil. Serverová obrana chráni dáta; táto chráni
+//  používateľa pred stratou práce.
+// ═══════════════════════════════════════════════════════════════════════════
+let pristupyFirmy = [];      // kto všetko má prístup k práve otvorenej firme
+const UCTOVNICKE_MODULY = ["banka","dph","priznania","majetok"];
+
+async function nacitajPristupy(fid){
+  pristupyFirmy=[];
+  if(localMode || !sb || !fid) return;
+  try{
+    const { data } = await sb.from("firma_pristupy")
+      .select("user_id,rola,udelene").eq("firma_id", fid);
+    pristupyFirmy = data || [];
+  }catch(_){ pristupyFirmy=[]; }
+}
+function mojaRolaVFirme(){
+  const f=firmyZoznam.find(x=>x.id===firmaId);
+  return (f && f.mojaRola) || "vlastnik";   // lokálny režim = vlastník
+}
+function firmaMaUctovnika(){ return pristupyFirmy.some(p=>p.rola==="uctovnik"); }
+
+// Smie prihlásený používateľ v tomto module zapisovať?
+function mozemPisat(modul){
+  const r=mojaRolaVFirme();
+  if(r==="nahlad") return false;
+  if(r==="uctovnik") return true;
+  // Vlastník: účtovnícke moduly sú len na čítanie, ak firma ÚČTOVNÍKA MÁ.
+  // Bez účtovníka sa nič nemení — dnešní používatelia rozdiel nepocítia.
+  if(UCTOVNICKE_MODULY.includes(modul) && firmaMaUctovnika()
+     && !(firmaConfig && firmaConfig.klientMozeUctovat)) return false;
+  return true;
+}
+// Pás cez obrazovku modulu, keď je len na čítanie — vysvetlí PREČO.
+function pasIbaCitanie(modul){
+  if(mozemPisat(modul)) return "";
+  const r=mojaRolaVFirme();
+  const preco = r==="nahlad"
+    ? "Máte prístup na čítanie. Zmeny môže robiť vlastník alebo účtovník."
+    : "Túto agendu spravuje váš účtovník. Ak chcete zapisovať sami, požiadajte ho o zmenu nastavenia.";
+  return `<div style="background:var(--bg);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:9px;padding:10px 13px;margin-bottom:12px;font-size:12.5px">🔒 ${preco}</div>`;
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  ZDIEĽANIE FIRMY — pozvánky a správa prístupov
+//
+//  Prístup nevzniká priamym zápisom: vlastník nepozná `user_id` pozvaného.
+//  Vzniká pozvánkou, ktorú si príjemca uplatní sám po prihlásení
+//  (`prijmi_pozvanku`, viazané na e-mail — token by stačil komukoľvek,
+//  kto ho zachytí).
+// ═══════════════════════════════════════════════════════════════════════════
+const ROLY_POPIS = {
+  uctovnik:"Účtovník — vidí všetko a môže zapisovať",
+  nahlad:  "Náhľad — vidí všetko, nemôže nič meniť"
+};
+
+function pozvankaToken(){
+  // 32 znakov z kryptografického zdroja; Math.random() by na prístupový
+  // token nestačil — je predvídateľný.
+  // Berieme 48 bajtov, nie 32: odstránenie znakov `+/=` z base64 dĺžku skráti,
+  // takže z tesnej rezervy by vyšiel token kratší než 32 znakov.
+  const a=new Uint8Array(48); crypto.getRandomValues(a);
+  const t=btoa(String.fromCharCode(...a)).replace(/[+/=]/g,"").slice(0,32);
+  return t.length===32 ? t : pozvankaToken();   // poistka, nie predpoklad
+}
+
+async function nacitajPozvanky(){
+  if(localMode || !sb || !firmaId) return [];
+  const { data } = await sb.from("firma_pozvanky")
+    .select("id,email,rola,token,plati_do,prijate")
+    .eq("firma_id", firmaId).order("vytvorene",{ascending:false});
+  return data || [];
+}
+
+async function appZdielanie(){
+  if(localMode || !sb){
+    document.getElementById("appScreen").innerHTML =
+      appHlavicka("zdielanie")+`<div class="aempty">Zdieľanie funguje len s prihlásením do cloudu.</div>`;
+    return;
+  }
+  if(mojaRolaVFirme()!=="vlastnik"){
+    document.getElementById("appScreen").innerHTML =
+      appHlavicka("zdielanie")+`<div class="aempty">Prístupy môže spravovať len vlastník firmy.</div>`;
+    return;
+  }
+  const poz=await nacitajPozvanky();
+  const cakajuce=poz.filter(p=>!p.prijate && p.plati_do>new Date().toISOString());
+  const { data:{ user } } = await sb.auth.getUser();
+
+  document.getElementById("appScreen").innerHTML = appHlavicka("zdielanie")+`
+    <div class="csub" style="margin-bottom:12px">${pristupyFirmy.length} prístupov · ${cakajuce.length} pozvánok čaká</div>
+    <div class="card" style="margin-bottom:14px">
+      <div class="csub" style="margin-bottom:10px">Účtovník uvidí vaše doklady a bude môcť viesť Banku, DPH a priznania. Vy fakturujete a nahrávate bločky ako doteraz.</div>
+      <div class="mfield"><label>E-mail pozývaného</label><input id="pzEmail" type="email" placeholder="uctovnik@example.sk"></div>
+      <div class="mfield"><label>Rola</label>
+        <select id="pzRola">${Object.entries(ROLY_POPIS).map(([k,v])=>`<option value="${k}">${v}</option>`).join("")}</select>
+      </div>
+      <button class="aabtn pri" style="width:100%;justify-content:center;margin-top:6px" onclick="vytvorPozvanku()">＋ Vytvoriť pozvánku</button>
+      <div id="pzVysledok" style="margin-top:10px"></div>
+    </div>
+
+    <div class="card" style="margin-bottom:14px">
+      <b style="font-family:'Fraunces',serif;font-size:15px">Kto má prístup</b>
+      ${pristupyFirmy.length ? `<div class="alist" style="margin-top:8px">
+        ${pristupyFirmy.map(p=>`<div class="arow" style="grid-template-columns:1fr auto auto;cursor:default;gap:8px">
+          <div><div class="acol-strong" style="font-size:13px">${esc(p.user_id===user.id?"vy":p.user_id.slice(0,8)+"…")}</div>
+               <div class="acol-muted">${esc(ROLY_POPIS[p.rola]||p.rola)}</div></div>
+          <div class="acol-muted" style="font-size:11px">${p.udelene?fmtDatum(String(p.udelene).slice(0,10)):""}</div>
+          <button class="aabtn" style="padding:3px 9px;font-size:11px;border-color:var(--neg);color:var(--neg)" onclick="odvolajPristup('${p.user_id}')">Odvolať</button>
+        </div>`).join("")}</div>`
+        : `<div class="aempty" style="padding:14px">Firmu zatiaľ nikto ďalší nevidí.</div>`}
+      <div class="csub" style="margin-top:8px">Vlastník sa v zozname neuvádza — vlastníctvo drží samotná firma a odvolať sa nedá.</div>
+    </div>
+
+    ${cakajuce.length?`<div class="card">
+      <b style="font-family:'Fraunces',serif;font-size:15px">Čakajúce pozvánky</b>
+      <div class="alist" style="margin-top:8px">
+        ${cakajuce.map(p=>`<div class="arow" style="grid-template-columns:1fr auto auto;cursor:default;gap:8px">
+          <div><div class="acol-strong" style="font-size:13px">${esc(p.email)}</div>
+               <div class="acol-muted">${esc(ROLY_POPIS[p.rola]||p.rola)} · platí do ${fmtDatum(String(p.plati_do).slice(0,10))}</div></div>
+          <button class="aabtn" style="padding:3px 9px;font-size:11px" onclick="kopirujPozvanku('${p.token}')">Kopírovať odkaz</button>
+          <button class="aabtn" style="padding:3px 9px;font-size:11px;border-color:var(--neg);color:var(--neg)" onclick="zrusPozvanku('${p.id}')">✕</button>
+        </div>`).join("")}
+      </div>
+    </div>`:''}`;
+}
+
+function pozvankaOdkaz(token){
+  return location.origin+location.pathname+"?pozvanka="+encodeURIComponent(token);
+}
+function kopirujPozvanku(token){
+  const url=pozvankaOdkaz(token);
+  navigator.clipboard?.writeText(url).then(
+    ()=>alert("Odkaz skopírovaný. Pošlite ho pozývanému.\n\n"+url),
+    ()=>prompt("Skopírujte odkaz:", url));
+}
+
+async function vytvorPozvanku(){
+  const email=(val("pzEmail")||"").trim().toLowerCase();
+  const rola=val("pzRola")||"nahlad";
+  const box=document.getElementById("pzVysledok");
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){
+    box.innerHTML=`<div style="color:var(--neg);font-size:12.5px">Zadajte platný e-mail.</div>`; return;
+  }
+  const token=pozvankaToken();
+  const { error } = await sb.from("firma_pozvanky").insert({
+    firma_id:firmaId, email, rola, token
+  });
+  if(error){
+    box.innerHTML=`<div style="color:var(--neg);font-size:12.5px">Pozvánku sa nepodarilo vytvoriť: ${esc(error.message)}</div>`;
+    return;
+  }
+  const url=pozvankaOdkaz(token);
+  // E-mail zatiaľ neodosielame — odkaz sa dá poslať ručne. Až po nasadení
+  // edge funkcie sa to zmení; dovtedy je tok plne funkčný a otestovateľný.
+  box.innerHTML=`<div style="background:#eef7f0;border-radius:9px;padding:10px 12px;font-size:12.5px">
+    ✓ Pozvánka vytvorená pre <b>${esc(email)}</b>. Pošlite jej tento odkaz:
+    <div style="margin-top:6px;word-break:break-all;font-family:ui-monospace,monospace;font-size:11px">${esc(url)}</div>
+    <button class="aabtn" style="margin-top:8px;padding:4px 10px;font-size:11.5px" onclick="kopirujPozvanku('${token}')">Kopírovať</button>
+  </div>`;
+  document.getElementById("pzEmail").value="";
+  appZdielanie();
+}
+
+async function zrusPozvanku(id){
+  if(!confirm("Zrušiť túto pozvánku? Odkaz prestane platiť.")) return;
+  await sb.from("firma_pozvanky").delete().eq("id", id);
+  appZdielanie();
+}
+async function odvolajPristup(uid){
+  if(!confirm("Odvolať prístup? Dotyčný stratí prístup k firme okamžite.")) return;
+  const { error } = await sb.from("firma_pristupy").delete()
+    .eq("firma_id", firmaId).eq("user_id", uid);
+  if(error){ alert("Odvolanie zlyhalo: "+error.message); return; }
+  await nacitajPristupy(firmaId);
+  appZdielanie();
+}
+
+// ── Uplatnenie pozvánky: ?pozvanka=<token> ──
+// Beží po prihlásení, lebo `prijmi_pozvanku` viaže pozvánku na e-mail
+// prihláseného používateľa.
+async function spracujPozvanku(){
+  const t=new URLSearchParams(location.search).get("pozvanka");
+  if(!t || localMode || !sb) return false;
+  try{
+    const { data:{ user } } = await sb.auth.getUser();
+    if(!user) return false;                 // prihlásenie prebehne a zavolá sa znova
+    const { data, error } = await sb.rpc("prijmi_pozvanku", { p_token:t });
+    history.replaceState({}, "", location.pathname);
+    if(error){ alert("Pozvánku sa nepodarilo prijať: "+error.message); return false; }
+    const HLASKY={
+      neplatna:"Pozvánka neexistuje alebo bola zrušená.",
+      uz_prijata:"Táto pozvánka už bola použitá.",
+      expirovana:"Platnosť pozvánky uplynula. Požiadajte o novú.",
+      iny_email:"Pozvánka je vystavená na inú e-mailovú adresu. Prihláste sa účtom, na ktorý prišla.",
+      ste_vlastnik:"Túto firmu už vlastníte.",
+      neprihlaseny:"Najprv sa prihláste."
+    };
+    if(!data || !data.ok){ alert(HLASKY[data&&data.chyba]||"Pozvánku sa nepodarilo prijať."); return false; }
+    alert("Prístup k firme bol udelený ("+(ROLY_POPIS[data.rola]||data.rola)+").");
+    await nacitajFirmu(data.firma_id);
+    return true;
+  }catch(e){ alert("Pozvánku sa nepodarilo prijať: "+e.message); return false; }
 }
 
 function vykresliPrepinacFiriem(){
@@ -1201,10 +1412,19 @@ async function nacitajFirmu(idPoziadavka){
     const { data:{ user }, error:authErr } = await sb.auth.getUser();
     if(authErr || !user){ zobrazFirmu(); return; }
 
+    // Bez filtra na `user_id` — od fázy 2 sem patria aj firmy, ku ktorým má
+    // používateľ delegovaný prístup, a tú množinu definuje RLS. Rolu si však
+    // appka drží sama; spoliehať sa pri zobrazovaní len na RLS by bola tá istá
+    // chyba ako pri SaaS faktúrach (kap. 10.4).
     const { data:zoz, error:chZoz } = await sb.from("firmy")
-      .select("id,nazov,updated_at").eq("user_id", user.id).order("nazov");
+      .select("id,nazov,updated_at,user_id").order("nazov");
     if(chZoz) throw chZoz;
-    firmyZoznam = zoz || [];
+    const { data:mojePr } = await sb.from("firma_pristupy")
+      .select("firma_id,rola").eq("user_id", user.id);
+    const rolaMap={}; (mojePr||[]).forEach(x=>{ rolaMap[x.firma_id]=x.rola; });
+    firmyZoznam = (zoz||[]).map(f=>({
+      ...f, mojaRola: f.user_id===user.id ? "vlastnik" : (rolaMap[f.id]||"nahlad")
+    }));
 
     if(!firmyZoznam.length){ firmaData=null; firmaId=null; firmaVerzia=null; vykresliPrepinacFiriem(); zobrazFirmu(); return; }
 
@@ -1223,7 +1443,7 @@ async function nacitajFirmu(idPoziadavka){
 
     // firma_config je PER FIRMU — pri prepnutí sa musí načítať znova,
     // inak by moduly a limity ostali z predošlej firmy
-    if(firmaId){ await nacitajFirmaConfig(firmaId); }
+    if(firmaId){ await nacitajFirmaConfig(firmaId); await nacitajPristupy(firmaId); }
     vykresliPrepinacFiriem();
     zobrazFirmu();
   } catch(e){
@@ -3224,6 +3444,7 @@ const APPS={
   dph:      {n:"DPH a dane",      ic:"§", c:"#6b4fbf", d:"DPH, daň z príjmov, odvody"},
   jazdy:    {n:"Kniha jázd",      ic:"🚗",c:"#2e9e6b", d:"Jazdy, km, kniha jázd"},
   majetok:  {n:"Majetok",         ic:"⌂", c:"#a06a2c", d:"Dlhodobý majetok, odpisy"},
+  zdielanie:{n:"Zdieľanie firmy",ic:"👥",c:"#5b6779", d:"Prístup pre účtovníka, pozvánky"},
   data:     {n:"Nastavenia a dáta",ic:"⚙",c:"#5b6779", d:"Firma, import/export, cloud"},
 };
 
@@ -3427,6 +3648,7 @@ function renderApp(id){
   if(id==="dph") return appDPH();
   if(id==="jazdy") return appJazdy();
   if(id==="majetok") return appMajetok();
+  if(id==="zdielanie") return appZdielanie();
   if(id==="data") return appData();
   if(id==="sadzby") return appSadzby();   // údržbová obrazovka, nie je v navigácii
 }
