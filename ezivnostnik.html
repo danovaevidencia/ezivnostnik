@@ -653,6 +653,7 @@ button{font-family:inherit;cursor:pointer}
       <b>e<i>živnostník</i></b>
     </div>
     <div class="sp"></div>
+    <select id="firmaPrepinac" class="usermenu" style="display:none;width:auto;max-width:170px;margin-right:6px;padding:0 8px;font-size:12.5px" onchange="prepniFirmu(this.value)" title="Prepnúť firmu"></select>
     <button class="usermenu" id="quickDoklad" onclick="rychlyDoklad(this)" title="Načítať doklad (foto alebo PDF)" style="margin-right:6px">📷</button>
     <button class="usermenu notifbtn" id="notifBtn" onclick="otvorNotifikacie()" title="Notifikácie" style="margin-right:6px">🔔<span id="notifBadge" class="notifbadge" style="display:none">0</span></button>
     <div class="syncchip" id="syncChip">✓ uložené</div>
@@ -768,7 +769,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.07.25-CY";  // kniha jázd: tachometer naprieč knihou, kontrola oproti vozidlu a tankovaniam
+const APP_VERZIA = "2026.07.25-DC";  // sprievodca prípravou knihy jázd (6 krokov), domáce nabíjanie
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -1138,7 +1139,58 @@ function vydavkyRezimEfektivny(){
   return S.vydavkyRezim==="pausal" ? "pausal" : "skutocne";
 }
 
-async function nacitajFirmu(){
+// ═══════════════════════════════════════════════════════════════
+//  VIAC FIRIEM V JEDNOM ÚČTE (fáza 1 plánu Spolupráca, kap. 38.8)
+//
+//  `firmy.user_id` nie je unikátny, takže schéma to zvládala odjakživa — appka
+//  nie. Načítanie stálo na `maybeSingle()`, ktorý pri viac než jednom riadku
+//  vracia CHYBU, nie prvý záznam: druhá firma by appku prestala načítať úplne.
+//
+//  Zoznam sa načítava bez `data` (len id, nazov, updated_at) — ťahať JSON
+//  všetkých firiem naraz by bolo zbytočné a pri dvadsiatich neúnosné.
+// ═══════════════════════════════════════════════════════════════
+let firmyZoznam = [];
+
+// ⚠️ BEZPEČNOSTNÁ FUNKCIA, nie pohodlie.
+// `firmaData` je globálna a appka z nej kreslí všetko; modulové premenné
+// (vybrané doklady, filtre, rozpracované obrazovky) sú globálne tiež. Keby
+// prepnutie firmy nechalo čo i len výber faktúr, zobrazili by sa doklady jedného
+// klienta pod menom druhého. Presne táto trieda chyby stála zaúčtovanie cudzej
+// faktúry (kap. 10.4). Každá nová modulová premenná patrí SEM.
+function resetStavuModulov(){
+  firmaData=null; firmaId=null; firmaVerzia=null; firmaConfig=null; firmaDirty=false;
+  fFilter="vsetky"; fakVybrane=new Set(); fakPoslednyList=[];
+  vFilter="vsetky"; vRok=""; vMesiac=""; vydVybrane=new Set(); vydPoslednyList=[];
+  bFilter="vsetky"; bMesiac=""; vypisRozbaleny=null;
+  kjMesiac=""; kjZlucit=false; kjTriedenie="datum"; kjHladaj="";
+  dphTab="vykaz"; dphVybObdobie="";
+  splitVybranyPohyb=null; splitMesiac=""; splitStavFilter="nespar"; splitVsetciKand=false;
+  vwFilterKm=0; _vwParsed=[]; _vwMeta=null; _vwTankovania=[];
+  if(typeof vwSprievodca==="function") vwSprievodca._init=false;
+  // zavri všetko rozpracované, nech na obrazovke nezostane cudzí obsah
+  try{ closeModal(); }catch(_){}
+  document.getElementById("splitScreen")?.classList.add("hidden");
+  document.getElementById("appScreen")?.classList.add("hidden");
+}
+
+function vykresliPrepinacFiriem(){
+  const el=document.getElementById("firmaPrepinac"); if(!el) return;
+  if(firmyZoznam.length<2){ el.style.display="none"; return; }
+  el.innerHTML=firmyZoznam.map(f=>`<option value="${f.id}" ${f.id===firmaId?'selected':''}>${esc(f.nazov||"Bez názvu")}</option>`).join("");
+  el.style.display="";
+}
+
+async function prepniFirmu(id){
+  if(!id || id===firmaId) return;
+  if(firmaDirty && !confirm("Máte neuložené zmeny. Prepnutím firmy sa stratia. Pokračovať?")){
+    vykresliPrepinacFiriem(); return;   // vráť select na pôvodnú firmu
+  }
+  resetStavuModulov();
+  try{ localStorage.setItem("eziv_poslednaFirma", id); }catch(_){}
+  await nacitajFirmu(id);
+}
+
+async function nacitajFirmu(idPoziadavka){
   if(localMode || !sb){
     const ls = localStorage.getItem("eziv_firma");
     if(ls){ try{ firmaData = JSON.parse(ls); }catch(e){} }
@@ -1148,12 +1200,31 @@ async function nacitajFirmu(){
   try {
     const { data:{ user }, error:authErr } = await sb.auth.getUser();
     if(authErr || !user){ zobrazFirmu(); return; }
-    const { data, error } = await sb.from("firmy").select("*").eq("user_id", user.id).maybeSingle();
+
+    const { data:zoz, error:chZoz } = await sb.from("firmy")
+      .select("id,nazov,updated_at").eq("user_id", user.id).order("nazov");
+    if(chZoz) throw chZoz;
+    firmyZoznam = zoz || [];
+
+    if(!firmyZoznam.length){ firmaData=null; firmaId=null; firmaVerzia=null; vykresliPrepinacFiriem(); zobrazFirmu(); return; }
+
+    // ktorú otvoriť: vyžiadanú → naposledy použitú → prvú
+    let cielId = idPoziadavka;
+    if(!cielId){ try{ cielId=localStorage.getItem("eziv_poslednaFirma")||""; }catch(_){} }
+    if(!firmyZoznam.some(f=>f.id===cielId)) cielId=firmyZoznam[0].id;
+
+    const { data, error } = await sb.from("firmy").select("*").eq("id", cielId).maybeSingle();
     if(error) throw error;
-    if(data){ firmaId = data.id; firmaData = data.data; migrujSadzbyZNastaveni(); }
-    else { firmaData = null; }
-    // načítaj admin konfiguráciu firmy (moduly, DPH režim, pozastavenie) — číta sa cez RLS
+    if(data){
+      firmaId=data.id; firmaData=data.data; firmaVerzia=data.updated_at||null;
+      try{ localStorage.setItem("eziv_poslednaFirma", firmaId); }catch(_){}
+      migrujSadzbyZNastaveni();
+    } else { firmaData=null; firmaVerzia=null; }
+
+    // firma_config je PER FIRMU — pri prepnutí sa musí načítať znova,
+    // inak by moduly a limity ostali z predošlej firmy
     if(firmaId){ await nacitajFirmaConfig(firmaId); }
+    vykresliPrepinacFiriem();
     zobrazFirmu();
   } catch(e){
     cloudMsg("Nepodarilo sa načítať dáta: "+e.message, "err");
@@ -6996,7 +7067,7 @@ function appJazdy(){
       <input id="kjHladaj" value="${esc(kjHladaj)}" oninput="kjHladaj=this.value;kjHladajDebounce()" placeholder="🔍 Hľadať trasu alebo účel…" style="flex:1;min-width:160px;border:1px solid var(--line);border-radius:8px;padding:7px 11px;font:inherit;font-size:13px">
     </div>
     <div class="atool" style="--_c:${c}">
-      <button class="aabtn" style="--_c:${c}" onclick="kjOptimalizuj()">⚙ Optimalizovať</button>
+      <button class="aabtn pri" style="--_c:${c}" onclick="kjWizard()">✨ Sprievodca</button><button class="aabtn" style="--_c:${c}" onclick="kjOptimalizuj()">⚙ Optimalizovať</button>
       <button class="aabtn" onclick="kjMapa()">🗺 Mapa</button>
       <button class="aabtn" onclick="kjExportXLS(kjMesiac)">↧ XLS mesiac</button>
       <button class="aabtn" onclick="kjExportXLS(null)">↧ XLS celá</button>
@@ -7171,6 +7242,291 @@ function editTankovanie(idx){
   });
 }
 let _optNavrh=null;
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  SPRIEVODCA PRÍPRAVOU KNIHY JÁZD (kap. 42)
+//
+//  Poradie krokov nie je kozmetika. Prvé kroky pracujú s FAKTAMI, ktoré appka
+//  vie doložiť: účel z výkazu prác, spotreba z vozidla, nabíjania z ZSE.
+//  Až posledný krok obsahuje rozloženie jázd, ktoré fakty MENÍ — a preto je
+//  posledný, voliteľný, vypnutý a s výslovným varovaním. Kto prejde iba prvé
+//  kroky, dostane knihu presnejšiu než mal, bez jediného vymysleného údaja.
+//
+//  Nič sa nezapisuje do `firmaData.jazdy` bez potvrdenia v príslušnom kroku;
+//  rozloženie sa neukladá NIKDY — žije len ako návrh na export.
+// ═══════════════════════════════════════════════════════════════════════════
+let _kjW = null;
+
+// Plug-in hybrid? Ak to nie je nastavené, odvodí sa z dát: vozidlo, ktoré má
+// jazdy so spotrebou paliva AJ elektriny, je hybrid. Kroky týkajúce sa
+// elektriny nemá zmysel ukazovať pri čisto spaľovacom aute.
+function kjJeHybrid(){
+  const S=firmaData.settings||{};
+  if(S.kjTypVozidla) return S.kjTypVozidla==="phev";
+  const J=firmaData.jazdy||[];
+  return J.some(j=>+j.celkL>0) && J.some(j=>+j.celkKWh>0);
+}
+function kjMaElektro(){
+  const S=firmaData.settings||{};
+  if(S.kjTypVozidla) return S.kjTypVozidla==="phev" || S.kjTypVozidla==="elektro";
+  return (firmaData.jazdy||[]).some(j=>+j.celkKWh>0);
+}
+
+function kjwJazdyObdobia(od, doD){
+  return (firmaData.jazdy||[]).filter(j=>{
+    const d=jazdaDayKey(j); return d && d>=od && d<=doD;
+  });
+}
+function kjwMesiaceObdobia(od, doD){
+  const out=[]; let [r,m]=od.split("-").map(Number);
+  const [r2_,m2]=doD.split("-").map(Number);
+  while(r<r2_ || (r===r2_ && m<=m2)){ out.push(r+"-"+String(m).padStart(2,"0")); m++; if(m>12){m=1;r++;} }
+  return out;
+}
+
+// ── Krok: účely z výkazu prác ──
+function kjwStavVykazu(od, doD){
+  let zhoda=0, nedoplnene=0;
+  kjwJazdyObdobia(od,doD).forEach(j=>{
+    const a=vykazAktivitaDna(jazdaDayKey(j));
+    if(a){ zhoda++; if(!j.ucelZVykazu) nedoplnene++; }
+  });
+  return {zhoda, nedoplnene};
+}
+function kjwApplyVykaz(){
+  const {od,doD}=_kjW; let n=0;
+  (firmaData.jazdy||[]).forEach(j=>{
+    const d=jazdaDayKey(j); if(!d || d<od || d>doD) return;
+    const a=vykazAktivitaDna(d); if(!a) return;
+    if(j.ucelPovodny==null) j.ucelPovodny=j.ucel||"";
+    j.ucel=a.aktivita; j.ucelZVykazu=true;
+    if(a.zakazka) j.zakazka=a.zakazka;
+    n++;
+  });
+  if(n) poZmene();
+  _kjW.hotovo.vykaz=n;
+  return n;
+}
+
+// ── Krok: domáce nabíjanie ──
+//
+//  Vozidlo hlási, koľko elektriny spotrebovalo. Zo ZSE vieme, koľko sa nabilo
+//  verejne a s dokladom. Rozdiel sa nabil doma — je to skutočný náklad, ktorý
+//  sa bez tohto výpočtu nikam nedostane. Vozidlo je pri tom autoritatívny
+//  zdroj: spotrebu nemožno „zabudnúť zaevidovať".
+function kjwDomaceNabijanie(od, doD){
+  const jz=kjwJazdyObdobia(od,doD);
+  const spotrebaKWh=r2(jz.reduce((a,j)=>a+(+j.celkKWh||0),0));
+  const verejne=(firmaData.nabijania||[]).filter(n=>{
+    const d=String(n.datum||"").slice(0,10);
+    return d>=od && d<=doD && (+n.kwh>0);     // mesačné poplatky majú kwh 0
+  });
+  const verejneKWh=r2(verejne.reduce((a,n)=>a+(+n.kwh||0),0));
+  const cena=+((firmaData.settings||{}).kjCenaElektro)||0.15;
+  const domaceKWh=r2(spotrebaKWh-verejneKWh);
+  return {spotrebaKWh, verejneKWh, domaceKWh:domaceKWh>0?domaceKWh:0,
+          pocetVerejnych:verejne.length, cena, suma:r2(Math.max(0,domaceKWh)*cena)};
+}
+// Vytvorí výdavok za domáce nabíjanie. Popis nesie výpočet, aby bol doklad
+// obhájiteľný — sám osebe je to odhad a musí byť zrejmé, z čoho vychádza.
+function kjwVytvorVydavokNabijanie(){
+  const D=kjwDomaceNabijanie(_kjW.od,_kjW.doD);
+  if(D.domaceKWh<=0){ alert("Podľa údajov nevyšla žiadna domáca spotreba."); return; }
+  const popis="Domáce nabíjanie služobného vozidla "+_kjW.od+" – "+_kjW.doD+
+    " · spotreba podľa vozidla "+D.spotrebaKWh+" kWh, verejné nabíjanie "+D.verejneKWh+
+    " kWh, rozdiel "+D.domaceKWh+" kWh × "+D.cena+" €/kWh";
+  if(!firmaData.vydavky) firmaData.vydavky=[];
+  // Výdavky nesú číslo dokladu dodávateľa. Tu dodávateľ nie je — ide o interný
+  // doklad, tak dostane vlastný čitateľný rad DN-RRRR-MM (domáce nabíjanie).
+  let cislo="DN-"+_kjW.doD.slice(0,7);
+  const pouzite=new Set((firmaData.vydavky||[]).map(x=>String(x.cislo)));
+  if(pouzite.has(cislo)){ let i=2; while(pouzite.has(cislo+"-"+i)) i++; cislo=cislo+"-"+i; }
+  firmaData.vydavky.push({
+    id:"dn"+Date.now()+Math.random().toString(36).slice(2,7),
+    cislo, datum:_kjW.doD, partner:"Domáca elektrina (vlastný výpočet)",
+    druh:"Interný doklad", popis, kategoria:"Prevádzka vozidla",
+    bez:D.suma, dph:0, spolu:D.suma,
+    uhradaRucne:{datum:_kjW.doD, sposob:"ine"}, zaplatena:true
+  });
+  poZmene();
+  _kjW.hotovo.nabijanie=D.suma;
+  kjwRender();
+}
+
+// ── Krok: rozloženie jázd (na hrane) ──
+function kjwRozlozenie(){
+  const vsetky=[];
+  kjwMesiaceObdobia(_kjW.od.slice(0,7), _kjW.doD.slice(0,7)).forEach(mk=>{
+    const R=optimalizujMesiac(mk);
+    if(R && R.novy && R.novy.length) vsetky.push({mk, R});
+  });
+  return vsetky;
+}
+
+
+// ── UI sprievodcu ──
+const KJW_KROKY=[
+  {k:"obdobie",  t:"Obdobie"},
+  {k:"vykaz",    t:"Účely z výkazu"},
+  {k:"elektro",  t:"Domáce nabíjanie"},
+  {k:"kontrola", t:"Kontrola knihy"},
+  {k:"rozlozenie", t:"Rozloženie jázd"},
+  {k:"zaver",    t:"Export"}
+];
+function kjwDostupneKroky(){
+  return KJW_KROKY.filter(x => (x.k!=="elektro" || kjMaElektro()));
+}
+function kjWizard(){
+  const mes=kjMesiace();
+  const dnes=new Date().toISOString().slice(0,10);
+  const zac=mes.length? (mes[mes.length-1]+"-01") : dnes.slice(0,8)+"01";
+  _kjW={ krok:0, od:zac, doD:dnes, hotovo:{}, navrh:null };
+  kjwRender();
+}
+function kjwKrok(delta){
+  const K=kjwDostupneKroky();
+  _kjW.krok=Math.max(0, Math.min(K.length-1, _kjW.krok+delta));
+  kjwRender();
+}
+function kjwNastavObdobie(pole, hod){ _kjW[pole]=hod; kjwRender(); }
+function kjwRychleObdobie(typ){
+  const dnes=new Date();
+  if(typ==="mesiac"){ const m=kjMesiac||dnes.toISOString().slice(0,7);
+    const [r,mm]=m.split("-").map(Number);
+    _kjW.od=m+"-01"; _kjW.doD=new Date(r,mm,0).toISOString().slice(0,10); }
+  else if(typ==="rok"){ const r=dnes.getFullYear(); _kjW.od=r+"-01-01"; _kjW.doD=r+"-12-31"; }
+  else if(typ==="vsetko"){ const mes=kjMesiace();
+    if(mes.length){ _kjW.od=mes[mes.length-1]+"-01";
+      const [r,mm]=mes[0].split("-").map(Number); _kjW.doD=new Date(r,mm,0).toISOString().slice(0,10); } }
+  kjwRender();
+}
+
+function kjwRender(){
+  const K=kjwDostupneKroky(), akt=K[_kjW.krok], jz=kjwJazdyObdobia(_kjW.od,_kjW.doD);
+  const km=Math.round(jz.reduce((a,j)=>a+(+j.km||0),0));
+  const pas=K.map((x,i)=>`<span style="font-size:11px;padding:3px 8px;border-radius:20px;white-space:nowrap;${i===_kjW.krok?'background:var(--brand);color:#fff':(i<_kjW.krok?'background:var(--brand-lite);color:var(--brand-deep)':'background:var(--bg);color:var(--ink-soft)')}">${i+1}. ${x.t}</span>`).join("");
+
+  let telo="";
+  if(akt.k==="obdobie"){
+    telo=`<div class="csub" style="margin-bottom:10px">Vyberte obdobie, ktoré chcete pripraviť. Sprievodca sa nedotkne ničoho mimo neho.</div>
+      <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:12px">
+        <button class="aabtn" onclick="kjwRychleObdobie('mesiac')">Zobrazený mesiac</button>
+        <button class="aabtn" onclick="kjwRychleObdobie('rok')">Tento rok</button>
+        <button class="aabtn" onclick="kjwRychleObdobie('vsetko')">Celá kniha</button>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <div class="mfield" style="flex:1;min-width:130px"><label>Od</label><input type="date" value="${_kjW.od}" onchange="kjwNastavObdobie('od',this.value)"></div>
+        <div class="mfield" style="flex:1;min-width:130px"><label>Do</label><input type="date" value="${_kjW.doD}" onchange="kjwNastavObdobie('doD',this.value)"></div>
+      </div>
+      <div style="background:var(--bg);border-radius:9px;padding:10px 12px;font-size:13px;margin-top:6px">
+        V období je <b>${jz.length}</b> jázd · <b>${km.toLocaleString('sk')} km</b></div>`;
+  }
+
+  else if(akt.k==="vykaz"){
+    const V=kjwStavVykazu(_kjW.od,_kjW.doD);
+    telo=`<div class="csub" style="margin-bottom:10px">Účel jazdy sa dá doložiť výkazom prác — ak ste v ten deň niečo robili, jazda mala dôvod. Toto je najsilnejší podklad, aký k účelu máte.</div>
+      ${V.zhoda?`<div style="background:var(--bg);border-radius:9px;padding:11px 13px;font-size:13px">
+        <b>${V.zhoda}</b> jázd má vo výkaze zhodný deň${V.nedoplnene?` · z toho <b>${V.nedoplnene}</b> ešte nemá doplnený účel`:` · všetky už doplnené`}
+        ${_kjW.hotovo.vykaz?`<div style="color:var(--pos);margin-top:6px">✓ Doplnené pri ${_kjW.hotovo.vykaz} jazdách</div>`:''}
+      </div>
+      ${V.nedoplnene?`<button class="aabtn pri" style="width:100%;justify-content:center;margin-top:12px" onclick="kjwApplyVykaz();kjwRender()">↳ Doplniť účel z výkazu (${V.nedoplnene})</button>
+      <div class="csub" style="margin-top:8px">Pôvodný účel sa uchová — dá sa vrátiť.</div>`:''}`
+      :`<div class="aempty">Za toto obdobie nemáte výkaz prác, z ktorého by sa dal účel doplniť.</div>`}`;
+  }
+
+  else if(akt.k==="elektro"){
+    const D=kjwDomaceNabijanie(_kjW.od,_kjW.doD);
+    const podiel=D.spotrebaKWh>0?Math.round(D.domaceKWh/D.spotrebaKWh*100):0;
+    telo=`<div class="csub" style="margin-bottom:10px">Vozidlo hlási, koľko elektriny spotrebovalo. Zo ZSE vieme, koľko ste nabili verejne s dokladom. <b>Rozdiel ste nabili doma</b> — je to skutočný náklad, ktorý sa bez tohto výpočtu nikam nedostane.</div>
+      <div class="alist">
+        <div class="arow" style="grid-template-columns:1fr auto;cursor:default"><div>Spotreba podľa vozidla</div><div class="acol-sum">${D.spotrebaKWh.toFixed(2)} kWh</div></div>
+        <div class="arow" style="grid-template-columns:1fr auto;cursor:default"><div>Verejné nabíjanie (${D.pocetVerejnych}×)</div><div class="acol-sum">${D.verejneKWh.toFixed(2)} kWh</div></div>
+        <div class="arow" style="grid-template-columns:1fr auto;cursor:default"><div><b>Doma nabité</b></div><div class="acol-sum"><b>${D.domaceKWh.toFixed(2)} kWh</b> (${podiel} %)</div></div>
+        <div class="arow" style="grid-template-columns:1fr auto;cursor:default"><div>Pri cene ${D.cena} €/kWh</div><div class="acol-sum" style="color:var(--pos)"><b>${eur(D.suma)}</b></div></div>
+      </div>
+      ${D.domaceKWh>0?(_kjW.hotovo.nabijanie
+        ? `<div style="color:var(--pos);font-size:13px;margin-top:12px">✓ Výdavok na ${eur(_kjW.hotovo.nabijanie)} vytvorený.</div>`
+        : `<button class="aabtn pri" style="width:100%;justify-content:center;margin-top:12px" onclick="kjwVytvorVydavokNabijanie()">+ Vytvoriť výdavok ${eur(D.suma)}</button>
+           <div class="csub" style="margin-top:8px">Doklad ponesie celý výpočet v popise. Cenu za kWh zmeníte v nastaveniach knihy jázd.</div>`)
+        : `<div class="csub" style="margin-top:12px">Verejné nabíjanie pokrýva celú spotrebu — doma sa nenabíjalo.</div>`}`;
+  }
+
+  else if(akt.k==="kontrola"){
+    const ch=jazdyKontrola();
+    telo=`<div class="csub" style="margin-bottom:10px">Čo by pri kontrole knihy jázd padlo do oka ako prvé.</div>
+      ${ch.length?`<div class="alist">${ch.map(x=>`<div class="arow" style="grid-template-columns:auto 1fr;cursor:default;align-items:start;gap:8px"><div>⚠</div><div style="font-size:12.5px;line-height:1.55">${esc(x)}</div></div>`).join("")}</div>`
+        :`<div style="background:#eef7f0;border-radius:9px;padding:12px 14px;font-size:13px">✓ Kniha je konzistentná — nič na vytknutie.</div>`}
+      <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:12px">
+        <button class="aabtn" onclick="closeModal();kjPrepocitajTacho()">↻ Prepočítať tachometer</button>
+      </div>`;
+  }
+
+  else if(akt.k==="rozlozenie"){
+    const R=_kjW.navrh;
+    telo=`<div style="background:#fdf3ee;border:1.5px solid var(--neg);border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:12.5px;line-height:1.6">
+        <b style="color:var(--neg)">⚠ Iba ukážka — na daňové účely sa nepoužíva</b><br>
+        Tento krok <b>prepisuje dátumy jázd</b>: dlhé a víkendové jazdy rozloží do pracovných dní. Vzniknutá kniha už <b>nezodpovedá tomu, čo hlási vozidlo</b> — a jeho výpis si vie správca dane vyžiadať.
+        <br><br>Použite to len vtedy, keď výsledok naozaj zodpovedá skutočnosti (napr. rekonštruujete jazdy, ktoré ste si nezapisovali). <b>Nič sa neuloží do knihy</b> — návrh žije len ako podklad na export.
+      </div>
+      ${R? `<div style="font-size:13px;margin-bottom:10px">Návrh za ${R.length} ${R.length===1?'mesiac':'mesiace'}: ponechaných <b>${R.reduce((a,x)=>a+x.R.ponechanych,0)}</b> · rozdelených <b>${R.reduce((a,x)=>a+x.R.rozdelenych,0)}</b> · nových dní <b>${R.reduce((a,x)=>a+x.R.novychDni,0)}</b></div>
+        ${R.every(x=>!x.R.rozdelenych)?`<div style="background:var(--bg);border-radius:9px;padding:11px 13px;font-size:12.5px">Nič sa nerozdelilo — v tomto období nemáte jazdy v pásme, ktoré pravidlá rozdeľujú (pracovný deň nad ${(firmaData.settings||{}).kjOptDlhaJazda||120} km, víkend nad ${(firmaData.settings||{}).kjOptVikendMax||40} km, a zároveň do ${(firmaData.settings||{}).kjOptDialkova||200} km). Prahy zmeníte v nastaveniach knihy jázd.</div>`:''}`
+        : `<button class="aabtn" style="width:100%;justify-content:center" onclick="_kjW.navrh=kjwRozlozenie();kjwRender()">Zobraziť, čo by rozloženie spravilo</button>`}`;
+  }
+
+  else {
+    const h=_kjW.hotovo;
+    telo=`<div class="csub" style="margin-bottom:10px">Čo sprievodca v tomto behu spravil:</div>
+      <div class="alist">
+        <div class="arow" style="grid-template-columns:1fr auto;cursor:default"><div>Obdobie</div><div class="acol-sum">${_kjW.od} – ${_kjW.doD}</div></div>
+        <div class="arow" style="grid-template-columns:1fr auto;cursor:default"><div>Účel doplnený z výkazu</div><div class="acol-sum">${h.vykaz||0}×</div></div>
+        ${kjMaElektro()?`<div class="arow" style="grid-template-columns:1fr auto;cursor:default"><div>Výdavok za domáce nabíjanie</div><div class="acol-sum">${h.nabijanie?eur(h.nabijanie):"—"}</div></div>`:''}
+        <div class="arow" style="grid-template-columns:1fr auto;cursor:default"><div>Jázd v období</div><div class="acol-sum">${jz.length} · ${km.toLocaleString('sk')} km</div></div>
+      </div>
+      <button class="aabtn pri" style="width:100%;justify-content:center;margin-top:14px" onclick="kjwExport()">↧ Exportovať knihu jázd do XLS</button>
+      ${_kjW.navrh?`<button class="aabtn" style="width:100%;justify-content:center;margin-top:8px" onclick="kjwExportNavrh()">↧ Exportovať rozložený návrh (ukážka)</button>`:''}
+      <div class="csub" style="margin-top:10px">Export ide cez rovnaký generátor ako zvyšok knihy, takže mesiace aj celok vyzerajú rovnako.</div>`;
+  }
+
+  openModal("Príprava knihy jázd", `
+    <div style="display:flex;gap:5px;overflow-x:auto;padding-bottom:10px;margin-bottom:12px">${pas}</div>
+    ${telo}
+    <div style="display:flex;gap:8px;margin-top:16px">
+      ${_kjW.krok>0?`<button class="aabtn" onclick="kjwKrok(-1)">‹ Späť</button>`:''}
+      <div style="flex:1"></div>
+      ${_kjW.krok<K.length-1?`<button class="aabtn pri" onclick="kjwKrok(1)">Ďalej ›</button>`:`<button class="aabtn" onclick="closeModal()">Hotovo</button>`}
+    </div>`, null);
+  const ok=document.getElementById("modalOk"); if(ok) ok.style.display="none";
+}
+
+// export skutočnej knihy za obdobie sprievodcu
+function kjwExport(){
+  const mes=kjwMesiaceObdobia(_kjW.od.slice(0,7), _kjW.doD.slice(0,7));
+  ensureXlsxStyle().then(X=>{
+    const S=xkStyles(), D=firmaData, wb=X.utils.book_new(); let n=0;
+    mes.forEach(mk=>{ const ws=xkKnihaJazdSheet(X,S,D,mk); if(ws){
+      const mm=mk.match(/(\d{4})-(\d{2})/);
+      X.utils.book_append_sheet(wb, ws, xkSheetName("KJ "+(mm?XK_MONTHS[+mm[2]-1].slice(0,3)+" "+mm[1]:mk))); n++; } });
+    if(!n){ alert("V období nie sú žiadne jazdy."); return; }
+    const freezeMap={}; wb.SheetNames.forEach((nm,i)=>{ const f=wb.Sheets[nm]['!freeze']; if(f) freezeMap[i]={x:f.xSplit||0,y:f.ySplit||0}; });
+    const buf=X.write(wb,{type:"array",bookType:"xlsx"});
+    ensureFflate().then(ff=>downloadBlob(new Blob([xkApplyFreeze(X,ff,buf,freezeMap)],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}), "kniha_jazd_"+_kjW.od+"_"+_kjW.doD+".xlsx"))
+      .catch(()=>downloadBlob(new Blob([buf],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}), "kniha_jazd_"+_kjW.od+"_"+_kjW.doD+".xlsx"));
+  }).catch(()=>alert("Knižnicu na export sa nepodarilo načítať."));
+}
+// export rozloženého návrhu — súbor je označený ako ukážka už v názve
+function kjwExportNavrh(){
+  if(!_kjW.navrh || !_kjW.navrh.length){ alert("Návrh nie je vytvorený."); return; }
+  ensureXlsxStyle().then(X=>{
+    const S=xkStyles(), D=firmaData, wb=X.utils.book_new(); let n=0;
+    _kjW.navrh.forEach(({mk,R})=>{ const ws=xkKnihaJazdSheet(X,S,D,mk,R.novy); if(ws){
+      const mm=mk.match(/(\d{4})-(\d{2})/);
+      X.utils.book_append_sheet(wb, ws, xkSheetName("UKAZKA "+(mm?XK_MONTHS[+mm[2]-1].slice(0,3)+" "+mm[1]:mk))); n++; } });
+    if(!n){ alert("Návrh neobsahuje jazdy."); return; }
+    const buf=X.write(wb,{type:"array",bookType:"xlsx"});
+    downloadBlob(new Blob([buf],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}), "UKAZKA_neplatna_kniha_jazd_"+_kjW.od+".xlsx");
+  }).catch(()=>alert("Knižnicu na export sa nepodarilo načítať."));
+}
+
 function kjOptimalizuj(){
   const R=optimalizujMesiac(kjMesiac);
   if(!R.novy || !R.novy.length){ alert(R.info||"Nie je čo optimalizovať."); return; }
@@ -7198,22 +7554,24 @@ function kjOptimalizuj(){
 }
 function kjOptExportXLS(){
   if(!_optNavrh) return;
-  const m=firmaData.meta||{};
-  const wb=XLSX.utils.book_new();
-  const jazdy=_optNavrh.novy;
-  const kmSpolu=jazdy.reduce((a,j)=>a+(+j.km||0),0);
-  const aoa=[
-    ["Kniha jázd (optimalizovaná) — "+mesiacLabel(kjMesiac)],
-    ["Vozidlo:", m.vozidlo||"", "", "Firma:", m.nazov||""],
-    [],
-    ["Dátum","Trasa","Účel","km"]
-  ];
-  jazdy.forEach(j=>aoa.push([j.datum||"", j.cesta||j.trasa||"", j.ucel||"", +j.km||0]));
-  aoa.push([]); aoa.push(["SPOLU","","",kmSpolu]);
-  const ws=XLSX.utils.aoa_to_sheet(aoa);
-  ws["!cols"]=[{wch:16},{wch:34},{wch:26},{wch:8}];
-  XLSX.utils.book_append_sheet(wb, ws, mesiacLabel(kjMesiac).replace(/\s/g,"_").slice(0,31));
-  XLSX.writeFile(wb, "kniha_jazd_optimalizovana_"+kjMesiac+".xlsx");
+  // Ten istý generátor ako pri bežnom exporte — inak dostane používateľ
+  // za mesiac súbor, ktorý sa na zvyšok knihy vôbec nepodobá.
+  ensureXlsxStyle().then(X=>{
+    const S=xkStyles(), D=firmaData;
+    const wb=X.utils.book_new();
+    const ws=xkKnihaJazdSheet(X, S, D, kjMesiac, _optNavrh.novy);
+    if(!ws){ alert("Návrh neobsahuje žiadne jazdy."); return; }
+    const mm=String(kjMesiac).match(/(\d{4})-(\d{2})/);
+    X.utils.book_append_sheet(wb, ws, xkSheetName("KJ "+(mm?XK_MONTHS[+mm[2]-1].slice(0,3)+" "+mm[1]:kjMesiac)));
+    const freezeMap={}; wb.SheetNames.forEach((n,i)=>{ const f=wb.Sheets[n]['!freeze']; if(f) freezeMap[i]={x:f.xSplit||0,y:f.ySplit||0}; });
+    const buf=X.write(wb,{type:"array",bookType:"xlsx"});
+    const nazov="kniha_jazd_navrh_"+kjMesiac+".xlsx";
+    ensureFflate().then(fflate=>{
+      downloadBlob(new Blob([xkApplyFreeze(X,fflate,buf,freezeMap)],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}), nazov);
+    }).catch(()=>{
+      downloadBlob(new Blob([buf],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}), nazov);
+    });
+  }).catch(()=>alert("Knižnicu na export sa nepodarilo načítať (potrebné pripojenie na internet)."));
 }
 function kjOptPrepis(){
   modalConfirmAsk("Naozaj nahradiť jazdy "+mesiacLabel(kjMesiac)+" optimalizovaným návrhom? Pôvodné jazdy tohto mesiaca sa odstránia.", ()=>{
@@ -10190,8 +10548,14 @@ function xkMonthLbl(ym){ const m=String(ym).match(/(\d{4})-(\d{2})/); return m?X
 // prevod doby "1:30" alebo "1h 30m" na minúty
 function dobaToMin(doba){ const s=String(doba||""); let m=s.match(/(\d+):(\d+)/); if(m) return (+m[1])*60+(+m[2]); m=s.match(/(\d+)\s*h(?:\s*(\d+))?/i); if(m) return (+m[1])*60+(+(m[2]||0)); const n=parseFloat(s); return isNaN(n)?0:Math.round(n*60); }
 // BOHATÝ hárok knihy jázd (verne prevzaté zo starej appky — 18 stĺpcov, hlavička vozidla, normy, spotreby)
-function xkKnihaJazdSheet(X, S, D, m){
-  const list=(D.jazdy||[]).filter(j=>(j.mesiac||String(j.datum||j.dt||"").slice(0,7))===m).sort((a,b)=>String(a.dt||a.datum||"").localeCompare(String(b.dt||b.datum||"")));
+// `vlastnyZoznam` umožňuje vygenerovať ten istý hárok z inej sady jázd
+// (napr. z optimalizovaného návrhu). Bez neho existovali DVA generátory
+// s odlišným výstupom — mesačný export z návrhu vyzeral úplne inak než
+// export celej knihy. Jeden hárok = jedna funkcia.
+function xkKnihaJazdSheet(X, S, D, m, vlastnyZoznam){
+  const list = vlastnyZoznam
+    ? vlastnyZoznam.slice().sort((a,b)=>String(a.dt||a.datum||"").localeCompare(String(b.dt||b.datum||"")))
+    : (D.jazdy||[]).filter(j=>(j.mesiac||String(j.datum||j.dt||"").slice(0,7))===m).sort((a,b)=>String(a.dt||a.datum||"").localeCompare(String(b.dt||b.datum||"")));
   if(!list.length) return null;
   const cfg=D.settings||{};
   const VOZIDLO=(D.meta&&D.meta.vozidlo)||"";
@@ -15695,6 +16059,47 @@ function importJSON(e){
   r.readAsText(file);
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  OPTIMISTICKÝ ZÁMOK (fáza 0 plánu Spolupráca, kap. 38.4)
+//
+//  `ulozFirmu` zapisuje CELÝ JSON naraz. Kým má účet jedného používateľa,
+//  nevadí to. Pri zdieľanom prístupe (účtovník + podnikateľ) by ten, kto uloží
+//  druhý, PREPÍSAL prácu prvého — ticho, bez konfliktu, bez varovania. Preto sa
+//  zapisuje podmienene: `where updated_at = <hodnota, ktorú sme načítali>`.
+//  Ak medzitým uložil niekto iný, podmienka nesedí, Supabase nevráti žiadny
+//  riadok a my to spoznáme.
+//
+//  Zámok je poistka, nie primárna obrana — tou je rolová deľba modulov (38.11),
+//  vďaka ktorej si účtovník a podnikateľ do rovnakých dát bežne nesiahnu.
+//  Zavádza sa PRED zdieľaním, lebo bez neho je zdieľanie nebezpečné.
+// ═══════════════════════════════════════════════════════════════
+let firmaVerzia = null;   // updated_at riadku, z ktorého sme čítali
+
+// Konflikt: dáta na serveri sú novšie než tie naše. Ponúkneme jediné bezpečné
+// riešenie — načítať znova. Automatické zlúčenie by tu bolo horšie než nič:
+// zlúčiť dva celé JSON-y bez znalosti zámeru je hádanie, nie oprava.
+async function riesKonfliktUlozenia(){
+  const zaloha = JSON.stringify(firmaData);
+  const ok = confirm(
+    "Dáta medzitým zmenil niekto iný (alebo iné zariadenie).\n\n"+
+    "Ak by sme uložili teraz, prepísali by sme jeho zmeny.\n\n"+
+    "OK = načítať aktuálne dáta zo servera (vaše neuložené zmeny sa stratia)\n"+
+    "Zrušiť = ponechať vaše zmeny na obrazovke a uložiť si zálohu");
+  if(ok){
+    await nacitajFirmu();
+    cloudMsg("Načítané aktuálne dáta zo servera.","info");
+  } else {
+    // aby sa práca nestratila ani pri zamietnutí — stiahne sa ako súbor
+    try{
+      const blob=new Blob([zaloha],{type:"application/json"});
+      const url=URL.createObjectURL(blob); const a=document.createElement("a");
+      a.href=url; a.download="eziv_neulozene_"+new Date().toISOString().slice(0,19).replace(/[:T]/g,"-")+".json";
+      a.click(); URL.revokeObjectURL(url);
+      cloudMsg("Vaše zmeny sme stiahli ako zálohu. Uloženie do cloudu neprebehlo.","err");
+    }catch(_){ cloudMsg("Uloženie neprebehlo — dáta na serveri sú novšie.","err"); }
+  }
+}
+
 async function ulozFirmu(){
   if(!firmaData){ cloudMsg("Nie sú žiadne dáta na uloženie. Najprv importujte JSON.","err"); return; }
   if(demoMode){ firmaDirty=false; cloudMsg("Ukážkový režim — zmeny sa neukladajú. Vytvorte si účet pre trvalé uloženie.","info"); return; }
@@ -15707,14 +16112,30 @@ async function ulozFirmu(){
     const nazov=(firmaData.meta&&firmaData.meta.nazov)?firmaData.meta.nazov:"Moja firma";
     let res;
     if(firmaId){
-      res=await sb.from("firmy").update({data:firmaData,nazov,updated_at:new Date().toISOString()}).eq("id",firmaId).select().single();
+      const teraz=new Date().toISOString();
+      let q=sb.from("firmy").update({data:firmaData,nazov,updated_at:teraz}).eq("id",firmaId);
+      // podmienka zámku; pri prvom uložení po starej verzii appky verziu ešte
+      // nemáme — vtedy sa uloží bez nej a verzia sa nastaví z odpovede
+      if(firmaVerzia) q=q.eq("updated_at",firmaVerzia);
+      res=await q.select().maybeSingle();
+      if(!res.error && !res.data){
+        // žiadny riadok sa nezmenil = podmienka updated_at nesedela
+        setSync("offline");
+        await riesKonfliktUlozenia();
+        return;
+      }
     }else{
       const { data:{ user } } = await sb.auth.getUser();
       if(!user) throw new Error("Nie ste prihlásený.");
       res=await sb.from("firmy").insert({data:firmaData,nazov,user_id:user.id}).select().single();
     }
     if(res.error) throw res.error;
-    firmaId=res.data.id; firmaDirty=false;
+    firmaId=res.data.id; firmaVerzia=res.data.updated_at||null; firmaDirty=false;
+    // názov sa mohol zmeniť v nastaveniach — prepínač musí ukazovať aktuálny
+    const _f=firmyZoznam.find(f=>f.id===firmaId);
+    if(_f){ _f.nazov=res.data.nazov; _f.updated_at=firmaVerzia; }
+    else { firmyZoznam.push({id:firmaId, nazov:res.data.nazov, updated_at:firmaVerzia}); }
+    vykresliPrepinacFiriem();
     cloudMsg("Uložené do cloudu ✓ Dáta sú teraz bezpečne online.","ok"); setSync("saved"); zobrazFirmu();
   }catch(e){
     // Index `firmy_ico_unik` je skutočná záruka jedinečnosti IČO a ohlási sa
