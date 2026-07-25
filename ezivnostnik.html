@@ -768,7 +768,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.07.24-CS";  // kontrola konzistencie na všetkých cestách importu
+const APP_VERZIA = "2026.07.24-CU";  // dátum a litre z FS pri eKasa doklade
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -4205,6 +4205,40 @@ function feMapFirmu(r){
   }
   return {nazov:T(nazov), ico:T(ico), dic, icdph, adresa};
 }
+// Dátum z FS do tvaru YYYY-MM-DD. FS ho vracia ako `createDate`, ktorý býva
+// ISO timestamp (2026-07-24T14:59:44) alebo s pásmom (…+02:00), niekedy aj
+// s medzerou namiesto T, alebo v tvare DD.MM.YYYY. Pôvodné `slice(0,10)` +
+// prísny regex prepustili len prvý tvar — pri ostatných ostalo pole prázdne
+// a uloženie zlyhalo na chýbajúcom dátume.
+function normalizujDatumFS(v){
+  if(!v) return "";
+  const s=String(v).trim();
+  let m=s.match(/^(\d{4})-(\d{2})-(\d{2})/);          // 2026-07-24…
+  if(m) return m[1]+"-"+m[2]+"-"+m[3];
+  m=s.match(/^(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})/);  // 24.07.2026
+  if(m) return m[3]+"-"+String(m[2]).padStart(2,"0")+"-"+String(m[1]).padStart(2,"0");
+  const t=Date.parse(s);                              // posledná záchrana
+  if(!isNaN(t)){ const d=new Date(t); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+  return "";
+}
+
+// Litre z položiek dokladu FS. Hľadá palivo a berie jeho množstvo. Štruktúra
+// položky sa medzi verziami FS líši, preto sa skúša viac názvov polí.
+function litreZPoloziekFS(polozky){
+  const jePalivo=n=>/natural|diesel|nafta|benz|ba\s?9[0-9]|fuelsave|palivo|pohonn/i.test(String(n||""));
+  let najlepsie=0;
+  for(const p of polozky){
+    const nazov=p.name||p.nazov||p.itemName||"";
+    const mn=parseFloat(String(p.quantity ?? p.mnozstvo ?? p.amount ?? "").toString().replace(",","."))||0;
+    if(mn<=0) continue;
+    // palivo má prednosť; ak názov nesedí, ber najväčšie množstvo ako záchranu
+    if(jePalivo(nazov)) return r2(mn);
+    if(mn>najlepsie) najlepsie=mn;
+  }
+  // bez rozpoznaného paliva vrátime množstvo len ak je jediná položka
+  return polozky.length===1 ? r2(najlepsie) : 0;
+}
+
 // Odvodí sadzbu DPH z prečítaných hodnôt. Pri OCR chybe býva nesprávna
 // VEĽKOSŤ čísel, nie ich pomer — 9,36 a 2,15 dá 22,97 %, teda zjavne 23 %.
 // Výsledok sa priloží k najbližšej zákonnej sadzbe; ak sa odvodiť nedá,
@@ -4258,7 +4292,18 @@ async function ekasaDoplnDoFormulara(receiptId){
       }
     }
   }
-  if(d.datum){ const el=document.getElementById("m_datum"); if(el){ const dd=String(d.datum).slice(0,10); if(/^\d{4}-\d{2}-\d{2}$/.test(dd)) el.value=dd; } }
+  if(d.datum){ const el=document.getElementById("m_datum"); if(el){ const dd=normalizujDatumFS(d.datum); if(dd) el.value=dd; } }
+  // Litre z položiek FS — proxy vracia `polozky`, ktoré appka dovtedy ignorovala.
+  // Pri tankovaní je práve tam množstvo, a to je pole, kde OCR robí najväčšie
+  // chyby (7,2 namiesto 42,27). FS je autorita, tak prepíše aj OCR.
+  const litreEl=document.getElementById("m_litre");
+  if(litreEl && Array.isArray(d.polozky) && d.polozky.length){
+    const litre=litreZPoloziekFS(d.polozky);
+    if(litre>0){
+      litreEl.value=litre;
+      if(typeof mKontrolaLitre==="function") mKontrolaLitre();
+    }
+  }
   // IČ DPH: FS ho v odpovedi často nemá — skús zapamätaného partnera podľa IČO
   const polIcDph=document.getElementById("m_dodIcDph");
   if(polIcDph && !polIcDph.value){
@@ -13130,12 +13175,29 @@ async function obrazokNaText(file, onProgress){
     "initializing api":"Spúšťam rozpoznávanie…",
     "recognizing text":null,     // null = ukáž percentá
   };
+  // Priechodov môže byť až päť (predspracovaný, pôvodný, +180°, +270°, +90°)
+  // a Tesseract v každom počíta percentá odznova. Bez prepočtu preto ukazovateľ
+  // skákal 61 % → 12 % → 80 % a vyzeralo to ako porucha.
+  // Každý priechod má preto SVOJE pásmo — hodnota môže rásť, nikdy neklesá.
+  // Pásma sú nerovnomerné zámerne: prvý priechod väčšinu dokladov vyrieši,
+  // takže dostane najviac miesta, a ďalšie sa už len dopĺňajú.
+  const PASMA=[[0,50],[50,65],[65,80],[80,92],[92,100]];
+  let _priechod=0, _zobrazene=0;
+  const POPIS_PRIECHODU=["","skúšam bez úprav…","skúšam iné natočenie…","skúšam iné natočenie…","posledný pokus…"];
+
   const rozpoznaj=async(src)=>{
+    const [od,do_]=PASMA[Math.min(_priechod,PASMA.length-1)];
+    const popis=POPIS_PRIECHODU[Math.min(_priechod,POPIS_PRIECHODU.length-1)];
     const { data }=await T.recognize(src,"slk+eng",{ logger:m=>{
       if(!onProgress) return;
-      if(m.status==="recognizing text") onProgress(Math.round((m.progress||0)*100));
+      if(m.status==="recognizing text"){
+        const celkovo=od+(do_-od)*(m.progress||0);
+        if(celkovo>_zobrazene) _zobrazene=celkovo;   // späť nikdy
+        onProgress(Math.round(_zobrazene), popis);
+      }
       else if(FAZY[m.status]!==undefined && FAZY[m.status]) onProgress(FAZY[m.status]);
     }});
+    _priechod++;
     return data.text||"";
   };
 
@@ -13656,13 +13718,13 @@ async function spracujDokladSubor(file, setStav){
       }
     }
     // PDF bez textovej vrstvy (sken) → OCR obrázka
-    if(text.trim().length<20){ setStav("PDF je sken, spúšťam OCR…"); text=await obrazokNaText(file, p=>setStav(typeof p==="number"?("OCR "+p+"%"):p)); }
+    if(text.trim().length<20){ setStav("PDF je sken, spúšťam OCR…"); text=await obrazokNaText(file, (p,popis)=>setStav(typeof p==="number"?("OCR "+p+"%"+(popis?" — "+popis:"")):p)); }
   } else {
     // obrázok: najprv eKasa QR (presnejšie než OCR), potom OCR text
     setStav("Hľadám QR kód dokladu…");
     try{ const qr=await precitajQRzObrazka(file); ekasa=parseEkasaQR(qr); }catch(_){}
     setStav("OCR obrázka…");
-    text=await obrazokNaText(file, p=>setStav(typeof p==="number"?("OCR "+p+"%"):p));
+    text=await obrazokNaText(file, (p,popis)=>setStav(typeof p==="number"?("OCR "+p+"%"+(popis?" — "+popis:"")):p));
   }
   const R=parseFakturaText(text);
   R._surovyText=text;
