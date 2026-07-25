@@ -558,15 +558,28 @@ async function otvorDetail(firmaId, nazov){
 }
 function zavriDetail(){ document.getElementById("detailModal").classList.remove("on"); }
 
+// Session môže byť `null`: token vypršal, alebo sa používateľ odhlásil v inej
+// karte. Bez kontroly padne `session.access_token` s hláškou „Cannot read
+// properties of null", ktorá nepovie, čo robiť. `getSession()` sa sám pokúsi
+// token obnoviť; ak vráti null, obnoviť sa už nedá.
+async function ziskajToken(){
+  try{
+    const { data:{ session } } = await sb.auth.getSession();
+    return (session && session.access_token) || null;
+  }catch(_){ return null; }
+}
+const CHYBA_SESSION="Prihlásenie vypršalo. Obnovte stránku a prihláste sa znova.";
+
 // ── GDPR: export a zmazanie cez edge-function (serverová operácia) ──
 async function gdprExport(){
   if(!cfgFirmaId) return;
   const err=document.getElementById("cfgErr"); err.textContent="Pripravujem export…";
   try{
-    const { data:{ session } } = await sb.auth.getSession();
+    const _tok = await ziskajToken();
+    if(!_tok){ err.textContent=CHYBA_SESSION; return; }
     const res = await fetch(SUPABASE_URL + "/functions/v1/gdpr", {
       method:"POST",
-      headers:{ "Content-Type":"application/json", "Authorization":"Bearer "+session.access_token },
+      headers:{ "Content-Type":"application/json", "Authorization":"Bearer "+_tok },
       body: JSON.stringify({ akcia:"export", firma_id:cfgFirmaId })
     });
     if(!res.ok){ const e=await res.json().catch(()=>({})); err.textContent="Export zlyhal: "+(e.error||res.status); return; }
@@ -597,10 +610,11 @@ async function gdprZmazat(){
 
   err.textContent="Mažem…";
   try{
-    const { data:{ session } } = await sb.auth.getSession();
+    const _tok = await ziskajToken();
+    if(!_tok){ err.textContent=CHYBA_SESSION; return; }
     const res = await fetch(SUPABASE_URL + "/functions/v1/gdpr", {
       method:"POST",
-      headers:{ "Content-Type":"application/json", "Authorization":"Bearer "+session.access_token },
+      headers:{ "Content-Type":"application/json", "Authorization":"Bearer "+_tok },
       body: JSON.stringify({ akcia:"zmazat", firma_id:cfgFirmaId, testovaci:jeTest })
     });
     const r = await res.json().catch(()=>({}));
