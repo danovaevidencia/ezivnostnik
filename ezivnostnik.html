@@ -772,7 +772,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.07.26-DL";  // fáza 2: roly, prístupy k firme, pozvánky
+const APP_VERZIA = "2026.07.26-DM";  // fáza 2: roly, prístupy k firme, pozvánky
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -3734,9 +3734,19 @@ function domov(){
   zobrazFirmu();
 }
 
-function appHlavicka(id, akcie){
+// Hlavička modulu. Je to jediné miesto, cez ktoré prechádzajú VŠETKY moduly,
+// takže sa tu dá zapnúť režim „len na čítanie" naraz pre celú appku — bez toho,
+// aby sa na niektorý modul zabudlo.
+//
+// `akcie` sú v praxi zapisovacie tlačidlá (Nová faktúra, Import výpisu, Pridať
+// majetok…), preto sa v režime na čítanie nezobrazia. Čo je bezpečné aj bez
+// práva zápisu (navigácia, export), patrí do `akcieVzdy`.
+function appHlavicka(id, akcie, akcieVzdy){
   const a=APPS[id];
-  return `<div class="appbar" style="--_c:${a.c}"><button class="appback" onclick="domov()">‹</button><div class="appic" style="background:${a.c}">${a.ic}</div><div class="apptitle"><h2>${a.n}</h2><div class="crumb" id="appCrumb"></div></div><div class="sp"></div><div class="appacts">${akcie||""}</div></div>`;
+  const citanie = typeof mozemPisat==="function" && !mozemPisat(id);
+  const zobrazene = (citanie ? "" : (akcie||"")) + (akcieVzdy||"");
+  return `<div class="appbar" style="--_c:${a.c}"><button class="appback" onclick="domov()">‹</button><div class="appic" style="background:${a.c}">${a.ic}</div><div class="apptitle"><h2>${a.n}</h2><div class="crumb" id="appCrumb"></div></div><div class="sp"></div><div class="appacts">${zobrazene}</div></div>`
+    + (citanie ? pasIbaCitanie(id) : "");
 }
 
 function renderApp(id){
@@ -8732,6 +8742,7 @@ function appMajetok(){
 
 // pridanie / úprava majetku
 function editMajetok(id){
+  if(!strazZapis("majetok")) return;
   const nova=id==null;
   const m=nova?{id:"maj_"+Date.now(),nazov:"",vstupnaCena:"",datumZaradenia:new Date().toISOString().slice(0,10),odpisovaSkupina:1,typMajetku:"odpisovany"}
     :JSON.parse(JSON.stringify((firmaData.majetok||[]).find(x=>String(x.id)===String(id))));
@@ -8797,6 +8808,7 @@ function mMajetokNahlad(){
 
 // vyradenie majetku + protokol
 function majetokVyradenie(id){
+  if(!strazZapis("majetok")) return;
   const m=(firmaData.majetok||[]).find(x=>String(x.id)===String(id));
   if(!m) return;
   const dnes=new Date().toISOString().slice(0,10);
@@ -9313,7 +9325,7 @@ function appCashflow(){
     </div>`:''}`;
   }
 
-  document.getElementById("appScreen").innerHTML=appHlavicka("cashflow",`<button class="aabtn" style="--_c:${c}" onclick="otvorApp('banka')">🏦 Banka</button>`)+`
+  document.getElementById("appScreen").innerHTML=appHlavicka("cashflow","",`<button class="aabtn" style="--_c:${c}" onclick="otvorApp('banka')">🏦 Banka</button>`)+`
     <div class="amini">
       <div class="aminbox"><div class="al">Prijaté</div><div class="av pos">${eur(sumaP)}</div></div>
       <div class="aminbox"><div class="al">Zaplatené</div><div class="av">${eur(sumaV)}</div></div>
@@ -12307,6 +12319,7 @@ function vypisZrusZhodu(txId){
 
 // import bankového výpisu (SEPA XML)
 function importVypis(){
+  if(!strazZapis("banka")) return;
   if(!skontrolujLimit("bankaImporty","Vo vyššom pláne môžete importovať výpisy bez obmedzenia.")) return;
   document.getElementById("vypisInput").click();
 }
@@ -15524,6 +15537,7 @@ const SPLIT_MODULY={
   kalendar: {n:"Kalendár",   ic:"📅", c:"#2f7a5e"},
 };
 function otvorSplit(lavy, pravy){
+  if(!strazZapis("banka")) return;
   aktualnaApp="split";
   splitVybranyPohyb=null;
   if(lavy) splitLavy=lavy;
@@ -15634,6 +15648,7 @@ function migrujUhrady(){
 // vrátil ako „nový". Príznak na zázname prežije dedup importu, takže skrytie
 // drží. Skrytý pohyb nevstupuje do párovania ani súm, dá sa obnoviť.
 function skryPohyb(txIdVal){
+  if(!strazZapis("banka")) return;
   const tx=(firmaData.vypis||[]).find(t=>txId(t)===txIdVal); if(!tx) return;
   if((tx.uhrady||[]).length && !confirm("Pohyb má priradené úhrady dokladov. Skrytím sa úhrady zrušia. Pokračovať?")) return;
   (tx.uhrady||[]).length && (tx.uhrady=[]);
@@ -15994,6 +16009,7 @@ function parJednoznacny(tx){
 
 // spáruje všetky jednoznačné pohyby naraz
 function parSparujJednoznacne(){
+  if(!strazZapis("banka")) return;
   const pohyby=(firmaData.vypis||[]).filter(t=>!splitPohybStav(t).spar);
   const navrhy=[];
   pohyby.forEach(t=>{ const k=parJednoznacny(t); if(k) navrhy.push({t,k}); });
@@ -16707,8 +16723,36 @@ async function ziskajToken(){
 }
 const CHYBA_SESSION="Prihlásenie vypršalo. Obnovte stránku a prihláste sa znova.";
 
+// Poistka pred zápisom, použiteľná aj priamo v moduloch. Vracia true, keď sa
+// zapisovať SMIE; inak to používateľovi vysvetlí a vráti false.
+function strazZapis(modul){
+  const m = modul || aktualnaZalozka || aktualnaApp;
+  if(!m || (typeof mozemPisat!=="function") || mozemPisat(m)) return true;
+  alert(mojaRolaVFirme()==="nahlad"
+    ? "Máte prístup len na čítanie. Zmeny môže robiť vlastník alebo účtovník."
+    : "Túto agendu spravuje váš účtovník.\n\nAk chcete zapisovať sami, požiadajte ho o zmenu nastavenia.");
+  return false;
+}
+
 async function ulozFirmu(){
   if(!firmaData){ cloudMsg("Nie sú žiadne dáta na uloženie. Najprv importujte JSON.","err"); return; }
+  // Posledná poistka pred zápisom. Rola Náhľad nesmie zapísať NIKDE — nie je to
+  // otázka jedného modulu, ale prístupu k firme ako takej. Blokovať to len
+  // skrývaním tlačidiel by znamenalo, že stačí jedna cesta, na ktorú sa
+  // zabudlo, a cudzie dáta sa prepíšu.
+  //
+  // Vlastník, ktorého agendu vedie účtovník, je obmedzený len v účtovníckych
+  // moduloch — preto sa pozeráme aj na to, ktorý modul je práve otvorený.
+  // Odtiaľ zmena prišla.
+  const modulTeraz = aktualnaZalozka || aktualnaApp;
+  if(mojaRolaVFirme()==="nahlad" || (modulTeraz && !mozemPisat(modulTeraz))){
+    firmaDirty=false;
+    cloudMsg(mojaRolaVFirme()==="nahlad"
+      ? "Máte prístup len na čítanie — zmeny sa neuložili."
+      : "Túto agendu spravuje váš účtovník — zmeny sa neuložili.","err");
+    setSync("offline");
+    return;
+  }
   if(demoMode){ firmaDirty=false; cloudMsg("Ukážkový režim — zmeny sa neukladajú. Vytvorte si účet pre trvalé uloženie.","info"); return; }
   if(localMode||!sb){
     localStorage.setItem("eziv_firma",JSON.stringify(firmaData));
