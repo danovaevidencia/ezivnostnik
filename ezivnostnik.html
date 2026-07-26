@@ -523,6 +523,9 @@ button{font-family:inherit;cursor:pointer}
 .demobanner button{background:#fff;color:var(--brand-deep);border:none;border-radius:9px;padding:8px 14px;
   font:inherit;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;transition:.15s}
 .demobanner button:hover{background:var(--brand-lite)}
+.demobanner button.demo-sec{background:transparent;color:#fff;border:1px solid rgba(255,255,255,.5)}
+.demobanner button.demo-sec:hover{background:rgba(255,255,255,.14)}
+body.demo .wrap{padding-bottom:86px}
 @media(max-width:480px){.demobanner{font-size:12px;padding:9px 12px}.demobanner button{padding:7px 11px;font-size:12px}}
 
 /* ═══ pás na domovskej: plán + inštalácia ═══ */
@@ -769,7 +772,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.07.25-DF";  // fáza 2: roly, prístupy k firme, pozvánky
+const APP_VERZIA = "2026.07.26-DJ";  // fáza 2: roly, prístupy k firme, pozvánky
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -946,25 +949,96 @@ async function spustiDemo(){
   // poistka: ak by dáta aj tak chýbali, demo nesmie skončiť v onboardingu
   if(!firmaData && window.DEMO_DATA_EMBED){ firmaData = JSON.parse(JSON.stringify(window.DEMO_DATA_EMBED)); }
   zobrazDemoBanner();
+  demoUpravUI();
   zobrazFirmu();
+  // sprievodca hneď na úvod — ukážka bez navigácie je len cudzia tabuľka čísel
+  setTimeout(()=>{ try{ demoSprievodca(); }catch(_){ } }, 700);
 }
 
-// nenápadný pruh, že ide o demo + tlačidlo na registráciu
+// ═══════════════════════════════════════════════════════════════
+//  UKÁŽKOVÝ REŽIM — UI
+//
+//  Demo má jedinú úlohu: dať človeku osahať funkcie na dátach, ktoré už
+//  niekto pripravil. Prihlasovanie a registrácia doň nepatria — sú to
+//  obrazovky pre niekoho, kto sa už rozhodol, a v ukážke len mýlia
+//  (a pôvodne aj zamykali: „Vytvoriť účet" viedlo na prihlasovaciu obrazovku
+//  vnútri dema, odkiaľ sa človek k skutočnej registrácii prakticky nedostal).
+//
+//  Dnes platí: v deme sa neprihlasuje ani neodhlasuje. Jediná cesta von je
+//  odkaz na SKUTOČNÚ registráciu, ktorý demo opustí načisto — celým načítaním
+//  stránky, aby po ňom neostal žiadny ukážkový stav.
+// ═══════════════════════════════════════════════════════════════
+function demoNaRegistraciu(){
+  // celé prenačítanie: žiadny zvyšok ukážkových dát v pamäti ani v UI
+  location.href = location.pathname + "?vstup=register";
+}
+// V ukážke nemá čo robiť odhlásenie ani prepínač firiem — nie je sa z čoho
+// odhlasovať. Tlačidlo na ich mieste vedie tam, kam v deme vedie všetko.
+function demoUpravUI(){
+  const odhlas=document.getElementById("userMenu");
+  if(odhlas){
+    odhlas.textContent="✎";
+    odhlas.title="Vytvoriť vlastný účet";
+    odhlas.onclick=demoNaRegistraciu;
+  }
+  const prep=document.getElementById("firmaPrepinac");
+  if(prep) prep.style.display="none";
+}
+
 function zobrazDemoBanner(){
+  document.body.classList.add("demo");   // miesto pod fixným pruhom
   if(document.getElementById("demoBanner")) return;
   const b=document.createElement("div");
   b.id="demoBanner"; b.className="demobanner";
-  b.innerHTML=`<span>🎬 <b>Ukážkový režim</b> — prezeráte si demo firmu. Zmeny sa neukladajú.</span>
-    <button onclick="demoNaRegistraciu()">Vytvoriť vlastný účet →</button>`;
+  b.innerHTML=`<span>🎬 <b>Ukážka</b> — fiktívna firma, skúšajte čokoľvek. Nič sa neuloží a nič nepokazíte.</span>
+    <button class="demo-sec" onclick="demoSprievodca()">Čo si vyskúšať</button>
+    <button onclick="demoNaRegistraciu()">Vytvoriť účet zadarmo →</button>`;
   document.body.appendChild(b);
 }
-function demoNaRegistraciu(){
-  demoMode=false; localMode=false; firmaData=null;
-  const b=document.getElementById("demoBanner"); if(b) b.remove();
-  document.getElementById("appView").classList.remove("on");
-  show("authView");
-  if(sb) nastavMode("register");
-  else msg("Cloud nie je napojený — registrácia bude možná po nastavení Supabase.","info");
+
+// Zoznam toho, čo sa v ukážke oplatí otvoriť. Bez neho človek pristane na
+// domovskej obrazovke plnej čísel a nevie, kde začať — a to bola najčastejšia
+// výhrada k pôvodnému demu.
+const DEMO_TIPY=[
+  {ik:"📷", n:"Načítať doklad z fotky",  p:"Odfoťte alebo nahrajte bloček — appka z neho prečíta sumu, DPH aj dodávateľa.", akcia:"rychlyDoklad()"},
+  {ik:"🏦", n:"Spárovať platby s dokladmi", p:"Šesť pohybov v banke čaká na priradenie. Skúste aj automatické párovanie.", akcia:"otvorApp('split')"},
+  {ik:"🧾", n:"Vystaviť faktúru",         p:"Deviata faktúra je rozpísaná — pozrite si PDF aj e-faktúru pre Peppol.", akcia:"otvorApp('faktury')"},
+  {ik:"🚗", n:"Sprievodca knihou jázd",   p:"Sedem krokov: účel z výkazu, domáce nabíjanie, víkendové jazdy, export do XLS.", akcia:"otvorApp('jazdy')"},
+  {ik:"📊", n:"Kontrolný výkaz a priznanie DPH", p:"Náhľad presne v podobe, v akej to uvidí Finančná správa. Aj XML na podanie.", akcia:"otvorApp('dph')"},
+  {ik:"🧮", n:"Daňové priznanie typ B",   p:"Predvyplnené z dokladov, s kontrolami, ktoré upozornia na to, čo nesedí.", akcia:"otvorApp('priznanieB')"}
+];
+function demoSprievodca(){
+  const html=`
+    <div class="csub" style="margin-bottom:12px">Toto sú fiktívne dáta grafickej dizajnérky za sedem mesiacov roka 2026 — faktúry, doklady, bankový výpis aj kniha jázd. Kľudne v nich čokoľvek zmeňte alebo zmažte.</div>
+    <div class="alist">
+      ${DEMO_TIPY.map(x=>`
+        <div class="arow" style="grid-template-columns:auto 1fr;gap:11px;align-items:start"
+             onclick="closeModal();${x.akcia}">
+          <div style="font-size:19px;line-height:1.2">${x.ik}</div>
+          <div><div class="acol-strong">${x.n}</div>
+               <div class="csub" style="margin-top:2px">${x.p}</div></div>
+        </div>`).join("")}
+    </div>
+    <button class="aabtn pri" style="width:100%;justify-content:center;margin-top:14px"
+            onclick="demoNaRegistraciu()">Vytvoriť si vlastný účet zadarmo →</button>
+    <div class="csub" style="margin-top:8px;text-align:center">Bez platobnej karty. Vlastné dáta sa už ukladajú.</div>`;
+  openModal("Čo si v ukážke vyskúšať", html, null, null, "siroky");
+}
+// Pás na domovskej obrazovke — druhá, viditeľnejšia cesta k tomu istému.
+function demoDomovPruh(){
+  if(!demoMode) return "";
+  return `<div style="background:linear-gradient(135deg,var(--brand),var(--brand-deep));color:#fff;
+      border-radius:14px;padding:15px 17px;margin:-4px 0 16px;display:flex;gap:13px;
+      align-items:center;flex-wrap:wrap">
+    <div style="flex:1;min-width:200px;line-height:1.5">
+      <b style="font-size:15px">Toto sú ukážkové dáta</b><br>
+      <span style="font-size:12.5px;opacity:.92">Fiktívna firma za 7 mesiacov. Skúšajte čokoľvek — nič sa neuloží.</span>
+    </div>
+    <button class="aabtn" style="background:#fff;color:var(--brand-deep);border-color:#fff;font-weight:700"
+            onclick="demoSprievodca()">Čo si vyskúšať</button>
+    <button class="aabtn" style="background:transparent;color:#fff;border-color:rgba(255,255,255,.55)"
+            onclick="demoNaRegistraciu()">Vytvoriť účet →</button>
+  </div>`;
 }
 
 function enterApp(user){
@@ -1166,7 +1240,7 @@ function resetStavuModulov(){
   kjMesiac=""; kjZlucit=false; kjTriedenie="datum"; kjHladaj="";
   dphTab="vykaz"; dphVybObdobie="";
   splitVybranyPohyb=null; splitMesiac=""; splitStavFilter="nespar"; splitVsetciKand=false;
-  vwFilterKm=0; _vwParsed=[]; _vwMeta=null; _vwTankovania=[];
+  vwFilterKm=0; _vwParsed=[]; _vwMeta=null;
   if(typeof vwSprievodca==="function") vwSprievodca._init=false;
   // zavri všetko rozpracované, nech na obrazovke nezostane cudzí obsah
   try{ closeModal(); }catch(_){}
@@ -1877,6 +1951,38 @@ function minToDoba(min){ const h=Math.floor(min/60), m=min%60; return String(h).
 function jazdaDayKey(j){ const d=jazdaDatum(j); if(!d) return String(j.datum||""); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; }
 function jazdaMonthKey(j){ const d=jazdaDatum(j); if(!d) return ""; return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; }
 function dowOf(j){ const d=jazdaDatum(j); return d?d.getDay():1; }
+// Čas začiatku jazdy ako "HH:MM", alebo null.
+//
+// Import z vozidla ukladal do `datum` len dátum bez času, hoci čas mal — sedel
+// v ISO `dt`. Kniha tak vyzerala, akoby žiadna jazda nemala čas, a stĺpec
+// „Čas konca" v exporte ostával prázdny, lebo sa počítal z `datum`.
+// Čas sa preto berie z `datum`, a keď tam nie je, dopočíta sa z `dt`.
+function jazdaCasZaciatku(j){
+  if(!j) return null;
+  const m=String(j.datum||"").match(/(\d{1,2}):(\d{2})\s*$/);
+  if(m) return String(+m[1]).padStart(2,"0")+":"+m[2];
+  if(j.dt){
+    const d=new Date(j.dt);
+    if(!isNaN(d)) return String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");
+  }
+  return null;
+}
+// Dátum aj s časom začiatku — to, čo patrí do stĺpca „Dátum a čas (začiatok)".
+function jazdaDatumSCasom(j){
+  const zaklad=String((j&&j.datum)||"");
+  if(/\d{1,2}:\d{2}\s*$/.test(zaklad)) return zaklad.trim();
+  const c=jazdaCasZaciatku(j);
+  return c ? (zaklad.trim()+" "+c) : zaklad;
+}
+// Čas konca = začiatok + doba jazdy. Bez známeho začiatku sa nedá dopočítať.
+function jazdaCasKonca(j){
+  const c=jazdaCasZaciatku(j); if(!c) return "";
+  const dm=(typeof dobaToMin==="function")?dobaToMin(j&&j.doba):0;
+  if(!dm) return c;
+  const [h,mi]=c.split(":").map(Number);
+  const tot=((h*60+mi+dm)%(24*60)+24*60)%(24*60);
+  return String(Math.floor(tot/60)).padStart(2,"0")+":"+String(tot%60).padStart(2,"0");
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  SÚKROMNÁ JAZDA (I4)
@@ -3072,12 +3178,13 @@ function renderHomeStrip(){
   }
 
   const varovanie = (dni !== null && dni <= 7);
-  let html = `<div class="hstrip">
-    <button class="hchip ${varovanie ? "warn" : ""}" onclick="zobrazCennik()"
+  let html = demoDomovPruh() + `<div class="hstrip">
+    ${demoMode ? `<button class="hchip" onclick="zobrazCennik()" title="Zobraziť plány a ceny">💳 <span>Plány a ceny</span></button>`
+      : `<button class="hchip ${varovanie ? "warn" : ""}" onclick="zobrazCennik()"
             title="Zobraziť plány a ceny">
       <span class="dot" style="background:${p.farba}"></span>
       <span><b>${esc(p.nazov)}</b>${popis ? ` <span class="sub">· ${esc(popis)}</span>` : ""}</span>
-    </button>`;
+    </button>`}`;
 
   if(!jeNainstalovana()){
     html += `<button class="hchip ${_pwaPrompt ? "pri" : ""}" onclick="nainstalujApp()"
@@ -7556,7 +7663,9 @@ function kjwVytvorVydavokNabijanie(){
   if(D.domaceKWh<=0){ alert("Podľa údajov nevyšla žiadna domáca spotreba."); return; }
   const popis="Domáce nabíjanie služobného vozidla "+_kjW.od+" – "+_kjW.doD+
     " · spotreba podľa vozidla "+D.spotrebaKWh+" kWh, verejné nabíjanie "+D.verejneKWh+
-    " kWh, rozdiel "+D.domaceKWh+" kWh × "+D.cena+" €/kWh";
+    " kWh, rozdiel "+D.domaceKWh+" kWh × "+D.cena+" €/kWh"+
+    " · INFORMATÍVNY DOPOČET — nie odpočet z merača; uplatniteľné len pri preukázateľne oddelenej spotrebe (samostatne meraná prípojka + faktúra od dodávateľa)";
+  if(!confirm("Výdavok "+eur(D.suma)+" je informatívny dopočet, nie doklad z merača.\n\nDomácu elektrinu si viete uplatniť len vtedy, keď spotrebu vozidla viete oddeliť od domácnosti — samostatne meranou prípojkou a faktúrou od dodávateľa. Bez toho ide o odhad, ktorý správca dane nemusí uznať.\n\nVytvoriť výdavok?")) return;
   if(!firmaData.vydavky) firmaData.vydavky=[];
   // Výdavky nesú číslo dokladu dodávateľa. Tu dodávateľ nie je — ide o interný
   // doklad, tak dostane vlastný čitateľný rad DN-RRRR-MM (domáce nabíjanie).
@@ -7573,6 +7682,82 @@ function kjwVytvorVydavokNabijanie(){
   poZmene();
   _kjW.hotovo.nabijanie=D.suma;
   kjwRender();
+}
+
+// ── Krok: víkendové jazdy ──
+//
+// Víkendová jazda je pri kontrole prvá vec, ktorá pýta vysvetlenie: pracovný
+// dôvod cesty v sobotu sa dokazuje horšie než v utorok. Presun do pracovného
+// dňa to rieši — ale NIE vždy. Ak v ten deň existuje doklad, ktorý vás na
+// mieste ukotvuje (tankovanie, verejné nabíjanie), jazda sa presunúť nesmie:
+// doklad hovorí, že ste v sobotu naozaj jazdili, a kniha by mu odporovala.
+// Taká nezrovnalosť je horšia než víkendová jazda samotná.
+function kjDniSDokladom(){
+  const set=new Set();
+  (firmaData.tankovania||[]).forEach(t=>{ const d=String(t.datum||"").slice(0,10); if(/^\d{4}-\d{2}-\d{2}$/.test(d)) set.add(d); });
+  (firmaData.nabijania||[]).forEach(n=>{ const d=String(n.datum||"").slice(0,10);
+    if(/^\d{4}-\d{2}-\d{2}$/.test(d) && (+n.kwh||0)>0) set.add(d); });
+  return set;
+}
+function kjDenKluc(dt){ return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`; }
+// Prehľad víkendových jázd v období — koľko sa dá presunúť a koľko drží doklad.
+function kjwVikendPrehlad(od, doD){
+  const dokl=kjDniSDokladom();
+  const jz=kjwJazdyObdobia(od,doD).filter(j=>{ const dw=dowOf(j); return dw===0||dw===6; });
+  const chranene=jz.filter(j=>dokl.has(jazdaDayKey(j)));
+  const volne=jz.filter(j=>!dokl.has(jazdaDayKey(j)));
+  return {spolu:jz.length, chranene, volne,
+          km:r2(jz.reduce((a,j)=>a+(+j.km||0),0)),
+          kmVolne:r2(volne.reduce((a,j)=>a+(+j.km||0),0))};
+}
+// Návrh: víkendové jazdy bez dokladu presunúť na voľné pracovné dni v tom istom
+// mesiaci. Km, doba aj spotreby ostávajú — mení sa iba deň. Nič sa neukladá.
+function kjwVikendPresun(){
+  const DNI_SK=["nedeľa","pondelok","utorok","streda","štvrtok","piatok","sobota"];
+  const dokl=kjDniSDokladom();
+  const out=[];
+  kjwMesiaceObdobia(_kjW.od.slice(0,7), _kjW.doD.slice(0,7)).forEach(mk=>{
+    const [rok,mes]=mk.split("-").map(Number);
+    const jazdy=(firmaData.jazdy||[]).filter(j=>jazdaMonthKey(j)===mk).map(j=>({...j}));
+    if(!jazdy.length) return;
+    // obsadené sú dni, na ktorých už jazda stojí a nikam sa nehýbe
+    const obsadene=new Set();
+    jazdy.forEach(j=>{ const dw=dowOf(j);
+      if(!(dw===0||dw===6) || dokl.has(jazdaDayKey(j))) obsadene.add(jazdaDayKey(j)); });
+    const volneDni=pracovneDni(rok,mes).filter(dt=>!obsadene.has(kjDenKluc(dt)));
+    let presunutych=0, chranenych=0, bezMiesta=0;
+    const novy=jazdy.map(j=>{
+      const dw=dowOf(j);
+      if(!(dw===0||dw===6)) return j;
+      if(dokl.has(jazdaDayKey(j))){ chranenych++; return j; }
+      const dt=volneDni.shift();
+      if(!dt){ bezMiesta++; return j; }
+      obsadene.add(kjDenKluc(dt));
+      presunutych++;
+      const cas=jazdaCasZaciatku(j)||"08:00";
+      const [hh,mi]=cas.split(":").map(Number);
+      return Object.assign({}, j, {
+        datum:`${dt.getDate()}. ${dt.getMonth()+1}. ${dt.getFullYear()} ${cas}`,
+        dt:new Date(dt.getFullYear(),dt.getMonth(),dt.getDate(),hh,mi).toISOString(),
+        den:DNI_SK[dt.getDay()], _presunuta:true, _povodnyDen:j.datum
+      });
+    }).sort((a,b)=>{
+      const da=jazdaDatum(a), db=jazdaDatum(b);
+      const ta=(da?da.getTime():0)+(dobaToMin(jazdaCasZaciatku(a)||"0:00"));
+      const tb=(db?db.getTime():0)+(dobaToMin(jazdaCasZaciatku(b)||"0:00"));
+      return ta-tb;
+    });
+    // Tachometer sa musí prereťaziť — po presune sedeli stavy na pôvodnom
+    // poradí dní a v exporte by skákali dozadu.
+    let stav=null;
+    novy.forEach(j=>{
+      if(stav===null) stav=(+j.poc||0);
+      j.poc=stav; j.kon=r2(stav+(+j.km||0)); stav=j.kon;
+    });
+    if(presunutych||chranenych||bezMiesta)
+      out.push({mk, R:{novy, presunutych, chranenych, bezMiesta}});
+  });
+  return out;
 }
 
 // ── Krok: rozloženie jázd (na hrane) ──
@@ -7592,6 +7777,7 @@ const KJW_KROKY=[
   {k:"vykaz",    t:"Účely z výkazu"},
   {k:"elektro",  t:"Domáce nabíjanie"},
   {k:"kontrola", t:"Kontrola knihy"},
+  {k:"vikend",   t:"Víkendové jazdy"},
   {k:"rozlozenie", t:"Rozloženie jázd"},
   {k:"zaver",    t:"Export"}
 ];
@@ -7602,7 +7788,7 @@ function kjWizard(){
   const mes=kjMesiace();
   const dnes=new Date().toISOString().slice(0,10);
   const zac=mes.length? (mes[mes.length-1]+"-01") : dnes.slice(0,8)+"01";
-  _kjW={ krok:0, od:zac, doD:dnes, hotovo:{}, navrh:null };
+  _kjW={ krok:0, od:zac, doD:dnes, hotovo:{}, navrh:null, navrhVik:null };
   kjwRender();
 }
 function kjwKrok(delta){
@@ -7610,7 +7796,15 @@ function kjwKrok(delta){
   _kjW.krok=Math.max(0, Math.min(K.length-1, _kjW.krok+delta));
   kjwRender();
 }
-function kjwNastavObdobie(pole, hod){ _kjW[pole]=hod; kjwRender(); }
+function kjwNaKrok(i){
+  const K=kjwDostupneKroky();
+  _kjW.krok=Math.max(0, Math.min(K.length-1, +i||0));
+  kjwRender();
+}
+// zmena obdobia zneplatňuje rozpracované návrhy — inak by sa dal exportovať
+// návrh z iného obdobia, než aké je práve nastavené
+function kjwZahodNavrhy(){ _kjW.navrh=null; _kjW.navrhVik=null; }
+function kjwNastavObdobie(pole, hod){ _kjW[pole]=hod; kjwZahodNavrhy(); kjwRender(); }
 function kjwRychleObdobie(typ){
   const dnes=new Date();
   if(typ==="mesiac"){ const m=kjMesiac||dnes.toISOString().slice(0,7);
@@ -7620,13 +7814,13 @@ function kjwRychleObdobie(typ){
   else if(typ==="vsetko"){ const mes=kjMesiace();
     if(mes.length){ _kjW.od=mes[mes.length-1]+"-01";
       const [r,mm]=mes[0].split("-").map(Number); _kjW.doD=new Date(r,mm,0).toISOString().slice(0,10); } }
-  kjwRender();
+  kjwZahodNavrhy(); kjwRender();
 }
 
 function kjwRender(){
   const K=kjwDostupneKroky(), akt=K[_kjW.krok], jz=kjwJazdyObdobia(_kjW.od,_kjW.doD);
   const km=Math.round(jz.reduce((a,j)=>a+(+j.km||0),0));
-  const pas=K.map((x,i)=>`<span style="font-size:11px;padding:3px 8px;border-radius:20px;white-space:nowrap;${i===_kjW.krok?'background:var(--brand);color:#fff':(i<_kjW.krok?'background:var(--brand-lite);color:var(--brand-deep)':'background:var(--bg);color:var(--ink-soft)')}">${i+1}. ${x.t}</span>`).join("");
+  const pas=K.map((x,i)=>`<span onclick="kjwNaKrok(${i})" style="font-size:11px;padding:3px 8px;border-radius:20px;white-space:nowrap;cursor:pointer;${i===_kjW.krok?'background:var(--brand);color:#fff':(i<_kjW.krok?'background:var(--brand-lite);color:var(--brand-deep)':'background:var(--bg);color:var(--ink-soft)')}">${i+1}. ${x.t}</span>`).join("");
 
   let telo="";
   if(akt.k==="obdobie"){
@@ -7666,6 +7860,11 @@ function kjwRender(){
         <div class="arow" style="grid-template-columns:1fr auto;cursor:default"><div><b>Doma nabité</b></div><div class="acol-sum"><b>${D.domaceKWh.toFixed(2)} kWh</b> (${podiel} %)</div></div>
         <div class="arow" style="grid-template-columns:1fr auto;cursor:default"><div>Pri cene ${D.cena} €/kWh</div><div class="acol-sum" style="color:var(--pos)"><b>${eur(D.suma)}</b></div></div>
       </div>
+      ${D.domaceKWh>0?`<div style="background:#fdf6ec;border:1.5px solid #f0c98a;border-radius:10px;padding:11px 13px;margin-top:12px;font-size:12.5px;line-height:1.6">
+        <b style="color:var(--accent-deep,#b8860b)">⚠ Výpočet je informatívny</b><br>
+        Ide o <b>dopočet rozdielu</b>, nie o doklad z merača. Domáca elektrina sa dá uplatniť len vtedy, keď viete spotrebu vozidla oddeliť od spotreby domácnosti — spravidla samostatne meranou wallbox prípojkou a faktúrou od dodávateľa. Bez toho ide o odhad, ktorý správca dane <b>nemusí uznať</b>.
+        <br><br>Rozdiel navyše obsahuje aj nabíjanie, ktoré ste zaplatili inak (u známych, u klienta, kartou bez dokladu) — nie všetko z neho je váš náklad.
+      </div>`:''}
       ${D.domaceKWh>0?(_kjW.hotovo.nabijanie
         ? `<div style="color:var(--pos);font-size:13px;margin-top:12px">✓ Výdavok na ${eur(_kjW.hotovo.nabijanie)} vytvorený.</div>`
         : `<button class="aabtn pri" style="width:100%;justify-content:center;margin-top:12px" onclick="kjwVytvorVydavokNabijanie()">+ Vytvoriť výdavok ${eur(D.suma)}</button>
@@ -7681,6 +7880,28 @@ function kjwRender(){
       <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:12px">
         <button class="aabtn" onclick="closeModal();kjPrepocitajTacho()">↻ Prepočítať tachometer</button>
       </div>`;
+  }
+
+  else if(akt.k==="vikend"){
+    const V=kjwVikendPrehlad(_kjW.od,_kjW.doD);
+    const N=_kjW.navrhVik;
+    telo=`<div class="csub" style="margin-bottom:10px">Jazda v sobotu alebo v nedeľu pýta pri kontrole vysvetlenie ako prvá. Ak sa dá vecne obhájiť, nechajte ju tak. Ak si ju len rekonštruujete, dá sa presunúť do pracovného dňa.</div>
+      ${V.spolu? `<div class="alist">
+        <div class="arow" style="grid-template-columns:1fr auto;cursor:default"><div>Víkendových jázd v období</div><div class="acol-sum">${V.spolu} · ${V.km.toLocaleString('sk')} km</div></div>
+        <div class="arow" style="grid-template-columns:1fr auto;cursor:default"><div>Drží ich doklad (tankovanie / nabíjanie)</div><div class="acol-sum">${V.chranene.length}</div></div>
+        <div class="arow" style="grid-template-columns:1fr auto;cursor:default"><div><b>Dalo by sa presunúť</b></div><div class="acol-sum"><b>${V.volne.length}</b> · ${V.kmVolne.toLocaleString('sk')} km</div></div>
+      </div>
+      ${V.chranene.length?`<div style="background:#eef7f0;border-radius:9px;padding:11px 13px;font-size:12.5px;margin-top:10px">
+        <b>${V.chranene.length}</b> ${V.chranene.length===1?'jazda ostane':'jázd ostane'} na mieste — v ten deň máte tankovanie alebo verejné nabíjanie. Doklad hovorí, že ste naozaj jazdili; presunúť ju by znamenalo, že si kniha s dokladom odporuje.
+      </div>`:''}
+      ${V.volne.length?`<div style="background:#fdf3ee;border:1.5px solid var(--neg);border-radius:10px;padding:12px 14px;margin-top:12px;font-size:12.5px;line-height:1.6">
+        <b style="color:var(--neg)">⚠ Iba ukážka — prepisuje dátumy jázd</b><br>
+        Presunutá kniha už <b>nezodpovedá tomu, čo hlási vozidlo</b>, a jeho výpis si vie správca dane vyžiadať. Použite to len vtedy, keď výsledok naozaj zodpovedá skutočnosti. <b>Nič sa neuloží do knihy</b> — návrh žije len ako podklad na export.
+      </div>
+      ${N? `<div style="font-size:13px;margin-top:12px">Návrh: presunutých <b>${N.reduce((a,x)=>a+x.R.presunutych,0)}</b> · ponechaných na doklade <b>${N.reduce((a,x)=>a+x.R.chranenych,0)}</b>${N.reduce((a,x)=>a+x.R.bezMiesta,0)?` · bez voľného pracovného dňa <b>${N.reduce((a,x)=>a+x.R.bezMiesta,0)}</b>`:''}</div>
+        <div class="csub" style="margin-top:6px">Export nájdete v poslednom kroku.</div>`
+      : `<button class="aabtn" style="width:100%;justify-content:center;margin-top:12px" onclick="_kjW.navrhVik=kjwVikendPresun();kjwRender()">Zobraziť, čo by presun spravil</button>`}`:''}`
+      :`<div style="background:#eef7f0;border-radius:9px;padding:12px 14px;font-size:13px">✓ V období nemáte žiadne víkendové jazdy.</div>`}`;
   }
 
   else if(akt.k==="rozlozenie"){
@@ -7705,18 +7926,19 @@ function kjwRender(){
         <div class="arow" style="grid-template-columns:1fr auto;cursor:default"><div>Jázd v období</div><div class="acol-sum">${jz.length} · ${km.toLocaleString('sk')} km</div></div>
       </div>
       <button class="aabtn pri" style="width:100%;justify-content:center;margin-top:14px" onclick="kjwExport()">↧ Exportovať knihu jázd do XLS</button>
+      ${_kjW.navrhVik?`<button class="aabtn" style="width:100%;justify-content:center;margin-top:8px" onclick="kjwExportNavrh('vikend')">↧ Exportovať presunuté víkendy (ukážka)</button>`:''}
       ${_kjW.navrh?`<button class="aabtn" style="width:100%;justify-content:center;margin-top:8px" onclick="kjwExportNavrh()">↧ Exportovať rozložený návrh (ukážka)</button>`:''}
       <div class="csub" style="margin-top:10px">Export ide cez rovnaký generátor ako zvyšok knihy, takže mesiace aj celok vyzerajú rovnako.</div>`;
   }
 
   openModal("Príprava knihy jázd", `
-    <div style="display:flex;gap:5px;overflow-x:auto;padding-bottom:10px;margin-bottom:12px">${pas}</div>
+    <div style="display:flex;gap:5px;flex-wrap:wrap;padding-bottom:10px;margin-bottom:12px">${pas}</div>
     ${telo}
     <div style="display:flex;gap:8px;margin-top:16px">
       ${_kjW.krok>0?`<button class="aabtn" onclick="kjwKrok(-1)">‹ Späť</button>`:''}
       <div style="flex:1"></div>
       ${_kjW.krok<K.length-1?`<button class="aabtn pri" onclick="kjwKrok(1)">Ďalej ›</button>`:`<button class="aabtn" onclick="closeModal()">Hotovo</button>`}
-    </div>`, null);
+    </div>`, null, null, "siroky");
   const ok=document.getElementById("modalOk"); if(ok) ok.style.display="none";
 }
 
@@ -7736,16 +7958,17 @@ function kjwExport(){
   }).catch(()=>alert("Knižnicu na export sa nepodarilo načítať."));
 }
 // export rozloženého návrhu — súbor je označený ako ukážka už v názve
-function kjwExportNavrh(){
-  if(!_kjW.navrh || !_kjW.navrh.length){ alert("Návrh nie je vytvorený."); return; }
+function kjwExportNavrh(druh){
+  const zdroj = druh==="vikend" ? _kjW.navrhVik : _kjW.navrh;
+  if(!zdroj || !zdroj.length){ alert("Návrh nie je vytvorený."); return; }
   ensureXlsxStyle().then(X=>{
     const S=xkStyles(), D=firmaData, wb=X.utils.book_new(); let n=0;
-    _kjW.navrh.forEach(({mk,R})=>{ const ws=xkKnihaJazdSheet(X,S,D,mk,R.novy); if(ws){
+    zdroj.forEach(({mk,R})=>{ const ws=xkKnihaJazdSheet(X,S,D,mk,R.novy); if(ws){
       const mm=mk.match(/(\d{4})-(\d{2})/);
       X.utils.book_append_sheet(wb, ws, xkSheetName("UKAZKA "+(mm?XK_MONTHS[+mm[2]-1].slice(0,3)+" "+mm[1]:mk))); n++; } });
     if(!n){ alert("Návrh neobsahuje jazdy."); return; }
     const buf=X.write(wb,{type:"array",bookType:"xlsx"});
-    downloadBlob(new Blob([buf],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}), "UKAZKA_neplatna_kniha_jazd_"+_kjW.od+".xlsx");
+    downloadBlob(new Blob([buf],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}), "UKAZKA_neplatna_kniha_jazd_"+(druh==="vikend"?"vikendy_":"")+_kjW.od+".xlsx");
   }).catch(()=>alert("Knižnicu na export sa nepodarilo načítať."));
 }
 
@@ -7908,7 +8131,7 @@ function parseSkDateTime(s){
   if(!m) return null;
   return new Date(+m[3],+m[2]-1,+m[1],+m[4],+m[5]);
 }
-let _vwParsed=[], _vwMeta=null, _vwTankovania=[];
+let _vwParsed=[], _vwMeta=null;
 
 // „27,731 km" — VW tu používa anglický formát, čiarka je oddeľovač tisícov.
 // Rozlíšenie: čiarka nasledovaná PRÁVE tromi číslicami a bez desatinnej bodky
@@ -7941,21 +8164,51 @@ function vwHlavicka(rows, doRiadku){
 // Hárok „Od tankovania" — jeden riadok = úsek medzi dvoma tankovaniami.
 // Počet riadkov teda zodpovedá počtu tankovaní a `Celková spotreba v l`
 // je palivo natankované v tom úseku. Slúži na krížovú kontrolu s bločkami.
-function vwOdTankovania(wb){
-  const sh=wb.Sheets["Od tankovania"]; if(!sh) return [];
-  const rows=XLSX.utils.sheet_to_json(sh,{header:1});
-  const hi=rows.findIndex(r=>r&&String(r[0]||"").includes("Koniec jazdy"));
-  if(hi<0) return [];
-  const out=[];
-  for(let i=hi+1;i<rows.length;i++){
-    const r=rows[i]; if(!r||!r[0]) continue;
-    const d=parseSkDateTime(r[0]); if(!d) continue;
-    const litre=vwCislo(r[6]);
-    if(litre<=0) continue;                       // elektrický úsek — netankovalo sa
-    out.push({ datum:`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`,
-               km:vwCislo(r[1]), litre:r2(litre) });
-  }
-  return out;
+// ═══════════════════════════════════════════════════════════════
+//  SPOTREBA PODĽA VOZIDLA
+//
+//  POZOR na hárok „Od tankovania". Napriek názvu to NIE JE zoznam tankovaní.
+//  Má rovnaké stĺpce ako ostatné dva hárky a stĺpec „Celková spotreba v l"
+//  hovorí, koľko paliva sa MINULO — nie koľko sa natankovalo. Sú to úseky,
+//  ktorých počítadlo sa nuluje pri tankovaní, nie záznamy o tankovaní.
+//
+//  Export z vozidla o tankovaniach ani nabíjaniach nevie NIČ: nepozná cenu,
+//  stanicu, dátum nákupu ani objem, ktorý pretiekol do nádrže. Tie údaje sú
+//  na bločku a v bankovom výpise, nikde inde.
+//
+//  Pôvodná verzia z toho hárku robila „tankovania" a porovnávala ich s
+//  bločkami. Porovnávala teda spotrebované litre s nakúpenými a rozdiel
+//  hlásila ako chýbajúce doklady — pri ľubovoľných dátach.
+//
+//  Spotreba sa preto číta z hárku „Krátkodobé údaje", teda z tých istých
+//  riadkov, ktoré sa importujú ako jazdy. To je jediný hárok, ktorý pokrýva
+//  presne to obdobie, o ktorom sa bavíme.
+// ═══════════════════════════════════════════════════════════════
+function vwSpotreba(parsed){
+  if(!parsed || !parsed.length) return null;
+  const dni=parsed.map(p=>p.denKey).filter(Boolean).sort();
+  return {
+    od: dni[0], doD: dni[dni.length-1],
+    km:    Math.round(parsed.reduce((a,p)=>a+(+p.km||0),0)),
+    litre: r2(parsed.reduce((a,p)=>a+(+p.celkL||0),0)),
+    kwh:   r2(parsed.reduce((a,p)=>a+(+p.celkKWh||0),0))
+  };
+}
+// Porovnanie spotrebovaného paliva s nakúpeným podľa dokladov.
+//
+// Nie je to rovnica, ktorá musí vyjsť na cent: v nádrži je na začiatku aj na
+// konci obdobia nejaké palivo a ten rozdiel sa nikde neeviduje. Za niekoľko
+// mesiacov sa však hodnoty priblížia, a keď doklady výrazne zaostávajú za
+// spotrebou, sú naozaj neúplné. Tolerancia je jedna nádrž.
+function vwKontrolaSpotreby(sp){
+  if(!sp || sp.litre<=0) return null;
+  const nase=(firmaData.tankovania||[]).filter(t=>{
+    const d=String(t.datum||"").slice(0,10); return d>=sp.od && d<=sp.doD; });
+  const naseL=r2(nase.reduce((a,t)=>a+(+t.litre||0),0));
+  const NADRZ=55;
+  return {od:sp.od, doD:sp.doD, spotrebovaneL:sp.litre, nakupeneL:naseL,
+          rozdiel:r2(sp.litre-naseL), pocetNase:nase.length, tolerancia:NADRZ,
+          podozrive: r2(sp.litre-naseL) > NADRZ};
 }
 
 async function spracujVW(e){
@@ -7968,14 +8221,17 @@ async function spracujVW(e){
     const hi=rows.findIndex(r=>r&&String(r[0]||"").includes("Koniec jazdy"));
     if(hi<0){ alert("Toto nevyzerá ako VW TripStatistics export. Hľadám hárok „Krátkodobé údaje“ so stĺpcom „Koniec jazdy“."); return; }
     _vwMeta=vwHlavicka(rows, hi);
-    _vwTankovania=vwOdTankovania(wb);
+
     const parsed=[];
     for(let i=hi+1;i<rows.length;i++){ const r=rows[i]; if(!r||!r[0]) continue;
       const d=parseSkDateTime(r[0]); if(!d) continue;
       const km=Math.round(parseFloat(String(r[1]).replace(",","."))||0);
       if(!km) continue;
       const denKey=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-      parsed.push({ dt:d.toISOString(), datum:`${d.getDate()}. ${d.getMonth()+1}. ${d.getFullYear()}`,
+      // čas jazdy z vozidla sa MUSÍ dostať aj do `datum` — kniha aj export ho
+      // čítajú odtiaľ a bez neho ostával stĺpec „Čas konca" prázdny
+      const hhmm=String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");
+      parsed.push({ dt:d.toISOString(), datum:`${d.getDate()}. ${d.getMonth()+1}. ${d.getFullYear()} ${hhmm}`,
         denKey, mesiacKey:denKey.slice(0,7),
         km, doba:r[2]||"", rychlost:Math.round(+r[3]||0),
         celkKWh:parseFloat(String(r[7]).replace(",","."))||0, celkL:parseFloat(String(r[6]).replace(",","."))||0,
@@ -8009,17 +8265,6 @@ function vwKontrolaTachometra(meta){
 // Natankované litre podľa vozidla vs. litre z bločkov (PHM výdavky).
 // Porovnáva sa len obdobie, ktoré export pokrýva — mimo neho by rozdiel
 // nič nehovoril.
-function vwKontrolaTankovani(vwTank){
-  if(!vwTank || !vwTank.length) return null;
-  const od=vwTank.reduce((a,t)=>t.datum<a?t.datum:a, vwTank[0].datum);
-  const doD=vwTank.reduce((a,t)=>t.datum>a?t.datum:a, vwTank[0].datum);
-  const vozidloL=r2(vwTank.reduce((a,t)=>a+(+t.litre||0),0));
-  const nase=(firmaData.tankovania||[]).filter(t=>{
-    const d=String(t.datum||"").slice(0,10); return d>=od && d<=doD; });
-  const naseL=r2(nase.reduce((a,t)=>a+(+t.litre||0),0));
-  return {od, doD, vozidloL, naseL, rozdiel:r2(vozidloL-naseL),
-          pocetVozidlo:vwTank.length, pocetNase:nase.length};
-}
 
 let vwFilterKm=0;
 // Duplicitná ochrana má DVE úrovne, lebo export z vozidla môže pokrývať aj
@@ -8053,7 +8298,7 @@ function vwSprievodca(){
       Export pokrýva <b>${mesLabel(mesiace[0])} – ${mesLabel(mesiace[mesiace.length-1])}</b> (${zoradene.length} jázd). Odškrtnite, čo nechcete.${duplicit?`<br>⚠ <b>${duplicit}</b> jázd už v knihe je (rovnaký čas) — preskočia sa.`:''}${vedenych?`<br>⚠ <b>${vedenych}</b> jázd padá do dní, ktoré už v knihe vediete (napr. po optimalizácii) — sú odznačené, aby sa dni nezdvojili.`:''}
     </div>
     ${(()=>{
-      const tk=vwKontrolaTachometra(_vwMeta), tn=vwKontrolaTankovani(_vwTankovania);
+      const tk=vwKontrolaTachometra(_vwMeta), tn=vwKontrolaSpotreby(vwSpotreba(_vwParsed));
       if(!tk && !tn) return "";
       const riadky=[];
       if(tk && !tk.prazdna){
@@ -8066,12 +8311,11 @@ function vwSprievodca(){
         riadky.push(`<div style="padding:4px 0">Tachometer vozidla: <b>${eur0(tk.vozidlo).replace(" €"," km")}</b> — kniha je zatiaľ prázdna.</div>`);
       }
       if(tn){
-        const zle=Math.abs(tn.rozdiel)>5;
         riadky.push(`<div style="display:flex;justify-content:space-between;gap:10px;padding:4px 0">
-          <span>Natankované palivo</span>
-          <span class="mono">vozidlo <b>${tn.vozidloL.toFixed(2)} l</b> · bločky ${tn.naseL.toFixed(2)} l ·
-          <span style="color:${zle?'var(--neg)':'var(--pos)'}">${tn.rozdiel>0?'chýba ':'navyše '}${Math.abs(tn.rozdiel).toFixed(2)} l</span></span></div>`);
-        if(zle && tn.rozdiel>0) riadky.push(`<div class="acol-muted" style="font-size:11.5px;padding-top:2px">Vozidlo eviduje ${tn.pocetVozidlo} tankovaní, vy máte ${tn.pocetNase} bločkov za rovnaké obdobie — chýbajúce doklady si nemôžete uplatniť do výdavkov.</div>`);
+          <span>Palivo — spotreba vs. doklady</span>
+          <span class="mono">minuté <b>${tn.spotrebovaneL.toFixed(2)} l</b> · nakúpené ${tn.nakupeneL.toFixed(2)} l ·
+          <span style="color:${tn.podozrive?'var(--neg)':'var(--pos)'}">${tn.rozdiel>0?'chýba ':'navyše '}${Math.abs(tn.rozdiel).toFixed(2)} l</span></span></div>`);
+        if(tn.podozrive) riadky.push(`<div class="acol-muted" style="font-size:11.5px;padding-top:2px">Vozidlo za toto obdobie minulo viac paliva, než pokrývajú vaše doklady (${tn.pocetNase}). Rozdiel nad jednu nádrž už nevysvetlí stav nádrže — bez bločkov si palivo neuplatníte. Export z vozidla o tankovaniach nevie nič, dohľadajte ich v bankovom výpise.</div>`);
       }
       return `<div style="background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:9px 12px;margin-bottom:12px;font-size:12.5px">
         <div style="font-weight:700;margin-bottom:4px">Kontrola oproti vozidlu</div>${riadky.join("")}</div>`;
@@ -8172,10 +8416,10 @@ function vwSprievodca(){
     if(tk && !tk.prazdna && Math.abs(tk.rozdiel)>50)
       sprava+="\n\n⚠ Vozidlo hlási "+Math.round(tk.vozidlo)+" km, kniha končí na "+Math.round(tk.kniha)+
               " km (rozdiel "+Math.round(tk.rozdiel)+" km) — pravdepodobne chýba staršie obdobie.";
-    const tn=vwKontrolaTankovani(_vwTankovania);
-    if(tn && tn.rozdiel>5)
-      sprava+="\n\n⚠ Podľa vozidla ste natankovali "+tn.vozidloL.toFixed(2)+" l, z bločkov máte "+
-              tn.naseL.toFixed(2)+" l — chýba "+tn.rozdiel.toFixed(2)+" l dokladov.";
+    const tn=vwKontrolaSpotreby(vwSpotreba(_vwParsed));
+    if(tn && tn.podozrive)
+      sprava+="\n\n⚠ Vozidlo za toto obdobie minulo "+tn.spotrebovaneL.toFixed(2)+" l paliva, doklady pokrývajú "+
+              tn.nakupeneL.toFixed(2)+" l — rozdiel "+tn.rozdiel.toFixed(2)+" l. Bločky dohľadajte v bankovom výpise.";
     sprava+="\n\nDlhým jazdám doplňte trasu a účel.";
     alert(sprava);
   });
@@ -9350,6 +9594,10 @@ function dokladDatumUhrady(typ, cislo){
       if(d && (!dat || d>dat)) dat=d;
     }
   }));
+  // isté bankové platby bez zapísaného rozpisu — pre hotovostný princíp je
+  // rozhodujúci deň, keď peniaze prišli, nie to, či je k nim rozpis
+  const B=bankoveIsteUhrady(typ, cislo);
+  if(B.datum && (!dat || B.datum>dat)) dat=B.datum;
   const dd=(typeof najdiDoklad==="function")?najdiDoklad(typ,cislo):null;
   if(dd && dd.uhradaRucne && dd.uhradaRucne.datum){
     const d=String(dd.uhradaRucne.datum).slice(0,10);
@@ -9367,15 +9615,23 @@ function pbKontroly(rok){
   if(v.pausalne && typeof jePlatcaDPH==="function" && jePlatcaDPH())
     blok.push("Ste platiteľ DPH — paušálne výdavky (60 %) nie sú prípustné. Prepnite na skutočné výdavky.");
   // 2) Hotovostný princíp — prelom rokov (príjem sa počíta podľa úhrady, nie vystavenia)
-  let von=0, dovnutra=0; const nespar=[];
+  let von=0, dovnutra=0; const nespar=[], bezDatumu=[];
   fakt.forEach(f=>{
     const vyst=String(f.datum||f.vystavenie||"").slice(0,4);
     const suma=r2(+f.spolu||+f.bez||0);
     const datU=dokladDatumUhrady("faktura", String(f.cislo));
     const rokU=datU?datU.slice(0,4):null;
+    // Faktúra označená ako uhradená, ale bez známeho dňa úhrady (starší príznak
+    // alebo ručné potvrdenie bez dátumu). Zaplatená je — len sa nedá povedať
+    // kedy, a hotovostný princíp stojí presne na tom. Neblokuje sa, lebo
+    // priraďovať úhradu k niečomu, čo je už zaplatené, nemá čo napraviť;
+    // predpokladá sa rok vystavenia a používateľ dostane upozornenie.
+    if(vyst===R && !rokU && dokladJeUhradeny("faktura", String(f.cislo))){ bezDatumu.push(f); return; }
     if(vyst===R && (!rokU || rokU>R)){ von=r2(von+suma); if(!rokU && f.pbZahrnut!==true) nespar.push(f); }
     if(vyst<R && rokU===R) dovnutra=r2(dovnutra+suma);
   });
+  if(bezDatumu.length)
+    upoz.push(`Uhradené bez známeho dňa úhrady (${bezDatumu.length}) (${bezDatumu.map(f=>f.cislo).slice(0,6).join(", ")}${bezDatumu.length>6?"…":""}). Počítajú sa do príjmov ${rok} podľa roka vystavenia — ak platba prišla v inom roku, priraďte jej úhradu z výpisu.`);
   if(von>0) upoz.push(`Hotovostný princíp: faktúry vystavené v ${rok} a neuhradené do 31. 12. (${eur(von)}) do príjmov ${rok} nepatria — patria do roka úhrady.`);
   if(dovnutra>0) upoz.push(`Hotovostný princíp: faktúry z minulého roka uhradené v ${rok} (${eur(dovnutra)}) do príjmov ${rok} patria — overte, či sú zahrnuté.`);
   // 3) Nespárované faktúry (blokujúca pri uzávierke)
@@ -9473,7 +9729,7 @@ function pbNahladFormular(rok){
 
     <div class="pbf-note">Vizuálny náhľad pre kontrolu — nie oficiálne tlačivo. Predvyplňovací nástroj nenahrádza daňového poradcu ani oficiálne priznanie. Pred podaním si všetko overte. Výpočet podľa pravidiel ${rok}.</div>
   </div>`;
-  openModal("Priznanie FO typ B – náhľad", html, null);
+  openModal("Priznanie FO typ B – náhľad", html, null, null, "siroky");
 }
 const PB_KROKY=["Príjmy a výdavky","Nezdaniteľné časti","Daň a bonus","Zhrnutie"];
 // náhľad formulára pre NAHRATÉ priznanie (z prehľadu Priznania) — z importovaných XML dát
@@ -9515,7 +9771,7 @@ function priznanieNahladFormular(rok){
     ${P.danNaUhradu>0?rr("135","Daň na úhradu", P.danNaUhradu, "pay"):""}
     <div class="pbf-note">Náhľad načítaného priznania (z oficiálneho XML DPFO typ B). Údaje pochádzajú z podaného priznania.</div>
   </div>`;
-  openModal("Priznanie "+rok+" – náhľad", html, null);
+  openModal("Priznanie "+rok+" – náhľad", html, null, null, "siroky");
 }
 function appPriznanieB(){
   const c="#7a6a2c";
@@ -10799,7 +11055,7 @@ function xkKnihaJazdSheet(X, S, D, m, vlastnyZoznam){
   const konStav=list.length?(list[list.length-1].kon||0):0;
   const odhadEl=r2(sumKWh*CENA_EL);
   const head=["Č.","Dátum a čas (začiatok)","Čas konca","Deň v týždni","Meno vodiča","Cesta","Účel","Čerpanie 95 v l","Čerpanie ZSE","Počiatočný stav km","Prejdená vzdialenosť v km","Konečný stav km","Doba jazdy v h","Priemerná rýchlosť v km/h","Priemerná spotreba paliva v l/100 km","Priemerná spotreba elektrickej energie kWh/100 km","Celková spotreba v l","Celková spotreba v kWh"];
-  const casKonca=(j)=>{ const mm=String(j.datum||"").match(/(\d+):(\d+)\s*$/); if(!mm) return ""; let h=+mm[1],mi=+mm[2]; const dm=dobaToMin(j.doba); let tot=(h*60+mi+dm)%(24*60); return String(Math.floor(tot/60)).padStart(2,"0")+":"+String(tot%60).padStart(2,"0"); };
+  const casKonca=(j)=>jazdaCasKonca(j);
   const E=xkCell("",S.cell);
   const aoa=[
     [xkCell(VOZIDLO,sLbl),E,E,E,E,E, E,E,E,E,E,E, E,E,E,E, xkCell("Počet km spolu:",sLbl),xkCell(konStav,sVal)],
@@ -10815,7 +11071,7 @@ function xkKnihaJazdSheet(X, S, D, m, vlastnyZoznam){
     const spL = (j.spotrebaL!=null && j.spotrebaL!=="") ? +j.spotrebaL : (km>0? r2(cL/km*100):0);
     const spKWh = (j.spotrebaKWh!=null && j.spotrebaKWh!=="") ? +j.spotrebaKWh : (km>0? r2(cKWh/km*100):0);
     aoa.push([
-      xkCell(i+1,sn), xkCell(j.datum||"",sc), xkCell(casKonca(j),sc), xkCell(j.den||"",sc), xkCell(j.vodic||"",sc), xkCell(j.cesta||j.trasa||"",sc), xkCell((jazdaSukromna(j)?"[súkromná] ":"")+(j.ucel||""),sc),
+      xkCell(i+1,sn), xkCell(jazdaDatumSCasom(j),sc), xkCell(casKonca(j),sc), xkCell(j.den||"",sc), xkCell(j.vodic||"",sc), xkCell(j.cesta||j.trasa||"",sc), xkCell((jazdaSukromna(j)?"[súkromná] ":"")+(j.ucel||""),sc),
       xkCell(+j.cerpanieBenzin||0,sn), xkCell(+j.cerpanieZse||0,sn),
       xkCell(+j.poc||0,sn), xkCell(km,sn), xkCell(+j.kon||0,sn),
       xkCell(j.doba||"",sc), xkCell(+j.rychlost||0,sn),
@@ -15318,8 +15574,16 @@ function migrujUhrady(){
   (firmaData.vypis||[]).forEach(t=>{
     if(Array.isArray(t.uhrady)) return;
     if(t.potvrdenaZhoda && t.potvrdenaZhoda.cislo){
-      t.uhrady=[{typ:t.potvrdenaZhoda.typ||"vydavok", cislo:String(t.potvrdenaZhoda.cislo),
-                 suma:txSuma(t), datum:t.datum||""}];
+      // Suma úhrady sa orezáva na sumu dokladu. Starý formát vedel len „tento
+      // pohyb patrí k tomuto dokladu" a o sumách nehovoril nič; keby sa
+      // migrovala celá suma pohybu, hromadná platba by sa celá minula na jednu
+      // faktúru a zvyšok by sa už nedal priradiť nikam — presne to, čo mal
+      // rozpad platby na viac dokladov vyriešiť.
+      const typ=t.potvrdenaZhoda.typ||"vydavok", cis=String(t.potvrdenaZhoda.cislo);
+      const celkomDok=dokladSuma(typ,cis), celkomPoh=txSuma(t);
+      t.uhrady=[{typ, cislo:cis,
+                 suma: celkomDok>0 ? r2(Math.min(celkomPoh, celkomDok)) : celkomPoh,
+                 datum:t.datum||""}];
       n++;
     } else t.uhrady=[];
   });
@@ -15398,13 +15662,73 @@ function dokladSuma(typ, cislo){
   if(!d) return 0;
   return r2(+d.spolu || +d.bez || 0);
 }
-// koľko už bolo na doklad zaplatené (naprieč všetkými pohybmi)
-function dokladUhradene(typ, cislo){
+// koľko už bolo na doklad zaplatené ZAPÍSANÝMI úhradami (rozpis pohybu)
+// Toto je surový, nedovodený stav — používa sa tam, kde by odvodenie zaviedlo
+// kruh: pri stropovaní novej úhrady a pri výbere kandidátov na párovanie.
+function dokladUhradeneZapisane(typ, cislo){
   let s=0;
   (firmaData.vypis||[]).forEach(t=>(t.uhrady||[]).forEach(u=>{
     if(u.typ===typ && String(u.cislo)===String(cislo)) s+=(+u.suma||0);
   }));
   return r2(s);
+}
+// ═══════════════════════════════════════════════════════════════
+//  ISTÉ BANKOVÉ ÚHRADY BEZ ZAPÍSANÉHO ROZPISU
+//
+//  Výpis a faktúra sa dovtedy pozerali na dve rôzne veci. Obrazovka výpisov
+//  pri príjme s variabilným symbolom zhodným s číslom faktúry hlási
+//  „spárované" (vypisSparuj → istota „ista"), ale úhradu nikam nezapíše.
+//  Úhradová logika číta výhradne zapísané `uhrady`, takže tá istá faktúra
+//  inde vyzerala ako neuhradená — a daňové priznanie ju blokovalo ako
+//  nespárovanú, hoci platba v banke stála čierne na bielom.
+//
+//  Stav sa preto odvodzuje aj z výpisu, rovnako, ako sa už odvodzuje z
+//  ručného potvrdenia. Neukladá sa nič: keď pribudne rozpis alebo sa výpis
+//  zmení, odvodený stav sa zmení s ním.
+//
+//  Tri poistky:
+//   · pohyb s vlastným rozpisom `uhrady` sa ignoruje — zapísané má prednosť,
+//   · vrátená platba sa odpočíta (rovnaký VS opačným smerom),
+//   · súčet sa nikdy nedostane nad sumu dokladu — dvakrát prijatá platba
+//     nesmie z faktúry urobiť preplatok.
+//
+//  Platí len pre faktúry. Pri výdavkoch appka istotu z VS nikdy nevyhlasuje
+//  (klasifikuje ich podľa protistrany), takže niet čo zosúlaďovať.
+// ═══════════════════════════════════════════════════════════════
+function bankoveIsteUhrady(typ, cislo){
+  const prazdne={suma:0, datum:null};
+  if(typ!=="faktura") return prazdne;
+  const f=(firmaData.faktury||[]).find(x=>String(x.cislo)===String(cislo));
+  if(!f) return prazdne;
+  const kluc=v=>String(v==null?"":v).replace(/\D/g,"");
+  const ciel=new Set([kluc(f.cislo), kluc(f.vs), kluc(f.variabilny)].filter(x=>x.length>=4));
+  if(!ciel.size) return prazdne;
+  const prijmy=[]; let vratene=0;
+  (firmaData.vypis||[]).forEach(t=>{
+    if(t.skryty || t.vratenie || t.odmietnutaZhoda) return;
+    if((t.uhrady||[]).length) return;
+    if(!ciel.has(kluc(t.vs))) return;
+    const suma=Math.abs(+t.suma||0);
+    if(suma<=0) return;
+    if(t.smer==="prijem") prijmy.push({datum:String(t.datum||"").slice(0,10), suma});
+    else if(t.smer==="vydaj") vratene=r2(vratene+suma);
+  });
+  if(!prijmy.length) return prazdne;
+  const cista=r2(Math.max(0, prijmy.reduce((a,p)=>a+p.suma,0)-vratene));
+  if(cista<=0.005) return prazdne;
+  const celkom=r2(+f.spolu||+f.bez||0);
+  const strop=celkom>0 ? Math.min(cista, celkom) : cista;
+  // dátum úhrady = deň, ktorým bol doklad pokrytý. Pri vrátenej a znova
+  // prijatej platbe je to tá platba, ktorá zostala v platnosti — preto sa
+  // ide od najstaršej, nie od poslednej.
+  prijmy.sort((a,b)=>String(a.datum).localeCompare(String(b.datum)));
+  let acc=0, datum=prijmy[0].datum||null;
+  for(const p of prijmy){ acc=r2(acc+p.suma); datum=p.datum||datum; if(acc>=strop-0.005) break; }
+  return {suma:r2(strop), datum:datum||null};
+}
+// koľko už bolo na doklad zaplatené (zapísané úhrady + isté bankové platby)
+function dokladUhradene(typ, cislo){
+  return r2(dokladUhradeneZapisane(typ,cislo)+bankoveIsteUhrady(typ,cislo).suma);
 }
 function dokladZostava(typ, cislo){ return r2(dokladSuma(typ,cislo)-dokladUhradene(typ,cislo)); }
 
@@ -15566,7 +15890,10 @@ function pridajUhradu(tx, typ, cislo, suma){
   if(!Array.isArray(tx.uhrady)) tx.uhrady=[];
   const maxPohyb=txZostava(tx);
   const zname=dokladSuma(typ,cislo)>0;              // poznáme celkovú sumu dokladu?
-  const maxDoklad=dokladZostava(typ,cislo);
+  // Strop sa počíta LEN zo zapísaných úhrad. Keby sa doň rátala aj istá
+  // banková platba odvodená z tohto istého pohybu, doklad by pri pokuse
+  // priradiť ho ručne vyšiel ako už uhradený a rozpis by sa nedal zapísať.
+  const maxDoklad=r2(dokladSuma(typ,cislo)-dokladUhradeneZapisane(typ,cislo));
   // Strop je zostatok dokladu; ak sumu dokladu nepoznáme, obmedzuje len pohyb.
   const strop = zname ? Math.max(0, maxDoklad) : maxPohyb;
   let s = (suma!=null) ? r2(suma) : r2(Math.min(maxPohyb, strop));
@@ -15707,7 +16034,11 @@ function splitKandidati(tx, ajNerelevantne){
     if(dni!==null && dni<=30 && parNazvySedia(tx.proti||tx.popis, k.nazov)) return true;
     return false;
   };
-  const jeVolny=k=>{ const st=dokladStavUhrady(k.typ,k.cislo); return st.stav!=="uhradene"; };
+  // Vynechávajú sa doklady uhradené ZAPÍSANÝM rozpisom. Odvodená bankové
+  // úhrada sa sem rátať nesmie — práve ten pohyb, ktorý ju odvodzuje, by si
+  // svoju vlastnú faktúru zo zoznamu kandidátov odstránil.
+  const jeVolny=k=>{ const celkom=dokladSuma(k.typ,k.cislo);
+    return !(celkom>0 && r2(celkom-dokladUhradeneZapisane(k.typ,k.cislo))<=0.005); };
   const rel=zdroj.filter(k=>jeRel(k)&&jeVolny(k));
   const ine=zdroj.filter(k=>!rel.includes(k)).sort((a,b)=>Math.abs(a.suma-suma)-Math.abs(b.suma-suma));
   return {rel, zvysok:ine.length, vsetky: ajNerelevantne ? [...rel, ...ine] : rel};
@@ -16913,7 +17244,7 @@ function obDokonci(){
 
 
 // EMBEDDED_DEMO_DATA
-window.DEMO_DATA_EMBED = {"schema":1,"meta":{"nazov":"Zuzana Vzorová – Ateliér Modrý Bocian","ico":"50123456","dic":"1050123456","icdph":"SK1050123456","adresa":"Slnečná 14, 949 01 Nitra","vozidlo":"DEMO-e-Golf-2024","iban":"SK1111000000001234567890"},"settings":{"danPrijem":0.15,"zdravSadzba":0.15,"vzKoef":0.672948,"zdravMin":107.25,"odpisAutoMes":1730.59,"sadzbaDPH":0.23,"dphPlatca":true,"denTarifa":350,"stravneDen":5.12,"kjNazovVozidla":"e-Golf","kjNormaBenzin":6,"kjNormaElektrina":18.1,"kjCenaElektro":0.15,"nezdanitCast2026":5966.73,"limit15pct":60000,"preddavokZP":256.25,"preddavokDanQ":2928.99,"preddavokDanOd":"2026-07","socOdvodyMes":0,"socOdvodyOd":"2026-10","kjVodic":"Zuzana Vzorová","kjAutoLimit":50,"kjTrasa":"Demovo - Bratislava - Demovo","kjUcel":"Projekt dizajnérsky projekt Vzorový odberateľ, s.r.o.","kjNormaElektro":18.1,"zakazkaCislo":"DEMO0001","projektNazov":"Životné situácie  - dizajnérsky projekt","dodavatelia":[{"nazov":"Zuzana Vzorová – agile management","adresa":"Ukážková 1, 000 01 Demovo","ico":"50 123 456","icdph":"SK1099999999","skratka":"Zuzana Vzorová","pracovnik":"Zuzana Vzorová"}],"odberatelia":[{"nazov":"Vzorový odberateľ, s.r.o.","adresa":"Vzorová 2, 000 01 Demovo","ico":"31 999 888","icdph":"","skratka":"Vzorový odberateľ, s.r.o.","schvalil":"Ján Vzorový"}],"odberatel":"Vzorový odberateľ, s.r.o.","odberatelAdresa":"Vzorová 2, 000 01 Demovo","dodavatel":"Zuzana Vzorová – agile management","dodavatelAdresa":"Ukážková 1, 000 01 Demovo","dodavatelIco":"50 123 456","dodavatelIcDph":"SK1099999999","miestoPodpisu":"Bratislava","vykazHodinyMod":"pausal","vykazPausalHodin":8,"vykazFilter":"","vykazVylucit":"obed,lunch,súkromné,private,dovolenka,canceled,zrušené,private appointment","vykazAktivity":[{"den":1,"text":"Aktualizácia programového harmonogramu"},{"den":3,"text":"Príprava reportu o stave programu"},{"den":5,"text":"QA report"}],"castyUlohy":["Krízové riadenie s GR","Príprava na KR","Príprava agendy KR","Sumarizácia a odpočet úloh z KR","Status MIRRI","Externý status MIRRI","Status s PM","Rozšírený stand-up PM a VM","Stand-up ","Jour fix","Systémová integrácia ŽS ","Synchro ext. kapacít","Interné synchro ","Synchro Vzorový odberateľ, s.r.o.","Finančné riadenie synchro","Rozpočet ","Prierezový projekt","Aktualizácia programového harmonogramu","Reporting stavu harmonogramu NCZI","Konsolidácia harmonogramu NCZI MIRRI","Odpočet MIRRI ŽS 7 a 8","Master plan review","PZP a KRIMP ŽS 7 a 8","PZP a KRIMP ŽS 14 a 16","JIRA aktualizácia progresu ŽS ","Príprava prezentácie na RV MIRRI","Technické stretnutie NCZI","Monitoring služieb","Vecná akceptácia"],"nczdHranicaPlna":26083.13,"nczdKonstanta":14661.11,"nczdZanik":43983.32,"zpSadzba2025":0.15,"zpSadzba2026":0.16,"zpKoeficient":1.486,"kjPriemRychlost":35,"kjOptVikendMax":40,"kjOptDlhaJazda":120,"kjOptDenMin":45,"kjOptDenMax":100,"kjOptDialkova":200,"ibanVszp":"","ibanSocpoist":"","ibanDanovyUrad":"","nazov":"Zuzana Vzorová – Ateliér Modrý Bocian","ico":"50123456","icdph":"SK1050123456","dic":"1050123456","odberatelNazov":""},"dan":[{"mesiac":"Január","odprac":22,"faktBez":7700,"odpisAuto":"","ostatne":1273.45,"preddavok":"","faktSDph":9471},{"mesiac":"Február","odprac":23,"faktBez":8050,"odpisAuto":"","ostatne":1506.28,"preddavok":"","faktSDph":9901.5},{"mesiac":"Marec","odprac":25,"faktBez":8750,"odpisAuto":"","ostatne":193.08,"preddavok":"","faktSDph":10762.5},{"mesiac":"Apríl","odprac":20,"faktBez":7000,"odpisAuto":"","ostatne":415.74,"preddavok":"","faktSDph":8610},{"mesiac":"Máj","odprac":22,"faktBez":9031.58,"odpisAuto":"","ostatne":1523.4,"preddavok":"","faktSDph":11108.84},{"mesiac":"Jún","odprac":0,"faktBez":0,"odpisAuto":"","ostatne":856.53,"preddavok":""}],"jazdy":[{"id":"demo_j0","datum":"9. 1. 2026 14:00","dt":"2026-01-09T14:00:00.000Z","den":"piatok","vodic":"Zuzana Vzorová","cesta":"Nitra - Trenčín - Nitra","ucel":"Dizajn konferencia","km":174,"poc":42150,"kon":42324,"doba":"04:29","rychlost":39,"celkKWh":28.65,"celkL":0,"spotrebaKWh":16.47,"spotrebaL":0,"mesiac":"2026-01","doplnene":false},{"id":"demo_j1","datum":"14. 1. 2026 9:00","dt":"2026-01-14T09:00:00.000Z","den":"streda","vodic":"Zuzana Vzorová","cesta":"Nitra - Trnava - Nitra","ucel":"Fotografovanie produktov Pekáreň Vôňa Rána","km":101,"poc":42324,"kon":42425,"doba":"01:59","rychlost":51,"celkKWh":14.79,"celkL":0,"spotrebaKWh":14.64,"spotrebaL":0,"mesiac":"2026-01","doplnene":false},{"id":"demo_j2","datum":"17. 1. 2026 9:00","dt":"2026-01-17T09:00:00.000Z","den":"sobota","vodic":"Zuzana Vzorová","cesta":"Nitra - Trnava - Nitra","ucel":"Fotografovanie produktov Pekáreň Vôňa Rána","km":102,"poc":42425,"kon":42527,"doba":"02:27","rychlost":42,"celkKWh":15.97,"celkL":0,"spotrebaKWh":15.66,"spotrebaL":0,"mesiac":"2026-01","doplnene":false},{"id":"demo_j3","datum":"20. 1. 2026 10:00","dt":"2026-01-20T10:00:00.000Z","den":"utorok","vodic":"Zuzana Vzorová","cesta":"Nitra - Bratislava - Nitra","ucel":"Stretnutie s klientom Kaviareň Zrnko & Para","km":185,"poc":42527,"kon":42712,"doba":"03:57","rychlost":47,"celkKWh":29.14,"celkL":0,"spotrebaKWh":15.75,"spotrebaL":0,"mesiac":"2026-01","doplnene":false},{"id":"demo_j4","datum":"26. 1. 2026 12:00","dt":"2026-01-26T12:00:00.000Z","den":"pondelok","vodic":"Zuzana Vzorová","cesta":"Nitra - Bratislava - Nitra","ucel":"Stretnutie s klientom Kaviareň Zrnko & Para","km":185,"poc":42712,"kon":42897,"doba":"04:46","rychlost":39,"celkKWh":27.13,"celkL":0,"spotrebaKWh":14.66,"spotrebaL":0,"mesiac":"2026-01","doplnene":false},{"id":"demo_j5","datum":"29. 1. 2026 10:00","dt":"2026-01-29T10:00:00.000Z","den":"štvrtok","vodic":"Zuzana Vzorová","cesta":"Nitra - Nové Zámky - Nitra","ucel":"Konzultácia Cyklo Servis Rýchle Koleso","km":76,"poc":42897,"kon":42973,"doba":"01:40","rychlost":46,"celkKWh":11.94,"celkL":0,"spotrebaKWh":15.71,"spotrebaL":0,"mesiac":"2026-01","doplnene":false},{"id":"demo_j6","datum":"3. 2. 2026 13:00","dt":"2026-02-03T13:00:00.000Z","den":"utorok","vodic":"Zuzana Vzorová","cesta":"Nitra - Nové Zámky - Nitra","ucel":"Konzultácia Cyklo Servis Rýchle Koleso","km":73,"poc":42973,"kon":43046,"doba":"01:33","rychlost":47,"celkKWh":11.04,"celkL":0,"spotrebaKWh":15.12,"spotrebaL":0,"mesiac":"2026-02","doplnene":false},{"id":"demo_j7","datum":"5. 2. 2026 13:00","dt":"2026-02-05T13:00:00.000Z","den":"štvrtok","vodic":"Zuzana Vzorová","cesta":"Nitra - Trnava - Nitra","ucel":"Fotografovanie produktov Pekáreň Vôňa Rána","km":105,"poc":43046,"kon":43151,"doba":"02:34","rychlost":41,"celkKWh":16.84,"celkL":0,"spotrebaKWh":16.04,"spotrebaL":0,"mesiac":"2026-02","doplnene":false},{"id":"demo_j8","datum":"10. 2. 2026 13:00","dt":"2026-02-10T13:00:00.000Z","den":"utorok","vodic":"Zuzana Vzorová","cesta":"Nitra - Šaľa - Nitra","ucel":"Stretnutie Kníhkupectvo Sova a Kniha","km":57,"poc":43151,"kon":43208,"doba":"01:07","rychlost":51,"celkKWh":8.6,"celkL":0,"spotrebaKWh":15.09,"spotrebaL":0,"mesiac":"2026-02","doplnene":false},{"id":"demo_j9","datum":"15. 2. 2026 15:00","dt":"2026-02-15T15:00:00.000Z","den":"nedeľa","vodic":"Zuzana Vzorová","cesta":"Nitra - Nitra (centrum)","ucel":"Tlačiareň – odovzdanie podkladov","km":12,"poc":43208,"kon":43220,"doba":"00:17","rychlost":42,"celkKWh":1.89,"celkL":0,"spotrebaKWh":15.75,"spotrebaL":0,"mesiac":"2026-02","doplnene":false},{"id":"demo_j10","datum":"19. 2. 2026 12:00","dt":"2026-02-19T12:00:00.000Z","den":"štvrtok","vodic":"Zuzana Vzorová","cesta":"Nitra - Piešťany - Nitra","ucel":"Fotenie interiéru kaviarne","km":121,"poc":43220,"kon":43341,"doba":"02:52","rychlost":42,"celkKWh":20.5,"celkL":0,"spotrebaKWh":16.94,"spotrebaL":0,"mesiac":"2026-02","doplnene":false},{"id":"demo_j11","datum":"22. 2. 2026 10:00","dt":"2026-02-22T10:00:00.000Z","den":"nedeľa","vodic":"Zuzana Vzorová","cesta":"Nitra - Trnava - Nitra","ucel":"Fotografovanie produktov Pekáreň Vôňa Rána","km":104,"poc":43341,"kon":43445,"doba":"02:08","rychlost":49,"celkKWh":15.03,"celkL":0,"spotrebaKWh":14.45,"spotrebaL":0,"mesiac":"2026-02","doplnene":false},{"id":"demo_j12","datum":"25. 2. 2026 14:00","dt":"2026-02-25T14:00:00.000Z","den":"streda","vodic":"Zuzana Vzorová","cesta":"Nitra - Piešťany - Nitra","ucel":"Fotenie interiéru kaviarne","km":122,"poc":43445,"kon":43567,"doba":"03:07","rychlost":39,"celkKWh":19.12,"celkL":0,"spotrebaKWh":15.67,"spotrebaL":0,"mesiac":"2026-02","doplnene":false},{"id":"demo_j13","datum":"3. 3. 2026 11:00","dt":"2026-03-03T11:00:00.000Z","den":"utorok","vodic":"Zuzana Vzorová","cesta":"Nitra - Trenčín - Nitra","ucel":"Dizajn konferencia","km":177,"poc":43567,"kon":43744,"doba":"03:49","rychlost":46,"celkKWh":27.86,"celkL":0,"spotrebaKWh":15.74,"spotrebaL":0,"mesiac":"2026-03","doplnene":false},{"id":"demo_j14","datum":"5. 3. 2026 11:00","dt":"2026-03-05T11:00:00.000Z","den":"štvrtok","vodic":"Zuzana Vzorová","cesta":"Nitra - Piešťany - Nitra","ucel":"Fotenie interiéru kaviarne","km":117,"poc":43744,"kon":43861,"doba":"02:37","rychlost":45,"celkKWh":18.71,"celkL":0,"spotrebaKWh":15.99,"spotrebaL":0,"mesiac":"2026-03","doplnene":false},{"id":"demo_j15","datum":"11. 3. 2026 13:00","dt":"2026-03-11T13:00:00.000Z","den":"streda","vodic":"Zuzana Vzorová","cesta":"Nitra - Bratislava - Nitra","ucel":"Stretnutie s klientom Kaviareň Zrnko & Para","km":180,"poc":43861,"kon":44041,"doba":"03:28","rychlost":52,"celkKWh":29.64,"celkL":0,"spotrebaKWh":16.47,"spotrebaL":0,"mesiac":"2026-03","doplnene":false},{"id":"demo_j16","datum":"15. 3. 2026 11:00","dt":"2026-03-15T11:00:00.000Z","den":"nedeľa","vodic":"Zuzana Vzorová","cesta":"Nitra - Levice - Nitra","ucel":"Prezentácia loga Záhradníctvo Zelený Ježko","km":92,"poc":44041,"kon":44133,"doba":"02:24","rychlost":38,"celkKWh":14.15,"celkL":0,"spotrebaKWh":15.38,"spotrebaL":0,"mesiac":"2026-03","doplnene":false},{"id":"demo_j17","datum":"17. 3. 2026 12:00","dt":"2026-03-17T12:00:00.000Z","den":"utorok","vodic":"Zuzana Vzorová","cesta":"Nitra - Nové Zámky - Nitra","ucel":"Konzultácia Cyklo Servis Rýchle Koleso","km":81,"poc":44133,"kon":44214,"doba":"02:05","rychlost":39,"celkKWh":13.21,"celkL":0,"spotrebaKWh":16.31,"spotrebaL":0,"mesiac":"2026-03","doplnene":false},{"id":"demo_j18","datum":"22. 3. 2026 12:00","dt":"2026-03-22T12:00:00.000Z","den":"nedeľa","vodic":"Zuzana Vzorová","cesta":"Nitra - Nové Zámky - Nitra","ucel":"Konzultácia Cyklo Servis Rýchle Koleso","km":75,"poc":44214,"kon":44289,"doba":"01:28","rychlost":51,"celkKWh":11.62,"celkL":0,"spotrebaKWh":15.49,"spotrebaL":0,"mesiac":"2026-03","doplnene":false},{"id":"demo_j19","datum":"26. 3. 2026 13:00","dt":"2026-03-26T13:00:00.000Z","den":"štvrtok","vodic":"Zuzana Vzorová","cesta":"Nitra - Nové Zámky - Nitra","ucel":"Konzultácia Cyklo Servis Rýchle Koleso","km":79,"poc":44289,"kon":44368,"doba":"01:53","rychlost":42,"celkKWh":11.38,"celkL":0,"spotrebaKWh":14.41,"spotrebaL":0,"mesiac":"2026-03","doplnene":false},{"id":"demo_j20","datum":"30. 3. 2026 14:00","dt":"2026-03-30T14:00:00.000Z","den":"pondelok","vodic":"Zuzana Vzorová","cesta":"Nitra - Šaľa - Nitra","ucel":"Stretnutie Kníhkupectvo Sova a Kniha","km":60,"poc":44368,"kon":44428,"doba":"01:22","rychlost":44,"celkKWh":9.05,"celkL":0,"spotrebaKWh":15.08,"spotrebaL":0,"mesiac":"2026-03","doplnene":false},{"id":"demo_j21","datum":"2. 4. 2026 9:00","dt":"2026-04-02T09:00:00.000Z","den":"štvrtok","vodic":"Zuzana Vzorová","cesta":"Nitra - Šaľa - Nitra","ucel":"Stretnutie Kníhkupectvo Sova a Kniha","km":55,"poc":44428,"kon":44483,"doba":"01:21","rychlost":41,"celkKWh":8.08,"celkL":0,"spotrebaKWh":14.69,"spotrebaL":0,"mesiac":"2026-04","doplnene":false},{"id":"demo_j22","datum":"7. 4. 2026 15:00","dt":"2026-04-07T15:00:00.000Z","den":"utorok","vodic":"Zuzana Vzorová","cesta":"Nitra - Nitra (centrum)","ucel":"Tlačiareň – odovzdanie podkladov","km":10,"poc":44483,"kon":44493,"doba":"00:12","rychlost":50,"celkKWh":1.48,"celkL":0,"spotrebaKWh":14.8,"spotrebaL":0,"mesiac":"2026-04","doplnene":false},{"id":"demo_j23","datum":"11. 4. 2026 13:00","dt":"2026-04-11T13:00:00.000Z","den":"sobota","vodic":"Zuzana Vzorová","cesta":"Nitra - Bratislava - Nitra","ucel":"Stretnutie s klientom Kaviareň Zrnko & Para","km":178,"poc":44493,"kon":44671,"doba":"04:07","rychlost":43,"celkKWh":27.94,"celkL":0,"spotrebaKWh":15.7,"spotrebaL":0,"mesiac":"2026-04","doplnene":false},{"id":"demo_j24","datum":"16. 4. 2026 14:00","dt":"2026-04-16T14:00:00.000Z","den":"štvrtok","vodic":"Zuzana Vzorová","cesta":"Nitra - Nové Zámky - Nitra","ucel":"Konzultácia Cyklo Servis Rýchle Koleso","km":80,"poc":44671,"kon":44751,"doba":"01:41","rychlost":48,"celkKWh":11.33,"celkL":0,"spotrebaKWh":14.16,"spotrebaL":0,"mesiac":"2026-04","doplnene":false},{"id":"demo_j25","datum":"19. 4. 2026 12:00","dt":"2026-04-19T12:00:00.000Z","den":"nedeľa","vodic":"Zuzana Vzorová","cesta":"Nitra - Šaľa - Nitra","ucel":"Stretnutie Kníhkupectvo Sova a Kniha","km":58,"poc":44751,"kon":44809,"doba":"01:28","rychlost":40,"celkKWh":9.22,"celkL":0,"spotrebaKWh":15.9,"spotrebaL":0,"mesiac":"2026-04","doplnene":false},{"id":"demo_j26","datum":"22. 4. 2026 10:00","dt":"2026-04-22T10:00:00.000Z","den":"streda","vodic":"Zuzana Vzorová","cesta":"Nitra - Bratislava - Nitra","ucel":"Stretnutie s klientom Kaviareň Zrnko & Para","km":179,"poc":44809,"kon":44988,"doba":"04:03","rychlost":44,"celkKWh":25.65,"celkL":0,"spotrebaKWh":14.33,"spotrebaL":0,"mesiac":"2026-04","doplnene":false},{"id":"demo_j27","datum":"26. 4. 2026 13:00","dt":"2026-04-26T13:00:00.000Z","den":"nedeľa","vodic":"Zuzana Vzorová","cesta":"Nitra - Bratislava - Nitra","ucel":"Stretnutie s klientom Kaviareň Zrnko & Para","km":177,"poc":44988,"kon":45165,"doba":"04:24","rychlost":40,"celkKWh":25.32,"celkL":0,"spotrebaKWh":14.31,"spotrebaL":0,"mesiac":"2026-04","doplnene":false}],"vykazy":[{"projekt":"Redizajn značky – Kaviareň Zrnko & Para","zakazka":"DEMO0001","pracovnik":"Zuzana Vzorová","obdobie":"1.5.2026 - 30.5.2026","polozky":[{"datum":"2026-05-04","hodiny":9,"poznamka":"Synchro meeting Program, E2E ŽS 1, E2E Testovacie scenáre, Odpočet ŽS 7 a 8"},{"datum":"2026-05-05","hodiny":10,"poznamka":"ŽS  Testing, ISSUE log, stanovisko k posunu legislativy; One 2 One ŽS1"},{"datum":"2026-05-06","hodiny":9,"poznamka":"Procesy pre overenie nasadenia ŽS, Projek. Dokumentácia Prierez"},{"datum":"2026-05-07","hodiny":9,"poznamka":"Externy status MIRRI; sumar stavu BP; Nastavenie JIRA ; revízia CR; Master plán ŽS 1"},{"datum":"2026-05-08","hodiny":8,"poznamka":"Master plan ŽS 1 final draft; Synchro ext. Kapacít; Podklad na RV MIRRI"},{"datum":"2026-05-11","hodiny":9,"poznamka":"Odpočet ŽS 7 a 8, Master plan review, plán ŽS 8"},{"datum":"2026-05-12","hodiny":10,"poznamka":"Stretnutie s dodavatelmi  SP; Plan ŽS 7; Test manager support;One2One ŽS 14"},{"datum":"2026-05-13","hodiny":9,"poznamka":"One 2 One Notifikácie, Master plan prierez; Synchro  Vzorový odberateľ, s.r.o."},{"datum":"2026-05-14","hodiny":8,"poznamka":"Prince 2 Agile practicional školenie pre projekt "},{"datum":"2026-05-15","hodiny":8,"poznamka":"Prince 2 Agile practicional školenie pre projekt "},{"datum":"2026-05-18","hodiny":9,"poznamka":"Mirri - overovacie TS; Ohrozené BP ; Status vecnej akceptácie"},{"datum":"2026-05-19","hodiny":8,"poznamka":"Synchro T. Sokol, B. Hawkvitz; príprava zdôvodnenia pre MIRRI"},{"datum":"2026-05-20","hodiny":9,"poznamka":"Synchro Vzorový odberateľ, s.r.o.; Handover ŽS 14; Systemova integracia, AI progress"},{"datum":"2026-05-21","hodiny":8,"poznamka":"Meeting B. Világi; Update prezentácie na stretnutie MIRRI, ŽS 7 a 8 plan"},{"datum":"2026-05-22","hodiny":8,"poznamka":"Status MIRRI, MIRRI dokumentácia update, Master plan ŽS1"},{"datum":"2026-05-25","hodiny":10,"poznamka":"Progress update Asseco; OTS follow up MIRRI; DI plan update"},{"datum":"2026-05-26","hodiny":9,"poznamka":"Stretnutie s dodavatelmi  SP; aktualizácia finančného dashboardu"},{"datum":"2026-05-27","hodiny":9,"poznamka":"Synchro Vzorový odberateľ, s.r.o.; OTS ŽS1 ; Jour fix; Systemova integracia, Stretnutie s vedenim MIRRI"},{"datum":"2026-05-28","hodiny":9,"poznamka":"Status MIRRI; Aktualizacia Master planu - final review; Manazerske zhrnutie k master planu, Synchro s programom, Povinné školenie"},{"datum":"2026-05-29","hodiny":8,"poznamka":"Review stavu BP k 30.5.2026; Test. Casy; Master plan Frontend"}],"hodiny":176,"dni":22}],"faktury":[{"cislo":"20260001","odberatel":"Kaviareň Zrnko & Para, s.r.o.","ico":"51001122","icdph":"SK2120011220","datum":"2026-01-15","vystavenie":"2026-01-15","splatnost":"2026-01-29","bez":650,"dph":149.5,"spolu":799.5,"dni":0,"vs":"20260001","polozky":[{"nazov":"návrh loga a vizuálnej identity","mn":1,"mj":"ks","cena":650}],"zaplatena":true},{"cislo":"20260002","odberatel":"Pekáreň Vôňa Rána, s.r.o.","ico":"52334455","icdph":"SK2120334455","datum":"2026-02-06","vystavenie":"2026-02-06","splatnost":"2026-02-20","bez":1200,"dph":276.0,"spolu":1476.0,"dni":0,"vs":"20260002","polozky":[{"nazov":"redizajn webstránky","mn":1,"mj":"ks","cena":1200}],"zaplatena":true},{"cislo":"20260003","odberatel":"Kníhkupectvo Sova a Kniha, s.r.o.","ico":"53667788","icdph":"SK2120667788","datum":"2026-02-28","vystavenie":"2026-02-28","splatnost":"2026-03-14","bez":480,"dph":110.4,"spolu":590.4,"dni":0,"vs":"20260003","polozky":[{"nazov":"grafika pre sociálne siete (balík)","mn":1,"mj":"ks","cena":480}],"zaplatena":true},{"cislo":"20260004","odberatel":"Záhradníctvo Zelený Ježko, s.r.o.","ico":"54990011","icdph":"SK2120990011","datum":"2026-03-22","vystavenie":"2026-03-22","splatnost":"2026-04-05","bez":320,"dph":73.6,"spolu":393.6,"dni":0,"vs":"20260004","polozky":[{"nazov":"tlačové podklady – letáky","mn":1,"mj":"ks","cena":320}],"zaplatena":true},{"cislo":"20260005","odberatel":"Cyklo Servis Rýchle Koleso, s.r.o.","ico":"55223344","icdph":"SK2120223344","datum":"2026-04-13","vystavenie":"2026-04-13","splatnost":"2026-04-27","bez":440,"dph":101.2,"spolu":541.2,"dni":8,"vs":"20260005","polozky":[{"nazov":"UX konzultácia","mn":8,"mj":"hod","cena":55}],"zaplatena":false},{"cislo":"20260006","odberatel":"Kaviareň Zrnko & Para, s.r.o.","ico":"51001122","icdph":"SK2120011220","datum":"2026-05-05","vystavenie":"2026-05-05","splatnost":"2026-05-19","bez":400,"dph":92.0,"spolu":492.0,"dni":0,"vs":"20260006","polozky":[{"nazov":"fotografovanie produktov","mn":1,"mj":"ks","cena":400}],"zaplatena":false}],"protokoly":[{"cislo":"AP_01_2026","dni":22,"tarifa":350,"suma":7700,"obdobie":"1.5.2026 - 30.5.2026","datum":"2026-06-25","pracovnik":"Zuzana Vzorová","text":"Na základe Zmluvy o poskytovaní služieb a priloženého výkazu prác, predmetom ktorého bolo poskytnutie služieb v zmysle definície Prílohy č. 1 Zmluvy o poskytovaní služieb, týmto Vzorový odberateľ, s.r.o. potvrdzuje, že Zuzana Vzorová vykonal požadované služby popísané vo výkaze prác v rozsahu:"}],"naklady":[],"vydavky":[{"cislo":"D2026000","druh":"Došlá faktúra","partner":"Adobe Systems s.r.o.","ico":"","popis":"Adobe Creative Cloud","datum":"2026-01-10","mesiac":1,"bez":60.49,"dph":12.1,"spolu":72.59,"uhrada":"Bankový prevod","mena":"EUR"},{"cislo":"D2026001","druh":"Došlá faktúra","partner":"Papiernictvo Ceruzka, s.r.o.","ico":"51778899","popis":"Kancelárske potreby","datum":"2026-01-23","mesiac":1,"bez":23.3,"dph":4.66,"spolu":27.96,"uhrada":"Kartou","mena":"EUR"},{"cislo":"D2026002","druh":"Došlá faktúra","partner":"ZSE Energetické služby, s.r.o.","ico":"52820203","popis":"Nabíjanie elektromobilu","datum":"2026-02-05","mesiac":2,"bez":18.4,"dph":3.5,"spolu":21.9,"uhrada":"Bankový prevod","mena":"EUR"},{"cislo":"D2026003","druh":"Došlá faktúra","partner":"WebHost SK, s.r.o.","ico":"51665544","popis":"Hosting a doména","datum":"2026-02-18","mesiac":2,"bez":47.9,"dph":9.58,"spolu":57.48,"uhrada":"Kartou","mena":"EUR"},{"cislo":"D2026004","druh":"Došlá faktúra","partner":"O2 Slovakia, s.r.o.","ico":"35848863","popis":"Mobilný paušál","datum":"2026-03-03","mesiac":3,"bez":25.0,"dph":5.0,"spolu":30.0,"uhrada":"Bankový prevod","mena":"EUR"},{"cislo":"D2026005","druh":"Došlá faktúra","partner":"Servis PC Rýchlik, s.r.o.","ico":"52119988","popis":"Notebook – oprava","datum":"2026-03-16","mesiac":3,"bez":89.0,"dph":17.8,"spolu":106.8,"uhrada":"Kartou","mena":"EUR"},{"cislo":"D2026006","druh":"Bloček","partner":"Depositphotos","ico":"","popis":"Predplatné fotobanka","datum":"2026-03-29","mesiac":3,"bez":29.99,"dph":0,"spolu":29.99,"uhrada":"Bankový prevod","mena":"EUR"},{"cislo":"D2026007","druh":"Došlá faktúra","partner":"Saba Parking SK s.r.o.","ico":"35844256","popis":"Parkovné centrum mesta","datum":"2026-04-11","mesiac":4,"bez":8.2,"dph":1.56,"spolu":9.76,"uhrada":"Kartou","mena":"EUR"},{"cislo":"D2026008","druh":"Došlá faktúra","partner":"EventPro, s.r.o.","ico":"53442211","popis":"Školenie – dizajn konferencia","datum":"2026-04-24","mesiac":4,"bez":120.0,"dph":24.0,"spolu":144.0,"uhrada":"Bankový prevod","mena":"EUR"},{"cislo":"D2026009","druh":"Došlá faktúra","partner":"Kaviareň Zrnko & Para, s.r.o.","ico":"51001122","popis":"Káva do ateliéru","datum":"2026-05-07","mesiac":5,"bez":14.6,"dph":2.92,"spolu":17.52,"uhrada":"Kartou","mena":"EUR"},{"cislo":"D2026010","druh":"Došlá faktúra","partner":"ZSE Energetické služby, s.r.o.","ico":"52820203","popis":"Nabíjanie elektromobilu","datum":"2026-05-20","mesiac":5,"bez":21.1,"dph":4.01,"spolu":25.11,"uhrada":"Bankový prevod","mena":"EUR"},{"cislo":"D2026011","druh":"Bloček","partner":"Poisťovňa Istota, a.s.","ico":"51009988","popis":"Poistenie zodpovednosti","datum":"2026-06-02","mesiac":6,"bez":34.5,"dph":0,"spolu":34.5,"uhrada":"Kartou","mena":"EUR"}],"nabijania":[{"karta":"692233","typ":"Mesačný poplatok","stanica":"","datum":"2026-05-01","zaciatok":"02:00","koniec":"02:00","kwh":0,"suma":11.68,"mesiac":"2026-05"},{"karta":"692233","typ":"Nabíjanie","stanica":"ZSE RK Kozí vŕšok Ultra","datum":"2026-05-30","zaciatok":"13:26","koniec":"14:15","kwh":20.87,"suma":0,"mesiac":"2026-05"}],"dovolenka":{"2025":{"narok":25,"mesiace":{"Január":0,"Február":2,"Marec":1,"Apríl":1,"Máj":0,"Jún":4,"Júl":4,"August":2,"September":0,"Október":0,"November":0,"December":4}},"2026":{"narok":32,"mesiace":{"Január":2,"Február":4,"Marec":0,"Apríl":3,"Máj":0,"Jún":0,"Júl":0,"August":0,"September":0,"Október":0,"November":0,"December":0}}},"danovePriznania":{},"kjTrasyVolby":{},"vypis":[{"id":"b_out_D2026000","datum":"2026-01-10","suma":-72.59,"smer":"vydaj","protiucet":"SK5002000000002222000000","vs":"2026000","popis":"Adobe Creative Cloud – Adobe Systems s.r.o.","partner":"Adobe Systems s.r.o.","sparovane":true,"typ":"vydavok"},{"id":"b_in_20260001","datum":"2026-01-27","suma":799.5,"smer":"prijem","protiucet":"SK9002000000001111510011","vs":"20260001","popis":"Úhrada faktúry 20260001 – Kaviareň Zrnko & Para, s.r.o.","partner":"Kaviareň Zrnko & Para, s.r.o.","sparovane":true,"typ":"faktura"},{"id":"b_out_D2026002","datum":"2026-02-05","suma":-21.9,"smer":"vydaj","protiucet":"SK5002000000002222528202","vs":"2026002","popis":"Nabíjanie elektromobilu – ZSE Energetické služby, s.r.o.","partner":"ZSE Energetické služby, s.r.o.","sparovane":true,"typ":"vydavok"},{"id":"b_x1","datum":"2026-02-05","suma":-45.0,"smer":"vydaj","protiucet":"SK3011000000003333","vs":"","popis":"Poplatky za vedenie účtu","partner":"Tatra banka, a.s.","sparovane":false,"typ":""},{"id":"b_in_20260002","datum":"2026-02-18","suma":1476.0,"smer":"prijem","protiucet":"SK9002000000001111523344","vs":"20260002","popis":"Úhrada faktúry 20260002 – Pekáreň Vôňa Rána, s.r.o.","partner":"Pekáreň Vôňa Rána, s.r.o.","sparovane":true,"typ":"faktura"},{"id":"b_out_D2026004","datum":"2026-03-03","suma":-30.0,"smer":"vydaj","protiucet":"SK5002000000002222358488","vs":"2026004","popis":"Mobilný paušál – O2 Slovakia, s.r.o.","partner":"O2 Slovakia, s.r.o.","sparovane":true,"typ":"vydavok"},{"id":"b_in_20260003","datum":"2026-03-12","suma":590.4,"smer":"prijem","protiucet":"SK9002000000001111536677","vs":"20260003","popis":"Úhrada faktúry 20260003 – Kníhkupectvo Sova a Kniha, s.r.o.","partner":"Kníhkupectvo Sova a Kniha, s.r.o.","sparovane":true,"typ":"faktura"},{"id":"b_x2","datum":"2026-03-20","suma":-121.92,"smer":"vydaj","protiucet":"SK6065000000009999","vs":"1050123456","popis":"Odvod zdravotné poistenie","partner":"Union ZP","sparovane":false,"typ":"odvod"},{"id":"b_out_D2026006","datum":"2026-03-29","suma":-29.99,"smer":"vydaj","protiucet":"SK5002000000002222000000","vs":"2026006","popis":"Predplatné fotobanka – Depositphotos","partner":"Depositphotos","sparovane":true,"typ":"vydavok"},{"id":"b_in_20260004","datum":"2026-04-03","suma":393.6,"smer":"prijem","protiucet":"SK9002000000001111549900","vs":"20260004","popis":"Úhrada faktúry 20260004 – Záhradníctvo Zelený Ježko, s.r.o.","partner":"Záhradníctvo Zelený Ježko, s.r.o.","sparovane":true,"typ":"faktura"},{"id":"b_out_D2026008","datum":"2026-04-24","suma":-144.0,"smer":"vydaj","protiucet":"SK5002000000002222534422","vs":"2026008","popis":"Školenie – dizajn konferencia – EventPro, s.r.o.","partner":"EventPro, s.r.o.","sparovane":true,"typ":"vydavok"},{"id":"b_out_D2026010","datum":"2026-05-20","suma":-25.11,"smer":"vydaj","protiucet":"SK5002000000002222528202","vs":"2026010","popis":"Nabíjanie elektromobilu – ZSE Energetické služby, s.r.o.","partner":"ZSE Energetické služby, s.r.o.","sparovane":true,"typ":"vydavok"}],"vypisPravidla":[{"typ":"iban","hodnota":"SK8956000000009942097003","nazov":"Súkromný účet (prevody)"}],"priznanieB":{}};
+window.DEMO_DATA_EMBED = {"schema":1,"meta":{"nazov":"Zuzana Vzorová — Ateliér Modrý Bocian","ico":"50123456","dic":"1050123456","icdph":"SK1050123456","adresa":"Slnečná 14, 949 01 Nitra","iban":"SK1111000000001234567890","vozidlo":"Škoda Superb iV","email":"zuzana@modrybocian.sk","telefon":"+421 900 123 456"},"settings":{"dphPlatca":true,"sadzbaDPH":0.23,"danPrijem":0.15,"zdravSadzba":0.16,"zpSadzba2026":0.16,"nezdanitCast2026":5966.73,"limit15pct":60000,"preddavokZP":121.92,"preddavokDanQ":738.25,"preddavokDanOd":"2026-01","socOdvodyMes":0,"socOdvodyOd":"2026-07","odpisAutoMes":0,"kjTypVozidla":"phev","kjNazovVozidla":"Škoda Superb iV","kjVodic":"Zuzana Vzorová","kjNormaBenzin":5.6,"kjNormaElektro":16.4,"kjNormaElektrina":16.4,"kjCenaElektro":0.15,"kjPriemRychlost":45,"kjTrasaDefault":"Nitra – Bratislava – Nitra","kjTrasa":"Nitra – Bratislava – Nitra","kjUcel":"Stretnutie s klientom","kjAutoLimit":50,"kjOptVikendMax":40,"kjOptDlhaJazda":120,"kjOptDenMin":45,"kjOptDenMax":100,"kjOptDialkova":200,"dodavatel":"Zuzana Vzorová — Ateliér Modrý Bocian","dodavatelAdresa":"Slnečná 14, 949 01 Nitra","dodavatelIco":"50 123 456","dodavatelIcDph":"SK1050123456","miestoPodpisu":"Nitra","denTarifa":420,"stravneDen":5.12,"zakazkaCislo":"DEMO0001","projektNazov":"Ateliér Modrý Bocian — klientske projekty","odberatelia":[{"nazov":"Kaviareň Zrnko & Para, s. r. o.","adresa":"Štefánikova 12, 949 01 Nitra","ico":"51001122","icdph":"SK2120011220","skratka":"Kaviareň Zrnko & Para"},{"nazov":"Pekáreň Vôňa Rána, s. r. o.","adresa":"Hlavná 88, 917 01 Trnava","ico":"52334455","icdph":"SK2120334455","skratka":"Pekáreň Vôňa Rána"},{"nazov":"Kníhkupectvo Sova a Kniha, s. r. o.","adresa":"Nám. Mieru 3, 927 01 Šaľa","ico":"53667788","icdph":"SK2120667788","skratka":"Kníhkupectvo Sova a Kniha"},{"nazov":"Záhradníctvo Zelený Ježko, s. r. o.","adresa":"Poľná 41, 934 01 Levice","ico":"54990011","icdph":"SK2120990011","skratka":"Záhradníctvo Zelený Ježko"},{"nazov":"Cyklo Servis Rýchle Koleso, s. r. o.","adresa":"Továrenská 7, 940 02 Nové Zámky","ico":"55223344","icdph":"SK2120223344","skratka":"Cyklo Servis Rýchle Koleso"}],"dodavatelia":[{"nazov":"Zuzana Vzorová — Ateliér Modrý Bocian","adresa":"Slnečná 14, 949 01 Nitra","ico":"50 123 456","icdph":"SK1050123456","skratka":"Ateliér Modrý Bocian","pracovnik":"Zuzana Vzorová"}],"ignorPravidla":[{"typ":"iban","hodnota":"SK8956000000009942097003","nazov":"Súkromný účet (prevody)"},{"typ":"popis","hodnota":"Poplatok za vedenie","nazov":"Bankové poplatky"}],"vykazHodinyMod":"pausal","vykazPausalHodin":8,"vykazVylucit":"obed,lunch,súkromné,dovolenka","castyUlohy":["Návrh vizuálnej identity — koncept","Sadzba tlačových podkladov","Konzultácia s klientom","Fotografovanie produktov","Retuš a postprodukcia","Príprava dát pre tlačiareň","Návrh obalového dizajnu","Korektúry a schvaľovanie"]},"faktury":[{"cislo":"20260001","odberatel":"Kaviareň Zrnko & Para, s. r. o.","ico":"51001122","icdph":"SK2120011220","adresa":"Štefánikova 12, 949 01 Nitra","datum":"2026-01-16","vystavenie":"2026-01-16","splatnost":"2026-01-30","vs":"20260001","bez":1850.0,"dph":425.5,"spolu":2275.5,"sadzba":0.23,"polozky":[{"nazov":"Návrh loga a vizuálnej identity","mn":1,"mj":"ks","cena":1850}],"forma":"Bankový prevod"},{"cislo":"20260002","odberatel":"Pekáreň Vôňa Rána, s. r. o.","ico":"52334455","icdph":"SK2120334455","adresa":"Hlavná 88, 917 01 Trnava","datum":"2026-02-06","vystavenie":"2026-02-06","splatnost":"2026-02-20","vs":"20260002","bez":2400.0,"dph":552.0,"spolu":2952.0,"sadzba":0.23,"polozky":[{"nazov":"Redizajn webstránky","mn":1,"mj":"ks","cena":2400}],"forma":"Bankový prevod"},{"cislo":"20260003","odberatel":"Kníhkupectvo Sova a Kniha, s. r. o.","ico":"53667788","icdph":"SK2120667788","adresa":"Nám. Mieru 3, 927 01 Šaľa","datum":"2026-02-27","vystavenie":"2026-02-27","splatnost":"2026-03-13","vs":"20260003","bez":960.0,"dph":220.8,"spolu":1180.8,"sadzba":0.23,"polozky":[{"nazov":"Grafika pre sociálne siete — balík","mn":1,"mj":"ks","cena":960}],"forma":"Bankový prevod"},{"cislo":"20260004","odberatel":"Záhradníctvo Zelený Ježko, s. r. o.","ico":"54990011","icdph":"SK2120990011","adresa":"Poľná 41, 934 01 Levice","datum":"2026-03-24","vystavenie":"2026-03-24","splatnost":"2026-04-07","vs":"20260004","bez":740.0,"dph":170.2,"spolu":910.2,"sadzba":0.23,"polozky":[{"nazov":"Tlačové podklady — letáky a plagáty","mn":1,"mj":"ks","cena":740}],"forma":"Bankový prevod"},{"cislo":"20260005","odberatel":"Cyklo Servis Rýchle Koleso, s. r. o.","ico":"55223344","icdph":"SK2120223344","adresa":"Továrenská 7, 940 02 Nové Zámky","datum":"2026-04-14","vystavenie":"2026-04-14","splatnost":"2026-04-28","vs":"20260005","bez":1040.0,"dph":239.2,"spolu":1279.2,"sadzba":0.23,"polozky":[{"nazov":"UX konzultácia","mn":16,"mj":"hod","cena":65}],"forma":"Bankový prevod"},{"cislo":"20260006","odberatel":"Kaviareň Zrnko & Para, s. r. o.","ico":"51001122","icdph":"SK2120011220","adresa":"Štefánikova 12, 949 01 Nitra","datum":"2026-05-06","vystavenie":"2026-05-06","splatnost":"2026-05-20","vs":"20260006","bez":1180.0,"dph":271.4,"spolu":1451.4,"sadzba":0.23,"polozky":[{"nazov":"Fotografovanie produktov","mn":1,"mj":"ks","cena":1180}],"forma":"Bankový prevod"},{"cislo":"20260007","odberatel":"Pekáreň Vôňa Rána, s. r. o.","ico":"52334455","icdph":"SK2120334455","adresa":"Hlavná 88, 917 01 Trnava","datum":"2026-05-29","vystavenie":"2026-05-29","splatnost":"2026-06-12","vs":"20260007","bez":1620.0,"dph":372.6,"spolu":1992.6,"sadzba":0.23,"polozky":[{"nazov":"Obalový dizajn — rad pečiva","mn":1,"mj":"ks","cena":1620}],"forma":"Bankový prevod"},{"cislo":"20260008","odberatel":"Kníhkupectvo Sova a Kniha, s. r. o.","ico":"53667788","icdph":"SK2120667788","adresa":"Nám. Mieru 3, 927 01 Šaľa","datum":"2026-06-18","vystavenie":"2026-06-18","splatnost":"2026-07-02","vs":"20260008","bez":1680.0,"dph":386.4,"spolu":2066.4,"sadzba":0.23,"polozky":[{"nazov":"Ilustrácie do detskej edície","mn":12,"mj":"ks","cena":140}],"forma":"Bankový prevod"},{"cislo":"20260009","odberatel":"Záhradníctvo Zelený Ježko, s. r. o.","ico":"54990011","icdph":"SK2120990011","adresa":"Poľná 41, 934 01 Levice","datum":"2026-07-15","vystavenie":"2026-07-15","splatnost":"2026-07-29","vs":"20260009","bez":1340.0,"dph":308.2,"spolu":1648.2,"sadzba":0.23,"polozky":[{"nazov":"Katalóg rastlín — sadzba a tlač","mn":1,"mj":"ks","cena":1340}],"forma":"Bankový prevod"}],"vydavky":[{"id":"demo_v00","cislo":"D2026001","druh":"Došlá faktúra","partner":"Adobe Systems Software Ireland","ico":"","popis":"Creative Cloud — mesačné predplatné","kategoria":"Softvér a služby","datum":"2026-01-08","mesiac":1,"bez":59.02,"dph":13.57,"spolu":72.59,"sadzba":0.23,"uhrada":"Bankový prevod","mena":"EUR"},{"id":"demo_v01","cislo":"D2026002","druh":"Bloček","partner":"OMV Slovensko, s. r. o.","ico":"31340846","popis":"Tankovanie","kategoria":"Prevádzka vozidla","datum":"2026-01-14","mesiac":1,"bez":55.61,"dph":12.79,"spolu":68.4,"sadzba":0.23,"uhrada":"Kartou","mena":"EUR"},{"id":"demo_v02","cislo":"D2026003","druh":"Bloček","partner":"Papiernictvo Ceruzka, s. r. o.","ico":"51778899","popis":"Kancelárske potreby","kategoria":"Kancelária","datum":"2026-01-22","mesiac":1,"bez":22.73,"dph":5.23,"spolu":27.96,"sadzba":0.23,"uhrada":"Kartou","mena":"EUR"},{"id":"demo_v03","cislo":"D2026004","druh":"Došlá faktúra","partner":"WebHost SK, s. r. o.","ico":"51665544","popis":"Hosting a doména na rok","kategoria":"Softvér a služby","datum":"2026-02-03","mesiac":2,"bez":46.73,"dph":10.75,"spolu":57.48,"sadzba":0.23,"uhrada":"Bankový prevod","mena":"EUR"},{"id":"demo_v04","cislo":"D2026005","druh":"Došlá faktúra","partner":"ZSE Energetické služby, s. r. o.","ico":"52820203","popis":"Verejné nabíjanie","kategoria":"Prevádzka vozidla","datum":"2026-02-05","mesiac":2,"bez":17.8,"dph":4.1,"spolu":21.9,"sadzba":0.23,"uhrada":"Bankový prevod","mena":"EUR"},{"id":"demo_v05","cislo":"D2026006","druh":"Došlá faktúra","partner":"O2 Slovakia, s. r. o.","ico":"35848863","popis":"Mobilný paušál","kategoria":"Telefón a internet","datum":"2026-02-11","mesiac":2,"bez":24.39,"dph":5.61,"spolu":30.0,"sadzba":0.23,"uhrada":"Bankový prevod","mena":"EUR"},{"id":"demo_v06","cislo":"D2026007","druh":"Došlá faktúra","partner":"Servis PC Rýchlik, s. r. o.","ico":"52119988","popis":"Notebook — výmena batérie","kategoria":"Vybavenie","datum":"2026-02-24","mesiac":2,"bez":86.83,"dph":19.97,"spolu":106.8,"sadzba":0.23,"uhrada":"Kartou","mena":"EUR"},{"id":"demo_v07","cislo":"D2026008","druh":"Došlá faktúra","partner":"O2 Slovakia, s. r. o.","ico":"35848863","popis":"Mobilný paušál","kategoria":"Telefón a internet","datum":"2026-03-04","mesiac":3,"bez":24.39,"dph":5.61,"spolu":30.0,"sadzba":0.23,"uhrada":"Bankový prevod","mena":"EUR"},{"id":"demo_v08","cislo":"D2026009","druh":"Bloček","partner":"Slovnaft, a. s.","ico":"31322832","popis":"Tankovanie","kategoria":"Prevádzka vozidla","datum":"2026-03-09","mesiac":3,"bez":60.28,"dph":13.87,"spolu":74.15,"sadzba":0.23,"uhrada":"Kartou","mena":"EUR"},{"id":"demo_v09","cislo":"D2026010","druh":"Došlá faktúra","partner":"Depositphotos","ico":"","popis":"Fotobanka — ročné predplatné","kategoria":"Softvér a služby","datum":"2026-03-18","mesiac":3,"bez":359.88,"dph":0.0,"spolu":359.88,"sadzba":0.0,"uhrada":"Kartou","mena":"EUR"},{"id":"demo_v10","cislo":"D2026011","druh":"Bloček","partner":"Saba Parking SK, s. r. o.","ico":"35844256","popis":"Parkovné — centrum mesta","kategoria":"Prevádzka vozidla","datum":"2026-03-27","mesiac":3,"bez":7.93,"dph":1.83,"spolu":9.76,"sadzba":0.23,"uhrada":"Kartou","mena":"EUR"},{"id":"demo_v11","cislo":"D2026012","druh":"Došlá faktúra","partner":"Adobe Systems Software Ireland","ico":"","popis":"Creative Cloud — mesačné predplatné","kategoria":"Softvér a služby","datum":"2026-04-02","mesiac":4,"bez":59.02,"dph":13.57,"spolu":72.59,"sadzba":0.23,"uhrada":"Bankový prevod","mena":"EUR"},{"id":"demo_v12","cislo":"D2026013","druh":"Došlá faktúra","partner":"O2 Slovakia, s. r. o.","ico":"35848863","popis":"Mobilný paušál","kategoria":"Telefón a internet","datum":"2026-04-08","mesiac":4,"bez":24.39,"dph":5.61,"spolu":30.0,"sadzba":0.23,"uhrada":"Bankový prevod","mena":"EUR"},{"id":"demo_v13","cislo":"D2026014","druh":"Došlá faktúra","partner":"EventPro, s. r. o.","ico":"53442211","popis":"Školenie — typografia v praxi","kategoria":"Vzdelávanie","datum":"2026-04-21","mesiac":4,"bez":175.61,"dph":40.39,"spolu":216.0,"sadzba":0.23,"uhrada":"Bankový prevod","mena":"EUR"},{"id":"demo_v14","cislo":"D2026015","druh":"Došlá faktúra","partner":"Tlačiareň Dobrý Odtlačok, s. r. o.","ico":"52667711","popis":"Tlač vzoriek pre klienta","kategoria":"Materiál","datum":"2026-04-29","mesiac":4,"bez":116.68,"dph":26.84,"spolu":143.52,"sadzba":0.23,"uhrada":"Bankový prevod","mena":"EUR"},{"id":"demo_v15","cislo":"D2026016","druh":"Došlá faktúra","partner":"O2 Slovakia, s. r. o.","ico":"35848863","popis":"Mobilný paušál","kategoria":"Telefón a internet","datum":"2026-05-06","mesiac":5,"bez":24.39,"dph":5.61,"spolu":30.0,"sadzba":0.23,"uhrada":"Bankový prevod","mena":"EUR"},{"id":"demo_v16","cislo":"D2026017","druh":"Bloček","partner":"OMV Slovensko, s. r. o.","ico":"31340846","popis":"Tankovanie","kategoria":"Prevádzka vozidla","datum":"2026-05-13","mesiac":5,"bez":57.95,"dph":13.33,"spolu":71.28,"sadzba":0.23,"uhrada":"Kartou","mena":"EUR"},{"id":"demo_v17","cislo":"D2026018","druh":"Došlá faktúra","partner":"Poisťovňa Istota, a. s.","ico":"51009988","popis":"Poistenie zodpovednosti za škodu","kategoria":"Poistenie","datum":"2026-05-19","mesiac":5,"bez":103.5,"dph":0.0,"spolu":103.5,"sadzba":0.0,"uhrada":"Bankový prevod","mena":"EUR"},{"id":"demo_v18","cislo":"D2026019","druh":"Došlá faktúra","partner":"Adobe Systems Software Ireland","ico":"","popis":"Creative Cloud — mesačné predplatné","kategoria":"Softvér a služby","datum":"2026-06-03","mesiac":6,"bez":59.02,"dph":13.57,"spolu":72.59,"sadzba":0.23,"uhrada":"Bankový prevod","mena":"EUR"},{"id":"demo_v19","cislo":"D2026020","druh":"Došlá faktúra","partner":"O2 Slovakia, s. r. o.","ico":"35848863","popis":"Mobilný paušál","kategoria":"Telefón a internet","datum":"2026-06-09","mesiac":6,"bez":24.39,"dph":5.61,"spolu":30.0,"sadzba":0.23,"uhrada":"Bankový prevod","mena":"EUR"},{"id":"demo_v20","cislo":"D2026021","druh":"Bloček","partner":"Kaviareň Zrnko & Para, s. r. o.","ico":"51001122","popis":"Pracovné stretnutie — občerstvenie","kategoria":"Reprezentácia","datum":"2026-06-17","mesiac":6,"bez":14.24,"dph":3.28,"spolu":17.52,"sadzba":0.23,"uhrada":"Kartou","mena":"EUR"},{"id":"demo_v21","cislo":"D2026022","druh":"Došlá faktúra","partner":"Účtovníctvo Presné Číslo, s. r. o.","ico":"53881100","popis":"Spracovanie účtovníctva Q2","kategoria":"Účtovníctvo a poradenstvo","datum":"2026-06-30","mesiac":6,"bez":240.0,"dph":55.2,"spolu":295.2,"sadzba":0.23,"uhrada":"Bankový prevod","mena":"EUR"},{"id":"demo_v22","cislo":"D2026023","druh":"Došlá faktúra","partner":"O2 Slovakia, s. r. o.","ico":"35848863","popis":"Mobilný paušál","kategoria":"Telefón a internet","datum":"2026-07-07","mesiac":7,"bez":24.39,"dph":5.61,"spolu":30.0,"sadzba":0.23,"uhrada":"Bankový prevod","mena":"EUR"},{"id":"demo_v23","cislo":"D2026024","druh":"Bloček","partner":"Slovnaft, a. s.","ico":"31322832","popis":"Tankovanie","kategoria":"Prevádzka vozidla","datum":"2026-07-13","mesiac":7,"bez":54.39,"dph":12.51,"spolu":66.9,"sadzba":0.23,"uhrada":"Kartou","mena":"EUR"},{"id":"demo_v24","cislo":"D2026025","druh":"Došlá faktúra","partner":"Fotoateliér Svetlo, s. r. o.","ico":"52443399","popis":"Prenájom štúdia a svetiel","kategoria":"Materiál","datum":"2026-07-20","mesiac":7,"bez":149.59,"dph":34.41,"spolu":184.0,"sadzba":0.23,"uhrada":"Bankový prevod","mena":"EUR"},{"id":"demo_v_vikend","cislo":"D2026026","druh":"Bloček","partner":"OMV Slovensko, s. r. o.","ico":"31340846","popis":"Tankovanie","kategoria":"Prevádzka vozidla","datum":"2026-05-10","mesiac":5,"bez":51.06,"dph":11.74,"spolu":62.8,"sadzba":0.23,"uhrada":"Kartou","mena":"EUR"}],"vypis":[{"id":"demo_tx000","dt":"2026-01-08T00:00:00.000Z","datum":"2026-01-08","suma":72.59,"smer":"vydaj","proti":"Adobe Systems Software Ireland","vs":"2026001","popis":"Creative Cloud — mesačné predplatné","ibanProti":"SK5002000000002222000000","mesiac":"2026-01","uhrady":[{"typ":"vydavok","cislo":"D2026001","suma":72.59,"datum":"2026-01-08"}],"potvrdenaZhoda":{"typ":"vydavok","cislo":"D2026001"}},{"id":"demo_tx001","dt":"2026-01-08T00:00:00.000Z","datum":"2026-01-08","suma":121.92,"smer":"vydaj","proti":"Union zdravotná poisťovňa","vs":"1050123456","popis":"Odvod zdravotné poistenie","ibanProti":"SK6065000000009999","mesiac":"2026-01"},{"id":"demo_tx002","dt":"2026-01-12T00:00:00.000Z","datum":"2026-01-12","suma":12.9,"smer":"vydaj","proti":"Tatra banka, a. s.","vs":"","popis":"Poplatok za vedenie účtu","ibanProti":"SK3011000000003333","mesiac":"2026-01"},{"id":"demo_tx003","dt":"2026-01-14T00:00:00.000Z","datum":"2026-01-14","suma":68.4,"smer":"vydaj","proti":"OMV Slovensko, s. r. o.","vs":"2026002","popis":"Tankovanie","ibanProti":"SK5002000000002222313408","mesiac":"2026-01","uhrady":[{"typ":"vydavok","cislo":"D2026002","suma":68.4,"datum":"2026-01-14"}],"potvrdenaZhoda":{"typ":"vydavok","cislo":"D2026002"}},{"id":"demo_tx004","dt":"2026-01-20T00:00:00.000Z","datum":"2026-01-20","suma":600.0,"smer":"vydaj","proti":"VZOROVÁ ZUZANA","vs":"","popis":"Prevod na súkromný účet","ibanProti":"SK8956000000009942097003","mesiac":"2026-01"},{"id":"demo_tx005","dt":"2026-01-22T00:00:00.000Z","datum":"2026-01-22","suma":27.96,"smer":"vydaj","proti":"Papiernictvo Ceruzka, s. r. o.","vs":"2026003","popis":"Kancelárske potreby","ibanProti":"SK5002000000002222517788","mesiac":"2026-01","uhrady":[{"typ":"vydavok","cislo":"D2026003","suma":27.96,"datum":"2026-01-22"}],"potvrdenaZhoda":{"typ":"vydavok","cislo":"D2026003"}},{"id":"demo_tx006","dt":"2026-01-25T00:00:00.000Z","datum":"2026-01-25","suma":2275.5,"smer":"prijem","proti":"Kaviareň Zrnko & Para, s. r. o.","vs":"20260001","popis":"Úhrada faktúry 20260001","ibanProti":"SK9002000000001111510011","mesiac":"2026-01"},{"id":"demo_tx007","dt":"2026-02-03T00:00:00.000Z","datum":"2026-02-03","suma":57.48,"smer":"vydaj","proti":"WebHost SK, s. r. o.","vs":"2026004","popis":"Hosting a doména na rok","ibanProti":"SK5002000000002222516655","mesiac":"2026-02","uhrady":[{"typ":"vydavok","cislo":"D2026004","suma":57.48,"datum":"2026-02-03"}],"potvrdenaZhoda":{"typ":"vydavok","cislo":"D2026004"}},{"id":"demo_tx008","dt":"2026-02-05T00:00:00.000Z","datum":"2026-02-05","suma":21.9,"smer":"vydaj","proti":"ZSE Energetické služby, s. r. o.","vs":"2026005","popis":"Verejné nabíjanie","ibanProti":"SK5002000000002222528202","mesiac":"2026-02","uhrady":[{"typ":"vydavok","cislo":"D2026005","suma":21.9,"datum":"2026-02-05"}],"potvrdenaZhoda":{"typ":"vydavok","cislo":"D2026005"}},{"id":"demo_tx009","dt":"2026-02-08T00:00:00.000Z","datum":"2026-02-08","suma":121.92,"smer":"vydaj","proti":"Union zdravotná poisťovňa","vs":"1050123456","popis":"Odvod zdravotné poistenie","ibanProti":"SK6065000000009999","mesiac":"2026-02"},{"id":"demo_tx010","dt":"2026-02-11T00:00:00.000Z","datum":"2026-02-11","suma":30.0,"smer":"vydaj","proti":"O2 Slovakia, s. r. o.","vs":"2026006","popis":"Mobilný paušál","ibanProti":"SK5002000000002222358488","mesiac":"2026-02","uhrady":[{"typ":"vydavok","cislo":"D2026006","suma":30.0,"datum":"2026-02-11"}],"potvrdenaZhoda":{"typ":"vydavok","cislo":"D2026006"}},{"id":"demo_tx011","dt":"2026-02-12T00:00:00.000Z","datum":"2026-02-12","suma":12.9,"smer":"vydaj","proti":"Tatra banka, a. s.","vs":"","popis":"Poplatok za vedenie účtu","ibanProti":"SK3011000000003333","mesiac":"2026-02"},{"id":"demo_tx012","dt":"2026-02-20T00:00:00.000Z","datum":"2026-02-20","suma":2952.0,"smer":"prijem","proti":"Pekáreň Vôňa Rána, s. r. o.","vs":"20260002","popis":"Úhrada faktúry 20260002","ibanProti":"SK9002000000001111523344","mesiac":"2026-02"},{"id":"demo_tx013","dt":"2026-02-20T00:00:00.000Z","datum":"2026-02-20","suma":500.0,"smer":"vydaj","proti":"VZOROVÁ ZUZANA","vs":"","popis":"Prevod na súkromný účet","ibanProti":"SK8956000000009942097003","mesiac":"2026-02"},{"id":"demo_tx014","dt":"2026-02-24T00:00:00.000Z","datum":"2026-02-24","suma":106.8,"smer":"vydaj","proti":"Servis PC Rýchlik, s. r. o.","vs":"2026007","popis":"Notebook — výmena batérie","ibanProti":"SK5002000000002222521199","mesiac":"2026-02","uhrady":[{"typ":"vydavok","cislo":"D2026007","suma":106.8,"datum":"2026-02-24"}],"potvrdenaZhoda":{"typ":"vydavok","cislo":"D2026007"}},{"id":"demo_tx015","dt":"2026-03-04T00:00:00.000Z","datum":"2026-03-04","suma":30.0,"smer":"vydaj","proti":"O2 Slovakia, s. r. o.","vs":"2026008","popis":"Mobilný paušál","ibanProti":"SK5002000000002222358488","mesiac":"2026-03","uhrady":[{"typ":"vydavok","cislo":"D2026008","suma":30.0,"datum":"2026-03-04"}],"potvrdenaZhoda":{"typ":"vydavok","cislo":"D2026008"}},{"id":"demo_tx016","dt":"2026-03-08T00:00:00.000Z","datum":"2026-03-08","suma":121.92,"smer":"vydaj","proti":"Union zdravotná poisťovňa","vs":"1050123456","popis":"Odvod zdravotné poistenie","ibanProti":"SK6065000000009999","mesiac":"2026-03"},{"id":"demo_tx017","dt":"2026-03-09T00:00:00.000Z","datum":"2026-03-09","suma":74.15,"smer":"vydaj","proti":"Slovnaft, a. s.","vs":"2026009","popis":"Tankovanie","ibanProti":"SK5002000000002222313228","mesiac":"2026-03","uhrady":[{"typ":"vydavok","cislo":"D2026009","suma":74.15,"datum":"2026-03-09"}],"potvrdenaZhoda":{"typ":"vydavok","cislo":"D2026009"}},{"id":"demo_tx018","dt":"2026-03-12T00:00:00.000Z","datum":"2026-03-12","suma":1180.8,"smer":"prijem","proti":"Kníhkupectvo Sova a Kniha, s. r. o.","vs":"20260003","popis":"Úhrada faktúry 20260003","ibanProti":"SK9002000000001111536677","mesiac":"2026-03"},{"id":"demo_tx019","dt":"2026-03-12T00:00:00.000Z","datum":"2026-03-12","suma":12.9,"smer":"vydaj","proti":"Tatra banka, a. s.","vs":"","popis":"Poplatok za vedenie účtu","ibanProti":"SK3011000000003333","mesiac":"2026-03"},{"id":"demo_tx020","dt":"2026-03-18T00:00:00.000Z","datum":"2026-03-18","suma":359.88,"smer":"vydaj","proti":"Depositphotos","vs":"2026010","popis":"Fotobanka — ročné predplatné","ibanProti":"SK5002000000002222000000","mesiac":"2026-03"},{"id":"demo_tx021","dt":"2026-03-20T00:00:00.000Z","datum":"2026-03-20","suma":400.0,"smer":"vydaj","proti":"VZOROVÁ ZUZANA","vs":"","popis":"Prevod na súkromný účet","ibanProti":"SK8956000000009942097003","mesiac":"2026-03"},{"id":"demo_tx022","dt":"2026-03-27T00:00:00.000Z","datum":"2026-03-27","suma":9.76,"smer":"vydaj","proti":"Saba Parking SK, s. r. o.","vs":"2026011","popis":"Parkovné — centrum mesta","ibanProti":"SK5002000000002222358442","mesiac":"2026-03","uhrady":[{"typ":"vydavok","cislo":"D2026011","suma":9.76,"datum":"2026-03-27"}],"potvrdenaZhoda":{"typ":"vydavok","cislo":"D2026011"}},{"id":"demo_tx023","dt":"2026-03-31T00:00:00.000Z","datum":"2026-03-31","suma":738.25,"smer":"vydaj","proti":"Daňový úrad Nitra","vs":"1050123456","popis":"Preddavok na daň z príjmov Q1","ibanProti":"SK1180000000007000080036","mesiac":"2026-03"},{"id":"demo_tx024","dt":"2026-04-02T00:00:00.000Z","datum":"2026-04-02","suma":72.59,"smer":"vydaj","proti":"Adobe Systems Software Ireland","vs":"2026012","popis":"Creative Cloud — mesačné predplatné","ibanProti":"SK5002000000002222000000","mesiac":"2026-04","uhrady":[{"typ":"vydavok","cislo":"D2026012","suma":72.59,"datum":"2026-04-02"}],"potvrdenaZhoda":{"typ":"vydavok","cislo":"D2026012"}},{"id":"demo_tx025","dt":"2026-04-04T00:00:00.000Z","datum":"2026-04-04","suma":910.2,"smer":"prijem","proti":"Záhradníctvo Zelený Ježko, s. r. o.","vs":"20260004","popis":"Úhrada faktúry 20260004","ibanProti":"SK9002000000001111549900","mesiac":"2026-04"},{"id":"demo_tx026","dt":"2026-04-08T00:00:00.000Z","datum":"2026-04-08","suma":30.0,"smer":"vydaj","proti":"O2 Slovakia, s. r. o.","vs":"2026013","popis":"Mobilný paušál","ibanProti":"SK5002000000002222358488","mesiac":"2026-04","uhrady":[{"typ":"vydavok","cislo":"D2026013","suma":30.0,"datum":"2026-04-08"}],"potvrdenaZhoda":{"typ":"vydavok","cislo":"D2026013"}},{"id":"demo_tx027","dt":"2026-04-08T00:00:00.000Z","datum":"2026-04-08","suma":121.92,"smer":"vydaj","proti":"Union zdravotná poisťovňa","vs":"1050123456","popis":"Odvod zdravotné poistenie","ibanProti":"SK6065000000009999","mesiac":"2026-04"},{"id":"demo_tx028","dt":"2026-04-12T00:00:00.000Z","datum":"2026-04-12","suma":12.9,"smer":"vydaj","proti":"Tatra banka, a. s.","vs":"","popis":"Poplatok za vedenie účtu","ibanProti":"SK3011000000003333","mesiac":"2026-04"},{"id":"demo_tx029","dt":"2026-04-20T00:00:00.000Z","datum":"2026-04-20","suma":500.0,"smer":"vydaj","proti":"VZOROVÁ ZUZANA","vs":"","popis":"Prevod na súkromný účet","ibanProti":"SK8956000000009942097003","mesiac":"2026-04"},{"id":"demo_tx030","dt":"2026-04-21T00:00:00.000Z","datum":"2026-04-21","suma":216.0,"smer":"vydaj","proti":"EventPro, s. r. o.","vs":"2026014","popis":"Školenie — typografia v praxi","ibanProti":"SK5002000000002222534422","mesiac":"2026-04"},{"id":"demo_tx031","dt":"2026-04-24T00:00:00.000Z","datum":"2026-04-24","suma":1279.2,"smer":"prijem","proti":"Cyklo Servis Rýchle Koleso, s. r. o.","vs":"20260005","popis":"Úhrada faktúry 20260005","ibanProti":"SK9002000000001111552233","mesiac":"2026-04"},{"id":"demo_tx032","dt":"2026-04-27T00:00:00.000Z","datum":"2026-04-27","suma":84.0,"smer":"prijem","proti":"Sociálna poisťovňa","vs":"","popis":"Vrátenie preplatku","ibanProti":"SK5265000000001111","mesiac":"2026-04"},{"id":"demo_tx033","dt":"2026-04-29T00:00:00.000Z","datum":"2026-04-29","suma":143.52,"smer":"vydaj","proti":"Tlačiareň Dobrý Odtlačok, s. r. o.","vs":"2026015","popis":"Tlač vzoriek pre klienta","ibanProti":"SK5002000000002222526677","mesiac":"2026-04","uhrady":[{"typ":"vydavok","cislo":"D2026015","suma":143.52,"datum":"2026-04-29"}],"potvrdenaZhoda":{"typ":"vydavok","cislo":"D2026015"}},{"id":"demo_tx034","dt":"2026-05-06T00:00:00.000Z","datum":"2026-05-06","suma":30.0,"smer":"vydaj","proti":"O2 Slovakia, s. r. o.","vs":"2026016","popis":"Mobilný paušál","ibanProti":"SK5002000000002222358488","mesiac":"2026-05","uhrady":[{"typ":"vydavok","cislo":"D2026016","suma":30.0,"datum":"2026-05-06"}],"potvrdenaZhoda":{"typ":"vydavok","cislo":"D2026016"}},{"id":"demo_tx035","dt":"2026-05-08T00:00:00.000Z","datum":"2026-05-08","suma":121.92,"smer":"vydaj","proti":"Union zdravotná poisťovňa","vs":"1050123456","popis":"Odvod zdravotné poistenie","ibanProti":"SK6065000000009999","mesiac":"2026-05"},{"id":"demo_tx036","dt":"2026-05-10T00:00:00.000Z","datum":"2026-05-10","suma":62.8,"smer":"vydaj","proti":"OMV Slovensko, s. r. o.","vs":"2026026","popis":"Tankovanie","ibanProti":"SK5002000000002222313408","mesiac":"2026-05","uhrady":[{"typ":"vydavok","cislo":"D2026026","suma":62.8,"datum":"2026-05-10"}],"potvrdenaZhoda":{"typ":"vydavok","cislo":"D2026026"}},{"id":"demo_tx037","dt":"2026-05-12T00:00:00.000Z","datum":"2026-05-12","suma":12.9,"smer":"vydaj","proti":"Tatra banka, a. s.","vs":"","popis":"Poplatok za vedenie účtu","ibanProti":"SK3011000000003333","mesiac":"2026-05"},{"id":"demo_tx038","dt":"2026-05-13T00:00:00.000Z","datum":"2026-05-13","suma":71.28,"smer":"vydaj","proti":"OMV Slovensko, s. r. o.","vs":"2026017","popis":"Tankovanie","ibanProti":"SK5002000000002222313408","mesiac":"2026-05","uhrady":[{"typ":"vydavok","cislo":"D2026017","suma":71.28,"datum":"2026-05-13"}],"potvrdenaZhoda":{"typ":"vydavok","cislo":"D2026017"}},{"id":"demo_tx039","dt":"2026-05-17T00:00:00.000Z","datum":"2026-05-17","suma":725.7,"smer":"prijem","proti":"Kaviareň Zrnko & Para, s. r. o.","vs":"20260006","popis":"Úhrada faktúry 20260006","ibanProti":"SK9002000000001111510011","mesiac":"2026-05"},{"id":"demo_tx040","dt":"2026-05-19T00:00:00.000Z","datum":"2026-05-19","suma":103.5,"smer":"vydaj","proti":"Poisťovňa Istota, a. s.","vs":"2026018","popis":"Poistenie zodpovednosti za škodu","ibanProti":"SK5002000000002222510099","mesiac":"2026-05","uhrady":[{"typ":"vydavok","cislo":"D2026018","suma":103.5,"datum":"2026-05-19"}],"potvrdenaZhoda":{"typ":"vydavok","cislo":"D2026018"}},{"id":"demo_tx041","dt":"2026-05-20T00:00:00.000Z","datum":"2026-05-20","suma":500.0,"smer":"vydaj","proti":"VZOROVÁ ZUZANA","vs":"","popis":"Prevod na súkromný účet","ibanProti":"SK8956000000009942097003","mesiac":"2026-05"},{"id":"demo_tx042","dt":"2026-06-03T00:00:00.000Z","datum":"2026-06-03","suma":72.59,"smer":"vydaj","proti":"Adobe Systems Software Ireland","vs":"2026019","popis":"Creative Cloud — mesačné predplatné","ibanProti":"SK5002000000002222000000","mesiac":"2026-06","uhrady":[{"typ":"vydavok","cislo":"D2026019","suma":72.59,"datum":"2026-06-03"}],"potvrdenaZhoda":{"typ":"vydavok","cislo":"D2026019"}},{"id":"demo_tx043","dt":"2026-06-08T00:00:00.000Z","datum":"2026-06-08","suma":121.92,"smer":"vydaj","proti":"Union zdravotná poisťovňa","vs":"1050123456","popis":"Odvod zdravotné poistenie","ibanProti":"SK6065000000009999","mesiac":"2026-06"},{"id":"demo_tx044","dt":"2026-06-09T00:00:00.000Z","datum":"2026-06-09","suma":30.0,"smer":"vydaj","proti":"O2 Slovakia, s. r. o.","vs":"2026020","popis":"Mobilný paušál","ibanProti":"SK5002000000002222358488","mesiac":"2026-06","uhrady":[{"typ":"vydavok","cislo":"D2026020","suma":30.0,"datum":"2026-06-09"}],"potvrdenaZhoda":{"typ":"vydavok","cislo":"D2026020"}},{"id":"demo_tx045","dt":"2026-06-10T00:00:00.000Z","datum":"2026-06-10","suma":1992.6,"smer":"prijem","proti":"Pekáreň Vôňa Rána, s. r. o.","vs":"20260007","popis":"Úhrada faktúry 20260007","ibanProti":"SK9002000000001111523344","mesiac":"2026-06"},{"id":"demo_tx046","dt":"2026-06-12T00:00:00.000Z","datum":"2026-06-12","suma":12.9,"smer":"vydaj","proti":"Tatra banka, a. s.","vs":"","popis":"Poplatok za vedenie účtu","ibanProti":"SK3011000000003333","mesiac":"2026-06"},{"id":"demo_tx047","dt":"2026-06-17T00:00:00.000Z","datum":"2026-06-17","suma":17.52,"smer":"vydaj","proti":"Kaviareň Zrnko & Para, s. r. o.","vs":"2026021","popis":"Pracovné stretnutie — občerstvenie","ibanProti":"SK5002000000002222510011","mesiac":"2026-06","uhrady":[{"typ":"vydavok","cislo":"D2026021","suma":17.52,"datum":"2026-06-17"}],"potvrdenaZhoda":{"typ":"vydavok","cislo":"D2026021"}},{"id":"demo_tx048","dt":"2026-06-20T00:00:00.000Z","datum":"2026-06-20","suma":600.0,"smer":"vydaj","proti":"VZOROVÁ ZUZANA","vs":"","popis":"Prevod na súkromný účet","ibanProti":"SK8956000000009942097003","mesiac":"2026-06"},{"id":"demo_tx049","dt":"2026-06-30T00:00:00.000Z","datum":"2026-06-30","suma":295.2,"smer":"vydaj","proti":"Účtovníctvo Presné Číslo, s. r. o.","vs":"2026022","popis":"Spracovanie účtovníctva Q2","ibanProti":"SK5002000000002222538811","mesiac":"2026-06"},{"id":"demo_tx050","dt":"2026-06-30T00:00:00.000Z","datum":"2026-06-30","suma":738.25,"smer":"vydaj","proti":"Daňový úrad Nitra","vs":"1050123456","popis":"Preddavok na daň z príjmov Q2","ibanProti":"SK1180000000007000080036","mesiac":"2026-06"},{"id":"demo_tx051","dt":"2026-07-07T00:00:00.000Z","datum":"2026-07-07","suma":30.0,"smer":"vydaj","proti":"O2 Slovakia, s. r. o.","vs":"2026023","popis":"Mobilný paušál","ibanProti":"SK5002000000002222358488","mesiac":"2026-07","uhrady":[{"typ":"vydavok","cislo":"D2026023","suma":30.0,"datum":"2026-07-07"}],"potvrdenaZhoda":{"typ":"vydavok","cislo":"D2026023"}},{"id":"demo_tx052","dt":"2026-07-08T00:00:00.000Z","datum":"2026-07-08","suma":121.92,"smer":"vydaj","proti":"Union zdravotná poisťovňa","vs":"1050123456","popis":"Odvod zdravotné poistenie","ibanProti":"SK6065000000009999","mesiac":"2026-07"},{"id":"demo_tx053","dt":"2026-07-12T00:00:00.000Z","datum":"2026-07-12","suma":12.9,"smer":"vydaj","proti":"Tatra banka, a. s.","vs":"","popis":"Poplatok za vedenie účtu","ibanProti":"SK3011000000003333","mesiac":"2026-07"},{"id":"demo_tx054","dt":"2026-07-13T00:00:00.000Z","datum":"2026-07-13","suma":66.9,"smer":"vydaj","proti":"Slovnaft, a. s.","vs":"2026024","popis":"Tankovanie","ibanProti":"SK5002000000002222313228","mesiac":"2026-07","uhrady":[{"typ":"vydavok","cislo":"D2026024","suma":66.9,"datum":"2026-07-13"}],"potvrdenaZhoda":{"typ":"vydavok","cislo":"D2026024"}},{"id":"demo_tx055","dt":"2026-07-20T00:00:00.000Z","datum":"2026-07-20","suma":184.0,"smer":"vydaj","proti":"Fotoateliér Svetlo, s. r. o.","vs":"2026025","popis":"Prenájom štúdia a svetiel","ibanProti":"SK5002000000002222524433","mesiac":"2026-07","uhrady":[{"typ":"vydavok","cislo":"D2026025","suma":184.0,"datum":"2026-07-20"}],"potvrdenaZhoda":{"typ":"vydavok","cislo":"D2026025"}},{"id":"demo_tx056","dt":"2026-07-20T00:00:00.000Z","datum":"2026-07-20","suma":600.0,"smer":"vydaj","proti":"VZOROVÁ ZUZANA","vs":"","popis":"Prevod na súkromný účet","ibanProti":"SK8956000000009942097003","mesiac":"2026-07"}],"jazdy":[{"id":"demo_j000","datum":"6. 1. 2026 15:10","dt":"2026-01-06T15:10:00.000Z","den":"utorok","vodic":"Zuzana Vzorová","cesta":"Nitra – Bratislava – Nitra","ucel":"Stretnutie s klientom Kaviareň Zrnko & Para","km":177,"poc":42150,"kon":42327,"doba":"03:32","rychlost":50,"celkKWh":28.98,"celkL":8.92,"spotrebaKWh":16.37,"spotrebaL":5.04,"mesiac":"2026-01","zdroj":"demo","doplnene":false},{"id":"demo_j001","datum":"7. 1. 2026 09:10","dt":"2026-01-07T09:10:00.000Z","den":"streda","vodic":"Zuzana Vzorová","cesta":"Nitra – Trnava – Nitra","ucel":"Fotografovanie produktov Pekáreň Vôňa Rána","km":97,"poc":42327,"kon":42424,"doba":"02:12","rychlost":44,"celkKWh":16.94,"celkL":0,"spotrebaKWh":17.46,"spotrebaL":0,"mesiac":"2026-01","zdroj":"demo","doplnene":false},{"id":"demo_j002","datum":"10. 1. 2026 08:10","dt":"2026-01-10T08:10:00.000Z","den":"sobota","vodic":"Zuzana Vzorová","cesta":"Nitra – Šaľa – Nitra","ucel":"Stretnutie Kníhkupectvo Sova a Kniha","km":57,"poc":42424,"kon":42481,"doba":"01:13","rychlost":47,"celkKWh":9.61,"celkL":0,"spotrebaKWh":16.86,"spotrebaL":0,"mesiac":"2026-01","zdroj":"demo","doplnene":false},{"id":"demo_j003","datum":"12. 1. 2026 15:20","dt":"2026-01-12T15:20:00.000Z","den":"pondelok","vodic":"Zuzana Vzorová","cesta":"Nitra – Levice – Nitra","ucel":"Prezentácia Záhradníctvo Zelený Ježko","km":99,"poc":42481,"kon":42580,"doba":"01:52","rychlost":53,"celkKWh":17.25,"celkL":0,"spotrebaKWh":17.42,"spotrebaL":0,"mesiac":"2026-01","zdroj":"demo","doplnene":false},{"id":"demo_j004","datum":"13. 1. 2026 12:00","dt":"2026-01-13T12:00:00.000Z","den":"utorok","vodic":"Zuzana Vzorová","cesta":"Nitra – Nové Zámky – Nitra","ucel":"Konzultácia Cyklo Servis Rýchle Koleso","km":76,"poc":42580,"kon":42656,"doba":"01:57","rychlost":39,"celkKWh":12.0,"celkL":0,"spotrebaKWh":15.79,"spotrebaL":0,"mesiac":"2026-01","zdroj":"demo","doplnene":false},{"id":"demo_j005","datum":"15. 1. 2026 14:50","dt":"2026-01-15T14:50:00.000Z","den":"štvrtok","vodic":"Zuzana Vzorová","cesta":"Nitra – Piešťany – Nitra","ucel":"Fotenie interiéru kaviarne","km":121,"poc":42656,"kon":42777,"doba":"02:20","rychlost":52,"celkKWh":19.53,"celkL":5.51,"spotrebaKWh":16.14,"spotrebaL":4.55,"mesiac":"2026-01","zdroj":"demo","doplnene":false},{"id":"demo_j006","datum":"19. 1. 2026 15:30","dt":"2026-01-19T15:30:00.000Z","den":"pondelok","vodic":"Zuzana Vzorová","cesta":"Nitra – Nitra (centrum)","ucel":"Tlačiareň — odovzdanie podkladov","km":6,"poc":42777,"kon":42783,"doba":"00:08","rychlost":45,"celkKWh":0.89,"celkL":0,"spotrebaKWh":14.83,"spotrebaL":0,"mesiac":"2026-01","zdroj":"demo","doplnene":false},{"id":"demo_j007","datum":"21. 1. 2026 13:45","dt":"2026-01-21T13:45:00.000Z","den":"streda","vodic":"Zuzana Vzorová","cesta":"Nitra – Bratislava – Nitra","ucel":"Stretnutie s klientom Kaviareň Zrnko & Para","km":181,"poc":42783,"kon":42964,"doba":"04:13","rychlost":43,"celkKWh":28.28,"celkL":7.3,"spotrebaKWh":15.62,"spotrebaL":4.03,"mesiac":"2026-01","zdroj":"demo","doplnene":false},{"id":"demo_j008","datum":"24. 1. 2026 10:45","dt":"2026-01-24T10:45:00.000Z","den":"sobota","vodic":"Zuzana Vzorová","cesta":"Nitra – Trnava – Nitra","ucel":"Fotografovanie produktov Pekáreň Vôňa Rána","km":103,"poc":42964,"kon":43067,"doba":"02:14","rychlost":46,"celkKWh":17.44,"celkL":0,"spotrebaKWh":16.93,"spotrebaL":0,"mesiac":"2026-01","zdroj":"demo","doplnene":false},{"id":"demo_j009","datum":"26. 1. 2026 10:55","dt":"2026-01-26T10:55:00.000Z","den":"pondelok","vodic":"Zuzana Vzorová","cesta":"Nitra – Šaľa – Nitra","ucel":"Stretnutie Kníhkupectvo Sova a Kniha","km":60,"poc":43067,"kon":43127,"doba":"01:12","rychlost":50,"celkKWh":10.58,"celkL":0,"spotrebaKWh":17.63,"spotrebaL":0,"mesiac":"2026-01","zdroj":"demo","doplnene":false},{"id":"demo_j010","datum":"27. 1. 2026 14:20","dt":"2026-01-27T14:20:00.000Z","den":"utorok","vodic":"Zuzana Vzorová","cesta":"Nitra – Levice – Nitra","ucel":"Prezentácia Záhradníctvo Zelený Ježko","km":92,"poc":43127,"kon":43219,"doba":"02:11","rychlost":42,"celkKWh":15.78,"celkL":0,"spotrebaKWh":17.15,"spotrebaL":0,"mesiac":"2026-01","zdroj":"demo","doplnene":false},{"id":"demo_j011","datum":"29. 1. 2026 07:40","dt":"2026-01-29T07:40:00.000Z","den":"štvrtok","vodic":"Zuzana Vzorová","cesta":"Nitra – Nové Zámky – Nitra","ucel":"Konzultácia Cyklo Servis Rýchle Koleso","km":81,"poc":43219,"kon":43300,"doba":"01:39","rychlost":49,"celkKWh":13.84,"celkL":0,"spotrebaKWh":17.09,"spotrebaL":0,"mesiac":"2026-01","zdroj":"demo","doplnene":false},{"id":"demo_j012","datum":"2. 2. 2026 08:20","dt":"2026-02-02T08:20:00.000Z","den":"pondelok","vodic":"Zuzana Vzorová","cesta":"Nitra – Piešťany – Nitra","ucel":"Fotenie interiéru kaviarne","km":117,"poc":43300,"kon":43417,"doba":"03:00","rychlost":39,"celkKWh":18.9,"celkL":5.8,"spotrebaKWh":16.15,"spotrebaL":4.96,"mesiac":"2026-02","zdroj":"demo","doplnene":false},{"id":"demo_j013","datum":"3. 2. 2026 08:25","dt":"2026-02-03T08:25:00.000Z","den":"utorok","vodic":"Zuzana Vzorová","cesta":"Nitra – Nitra (centrum)","ucel":"Tlačiareň — odovzdanie podkladov","km":9,"poc":43417,"kon":43426,"doba":"00:13","rychlost":42,"celkKWh":1.54,"celkL":0,"spotrebaKWh":17.11,"spotrebaL":0,"mesiac":"2026-02","zdroj":"demo","doplnene":false},{"id":"demo_j014","datum":"6. 2. 2026 15:15","dt":"2026-02-06T15:15:00.000Z","den":"piatok","vodic":"Zuzana Vzorová","cesta":"Nitra – Bratislava – Nitra","ucel":"Stretnutie s klientom Kaviareň Zrnko & Para","km":183,"poc":43426,"kon":43609,"doba":"03:54","rychlost":47,"celkKWh":26.84,"celkL":6.21,"spotrebaKWh":14.67,"spotrebaL":3.39,"mesiac":"2026-02","zdroj":"demo","doplnene":false},{"id":"demo_j015","datum":"9. 2. 2026 13:55","dt":"2026-02-09T13:55:00.000Z","den":"pondelok","vodic":"Zuzana Vzorová","cesta":"Nitra – Trnava – Nitra","ucel":"Fotografovanie produktov Pekáreň Vôňa Rána","km":105,"poc":43609,"kon":43714,"doba":"02:34","rychlost":41,"celkKWh":17.41,"celkL":0,"spotrebaKWh":16.58,"spotrebaL":0,"mesiac":"2026-02","zdroj":"demo","doplnene":false},{"id":"demo_j016","datum":"13. 2. 2026 15:10","dt":"2026-02-13T15:10:00.000Z","den":"piatok","vodic":"Zuzana Vzorová","cesta":"Nitra – Šaľa – Nitra","ucel":"Stretnutie Kníhkupectvo Sova a Kniha","km":55,"poc":43714,"kon":43769,"doba":"01:10","rychlost":47,"celkKWh":9.48,"celkL":0,"spotrebaKWh":17.24,"spotrebaL":0,"mesiac":"2026-02","zdroj":"demo","doplnene":false},{"id":"demo_j017","datum":"14. 2. 2026 13:40","dt":"2026-02-14T13:40:00.000Z","den":"sobota","vodic":"Zuzana Vzorová","cesta":"Nitra – Levice – Nitra","ucel":"Prezentácia Záhradníctvo Zelený Ježko","km":99,"poc":43769,"kon":43868,"doba":"02:12","rychlost":45,"celkKWh":15.25,"celkL":0,"spotrebaKWh":15.4,"spotrebaL":0,"mesiac":"2026-02","zdroj":"demo","doplnene":false},{"id":"demo_j018","datum":"16. 2. 2026 12:20","dt":"2026-02-16T12:20:00.000Z","den":"pondelok","vodic":"Zuzana Vzorová","cesta":"Nitra – Nové Zámky – Nitra","ucel":"Konzultácia Cyklo Servis Rýchle Koleso","km":77,"poc":43868,"kon":43945,"doba":"01:53","rychlost":41,"celkKWh":11.42,"celkL":0,"spotrebaKWh":14.83,"spotrebaL":0,"mesiac":"2026-02","zdroj":"demo","doplnene":false},{"id":"demo_j019","datum":"18. 2. 2026 10:10","dt":"2026-02-18T10:10:00.000Z","den":"streda","vodic":"Zuzana Vzorová","cesta":"Nitra – Piešťany – Nitra","ucel":"Fotenie interiéru kaviarne","km":125,"poc":43945,"kon":44070,"doba":"02:43","rychlost":46,"celkKWh":20.05,"celkL":5.43,"spotrebaKWh":16.04,"spotrebaL":4.34,"mesiac":"2026-02","zdroj":"demo","doplnene":false},{"id":"demo_j020","datum":"21. 2. 2026 11:30","dt":"2026-02-21T11:30:00.000Z","den":"sobota","vodic":"Zuzana Vzorová","cesta":"Nitra – Nitra (centrum)","ucel":"Tlačiareň — odovzdanie podkladov","km":11,"poc":44070,"kon":44081,"doba":"00:12","rychlost":55,"celkKWh":1.91,"celkL":0,"spotrebaKWh":17.36,"spotrebaL":0,"mesiac":"2026-02","zdroj":"demo","doplnene":false},{"id":"demo_j021","datum":"25. 2. 2026 09:10","dt":"2026-02-25T09:10:00.000Z","den":"streda","vodic":"Zuzana Vzorová","cesta":"Nitra – Bratislava – Nitra","ucel":"Stretnutie s klientom Kaviareň Zrnko & Para","km":177,"poc":44081,"kon":44258,"doba":"04:19","rychlost":41,"celkKWh":31.11,"celkL":7.42,"spotrebaKWh":17.58,"spotrebaL":4.19,"mesiac":"2026-02","zdroj":"demo","doplnene":false},{"id":"demo_j022","datum":"28. 2. 2026 15:20","dt":"2026-02-28T15:20:00.000Z","den":"sobota","vodic":"Zuzana Vzorová","cesta":"Nitra – Trnava – Nitra","ucel":"Fotografovanie produktov Pekáreň Vôňa Rána","km":108,"poc":44258,"kon":44366,"doba":"02:15","rychlost":48,"celkKWh":18.18,"celkL":0,"spotrebaKWh":16.83,"spotrebaL":0,"mesiac":"2026-02","zdroj":"demo","doplnene":false},{"id":"demo_j023","datum":"4. 3. 2026 07:20","dt":"2026-03-04T07:20:00.000Z","den":"streda","vodic":"Zuzana Vzorová","cesta":"Nitra – Šaľa – Nitra","ucel":"Stretnutie Kníhkupectvo Sova a Kniha","km":60,"poc":44366,"kon":44426,"doba":"01:09","rychlost":52,"celkKWh":8.87,"celkL":0,"spotrebaKWh":14.78,"spotrebaL":0,"mesiac":"2026-03","zdroj":"demo","doplnene":false},{"id":"demo_j024","datum":"7. 3. 2026 14:00","dt":"2026-03-07T14:00:00.000Z","den":"sobota","vodic":"Zuzana Vzorová","cesta":"Nitra – Levice – Nitra","ucel":"Prezentácia Záhradníctvo Zelený Ježko","km":90,"poc":44426,"kon":44516,"doba":"01:55","rychlost":47,"celkKWh":15.42,"celkL":0,"spotrebaKWh":17.13,"spotrebaL":0,"mesiac":"2026-03","zdroj":"demo","doplnene":false},{"id":"demo_j025","datum":"9. 3. 2026 14:45","dt":"2026-03-09T14:45:00.000Z","den":"pondelok","vodic":"Zuzana Vzorová","cesta":"Nitra – Nové Zámky – Nitra","ucel":"Konzultácia Cyklo Servis Rýchle Koleso","km":74,"poc":44516,"kon":44590,"doba":"01:24","rychlost":53,"celkKWh":11.79,"celkL":0,"spotrebaKWh":15.93,"spotrebaL":0,"mesiac":"2026-03","zdroj":"demo","doplnene":false},{"id":"demo_j026","datum":"11. 3. 2026 11:05","dt":"2026-03-11T11:05:00.000Z","den":"streda","vodic":"Zuzana Vzorová","cesta":"Nitra – Piešťany – Nitra","ucel":"Fotenie interiéru kaviarne","km":122,"poc":44590,"kon":44712,"doba":"02:18","rychlost":53,"celkKWh":19.36,"celkL":4.88,"spotrebaKWh":15.87,"spotrebaL":4.0,"mesiac":"2026-03","zdroj":"demo","doplnene":false},{"id":"demo_j027","datum":"13. 3. 2026 11:00","dt":"2026-03-13T11:00:00.000Z","den":"piatok","vodic":"Zuzana Vzorová","cesta":"Nitra – Nitra (centrum)","ucel":"Tlačiareň — odovzdanie podkladov","km":9,"poc":44712,"kon":44721,"doba":"00:12","rychlost":45,"celkKWh":1.4,"celkL":0,"spotrebaKWh":15.56,"spotrebaL":0,"mesiac":"2026-03","zdroj":"demo","doplnene":false},{"id":"demo_j028","datum":"16. 3. 2026 10:05","dt":"2026-03-16T10:05:00.000Z","den":"pondelok","vodic":"Zuzana Vzorová","cesta":"Nitra – Bratislava – Nitra","ucel":"Stretnutie s klientom Kaviareň Zrnko & Para","km":186,"poc":44721,"kon":44907,"doba":"04:03","rychlost":46,"celkKWh":27.1,"celkL":9.6,"spotrebaKWh":14.57,"spotrebaL":5.16,"mesiac":"2026-03","zdroj":"demo","doplnene":false},{"id":"demo_j029","datum":"18. 3. 2026 07:05","dt":"2026-03-18T07:05:00.000Z","den":"streda","vodic":"Zuzana Vzorová","cesta":"Nitra – Trnava – Nitra","ucel":"Fotografovanie produktov Pekáreň Vôňa Rána","km":101,"poc":44907,"kon":45008,"doba":"02:04","rychlost":49,"celkKWh":15.29,"celkL":0,"spotrebaKWh":15.14,"spotrebaL":0,"mesiac":"2026-03","zdroj":"demo","doplnene":false},{"id":"demo_j030","datum":"20. 3. 2026 10:30","dt":"2026-03-20T10:30:00.000Z","den":"piatok","vodic":"Zuzana Vzorová","cesta":"Nitra – Šaľa – Nitra","ucel":"Stretnutie Kníhkupectvo Sova a Kniha","km":55,"poc":45008,"kon":45063,"doba":"01:27","rychlost":38,"celkKWh":9.76,"celkL":0,"spotrebaKWh":17.75,"spotrebaL":0,"mesiac":"2026-03","zdroj":"demo","doplnene":false},{"id":"demo_j031","datum":"23. 3. 2026 08:20","dt":"2026-03-23T08:20:00.000Z","den":"pondelok","vodic":"Zuzana Vzorová","cesta":"Nitra – Levice – Nitra","ucel":"Prezentácia Záhradníctvo Zelený Ježko","km":91,"poc":45063,"kon":45154,"doba":"02:16","rychlost":40,"celkKWh":15.94,"celkL":0,"spotrebaKWh":17.52,"spotrebaL":0,"mesiac":"2026-03","zdroj":"demo","doplnene":false},{"id":"demo_j032","datum":"27. 3. 2026 12:40","dt":"2026-03-27T12:40:00.000Z","den":"piatok","vodic":"Zuzana Vzorová","cesta":"Nitra – Nové Zámky – Nitra","ucel":"Konzultácia Cyklo Servis Rýchle Koleso","km":75,"poc":45154,"kon":45229,"doba":"01:23","rychlost":54,"celkKWh":12.78,"celkL":0,"spotrebaKWh":17.04,"spotrebaL":0,"mesiac":"2026-03","zdroj":"demo","doplnene":false},{"id":"demo_j033","datum":"1. 4. 2026 08:55","dt":"2026-04-01T08:55:00.000Z","den":"streda","vodic":"Zuzana Vzorová","cesta":"Nitra – Piešťany – Nitra","ucel":"Fotenie interiéru kaviarne","km":116,"poc":45229,"kon":45345,"doba":"02:14","rychlost":52,"celkKWh":18.92,"celkL":5.01,"spotrebaKWh":16.31,"spotrebaL":4.32,"mesiac":"2026-04","zdroj":"demo","doplnene":false},{"id":"demo_j034","datum":"3. 4. 2026 08:00","dt":"2026-04-03T08:00:00.000Z","den":"piatok","vodic":"Zuzana Vzorová","cesta":"Nitra – Nitra (centrum)","ucel":"Tlačiareň — odovzdanie podkladov","km":11,"poc":45345,"kon":45356,"doba":"00:15","rychlost":44,"celkKWh":1.91,"celkL":0,"spotrebaKWh":17.36,"spotrebaL":0,"mesiac":"2026-04","zdroj":"demo","doplnene":false},{"id":"demo_j035","datum":"7. 4. 2026 13:15","dt":"2026-04-07T13:15:00.000Z","den":"utorok","vodic":"Zuzana Vzorová","cesta":"Nitra – Bratislava – Nitra","ucel":"Stretnutie s klientom Kaviareň Zrnko & Para","km":185,"poc":45356,"kon":45541,"doba":"03:29","rychlost":53,"celkKWh":28.33,"celkL":6.61,"spotrebaKWh":15.31,"spotrebaL":3.57,"mesiac":"2026-04","zdroj":"demo","doplnene":false},{"id":"demo_j036","datum":"10. 4. 2026 09:20","dt":"2026-04-10T09:20:00.000Z","den":"piatok","vodic":"Zuzana Vzorová","cesta":"Nitra – Trnava – Nitra","ucel":"Fotografovanie produktov Pekáreň Vôňa Rána","km":107,"poc":45541,"kon":45648,"doba":"02:03","rychlost":52,"celkKWh":16.82,"celkL":0,"spotrebaKWh":15.72,"spotrebaL":0,"mesiac":"2026-04","zdroj":"demo","doplnene":false},{"id":"demo_j037","datum":"13. 4. 2026 11:00","dt":"2026-04-13T11:00:00.000Z","den":"pondelok","vodic":"Zuzana Vzorová","cesta":"Nitra – Šaľa – Nitra","ucel":"Stretnutie Kníhkupectvo Sova a Kniha","km":58,"poc":45648,"kon":45706,"doba":"01:07","rychlost":52,"celkKWh":8.7,"celkL":0,"spotrebaKWh":15.0,"spotrebaL":0,"mesiac":"2026-04","zdroj":"demo","doplnene":false},{"id":"demo_j038","datum":"15. 4. 2026 11:25","dt":"2026-04-15T11:25:00.000Z","den":"streda","vodic":"Zuzana Vzorová","cesta":"Nitra – Levice – Nitra","ucel":"Prezentácia Záhradníctvo Zelený Ježko","km":98,"poc":45706,"kon":45804,"doba":"02:11","rychlost":45,"celkKWh":15.0,"celkL":0,"spotrebaKWh":15.31,"spotrebaL":0,"mesiac":"2026-04","zdroj":"demo","doplnene":false},{"id":"demo_j039","datum":"17. 4. 2026 07:10","dt":"2026-04-17T07:10:00.000Z","den":"piatok","vodic":"Zuzana Vzorová","cesta":"Nitra – Nové Zámky – Nitra","ucel":"Konzultácia Cyklo Servis Rýchle Koleso","km":72,"poc":45804,"kon":45876,"doba":"01:32","rychlost":47,"celkKWh":12.14,"celkL":0,"spotrebaKWh":16.86,"spotrebaL":0,"mesiac":"2026-04","zdroj":"demo","doplnene":false},{"id":"demo_j040","datum":"21. 4. 2026 08:35","dt":"2026-04-21T08:35:00.000Z","den":"utorok","vodic":"Zuzana Vzorová","cesta":"Nitra – Piešťany – Nitra","ucel":"Fotenie interiéru kaviarne","km":120,"poc":45876,"kon":45996,"doba":"03:00","rychlost":40,"celkKWh":18.45,"celkL":5.49,"spotrebaKWh":15.38,"spotrebaL":4.58,"mesiac":"2026-04","zdroj":"demo","doplnene":false},{"id":"demo_j041","datum":"23. 4. 2026 13:45","dt":"2026-04-23T13:45:00.000Z","den":"štvrtok","vodic":"Zuzana Vzorová","cesta":"Nitra – Nitra (centrum)","ucel":"Tlačiareň — odovzdanie podkladov","km":16,"poc":45996,"kon":46012,"doba":"00:25","rychlost":38,"celkKWh":2.75,"celkL":0,"spotrebaKWh":17.19,"spotrebaL":0,"mesiac":"2026-04","zdroj":"demo","doplnene":false},{"id":"demo_j042","datum":"29. 4. 2026 14:05","dt":"2026-04-29T14:05:00.000Z","den":"streda","vodic":"Zuzana Vzorová","cesta":"Nitra – Bratislava – Nitra","ucel":"Stretnutie s klientom Kaviareň Zrnko & Para","km":183,"poc":46012,"kon":46195,"doba":"04:28","rychlost":41,"celkKWh":27.46,"celkL":7.4,"spotrebaKWh":15.01,"spotrebaL":4.04,"mesiac":"2026-04","zdroj":"demo","doplnene":false},{"id":"demo_j043","datum":"5. 5. 2026 07:55","dt":"2026-05-05T07:55:00.000Z","den":"utorok","vodic":"Zuzana Vzorová","cesta":"Nitra – Trnava – Nitra","ucel":"Fotografovanie produktov Pekáreň Vôňa Rána","km":103,"poc":46195,"kon":46298,"doba":"02:04","rychlost":50,"celkKWh":15.72,"celkL":0,"spotrebaKWh":15.26,"spotrebaL":0,"mesiac":"2026-05","zdroj":"demo","doplnene":false},{"id":"demo_j044","datum":"8. 5. 2026 11:50","dt":"2026-05-08T11:50:00.000Z","den":"piatok","vodic":"Zuzana Vzorová","cesta":"Nitra – Šaľa – Nitra","ucel":"Stretnutie Kníhkupectvo Sova a Kniha","km":61,"poc":46298,"kon":46359,"doba":"01:15","rychlost":49,"celkKWh":10.53,"celkL":0,"spotrebaKWh":17.26,"spotrebaL":0,"mesiac":"2026-05","zdroj":"demo","doplnene":false},{"id":"demo_j045","datum":"10. 5. 2026 15:35","dt":"2026-05-10T15:35:00.000Z","den":"nedeľa","vodic":"Zuzana Vzorová","cesta":"Nitra – Levice – Nitra","ucel":"Prezentácia Záhradníctvo Zelený Ježko","km":92,"poc":46359,"kon":46451,"doba":"02:25","rychlost":38,"celkKWh":15.46,"celkL":0,"spotrebaKWh":16.8,"spotrebaL":0,"mesiac":"2026-05","zdroj":"demo","doplnene":false},{"id":"demo_j046","datum":"12. 5. 2026 09:45","dt":"2026-05-12T09:45:00.000Z","den":"utorok","vodic":"Zuzana Vzorová","cesta":"Nitra – Nové Zámky – Nitra","ucel":"Konzultácia Cyklo Servis Rýchle Koleso","km":83,"poc":46451,"kon":46534,"doba":"01:46","rychlost":47,"celkKWh":14.59,"celkL":0,"spotrebaKWh":17.58,"spotrebaL":0,"mesiac":"2026-05","zdroj":"demo","doplnene":false},{"id":"demo_j047","datum":"14. 5. 2026 13:35","dt":"2026-05-14T13:35:00.000Z","den":"štvrtok","vodic":"Zuzana Vzorová","cesta":"Nitra – Piešťany – Nitra","ucel":"Fotenie interiéru kaviarne","km":125,"poc":46534,"kon":46659,"doba":"02:33","rychlost":49,"celkKWh":21.1,"celkL":5.46,"spotrebaKWh":16.88,"spotrebaL":4.37,"mesiac":"2026-05","zdroj":"demo","doplnene":false},{"id":"demo_j048","datum":"15. 5. 2026 13:15","dt":"2026-05-15T13:15:00.000Z","den":"piatok","vodic":"Zuzana Vzorová","cesta":"Nitra – Nitra (centrum)","ucel":"Tlačiareň — odovzdanie podkladov","km":16,"poc":46659,"kon":46675,"doba":"00:20","rychlost":48,"celkKWh":2.79,"celkL":0,"spotrebaKWh":17.44,"spotrebaL":0,"mesiac":"2026-05","zdroj":"demo","doplnene":false},{"id":"demo_j049","datum":"18. 5. 2026 11:30","dt":"2026-05-18T11:30:00.000Z","den":"pondelok","vodic":"Zuzana Vzorová","cesta":"Nitra – Bratislava – Nitra","ucel":"Stretnutie s klientom Kaviareň Zrnko & Para","km":178,"poc":46675,"kon":46853,"doba":"03:38","rychlost":49,"celkKWh":26.68,"celkL":7.83,"spotrebaKWh":14.99,"spotrebaL":4.4,"mesiac":"2026-05","zdroj":"demo","doplnene":false},{"id":"demo_j050","datum":"20. 5. 2026 11:55","dt":"2026-05-20T11:55:00.000Z","den":"streda","vodic":"Zuzana Vzorová","cesta":"Nitra – Trnava – Nitra","ucel":"Fotografovanie produktov Pekáreň Vôňa Rána","km":106,"poc":46853,"kon":46959,"doba":"02:00","rychlost":53,"celkKWh":15.96,"celkL":0,"spotrebaKWh":15.06,"spotrebaL":0,"mesiac":"2026-05","zdroj":"demo","doplnene":false},{"id":"demo_j051","datum":"21. 5. 2026 15:50","dt":"2026-05-21T15:50:00.000Z","den":"štvrtok","vodic":"Zuzana Vzorová","cesta":"Nitra – Šaľa – Nitra","ucel":"Stretnutie Kníhkupectvo Sova a Kniha","km":56,"poc":46959,"kon":47015,"doba":"01:05","rychlost":52,"celkKWh":9.72,"celkL":0,"spotrebaKWh":17.36,"spotrebaL":0,"mesiac":"2026-05","zdroj":"demo","doplnene":false},{"id":"demo_j052","datum":"23. 5. 2026 15:45","dt":"2026-05-23T15:45:00.000Z","den":"sobota","vodic":"Zuzana Vzorová","cesta":"Nitra – Levice – Nitra","ucel":"Prezentácia Záhradníctvo Zelený Ježko","km":96,"poc":47015,"kon":47111,"doba":"01:58","rychlost":49,"celkKWh":14.54,"celkL":0,"spotrebaKWh":15.15,"spotrebaL":0,"mesiac":"2026-05","zdroj":"demo","doplnene":false},{"id":"demo_j053","datum":"26. 5. 2026 08:10","dt":"2026-05-26T08:10:00.000Z","den":"utorok","vodic":"Zuzana Vzorová","cesta":"Nitra – Nové Zámky – Nitra","ucel":"Konzultácia Cyklo Servis Rýchle Koleso","km":83,"poc":47111,"kon":47194,"doba":"01:51","rychlost":45,"celkKWh":14.36,"celkL":0,"spotrebaKWh":17.3,"spotrebaL":0,"mesiac":"2026-05","zdroj":"demo","doplnene":false},{"id":"demo_j054","datum":"28. 5. 2026 13:30","dt":"2026-05-28T13:30:00.000Z","den":"štvrtok","vodic":"Zuzana Vzorová","cesta":"Nitra – Piešťany – Nitra","ucel":"Fotenie interiéru kaviarne","km":116,"poc":47194,"kon":47310,"doba":"02:42","rychlost":43,"celkKWh":19.49,"celkL":5.71,"spotrebaKWh":16.8,"spotrebaL":4.92,"mesiac":"2026-05","zdroj":"demo","doplnene":false},{"id":"demo_j055","datum":"31. 5. 2026 10:35","dt":"2026-05-31T10:35:00.000Z","den":"nedeľa","vodic":"Zuzana Vzorová","cesta":"Nitra – Nitra (centrum)","ucel":"Tlačiareň — odovzdanie podkladov","km":7,"poc":47310,"kon":47317,"doba":"00:08","rychlost":52,"celkKWh":1.21,"celkL":0,"spotrebaKWh":17.29,"spotrebaL":0,"mesiac":"2026-05","zdroj":"demo","doplnene":false},{"id":"demo_j056","datum":"5. 6. 2026 14:15","dt":"2026-06-05T14:15:00.000Z","den":"piatok","vodic":"Zuzana Vzorová","cesta":"Nitra – Bratislava – Nitra","ucel":"Stretnutie s klientom Kaviareň Zrnko & Para","km":177,"poc":47317,"kon":47494,"doba":"04:07","rychlost":43,"celkKWh":27.06,"celkL":7.78,"spotrebaKWh":15.29,"spotrebaL":4.4,"mesiac":"2026-06","zdroj":"demo","doplnene":false},{"id":"demo_j057","datum":"7. 6. 2026 07:30","dt":"2026-06-07T07:30:00.000Z","den":"nedeľa","vodic":"Zuzana Vzorová","cesta":"Nitra – Trnava – Nitra","ucel":"Fotografovanie produktov Pekáreň Vôňa Rána","km":108,"poc":47494,"kon":47602,"doba":"02:02","rychlost":53,"celkKWh":18.15,"celkL":0,"spotrebaKWh":16.81,"spotrebaL":0,"mesiac":"2026-06","zdroj":"demo","doplnene":false},{"id":"demo_j058","datum":"10. 6. 2026 14:40","dt":"2026-06-10T14:40:00.000Z","den":"streda","vodic":"Zuzana Vzorová","cesta":"Nitra – Šaľa – Nitra","ucel":"Stretnutie Kníhkupectvo Sova a Kniha","km":63,"poc":47602,"kon":47665,"doba":"01:19","rychlost":48,"celkKWh":9.73,"celkL":0,"spotrebaKWh":15.44,"spotrebaL":0,"mesiac":"2026-06","zdroj":"demo","doplnene":false},{"id":"demo_j059","datum":"15. 6. 2026 13:50","dt":"2026-06-15T13:50:00.000Z","den":"pondelok","vodic":"Zuzana Vzorová","cesta":"Nitra – Levice – Nitra","ucel":"Prezentácia Záhradníctvo Zelený Ježko","km":94,"poc":47665,"kon":47759,"doba":"01:58","rychlost":48,"celkKWh":16.58,"celkL":0,"spotrebaKWh":17.64,"spotrebaL":0,"mesiac":"2026-06","zdroj":"demo","doplnene":false},{"id":"demo_j060","datum":"18. 6. 2026 15:55","dt":"2026-06-18T15:55:00.000Z","den":"štvrtok","vodic":"Zuzana Vzorová","cesta":"Nitra – Nové Zámky – Nitra","ucel":"Konzultácia Cyklo Servis Rýchle Koleso","km":80,"poc":47759,"kon":47839,"doba":"01:54","rychlost":42,"celkKWh":12.81,"celkL":0,"spotrebaKWh":16.01,"spotrebaL":0,"mesiac":"2026-06","zdroj":"demo","doplnene":false},{"id":"demo_j061","datum":"24. 6. 2026 07:30","dt":"2026-06-24T07:30:00.000Z","den":"streda","vodic":"Zuzana Vzorová","cesta":"Nitra – Piešťany – Nitra","ucel":"Fotenie interiéru kaviarne","km":125,"poc":47839,"kon":47964,"doba":"02:19","rychlost":54,"celkKWh":20.27,"celkL":5.73,"spotrebaKWh":16.22,"spotrebaL":4.58,"mesiac":"2026-06","zdroj":"demo","doplnene":false},{"id":"demo_j062","datum":"25. 6. 2026 11:05","dt":"2026-06-25T11:05:00.000Z","den":"štvrtok","vodic":"Zuzana Vzorová","cesta":"Nitra – Nitra (centrum)","ucel":"Tlačiareň — odovzdanie podkladov","km":13,"poc":47964,"kon":47977,"doba":"00:15","rychlost":52,"celkKWh":2.1,"celkL":0,"spotrebaKWh":16.15,"spotrebaL":0,"mesiac":"2026-06","zdroj":"demo","doplnene":false},{"id":"demo_j063","datum":"29. 6. 2026 14:35","dt":"2026-06-29T14:35:00.000Z","den":"pondelok","vodic":"Zuzana Vzorová","cesta":"Nitra – Bratislava – Nitra","ucel":"Stretnutie s klientom Kaviareň Zrnko & Para","km":188,"poc":47977,"kon":48165,"doba":"04:42","rychlost":40,"celkKWh":28.39,"celkL":5.69,"spotrebaKWh":15.1,"spotrebaL":3.03,"mesiac":"2026-06","zdroj":"demo","doplnene":false},{"id":"demo_j064","datum":"1. 7. 2026 14:35","dt":"2026-07-01T14:35:00.000Z","den":"streda","vodic":"Zuzana Vzorová","cesta":"Nitra – Trnava – Nitra","ucel":"Fotografovanie produktov Pekáreň Vôňa Rána","km":99,"poc":48165,"kon":48264,"doba":"02:21","rychlost":42,"celkKWh":16.32,"celkL":0,"spotrebaKWh":16.48,"spotrebaL":0,"mesiac":"2026-07","zdroj":"demo","doplnene":false},{"id":"demo_j065","datum":"2. 7. 2026 07:30","dt":"2026-07-02T07:30:00.000Z","den":"štvrtok","vodic":"Zuzana Vzorová","cesta":"Nitra – Šaľa – Nitra","ucel":"Stretnutie Kníhkupectvo Sova a Kniha","km":54,"poc":48264,"kon":48318,"doba":"01:06","rychlost":49,"celkKWh":8.46,"celkL":0,"spotrebaKWh":15.67,"spotrebaL":0,"mesiac":"2026-07","zdroj":"demo","doplnene":false},{"id":"demo_j066","datum":"5. 7. 2026 12:55","dt":"2026-07-05T12:55:00.000Z","den":"nedeľa","vodic":"Zuzana Vzorová","cesta":"Nitra – Levice – Nitra","ucel":"Prezentácia Záhradníctvo Zelený Ježko","km":98,"poc":48318,"kon":48416,"doba":"02:17","rychlost":43,"celkKWh":16.28,"celkL":0,"spotrebaKWh":16.61,"spotrebaL":0,"mesiac":"2026-07","zdroj":"demo","doplnene":false},{"id":"demo_j067","datum":"8. 7. 2026 10:10","dt":"2026-07-08T10:10:00.000Z","den":"streda","vodic":"Zuzana Vzorová","cesta":"Nitra – Nové Zámky – Nitra","ucel":"Konzultácia Cyklo Servis Rýchle Koleso","km":76,"poc":48416,"kon":48492,"doba":"02:00","rychlost":38,"celkKWh":11.37,"celkL":0,"spotrebaKWh":14.96,"spotrebaL":0,"mesiac":"2026-07","zdroj":"demo","doplnene":false},{"id":"demo_j068","datum":"10. 7. 2026 12:10","dt":"2026-07-10T12:10:00.000Z","den":"piatok","vodic":"Zuzana Vzorová","cesta":"Nitra – Piešťany – Nitra","ucel":"Fotenie interiéru kaviarne","km":125,"poc":48492,"kon":48617,"doba":"02:59","rychlost":42,"celkKWh":22.18,"celkL":4.83,"spotrebaKWh":17.74,"spotrebaL":3.86,"mesiac":"2026-07","zdroj":"demo","doplnene":false},{"id":"demo_j069","datum":"12. 7. 2026 08:20","dt":"2026-07-12T08:20:00.000Z","den":"nedeľa","vodic":"Zuzana Vzorová","cesta":"Nitra – Nitra (centrum)","ucel":"Tlačiareň — odovzdanie podkladov","km":6,"poc":48617,"kon":48623,"doba":"00:08","rychlost":45,"celkKWh":0.93,"celkL":0,"spotrebaKWh":15.5,"spotrebaL":0,"mesiac":"2026-07","zdroj":"demo","doplnene":false},{"id":"demo_j070","datum":"13. 7. 2026 14:20","dt":"2026-07-13T14:20:00.000Z","den":"pondelok","vodic":"Zuzana Vzorová","cesta":"Nitra – Bratislava – Nitra","ucel":"Stretnutie s klientom Kaviareň Zrnko & Para","km":182,"poc":48623,"kon":48805,"doba":"03:34","rychlost":51,"celkKWh":27.66,"celkL":8.75,"spotrebaKWh":15.2,"spotrebaL":4.81,"mesiac":"2026-07","zdroj":"demo","doplnene":false},{"id":"demo_j071","datum":"15. 7. 2026 09:55","dt":"2026-07-15T09:55:00.000Z","den":"streda","vodic":"Zuzana Vzorová","cesta":"Nitra – Trnava – Nitra","ucel":"Fotografovanie produktov Pekáreň Vôňa Rána","km":105,"poc":48805,"kon":48910,"doba":"02:04","rychlost":51,"celkKWh":15.5,"celkL":0,"spotrebaKWh":14.76,"spotrebaL":0,"mesiac":"2026-07","zdroj":"demo","doplnene":false},{"id":"demo_j072","datum":"18. 7. 2026 15:50","dt":"2026-07-18T15:50:00.000Z","den":"sobota","vodic":"Zuzana Vzorová","cesta":"Nitra – Šaľa – Nitra","ucel":"Stretnutie Kníhkupectvo Sova a Kniha","km":62,"poc":48910,"kon":48972,"doba":"01:19","rychlost":47,"celkKWh":9.02,"celkL":0,"spotrebaKWh":14.55,"spotrebaL":0,"mesiac":"2026-07","zdroj":"demo","doplnene":false},{"id":"demo_j073","datum":"21. 7. 2026 12:45","dt":"2026-07-21T12:45:00.000Z","den":"utorok","vodic":"Zuzana Vzorová","cesta":"Nitra – Levice – Nitra","ucel":"Prezentácia Záhradníctvo Zelený Ježko","km":96,"poc":48972,"kon":49068,"doba":"02:17","rychlost":42,"celkKWh":14.03,"celkL":0,"spotrebaKWh":14.61,"spotrebaL":0,"mesiac":"2026-07","zdroj":"demo","doplnene":false}],"tankovania":[{"id":"demo_t01","vydavokId":"demo_v01","datum":"2026-01-14","litre":42.22,"suma":68.4,"stanica":"OMV Slovensko, s. r. o.","mesiac":"2026-01","zdroj":"demo"},{"id":"demo_t08","vydavokId":"demo_v08","datum":"2026-03-09","litre":45.77,"suma":74.15,"stanica":"Slovnaft, a. s.","mesiac":"2026-03","zdroj":"demo"},{"id":"demo_t16","vydavokId":"demo_v16","datum":"2026-05-13","litre":44.0,"suma":71.28,"stanica":"OMV Slovensko, s. r. o.","mesiac":"2026-05","zdroj":"demo"},{"id":"demo_t23","vydavokId":"demo_v23","datum":"2026-07-13","litre":41.3,"suma":66.9,"stanica":"Slovnaft, a. s.","mesiac":"2026-07","zdroj":"demo"},{"id":"demo_t_vikend","vydavokId":"demo_v_vikend","datum":"2026-05-10","litre":38.77,"suma":62.8,"stanica":"OMV Slovensko, s. r. o.","mesiac":"2026-05","zdroj":"demo"}],"nabijania":[{"karta":"692233","typ":"Mesačný poplatok","stanica":"","datum":"2026-01-01","zaciatok":"02:00","koniec":"02:00","kwh":0,"suma":11.68,"mesiac":"2026-01"},{"karta":"692233","typ":"Mesačný poplatok","stanica":"","datum":"2026-02-01","zaciatok":"02:00","koniec":"02:00","kwh":0,"suma":11.68,"mesiac":"2026-02"},{"karta":"692233","typ":"Mesačný poplatok","stanica":"","datum":"2026-03-01","zaciatok":"02:00","koniec":"02:00","kwh":0,"suma":11.68,"mesiac":"2026-03"},{"karta":"692233","typ":"Mesačný poplatok","stanica":"","datum":"2026-04-01","zaciatok":"02:00","koniec":"02:00","kwh":0,"suma":11.68,"mesiac":"2026-04"},{"karta":"692233","typ":"Mesačný poplatok","stanica":"","datum":"2026-05-01","zaciatok":"02:00","koniec":"02:00","kwh":0,"suma":11.68,"mesiac":"2026-05"},{"karta":"692233","typ":"Mesačný poplatok","stanica":"","datum":"2026-06-01","zaciatok":"02:00","koniec":"02:00","kwh":0,"suma":11.68,"mesiac":"2026-06"},{"karta":"692233","typ":"Mesačný poplatok","stanica":"","datum":"2026-07-01","zaciatok":"02:00","koniec":"02:00","kwh":0,"suma":11.68,"mesiac":"2026-07"},{"karta":"692233","typ":"Nabíjanie","stanica":"ZSE Nitra — Mlyny","datum":"2026-02-04","zaciatok":"13:26","koniec":"14:15","kwh":18.42,"suma":7.92,"mesiac":"2026-02"},{"karta":"692233","typ":"Nabíjanie","stanica":"ZSE Trnava — City Aréna","datum":"2026-03-11","zaciatok":"13:26","koniec":"14:15","kwh":21.06,"suma":9.05,"mesiac":"2026-03"},{"karta":"692233","typ":"Nabíjanie","stanica":"ZSE Bratislava — Eurovea","datum":"2026-04-23","zaciatok":"13:26","koniec":"14:15","kwh":16.88,"suma":7.26,"mesiac":"2026-04"},{"karta":"692233","typ":"Nabíjanie","stanica":"ZSE RK Kozí vŕšok Ultra","datum":"2026-05-30","zaciatok":"13:26","koniec":"14:15","kwh":20.87,"suma":8.97,"mesiac":"2026-05"},{"karta":"692233","typ":"Nabíjanie","stanica":"ZSE Levice — Nákupná zóna","datum":"2026-06-26","zaciatok":"13:26","koniec":"14:15","kwh":19.34,"suma":8.31,"mesiac":"2026-06"},{"karta":"692233","typ":"Nabíjanie","stanica":"ZSE Nové Zámky — OC Aquario","datum":"2026-07-17","zaciatok":"13:26","koniec":"14:15","kwh":17.55,"suma":7.55,"mesiac":"2026-07"}],"majetok":[{"id":"demo_m1","nazov":"Škoda Superb iV (plug-in hybrid)","typMajetku":"odpisovany","vstupnaCena":38900.0,"datumZaradenia":"2025-03-14","odpisovaSkupina":0,"poznamka":"Vozidlo v obchodnom majetku, kniha jázd sa vedie."},{"id":"demo_m2","nazov":"MacBook Pro 14\"","typMajetku":"odpisovany","vstupnaCena":2640.0,"datumZaradenia":"2025-09-02","odpisovaSkupina":0,"poznamka":""},{"id":"demo_m3","nazov":"Fotoaparát Sony A7 IV + objektívy","typMajetku":"drobny","vstupnaCena":1720.0,"datumZaradenia":"2026-02-10","odpisovaSkupina":0,"poznamka":"Drobný majetok — jednorazovo do výdavkov."}],"vykazy":[{"projekt":"Redizajn značky — Kaviareň Zrnko & Para","zakazka":"DEMO0001","pracovnik":"Zuzana Vzorová","obdobie":"1.5.2026 - 31.5.2026","polozky":[{"datum":"2026-05-01","hodiny":8,"poznamka":"Konzultácia s klientom","aktivity":["Korektúry a schvaľovanie"]},{"datum":"2026-05-04","hodiny":8,"poznamka":"Konzultácia s klientom","aktivity":["Retuš a postprodukcia"]},{"datum":"2026-05-05","hodiny":8,"poznamka":"Retuš a postprodukcia","aktivity":["Retuš a postprodukcia"]},{"datum":"2026-05-06","hodiny":8,"poznamka":"Konzultácia s klientom","aktivity":["Návrh obalového dizajnu"]},{"datum":"2026-05-11","hodiny":8,"poznamka":"Príprava dát pre tlačiareň","aktivity":["Korektúry a schvaľovanie"]},{"datum":"2026-05-14","hodiny":8,"poznamka":"Retuš a postprodukcia","aktivity":["Konzultácia s klientom"]},{"datum":"2026-05-15","hodiny":8,"poznamka":"Fotografovanie produktov","aktivity":["Príprava dát pre tlačiareň"]},{"datum":"2026-05-18","hodiny":8,"poznamka":"Návrh obalového dizajnu","aktivity":["Príprava dát pre tlačiareň"]},{"datum":"2026-05-19","hodiny":8,"poznamka":"Príprava dát pre tlačiareň","aktivity":["Návrh obalového dizajnu"]},{"datum":"2026-05-20","hodiny":8,"poznamka":"Korektúry a schvaľovanie","aktivity":["Návrh obalového dizajnu"]},{"datum":"2026-05-21","hodiny":8,"poznamka":"Sadzba tlačových podkladov","aktivity":["Konzultácia s klientom"]},{"datum":"2026-05-22","hodiny":8,"poznamka":"Retuš a postprodukcia","aktivity":["Retuš a postprodukcia"]},{"datum":"2026-05-25","hodiny":8,"poznamka":"Konzultácia s klientom","aktivity":["Korektúry a schvaľovanie"]},{"datum":"2026-05-27","hodiny":8,"poznamka":"Príprava dát pre tlačiareň","aktivity":["Korektúry a schvaľovanie"]},{"datum":"2026-05-29","hodiny":8,"poznamka":"Príprava dát pre tlačiareň","aktivity":["Retuš a postprodukcia"]}],"hodiny":120,"dni":15},{"projekt":"Obalový dizajn — Pekáreň Vôňa Rána","zakazka":"DEMO0001","pracovnik":"Zuzana Vzorová","obdobie":"1.6.2026 - 30.6.2026","polozky":[{"datum":"2026-06-01","hodiny":8,"poznamka":"Retuš a postprodukcia","aktivity":["Príprava dát pre tlačiareň"]},{"datum":"2026-06-02","hodiny":8,"poznamka":"Konzultácia s klientom","aktivity":["Retuš a postprodukcia"]},{"datum":"2026-06-03","hodiny":8,"poznamka":"Fotografovanie produktov","aktivity":["Fotografovanie produktov"]},{"datum":"2026-06-04","hodiny":8,"poznamka":"Príprava dát pre tlačiareň","aktivity":["Retuš a postprodukcia"]},{"datum":"2026-06-05","hodiny":8,"poznamka":"Sadzba tlačových podkladov","aktivity":["Fotografovanie produktov"]},{"datum":"2026-06-08","hodiny":8,"poznamka":"Konzultácia s klientom","aktivity":["Návrh obalového dizajnu"]},{"datum":"2026-06-09","hodiny":8,"poznamka":"Návrh vizuálnej identity — koncept","aktivity":["Návrh obalového dizajnu"]},{"datum":"2026-06-10","hodiny":8,"poznamka":"Fotografovanie produktov","aktivity":["Návrh vizuálnej identity — koncept"]},{"datum":"2026-06-11","hodiny":8,"poznamka":"Konzultácia s klientom","aktivity":["Návrh obalového dizajnu"]},{"datum":"2026-06-12","hodiny":8,"poznamka":"Návrh obalového dizajnu","aktivity":["Príprava dát pre tlačiareň"]},{"datum":"2026-06-15","hodiny":8,"poznamka":"Príprava dát pre tlačiareň","aktivity":["Fotografovanie produktov"]},{"datum":"2026-06-17","hodiny":8,"poznamka":"Korektúry a schvaľovanie","aktivity":["Návrh obalového dizajnu"]},{"datum":"2026-06-19","hodiny":8,"poznamka":"Sadzba tlačových podkladov","aktivity":["Retuš a postprodukcia"]},{"datum":"2026-06-23","hodiny":8,"poznamka":"Sadzba tlačových podkladov","aktivity":["Príprava dát pre tlačiareň"]},{"datum":"2026-06-24","hodiny":8,"poznamka":"Návrh obalového dizajnu","aktivity":["Sadzba tlačových podkladov"]},{"datum":"2026-06-25","hodiny":8,"poznamka":"Príprava dát pre tlačiareň","aktivity":["Fotografovanie produktov"]},{"datum":"2026-06-29","hodiny":8,"poznamka":"Korektúry a schvaľovanie","aktivity":["Retuš a postprodukcia"]},{"datum":"2026-06-30","hodiny":8,"poznamka":"Retuš a postprodukcia","aktivity":["Sadzba tlačových podkladov"]}],"hodiny":144,"dni":18}],"protokoly":[{"cislo":"AP_05_2026","datum":"2026-06-02","obdobie":"1.5.2026 - 31.5.2026","dni":15,"tarifa":420,"suma":6300,"pracovnik":"Zuzana Vzorová","miesto":"Nitra","dodavatel":"Zuzana Vzorová — Ateliér Modrý Bocian","dodavatelIco":"50 123 456","objednavatel":"Kaviareň Zrnko & Para, s. r. o.","schvalil":"Ján Zrnko","text":"Na základe zmluvy o dielo a priloženého výkazu prác objednávateľ potvrdzuje, že dodávateľ vykonal požadované práce v rozsahu:"}],"partneri":[{"nazov":"Kaviareň Zrnko & Para, s. r. o.","ico":"51001122","icdph":"SK2120011220","adresa":"Štefánikova 12, 949 01 Nitra","typ":"odberatel"},{"nazov":"Pekáreň Vôňa Rána, s. r. o.","ico":"52334455","icdph":"SK2120334455","adresa":"Hlavná 88, 917 01 Trnava","typ":"odberatel"},{"nazov":"Kníhkupectvo Sova a Kniha, s. r. o.","ico":"53667788","icdph":"SK2120667788","adresa":"Nám. Mieru 3, 927 01 Šaľa","typ":"odberatel"},{"nazov":"Záhradníctvo Zelený Ježko, s. r. o.","ico":"54990011","icdph":"SK2120990011","adresa":"Poľná 41, 934 01 Levice","typ":"odberatel"},{"nazov":"Cyklo Servis Rýchle Koleso, s. r. o.","ico":"55223344","icdph":"SK2120223344","adresa":"Továrenská 7, 940 02 Nové Zámky","typ":"odberatel"}],"dan":[],"dph":{},"naklady":[],"dokumenty":[],"udalostiFS":[],"danovePriznania":{},"priznanieB":{},"kjTrasyVolby":{},"dovolenka":{"2026":{"narok":25,"mesiace":{"Január":0,"Február":0,"Marec":0,"Apríl":0,"Máj":0,"Jún":0,"Júl":0,"August":0,"September":0,"Október":0,"November":0,"December":0}}}};
 
 boot();
 </script>
