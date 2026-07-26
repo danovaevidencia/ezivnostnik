@@ -772,7 +772,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.07.26-DO";  // fáza 2: roly, prístupy k firme, pozvánky
+const APP_VERZIA = "2026.07.26-DP";  // fáza 2: roly, prístupy k firme, pozvánky
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -876,11 +876,16 @@ async function doPrimary(){
         msg("Účet vytvorený. Skontrolujte e-mail a potvrďte registráciu.","ok");
       } else if(data.session){
         enterApp(data.user);
+        spracujPozvanku();
       }
     } else {
       const { data, error } = await sb.auth.signInWithPassword({ email, password: heslo });
       if(error) throw error;
       enterApp(data.user);
+      // Bez tohto sa pozvánka po prihlásení nespracuje. `boot()` ju rieši len
+      // vtedy, keď relácia už existuje — kto prišiel z odkazu a až potom sa
+      // prihlásil, skončil v appke bez toho, aby sa čokoľvek stalo.
+      spracujPozvanku();
     }
   } catch(e){
     msg(prelozChybu(e.message), "err");
@@ -1263,10 +1268,13 @@ async function nacitajPristupy(fid){
   pristupyFirmy=[];
   if(localMode || !sb || !fid) return;
   try{
-    const { data } = await sb.from("firma_pristupy")
+    const { data, error } = await sb.from("firma_pristupy")
       .select("user_id,rola,udelene").eq("firma_id", fid);
+    if(error && typeof zdielanieChyba!=="undefined")
+      zdielanieChyba="Prístupy sa nepodarilo načítať: "+error.message;
     pristupyFirmy = data || [];
-  }catch(_){ pristupyFirmy=[]; }
+  }catch(e){ pristupyFirmy=[];
+    if(typeof zdielanieChyba!=="undefined") zdielanieChyba="Prístupy sa nepodarilo načítať: "+e.message; }
 }
 function mojaRolaVFirme(){
   const f=firmyZoznam.find(x=>x.id===firmaId);
@@ -1319,11 +1327,16 @@ function pozvankaToken(){
   return t.length===32 ? t : pozvankaToken();   // poistka, nie predpoklad
 }
 
+// Prázdny zoznam a neúspešný dotaz vyzerajú na obrazovke rovnako — „0 pozvánok
+// čaká". Chyba sa preto odkladá a modul ju ukáže; inak sa zablokované čítanie
+// (RLS) nedá odlíšiť od stavu, keď naozaj nič nie je.
+let zdielanieChyba=null;
 async function nacitajPozvanky(){
   if(localMode || !sb || !firmaId) return [];
-  const { data } = await sb.from("firma_pozvanky")
+  const { data, error } = await sb.from("firma_pozvanky")
     .select("id,email,rola,token,plati_do,prijate")
     .eq("firma_id", firmaId).order("vytvorene",{ascending:false});
+  if(error) zdielanieChyba="Pozvánky sa nepodarilo načítať: "+error.message;
   return data || [];
 }
 
@@ -1339,10 +1352,18 @@ async function appZdielanie(){
     return;
   }
   const poz=await nacitajPozvanky();
-  const cakajuce=poz.filter(p=>!p.prijate && p.plati_do>new Date().toISOString());
+  // bez `plati_do` sa pozvánka považuje za platnú — inak by ticho zmizla
+  const teraz=new Date().toISOString();
+  const cakajuce=poz.filter(p=>!p.prijate && (!p.plati_do || p.plati_do>teraz));
   const { data:{ user } } = await sb.auth.getUser();
 
-  document.getElementById("appScreen").innerHTML = appHlavicka("zdielanie")+`
+  const chybaHtml = zdielanieChyba
+    ? `<div style="background:#fdf3ee;border:1.5px solid var(--neg);border-radius:10px;padding:11px 13px;margin-bottom:12px;font-size:12.5px">
+         <b style="color:var(--neg)">Zoznam sa nepodarilo načítať</b><br>${esc(zdielanieChyba)}
+         <div class="csub" style="margin-top:6px">Nula nižšie preto nemusí znamenať, že nič neexistuje.</div>
+       </div>` : "";
+  zdielanieChyba=null;
+  document.getElementById("appScreen").innerHTML = appHlavicka("zdielanie")+chybaHtml+`
     <div class="csub" style="margin-bottom:12px">${pristupyFirmy.length} prístupov · ${cakajuce.length} pozvánok čaká</div>
     <div class="card" style="margin-bottom:14px">
       <div class="csub" style="margin-bottom:10px">Účtovník uvidí vaše doklady a bude môcť viesť Banku, DPH a priznania. Vy fakturujete a nahrávate bločky ako doteraz.</div>
@@ -1399,8 +1420,12 @@ async function vytvorPozvanku(){
     box.innerHTML=`<div style="color:var(--neg);font-size:12.5px">Zadajte platný e-mail.</div>`; return;
   }
   const token=pozvankaToken();
+  // Platnosť sa zapisuje výslovne. Spoliehať sa na východiskovú hodnotu stĺpca
+  // znamená, že pri jej absencii vznikne pozvánka s prázdnym `plati_do` —
+  // uloží sa, ale z čakajúcich vypadne, lebo porovnanie s NULL nikdy neplatí.
+  const platiDo=new Date(Date.now()+7*24*3600*1000).toISOString();
   const { error } = await sb.from("firma_pozvanky").insert({
-    firma_id:firmaId, email, rola, token
+    firma_id:firmaId, email, rola, token, plati_do:platiDo
   });
   if(error){
     box.innerHTML=`<div style="color:var(--neg);font-size:12.5px">Pozvánku sa nepodarilo vytvoriť: ${esc(error.message)}</div>`;
@@ -1446,13 +1471,27 @@ async function odvolajPristup(uid){
 // ── Uplatnenie pozvánky: ?pozvanka=<token> ──
 // Beží po prihlásení, lebo `prijmi_pozvanku` viaže pozvánku na e-mail
 // prihláseného používateľa.
-async function spracujPozvanku(){
+// Token si odložíme hneď, ako ho vidíme v URL. Potvrdenie registrácie
+// e-mailom sa vracia na adresu bez query parametrov, takže bez tohto by sa
+// pozvánka po ceste stratila a nikto by nevedel prečo.
+function zapamatajPozvanku(){
   const t=new URLSearchParams(location.search).get("pozvanka");
+  if(t){ try{ localStorage.setItem("eziv_pozvanka", t); }catch(_){} }
+  return t;
+}
+function cakajucaPozvanka(){
+  const t=new URLSearchParams(location.search).get("pozvanka");
+  if(t) return t;
+  try{ return localStorage.getItem("eziv_pozvanka")||null; }catch(_){ return null; }
+}
+async function spracujPozvanku(){
+  const t=cakajucaPozvanka();
   if(!t || localMode || !sb) return false;
   try{
     const { data:{ user } } = await sb.auth.getUser();
     if(!user) return false;                 // prihlásenie prebehne a zavolá sa znova
     const { data, error } = await sb.rpc("prijmi_pozvanku", { p_token:t });
+    try{ localStorage.removeItem("eziv_pozvanka"); }catch(_){}
     history.replaceState({}, "", location.pathname);
     if(error){ alert("Pozvánku sa nepodarilo prijať: "+error.message); return false; }
     const HLASKY={
