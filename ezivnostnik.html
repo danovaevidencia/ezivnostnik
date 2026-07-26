@@ -772,7 +772,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.07.26-DN";  // fáza 2: roly, prístupy k firme, pozvánky
+const APP_VERZIA = "2026.07.26-DO";  // fáza 2: roly, prístupy k firme, pozvánky
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -1351,7 +1351,8 @@ async function appZdielanie(){
         <select id="pzRola">${Object.entries(ROLY_POPIS).map(([k,v])=>`<option value="${k}">${v}</option>`).join("")}</select>
       </div>
       <button class="aabtn pri" style="width:100%;justify-content:center;margin-top:6px" onclick="vytvorPozvanku()">＋ Vytvoriť pozvánku</button>
-      <div id="pzVysledok" style="margin-top:10px"></div>
+      <div class="csub" style="margin-top:8px">Pozvánka sa <b>neposiela e-mailom</b> — dostanete odkaz, ktorý pozývanému pošlete sami.</div>
+      <div id="pzVysledok" style="margin-top:10px">${pozvankaVysledokHtml()}</div>
     </div>
 
     <div class="card" style="margin-bottom:14px">
@@ -1405,16 +1406,27 @@ async function vytvorPozvanku(){
     box.innerHTML=`<div style="color:var(--neg);font-size:12.5px">Pozvánku sa nepodarilo vytvoriť: ${esc(error.message)}</div>`;
     return;
   }
-  const url=pozvankaOdkaz(token);
-  // E-mail zatiaľ neodosielame — odkaz sa dá poslať ručne. Až po nasadení
-  // edge funkcie sa to zmení; dovtedy je tok plne funkčný a otestovateľný.
-  box.innerHTML=`<div style="background:#eef7f0;border-radius:9px;padding:10px 12px;font-size:12.5px">
-    ✓ Pozvánka vytvorená pre <b>${esc(email)}</b>. Pošlite jej tento odkaz:
-    <div style="margin-top:6px;word-break:break-all;font-family:ui-monospace,monospace;font-size:11px">${esc(url)}</div>
-    <button class="aabtn" style="margin-top:8px;padding:4px 10px;font-size:11.5px" onclick="kopirujPozvanku('${token}')">Kopírovať</button>
-  </div>`;
+  // E-mail zatiaľ neodosielame — odkaz sa posiela ručne. Až po nasadení edge
+  // funkcie sa to zmení; dovtedy je tok plne funkčný a otestovateľný.
+  //
+  // Výsledok sa NESMIE písať priamo do #pzVysledok: appZdielanie() hneď nato
+  // prekresľuje celú obrazovku, takže odkaz by sa mihol a zmizol. Preto sa
+  // odloží a vykreslí až po prekreslení.
+  pozvankaVysledok={email, token};
   document.getElementById("pzEmail").value="";
   appZdielanie();
+}
+// posledná vytvorená pozvánka — prežije prekreslenie obrazovky
+let pozvankaVysledok=null;
+function pozvankaVysledokHtml(){
+  if(!pozvankaVysledok) return "";
+  const {email, token}=pozvankaVysledok;
+  return `<div style="background:#eef7f0;border-radius:9px;padding:10px 12px;font-size:12.5px">
+    ✓ Pozvánka vytvorená pre <b>${esc(email)}</b>.
+    <b>E-mail sa neodosiela</b> — pošlite jej tento odkaz sami:
+    <div style="margin-top:6px;word-break:break-all;font-family:ui-monospace,monospace;font-size:11px">${esc(pozvankaOdkaz(token))}</div>
+    <button class="aabtn pri" style="margin-top:8px;padding:4px 10px;font-size:11.5px" onclick="kopirujPozvanku('${token}')">Kopírovať odkaz</button>
+  </div>`;
 }
 
 async function zrusPozvanku(id){
