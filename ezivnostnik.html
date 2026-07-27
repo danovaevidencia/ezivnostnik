@@ -68,6 +68,17 @@ button{font-family:inherit;cursor:pointer}
 .syncchip.offline{color:var(--ink-soft)}
 .usermenu{width:36px;height:36px;border-radius:10px;border:1.5px solid var(--line);background:var(--paper);
   display:grid;place-items:center;font-size:14px;font-weight:700;color:var(--brand)}
+/* Prepínač firiem. Nesmie dediť z .usermenu — to je štvorcové tlačidlo
+   s place-items:center, takže sa názov centroval a natívna šípka selectu
+   mu padla rovno do textu. Vlastná šípka + miesto pre ňu vpravo. */
+.fswitch{height:36px;max-width:240px;border-radius:10px;border:1.5px solid var(--line);
+  background:var(--paper);color:var(--brand);font-weight:700;font-size:12.5px;
+  padding:0 32px 0 11px;text-overflow:ellipsis;white-space:nowrap;overflow:hidden;
+  appearance:none;-webkit-appearance:none;-moz-appearance:none;cursor:pointer;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'><path d='M1.5 1.5L6 6l4.5-4.5' fill='none' stroke='%231f5fa8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat:no-repeat;background-position:right 11px center;background-size:11px}
+.fswitch:hover{border-color:var(--brand)}
+@media(max-width:640px){ .fswitch{max-width:150px;font-size:12px} }
 .wrap{max-width:1180px;margin:0 auto;padding:20px 16px 60px}
 
 /* uvítanie */
@@ -656,7 +667,7 @@ body.demo .wrap{padding-bottom:86px}
       <b>e<i>živnostník</i></b>
     </div>
     <div class="sp"></div>
-    <select id="firmaPrepinac" class="usermenu" style="display:none;width:auto;max-width:170px;margin-right:6px;padding:0 8px;font-size:12.5px" onchange="prepniFirmu(this.value)" title="Prepnúť firmu"></select>
+    <select id="firmaPrepinac" class="fswitch" style="display:none;margin-right:6px" onchange="prepniFirmu(this.value)"></select>
     <button class="usermenu" id="quickDoklad" onclick="rychlyDoklad(this)" title="Načítať doklad (foto alebo PDF)" style="margin-right:6px">📷</button>
     <button class="usermenu notifbtn" id="notifBtn" onclick="otvorNotifikacie()" title="Notifikácie" style="margin-right:6px">🔔<span id="notifBadge" class="notifbadge" style="display:none">0</span></button>
     <div class="syncchip" id="syncChip">✓ uložené</div>
@@ -772,7 +783,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.07.27-DS";  // fáza 2: roly, prístupy k firme, pozvánky
+const APP_VERZIA = "2026.07.27-DT";  // fáza 2: roly, prístupy k firme, pozvánky
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -1112,16 +1123,45 @@ const PLANY = {
     limity:{ faktury:0, odberatelia:0, doklady:0, bankaImporty:0, ulozisko:0 },
     moduly:["faktury","vykazy","pohladavky","vydavky","banka","cashflow","kalendar",
             "jazdy","majetok","dokumenty","dovolenka","priznania","priznanieB","prognoza","dph"]
+  },
+  // Plán, ktorý platí ÚČTOVNÍK za svojich klientov. Funkčne je to Profi;
+  // jediné, čím sa líši, je limit počtu firiem a to, že ho hradí niekto iný
+  // než majiteľ firmy — to drží `firma_config.plan_zdroj`.
+  //
+  // `limity.firmy` je základ v cene (10). Skutočný strop môže byť vyšší podľa
+  // zaplateného množstva; vtedy ho nesie `firma_config.firmy_limit` a číta sa
+  // odtiaľ. Až po 20 — nad to sa plán nepredáva.
+  uctovnik: {
+    kod:"uctovnik", nazov:"Účtovník", farba:"#6b4fa8",
+    cenaMes:26.90, cenaRok:269,
+    popis:"Pre účtovníka — vy účtujete, klient nahráva doklady",
+    limity:{ faktury:0, odberatelia:0, doklady:0, bankaImporty:0, ulozisko:0, firmy:10 },
+    moduly:["faktury","vykazy","pohladavky","vydavky","banka","cashflow","kalendar",
+            "jazdy","majetok","dokumenty","dovolenka","priznania","priznanieB","prognoza","dph"]
   }
 };
+const UCTOVNIK_FIRIEM_MAX = 20;      // nad tento počet individuálna dohoda
 // jednorazové doplnky
 const DOPLNKY = {
   priznanieB: { kod:"priznanieB", nazov:"Daňové priznanie typ B", cena:7.90,
                 popis:"Jednorazové odomknutie priznania za jeden rok" }
 };
 // limit = 0 znamená neobmedzene
+// Hradí plán tejto firmy niekto iný než ona sama?
+function planHradiUctovnik(){
+  const z=String((firmaConfig||{}).plan_zdroj||"");
+  return z.indexOf("uctovnik:")===0;
+}
 function limitPlanu(kluc){
   const p=PLANY[aktualnyPlan()]||PLANY.free;
+  // Počet firiem je jediný limit, ktorý sa dá dokúpiť. Základ je v pláne,
+  // skutočný strop nesie predplatné (Stripe `quantity`) — a ten má prednosť.
+  if(kluc==="firmy"){
+    const zaplatene = +((firmaConfig||{}).firmy_limit||0);
+    const zaklad = (p.limity&&p.limity.firmy)||0;
+    if(!zaklad) return 0;                                  // plán bez tohto limitu
+    return Math.min(Math.max(zaplatene, zaklad), UCTOVNIK_FIRIEM_MAX);
+  }
   return (p.limity&&p.limity[kluc])||0;
 }
 // koľko z limitu je vyčerpané
@@ -1133,6 +1173,10 @@ function vyuzitieLimitu(kluc){
     case "doklady":      return (d.vydavky||[]).length;
     case "bankaImporty": return +((d.settings||{}).pocetImportovBanka||0);
     case "ulozisko":     return (d.vydavky||[]).filter(x=>x.doklad).length + (d.dokumenty||[]).length;
+    // Počet firiem sa neviaže na dáta jednej firmy, ale na účet — počítajú sa
+    // tie, ktoré prihlásený VLASTNÍ. Cudzie, do ktorých ho len pozvali,
+    // nezaťažujú jeho plán; tie platí ich vlastník.
+    case "firmy":        return (firmyZoznam||[]).filter(f=>(f.mojaRola||"vlastnik")==="vlastnik").length;
     default: return 0;
   }
 }
@@ -1143,7 +1187,8 @@ function skontrolujLimit(kluc, popisAkcie){
   const teraz=vyuzitieLimitu(kluc);
   if(teraz < limit) return true;
   const nazvy={faktury:"faktúr", odberatelia:"odberateľov", doklady:"dokladov",
-               bankaImporty:"importov výpisu", ulozisko:"uložených súborov"};
+               bankaImporty:"importov výpisu", ulozisko:"uložených súborov",
+               firmy:"spravovaných firiem"};
   const p=PLANY[aktualnyPlan()]||PLANY.free;
   if(confirm("Dosiahli ste limit plánu "+p.nazov+".\n\nVyužité: "+teraz+" z "+limit+" "+(nazvy[kluc]||kluc)+
              ".\n\n"+(popisAkcie?popisAkcie+"\n\n":"")+"Chcete si pozrieť vyššie plány?")){
@@ -1557,6 +1602,9 @@ function vykresliPrepinacFiriem(){
   const el=document.getElementById("firmaPrepinac"); if(!el) return;
   if(firmyZoznam.length<2){ el.style.display="none"; return; }
   el.innerHTML=firmyZoznam.map(f=>`<option value="${f.id}" ${f.id===firmaId?'selected':''}>${esc(f.nazov||"Bez názvu")}</option>`).join("");
+  // názov sa v hlavičke skracuje, celý nech je aspoň v tooltipe
+  const akt=firmyZoznam.find(f=>f.id===firmaId);
+  el.title=(akt&&akt.nazov?akt.nazov+" — ":"")+"prepnúť firmu";
   el.style.display="";
 }
 
@@ -3284,7 +3332,10 @@ function renderHomeStrip(){
          <div class="csub" style="margin-top:5px">${esc(firmaConfigChyba)}</div>
        </div>` : "";
   let html = demoDomovPruh() + planPruh + `<div class="hstrip">
-    ${demoMode ? `<button class="hchip" onclick="zobrazCennik()" title="Zobraziť plány a ceny">💳 <span>Plány a ceny</span></button>`
+    ${planHradiUctovnik() ? `<button class="hchip" onclick="zobrazCennik()" title="Plán za túto firmu hradí účtovník">
+      <span class="dot" style="background:${p.farba}"></span>
+      <span><b>${esc(p.nazov)}</b> <span class="sub">· hradí účtovník</span></span>
+    </button>` : demoMode ? `<button class="hchip" onclick="zobrazCennik()" title="Zobraziť plány a ceny">💳 <span>Plány a ceny</span></button>`
       : `<button class="hchip ${varovanie ? "warn" : ""}" onclick="zobrazCennik()"
             title="Zobraziť plány a ceny">
       <span class="dot" style="background:${p.farba}"></span>
@@ -16937,6 +16988,10 @@ async function ulozFirmu(){
     }else{
       const { data:{ user } } = await sb.auth.getUser();
       if(!user) throw new Error("Nie ste prihlásený.");
+      // Nová firma na účte — jediné miesto, kde sa počet firiem zvyšuje.
+      if(!skontrolujLimit("firmy","Vo vašom pláne už máte plný počet firiem.")){
+        setSync("offline"); return;
+      }
       res=await sb.from("firmy").insert({data:firmaData,nazov,user_id:user.id}).select().single();
     }
     if(res.error) throw res.error;
@@ -16944,7 +16999,7 @@ async function ulozFirmu(){
     // názov sa mohol zmeniť v nastaveniach — prepínač musí ukazovať aktuálny
     const _f=firmyZoznam.find(f=>f.id===firmaId);
     if(_f){ _f.nazov=res.data.nazov; _f.updated_at=firmaVerzia; }
-    else { firmyZoznam.push({id:firmaId, nazov:res.data.nazov, updated_at:firmaVerzia}); }
+    else { firmyZoznam.push({id:firmaId, nazov:res.data.nazov, updated_at:firmaVerzia, mojaRola:"vlastnik"}); }
     vykresliPrepinacFiriem();
     cloudMsg("Uložené do cloudu ✓ Dáta sú teraz bezpečne online.","ok"); setSync("saved"); zobrazFirmu();
   }catch(e){
