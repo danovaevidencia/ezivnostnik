@@ -772,7 +772,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.07.26-DR";  // fáza 2: roly, prístupy k firme, pozvánky
+const APP_VERZIA = "2026.07.27-DS";  // fáza 2: roly, prístupy k firme, pozvánky
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -1279,7 +1279,7 @@ async function nacitajPristupy(fid){
   if(localMode || !sb || !fid) return;
   try{
     const { data, error } = await sb.from("firma_pristupy")
-      .select("user_id,rola,udelene").eq("firma_id", fid);
+      .select("user_id,rola,udelene,email").eq("firma_id", fid);
     if(error && typeof zdielanieChyba!=="undefined")
       zdielanieChyba="Prístupy sa nepodarilo načítať: "+error.message;
     pristupyFirmy = data || [];
@@ -1424,7 +1424,7 @@ async function appZdielanie(){
       <b style="font-family:'Fraunces',serif;font-size:15px">Kto má prístup</b>
       ${pristupyFirmy.length ? `<div class="alist" style="margin-top:8px">
         ${pristupyFirmy.map(p=>`<div class="arow" style="grid-template-columns:1fr auto auto;cursor:default;gap:8px">
-          <div><div class="acol-strong" style="font-size:13px">${esc(p.user_id===user.id?"vy":p.user_id.slice(0,8)+"…")}</div>
+          <div><div class="acol-strong" style="font-size:13px">${esc(p.user_id===user.id ? "vy" : (p.email || p.user_id.slice(0,8)+"…"))}</div>
                <div class="acol-muted">${esc(ROLY_POPIS[p.rola]||p.rola)}</div></div>
           <div class="acol-muted" style="font-size:11px">${p.udelene?fmtDatum(String(p.udelene).slice(0,10)):""}</div>
           <button class="aabtn" style="padding:3px 9px;font-size:11px;border-color:var(--neg);color:var(--neg)" onclick="odvolajPristup('${p.user_id}')">Odvolať</button>
@@ -1715,7 +1715,7 @@ function deRocnySuhrn(rok){
   const LUX=limitLuxAuto(rok, zakladPred);
   const zakladSkut=r2(zakladPred+LUX.pripocitat);
   const zakladPausal=r2(prijmy-pausal-odvodyRok);
-  const pausalMozny=!jePlatcaDPH();  // paušál len pre neplatiteľa DPH
+  const pausalMozny=pausalMoznyRok(rok);   // §6/10: aj pri platiteľstve len časť roka
   return {rok,mesiace:M,prijmy,vydavkySkut,odpis,vyradenie,vyradenieInfo:V,lux:LUX,vydavkySkutSpolu,pausal,zpRok,zpZdroj:zpZapl.zdroj,socRok,odvodyRok,zakladPred,zakladSkut,zakladPausal,pausalMozny,pausalVyhodnejsi:pausalMozny && zakladPausal<zakladSkut};
 }
 
@@ -1812,7 +1812,7 @@ function deNczdManzel(zaklad, S, rok){
 
 function deDanovyVypocet(rok, variant){
   const R=deRocnySuhrn(rok), S=firmaData.settings||{};
-  const pausalMozny = !jePlatcaDPH();
+  const pausalMozny = pausalMoznyRok(rok);
   // určenie variantu: explicitný parameter > uložený režim > skutočné
   let pausal;
   if(variant==="pausal") pausal=true;
@@ -1889,8 +1889,9 @@ function dePrognoza(rok){
   let socMesiacov=12; if(S.socOdvodyOd){ const fm=parseInt(String(S.socOdvodyOd).split("-")[1])||13; socMesiacov=Math.max(0,12-fm+1); }
   const socRok=r2((+S.socOdvodyMes||0)*socMesiacov);
   const odvodyRok=r2(zpRok+socRok);
-  // režim výdavkov: paušál (60 %, max 20 000 €, len neplatiteľ DPH) vs skutočné
-  const pausalMozny = !jePlatcaDPH();
+  // režim výdavkov: paušál (60 %, max 20 000 €) vs skutočné.
+  // Platiteľ DPH ho smie za rok, v ktorom ním bol len časť obdobia (§6 ods. 10).
+  const pausalMozny = pausalMoznyRok(rok);
   const pausalRezim = pausalMozny && (vydavkyRezimEfektivny()==="pausal");
   const pausalVydavok = r2(Math.min(rocPrijmy*0.6, 20000));
   const zaklad = pausalRezim
@@ -2021,7 +2022,7 @@ function danTotals(rok, S){
   }
   // paušál je ročná záležitosť (60 %, max 20 000 €) — pri zvolenom paušále
   // prepočítaj ročnú daň a "odložiť" paušálne, nech dashboard sedí s priznaním
-  if(!jePlatcaDPH() && vydavkyRezimEfektivny()==="pausal"){
+  if(pausalMoznyRok(rok) && vydavkyRezimEfektivny()==="pausal"){
     const R=deRocnySuhrn(rok);
     const D=deVypocetDane(R.zakladPausal, S, rok);
     const danRozdiel=r2(D.dan - t.dan);
@@ -3724,13 +3725,49 @@ function jePlatcaDPH(){
   if(firmaConfig && typeof firmaConfig.platca_dph === "boolean") return firmaConfig.platca_dph;
   return !!(firmaData && firmaData.meta && firmaData.meta.icdph);
 }
+// ═══════════════════════════════════════════════════════════════════════════
+//  PAUŠÁLNE VÝDAVKY A PLATITEĽSTVO DPH
+//
+//  § 6 ods. 10 zákona o dani z príjmov dovoľuje paušálne výdavky daňovníkovi,
+//  ktorý nie je platiteľom DPH, **alebo ktorý je platiteľom DPH len časť
+//  zdaňovacieho obdobia**. Tá druhá veta sa ľahko prehliadne a appka ju
+//  prehliadala: kto sa stal platiteľom v priebehu roka, dostal paušál
+//  zablokovaný, hoci ten rok ešte môže dokončiť paušálne.
+//
+//  Rozhodujúce nie je „som platiteľ", ale „bol som ním celý rok". Dátumy sú
+//  v `meta.icdphOd` a `meta.icdphDo`; keď chýbajú, správame sa ako doteraz —
+//  platiteľ je platiteľom celý rok.
+// ═══════════════════════════════════════════════════════════════════════════
+function dphObdobieRoka(rok){
+  const m=(firmaData&&firmaData.meta)||{};
+  return {od:String(m.icdphOd||"").slice(0,10), doD:String(m.icdphDo||"").slice(0,10)};
+}
+function dphPlatcaCelyRok(rok){
+  const R=String(rok), {od,doD}=dphObdobieRoka(rok);
+  // ukončená registrácia: platiteľom už nie je, ale časť roka ním bol
+  if(doD && doD>=R+"-01-01" && doD<R+"-12-31") return false;
+  if(!jePlatcaDPH()) return false;
+  if(od && od>R+"-01-01") return false;            // registrácia až v priebehu roka
+  if(od && od>R+"-12-31") return false;            // v tomto roku ešte nebol
+  if(doD && doD<R+"-01-01") return false;          // registrácia skončila skôr
+  return true;
+}
+// Smie sa za tento rok uplatniť paušál?
+function pausalMoznyRok(rok){ return !dphPlatcaCelyRok(rok||new Date().getFullYear()); }
+// Bol platiteľom len časť roka? (kvôli vysvetleniu v UI)
+function dphPlatcaCastRoka(rok){
+  const R=String(rok), {od,doD}=dphObdobieRoka(rok);
+  return (!!od && od>R+"-01-01" && od<=R+"-12-31") ||
+         (!!doD && doD>=R+"-01-01" && doD<R+"-12-31");
+}
 
 // UI: prepínač režimu výdavkov v Nastaveniach + živé porovnanie skutočné vs paušál
 function nastVydavkyRezimHtml(){
   const S=firmaData.settings||{};
-  const platca=jePlatcaDPH();
-  const rezim = platca ? "skutocne" : (S.vydavkyRezim==="pausal" ? "pausal" : "skutocne");
   const rok=new Date().getFullYear();
+  const platca=!pausalMoznyRok(rok);          // blokuje len platiteľstvo CELÝ rok
+  const castRoka=dphPlatcaCastRoka(rok);
+  const rezim = platca ? "skutocne" : (S.vydavkyRezim==="pausal" ? "pausal" : "skutocne");
   let porovnanie="";
   try{
     const R=deRocnySuhrn(rok);
@@ -3751,10 +3788,12 @@ function nastVydavkyRezimHtml(){
       <button class="${rezim==='pausal'?'on':''} ${platca?'':''}" onclick="${platca?'':'nastavVydavkyRezim(\'pausal\')'}" ${platca?'disabled style="opacity:.5;cursor:not-allowed"':''}>Paušálne (60 %)</button>
     </div>
     <div class="ob-hint" style="margin-top:8px">Paušál: 60 % z príjmov, najviac 20 000 € ročne. Odvody sa uplatňujú navyše. Nedá sa kombinovať so skutočnými výdavkami — platí pre celý rok.</div>
+    ${castRoka?`<div class="ob-hint" style="margin-top:6px;color:var(--pos)"><b>Platiteľom DPH ste boli len časť roka ${rok}</b>, takže paušál za tento rok uplatniť môžete — § 6 ods. 10 zákona o dani z príjmov to výslovne dovoľuje. Od nasledujúceho roka už nie.</div>`:''}
+    ${platca?`<div class="ob-hint" style="margin-top:6px">Platiteľom DPH ste celý rok ${rok}, preto paušál nie je prípustný. Ak ste sa ním stali až v priebehu roka, doplňte dátum registrácie v údajoch firmy — potom sa paušál za tento rok odomkne.</div>`:''}
     ${porovnanie}`;
 }
 function nastavVydavkyRezim(rezim){
-  if(jePlatcaDPH()) return;                 // platiteľ nemôže paušál
+  if(!pausalMoznyRok(new Date().getFullYear())) return;   // platiteľ celý rok paušál nesmie
   firmaData.settings=firmaData.settings||{};
   firmaData.settings.vydavkyRezim = (rezim==="pausal") ? "pausal" : "skutocne";
   poZmene();
@@ -9169,6 +9208,11 @@ function appData(){
         <div class="mfield"><label>DIČ</label><input id="set_dic" value="${esc((d.meta||{}).dic||'')}"></div>
         <div class="mfield"><label>IČ DPH</label><input id="set_icdph" value="${esc((d.meta||{}).icdph||'')}"></div>
       </div>
+      <div class="mrow2">
+        <div class="mfield"><label>Platiteľom DPH od</label><input type="date" id="set_icdphOd" value="${esc((d.meta||{}).icdphOd||'')}"></div>
+        <div class="mfield"><label>Platiteľom DPH do</label><input type="date" id="set_icdphDo" value="${esc((d.meta||{}).icdphDo||'')}"></div>
+      </div>
+      <div class="csub" style="margin-top:-4px">Dátumy z osvedčenia o registrácii. Rozhodujú o jedinej veci, ale podstatnej: kto bol platiteľom DPH <b>len časť roka</b>, smie za ten rok ešte uplatniť paušálne výdavky (§ 6 ods. 10 zákona o dani z príjmov). Nevyplnené = platiteľom celý čas.</div>
     </div>
 
     <div class="card">
@@ -9304,6 +9348,8 @@ async function ulozNastavenia(){
   if(document.getElementById("set_adresa")) firmaData.meta.adresa=val("set_adresa")||"";
   if(document.getElementById("set_dic")) firmaData.meta.dic=val("set_dic")||"";
   if(document.getElementById("set_icdph")) firmaData.meta.icdph=val("set_icdph")||"";
+  if(document.getElementById("set_icdphOd")) firmaData.meta.icdphOd=val("set_icdphOd")||"";
+  if(document.getElementById("set_icdphDo")) firmaData.meta.icdphDo=val("set_icdphDo")||"";
   poZmene();
   const m=document.getElementById("cloudMsg2"); if(m){ m.textContent="✓ Nastavenia uložené. Výpočty sa aktualizovali."; m.className="cloudmsg ok"; }
 }
@@ -9735,8 +9781,10 @@ function pbKontroly(rok){
   const blok=[], upoz=[], info=[]; const R=String(rok);
   const fakt=firmaData.faktury||[];
   // 1) Platiteľ DPH celý rok → paušál nie je prípustný
-  if(v.pausalne && typeof jePlatcaDPH==="function" && jePlatcaDPH())
-    blok.push("Ste platiteľ DPH — paušálne výdavky (60 %) nie sú prípustné. Prepnite na skutočné výdavky.");
+  if(v.pausalne && !pausalMoznyRok(rok))
+    blok.push("Platiteľom DPH ste boli celý rok " + rok + " — paušálne výdavky (60 %) nie sú prípustné. Prepnite na skutočné výdavky.");
+  else if(v.pausalne && dphPlatcaCastRoka(rok))
+    info.push("Platiteľom DPH ste boli len časť roka " + rok + ", takže paušálne výdavky uplatniť môžete (§ 6 ods. 10 zákona o dani z príjmov). Od nasledujúceho roka už nie.");
   // 2) Hotovostný princíp — prelom rokov (príjem sa počíta podľa úhrady, nie vystavenia)
   let von=0, dovnutra=0; const nespar=[], bezDatumu=[];
   fakt.forEach(f=>{
@@ -17017,6 +17065,7 @@ function spustiOnboarding(){
     ico:"", nazov:"", adresa:"", dic:"", icdph:"", icdphNavrh:"",
     evidencia:"danova",        // danova | jednoduche
     platca:null,               // true | false
+    icdphOd:"",                // dátum registrácie — kvôli paušálu za časť roka
     vydavkyRezim:"skutocne",   // skutocne | pausal (paušál len pre neplatiteľa)
     manzel:false, manzelPrijem:0,
     deti:[],                   // [{vek:Number}]
@@ -17103,18 +17152,33 @@ function obKrokObsah(k){
       ${o.platca===true?`
         <div class="ob-field" style="margin-top:14px"><label>IČ DPH</label>
           <input id="ob_icdph2" value="${esc(o.icdph)}" placeholder="SK0000000000" oninput="_ob.icdph=this.value">
-          <div class="ob-hint">Vaše IČ DPH z osvedčenia o registrácii. Podľa neho appka zapne DPH moduly a fakturáciu s DPH.</div>
+          <div class="ob-hint ${o.icdph && !icdphPlatne(o.icdph) ? 'warn' : ''}">${o.icdph && !icdphPlatne(o.icdph)
+            ? 'Očakáva sa tvar SK a 10 číslic, napríklad SK1234567890.'
+            : 'Vaše IČ DPH z osvedčenia o registrácii. Podľa neho appka zapne DPH moduly a fakturáciu s DPH. Bez neho by vás appka považovala za neplatiteľa.'}</div>
+        </div>
+        <div class="ob-field"><label>Platiteľom DPH od</label>
+          <input type="date" id="ob_icdphOd" value="${esc(o.icdphOd||'')}" oninput="_ob.icdphOd=this.value">
+          <div class="ob-hint">Nepovinné. Ak ste sa stali platiteľom v priebehu roka, môžete ten rok ešte dokončiť s paušálnymi výdavkami — a appka to bude vedieť.</div>
         </div>
         <div class="ob-field"><label>Sadzba DPH</label>
           <select id="ob_sadzbaDPH"><option value="0.23" ${(o.sadzbaDPH||0.23)==0.23?'selected':''}>23 % (základná)</option><option value="0.19" ${o.sadzbaDPH==0.19?'selected':''}>19 % (znížená)</option></select></div>`:''}
-      ${obNav(3, o.platca!==null)}`;
+      ${o.platca===true && !dicPlatne(o.dic)?`<div class="ob-hint warn" style="margin-top:12px">${(o.dic||"").trim()?"DIČ má mať 10 číslic.":"Chýba DIČ — doplňte ho v predchádzajúcom kroku."} Bez neho sa nedá vygenerovať priznanie ani kontrolný výkaz.</div>`:''}
+      ${obNav(3, o.platca===false || (o.platca===true && icdphPlatne(o.icdph) && dicPlatne(o.dic)))}`;
   }
   if(k===4){
-    const pausalMozny = o.platca===false;   // paušál len pre neplatiteľa DPH
+    // §6 ods. 10 dovoľuje paušál aj tomu, kto bol platiteľom len ČASŤ roka.
+    // Zvyšok appky to vie (`pausalMoznyRok`), onboarding to prehliadal — a to
+    // aj napriek tomu, že o krok skôr sa na dátum registrácie sám pýta a sľubuje,
+    // že „ten rok ešte môžete dokončiť s paušálnymi výdavkami".
+    const rokT = new Date().getFullYear(), R = String(rokT);
+    const odDatum = String(o.icdphOd||"").slice(0,10);
+    const castRoka = o.platca===true && !!odDatum && odDatum>R+"-01-01" && odDatum<=R+"-12-31";
+    const pausalMozny = o.platca===false || castRoka;
     const jePausal = o.vydavkyRezim==='pausal';
     return `<h2>Ako uplatňujete výdavky?</h2>
       <div class="ob-lead">Skutočné výdavky sa počítajú z vašich dokladov. Paušálne výdavky sú 60 % z príjmov (max. 20 000 € ročne) — jednoduchšie, bez evidencie dokladov, ale dostupné len pre neplatiteľov DPH.</div>
-      ${!pausalMozny?`<div class="ob-hint warn" style="margin-bottom:14px">Ste platiteľ DPH, preto paušálne výdavky nie sú dostupné — zákon ich umožňuje len neplatiteľom. Výdavky sa počítajú skutočné.</div>`:''}
+      ${castRoka?`<div class="ob-hint" style="margin-bottom:14px;color:var(--pos)"><b>Platiteľom DPH ste sa stali až v priebehu roka ${rokT}</b>, takže tento rok ešte môžete dokončiť s paušálnymi výdavkami — § 6 ods. 10 zákona o dani z príjmov to výslovne dovoľuje. Od budúceho roka už nie.</div>`:''}
+      ${!pausalMozny&&o.platca===true?`<div class="ob-hint warn" style="margin-bottom:14px">Ste platiteľ DPH, preto paušálne výdavky nie sú dostupné. Výnimka platí len vtedy, keď ste sa platiteľom stali až v priebehu tohto roka — vtedy doplňte dátum registrácie v predchádzajúcom kroku a paušál sa odomkne.</div>`:''}
       <div class="ob-opts">
         <div class="ob-opt ${!jePausal?'sel':''}" onclick="obSetVydavky('skutocne')">
           <div class="ri"></div><div class="ot"><b>Skutočné výdavky</b><span>Podľa reálnych dokladov a faktúr. Vhodné, ak máte vyššie náklady (auto, materiál, subdodávky).</span></div>
@@ -17195,6 +17259,12 @@ function obKrokObsah(k){
   }
 }
 
+// IČ DPH v tvare SK + 10 číslic; DIČ 10 číslic. Bez IČ DPH sa `jePlatcaDPH()`
+// nemá o čo oprieť — číta ho z `meta.icdph`. Keď človek v sprievodcovi povie
+// „som platiteľ" a pole nechá prázdne, appka ho odvtedy považuje za
+// neplatiteľa, hoci si zvolil opak. Preto sa tu nepokračuje ďalej.
+function icdphPlatne(v){ return /^SK\d{10}$/.test(String(v||"").replace(/\s/g,"").toUpperCase()); }
+function dicPlatne(v){ return /^\d{10}$/.test(String(v||"").replace(/\s/g,"")); }
 function obNav(k, canNext, skipText){
   return `<div class="ob-nav">
     ${k>1?`<button class="back" onclick="obPredch()">← Späť</button>`:''}
@@ -17236,7 +17306,19 @@ function obUlozAktualne(){
   if(_ob.krok===4 && g("ob_manzelPrijem")!==null) _ob.manzelPrijem=+g("ob_manzelPrijem")||0;
 }
 
-function obDalej(){ obUlozAktualne(); if(_ob.krok<OB_KROKOV){ _ob.krok++; renderOnboarding(); } }
+function obDalej(){
+  obUlozAktualne();
+  // Krok „Ste platiteľ DPH?" sa nesmie preskočiť s prázdnym IČ DPH. `jePlatcaDPH()`
+  // ho číta z `meta.icdph`; bez neho by appka človeka od tejto chvíle považovala
+  // za neplatiteľa, hoci si zvolil opak — a zistil by to až na prvej faktúre.
+  if(_ob.krok===3 && _ob.platca===true && !icdphPlatne(_ob.icdph)){
+    alert(_ob.icdph
+      ? "IČ DPH sa očakáva v tvare SK a 10 číslic, napríklad SK1234567890."
+      : "Zvolili ste, že ste platiteľ DPH — doplňte IČ DPH z osvedčenia o registrácii.\n\nBez neho by vás aplikácia viedla ako neplatiteľa a faktúry by vychádzali bez DPH.");
+    return;
+  }
+  if(_ob.krok<OB_KROKOV){ _ob.krok++; renderOnboarding(); }
+}
 function obPredch(){ obUlozAktualne(); if(_ob.krok>1){ _ob.krok--; renderOnboarding(); } }
 
 // IČO → RPO (znovupoužije existujúcu logiku doplnFirmuPodlaICO cez dočasné polia)
@@ -17352,6 +17434,13 @@ function obImport(typ){
   setTimeout(()=>{ _ob.importy[typ]=true; if(!document.getElementById("obView").classList.contains("hidden")) renderOnboarding(); }, 400);
 }
 
+// Jedno pravidlo pre onboarding aj pre uloženie — inak by sa formulár a dáta
+// mohli rozísť: používateľ by paušál zvolil a appka by ho ticho prepísala.
+function obPausalMozny(o){
+  if(o.platca===false) return true;
+  const R=String(new Date().getFullYear()), od=String(o.icdphOd||"").slice(0,10);
+  return !!od && od>R+"-01-01" && od<=R+"-12-31";
+}
 // vytvorí prázdny firmaData s nastaveniami z onboardingu
 function obNovaFirma(){
   const o=_ob;
@@ -17362,8 +17451,9 @@ function obNovaFirma(){
     sadzbaDPH: o.platca ? (o.sadzbaDPH||sadzbaRoka("sadzbaDPH", new Date().getFullYear())) : 0,
     evidenciaTyp: o.evidencia,                 // "danova" | "jednoduche"
     jePlatcaDPH: !!o.platca,
-    // režim výdavkov (paušál len pre neplatiteľa DPH)
-    vydavkyRezim: (!o.platca && o.vydavkyRezim==="pausal") ? "pausal" : "skutocne",
+    // režim výdavkov — paušál smie neplatiteľ aj ten, kto sa platiteľom stal
+    // až v priebehu roka (§ 6 ods. 10)
+    vydavkyRezim: (o.vydavkyRezim==="pausal" && obPausalMozny(o)) ? "pausal" : "skutocne",
     // NČZD na manželku
     nczdManzel: !!o.manzel,
     nczdManzelPrijem: +o.manzelPrijem||0,
@@ -17371,7 +17461,9 @@ function obNovaFirma(){
     deti: (o.deti||[]).filter(d=>d.vek!=null).map(d=>({vek:+d.vek||0}))
   });
   return {
-    meta:{ nazov:o.nazov||"Moja firma", ico:o.ico||"", adresa:o.adresa||"", dic:o.dic||"", icdph:(o.platca?o.icdph:"")||"" },
+    meta:{ nazov:o.nazov||"Moja firma", ico:o.ico||"", adresa:o.adresa||"", dic:o.dic||"",
+         icdph:(o.platca?String(o.icdph||"").replace(/\s/g,"").toUpperCase():"")||"",
+         icdphOd:(o.platca?o.icdphOd:"")||"" },
     settings:s,
     faktury:[], vydavky:[], jazdy:[], vypis:[], vykazy:[], majetok:[],
     pohladavky:[], zavazky:[], dokumenty:[], dovolenka:[]
