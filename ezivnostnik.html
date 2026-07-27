@@ -772,7 +772,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.07.26-DP";  // fáza 2: roly, prístupy k firme, pozvánky
+const APP_VERZIA = "2026.07.26-DR";  // fáza 2: roly, prístupy k firme, pozvánky
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -1159,13 +1159,21 @@ function zostatokLimitu(kluc){
 }
 
 
+// Plán je uložený pri FIRME, nie pri používateľovi — účtovník má pracovať
+// v pláne, ktorý si zaplatil klient. Keď sa konfigurácia nenačíta, appka
+// spadne na Free a účtovníkovi zmiznú práve tie moduly, kvôli ktorým ho
+// klient pozval. Tichý fallback tu preto nestačí: rozdiel medzi „firma nemá
+// predplatné" a „konfiguráciu nevidím" musí byť viditeľný.
+let firmaConfigChyba = null;
 async function nacitajFirmaConfig(fid){
-  firmaConfig = null;
+  firmaConfig = null; firmaConfigChyba = null;
   if(!sb || !fid) return;
   try{
     const { data, error } = await sb.from("firma_config").select("*").eq("firma_id", fid).maybeSingle();
-    if(!error && data) firmaConfig = data;
-  }catch(_){}
+    if(error) firmaConfigChyba = error.message;
+    else if(data) firmaConfig = data;
+    else if(mojaRolaVFirme()!=="vlastnik") firmaConfigChyba = "konfigurácia firmy sa nevrátila";
+  }catch(e){ firmaConfigChyba = e.message; }
 }
 // je modul povolený? Rozhoduje PLÁN; admin konfigurácia ho môže prepísať (napr. darovaný prístup).
 function modulPovoleny(kod){
@@ -1262,7 +1270,9 @@ function resetStavuModulov(){
 //  používateľa pred stratou práce.
 // ═══════════════════════════════════════════════════════════════════════════
 let pristupyFirmy = [];      // kto všetko má prístup k práve otvorenej firme
-const UCTOVNICKE_MODULY = ["banka","dph","priznania","majetok"];
+// Priznanie B tu chýbalo. Je to podanie ako každé iné — keď agendu vedie
+// účtovník, vlastník ho nemá prepisovať o nič viac než kontrolný výkaz.
+const UCTOVNICKE_MODULY = ["banka","dph","priznania","priznanieB","majetok"];
 
 async function nacitajPristupy(fid){
   pristupyFirmy=[];
@@ -1282,24 +1292,45 @@ function mojaRolaVFirme(){
 }
 function firmaMaUctovnika(){ return pristupyFirmy.some(p=>p.rola==="uctovnik"); }
 
+// ═══════════════════════════════════════════════════════════════════════════
+//  ROLA JE FUNKCIA, NIE VLASTNÍCTVO
+//
+//  Pôvodne sa oprávnenia odvodzovali od toho, kto firmu vlastní: „si vlastník
+//  a firma má účtovníka → účtovnícke moduly máš na čítanie". To ticho
+//  predpokladá, že vlastník je podnikateľ.
+//
+//  Lenže firmu môže založiť aj účtovník a klienta do nej pozvať (38.11, tok
+//  pozvánky 1b). Vtedy je vlastníkom účtovník a podnikateľ je ten pozvaný —
+//  a ani jedna z dovtedajších rolí mu nesadla: ako `uctovnik` by prepisoval
+//  DPH a priznania, ako `nahlad` by nemohol nahrať ani vlastný bloček, teda
+//  presne to, kvôli čomu ho účtovník pozval.
+//
+//  Vlastníctvo preto rozhoduje o dátach a fakturácii, nie o tom, čo kto smie
+//  robiť. Na to je rola.
+// ═══════════════════════════════════════════════════════════════════════════
+function mojaFunkcnaRola(){
+  const r=mojaRolaVFirme();
+  if(r==="uctovnik" || r==="klient" || r==="nahlad") return r;
+  // Vlastník bez účtovníka je pánom všetkého — dnešní používatelia rozdiel
+  // nepocítia. Keď agendu vedie účtovník, vlastník pracuje ako klient; ten
+  // prepínač drží účtovník.
+  if(firmaMaUctovnika() && !(firmaConfig && firmaConfig.klientMozeUctovat)) return "klient";
+  return "vlastnik";
+}
 // Smie prihlásený používateľ v tomto module zapisovať?
 function mozemPisat(modul){
-  const r=mojaRolaVFirme();
+  const r=mojaFunkcnaRola();
+  if(r==="vlastnik" || r==="uctovnik") return true;
   if(r==="nahlad") return false;
-  if(r==="uctovnik") return true;
-  // Vlastník: účtovnícke moduly sú len na čítanie, ak firma ÚČTOVNÍKA MÁ.
-  // Bez účtovníka sa nič nemení — dnešní používatelia rozdiel nepocítia.
-  if(UCTOVNICKE_MODULY.includes(modul) && firmaMaUctovnika()
-     && !(firmaConfig && firmaConfig.klientMozeUctovat)) return false;
-  return true;
+  return !UCTOVNICKE_MODULY.includes(modul);      // klient: podklady áno, účtovníctvo nie
 }
 // Pás cez obrazovku modulu, keď je len na čítanie — vysvetlí PREČO.
 function pasIbaCitanie(modul){
   if(mozemPisat(modul)) return "";
-  const r=mojaRolaVFirme();
+  const r=mojaFunkcnaRola();
   const preco = r==="nahlad"
     ? "Máte prístup na čítanie. Zmeny môže robiť vlastník alebo účtovník."
-    : "Túto agendu spravuje váš účtovník. Ak chcete zapisovať sami, požiadajte ho o zmenu nastavenia.";
+    : "Túto agendu vedie účtovník. Podklady — faktúry, doklady, kniha jázd — sú na vás.";
   return `<div style="background:var(--bg);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:9px;padding:10px 13px;margin-bottom:12px;font-size:12.5px">🔒 ${preco}</div>`;
 }
 
@@ -1312,11 +1343,23 @@ function pasIbaCitanie(modul){
 //  (`prijmi_pozvanku`, viazané na e-mail — token by stačil komukoľvek,
 //  kto ho zachytí).
 // ═══════════════════════════════════════════════════════════════════════════
+// Tri role stačia. `klient` a „vlastník, ktorého agendu vedie účtovník" sú tá
+// istá vec — líšia sa len tým, kto firmu vlastní, a to s oprávneniami nesúvisí.
 const ROLY_POPIS = {
-  uctovnik:"Účtovník — vidí všetko a môže zapisovať",
+  uctovnik:"Účtovník — vedie účtovníctvo, píše všade",
+  klient:  "Klient — fakturuje a nahráva doklady, účtovníctvo vidí",
   nahlad:  "Náhľad — vidí všetko, nemôže nič meniť"
 };
+const ROLY_DETAIL = {
+  uctovnik:"Banka, DPH, priznania aj majetok. Pozvite toho, kto vám účtuje.",
+  klient:  "Faktúry, bločky, došlé faktúry, kniha jázd. Účtovnícke moduly len číta.",
+  nahlad:  "Nič nezmení nikde. Pre poradcu, spoločníka alebo audítora."
+};
 
+function pzPopisRoly(){
+  const el=document.getElementById("pzRolaPopis");
+  if(el) el.textContent=ROLY_DETAIL[val("pzRola")]||"";
+}
 function pozvankaToken(){
   // 32 znakov z kryptografického zdroja; Math.random() by na prístupový
   // token nestačil — je predvídateľný.
@@ -1366,11 +1409,12 @@ async function appZdielanie(){
   document.getElementById("appScreen").innerHTML = appHlavicka("zdielanie")+chybaHtml+`
     <div class="csub" style="margin-bottom:12px">${pristupyFirmy.length} prístupov · ${cakajuce.length} pozvánok čaká</div>
     <div class="card" style="margin-bottom:14px">
-      <div class="csub" style="margin-bottom:10px">Účtovník uvidí vaše doklady a bude môcť viesť Banku, DPH a priznania. Vy fakturujete a nahrávate bločky ako doteraz.</div>
+      <div class="csub" style="margin-bottom:10px">Deľba práce je vecou roly, nie toho, kto firmu založil. Účtovník vedie Banku, DPH, priznania a majetok; klient fakturuje a nahráva doklady.</div>
       <div class="mfield"><label>E-mail pozývaného</label><input id="pzEmail" type="email" placeholder="uctovnik@example.sk"></div>
       <div class="mfield"><label>Rola</label>
-        <select id="pzRola">${Object.entries(ROLY_POPIS).map(([k,v])=>`<option value="${k}">${v}</option>`).join("")}</select>
+        <select id="pzRola" onchange="pzPopisRoly()">${Object.entries(ROLY_POPIS).map(([k,v])=>`<option value="${k}">${v}</option>`).join("")}</select>
       </div>
+      <div class="csub" id="pzRolaPopis" style="margin:-4px 0 8px">${ROLY_DETAIL.uctovnik}</div>
       <button class="aabtn pri" style="width:100%;justify-content:center;margin-top:6px" onclick="vytvorPozvanku()">＋ Vytvoriť pozvánku</button>
       <div class="csub" style="margin-top:8px">Pozvánka sa <b>neposiela e-mailom</b> — dostanete odkaz, ktorý pozývanému pošlete sami.</div>
       <div id="pzVysledok" style="margin-top:10px">${pozvankaVysledokHtml()}</div>
@@ -1414,7 +1458,7 @@ function kopirujPozvanku(token){
 
 async function vytvorPozvanku(){
   const email=(val("pzEmail")||"").trim().toLowerCase();
-  const rola=val("pzRola")||"nahlad";
+  const rola=val("pzRola")||"uctovnik";
   const box=document.getElementById("pzVysledok");
   if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){
     box.innerHTML=`<div style="color:var(--neg);font-size:12.5px">Zadajte platný e-mail.</div>`; return;
@@ -3229,7 +3273,16 @@ function renderHomeStrip(){
   }
 
   const varovanie = (dni !== null && dni <= 7);
-  let html = demoDomovPruh() + `<div class="hstrip">
+  // Účtovník, ktorý vidí Free namiesto klientovho plánu, nemá ako uhádnuť,
+  // že problém je v prístupe ku konfigurácii, a nie v tom, že si klient nič
+  // nezaplatil.
+  const planPruh = (firmaConfigChyba && mojaRolaVFirme()!=="vlastnik")
+    ? `<div style="background:#fdf3ee;border:1.5px solid var(--neg);border-radius:10px;padding:11px 13px;margin-bottom:12px;font-size:12.5px">
+         <b style="color:var(--neg)">Plán firmy sa nepodarilo načítať</b> — pracujete v obmedzeniach plánu Free,
+         hoci firma môže mať vyšší. Požiadajte vlastníka, nech to overí.
+         <div class="csub" style="margin-top:5px">${esc(firmaConfigChyba)}</div>
+       </div>` : "";
+  let html = demoDomovPruh() + planPruh + `<div class="hstrip">
     ${demoMode ? `<button class="hchip" onclick="zobrazCennik()" title="Zobraziť plány a ceny">💳 <span>Plány a ceny</span></button>`
       : `<button class="hchip ${varovanie ? "warn" : ""}" onclick="zobrazCennik()"
             title="Zobraziť plány a ceny">
@@ -16786,9 +16839,9 @@ const CHYBA_SESSION="Prihlásenie vypršalo. Obnovte stránku a prihláste sa zn
 function strazZapis(modul){
   const m = modul || aktualnaZalozka || aktualnaApp;
   if(!m || (typeof mozemPisat!=="function") || mozemPisat(m)) return true;
-  alert(mojaRolaVFirme()==="nahlad"
+  alert(mojaFunkcnaRola()==="nahlad"
     ? "Máte prístup len na čítanie. Zmeny môže robiť vlastník alebo účtovník."
-    : "Túto agendu spravuje váš účtovník.\n\nAk chcete zapisovať sami, požiadajte ho o zmenu nastavenia.");
+    : "Túto agendu vedie účtovník.\n\nVaše sú podklady — faktúry, doklady a kniha jázd.");
   return false;
 }
 
@@ -16803,11 +16856,11 @@ async function ulozFirmu(){
   // moduloch — preto sa pozeráme aj na to, ktorý modul je práve otvorený.
   // Odtiaľ zmena prišla.
   const modulTeraz = aktualnaZalozka || aktualnaApp;
-  if(mojaRolaVFirme()==="nahlad" || (modulTeraz && !mozemPisat(modulTeraz))){
+  if(mojaFunkcnaRola()==="nahlad" || (modulTeraz && !mozemPisat(modulTeraz))){
     firmaDirty=false;
-    cloudMsg(mojaRolaVFirme()==="nahlad"
+    cloudMsg(mojaFunkcnaRola()==="nahlad"
       ? "Máte prístup len na čítanie — zmeny sa neuložili."
-      : "Túto agendu spravuje váš účtovník — zmeny sa neuložili.","err");
+      : "Túto agendu vedie účtovník — zmeny sa neuložili.","err");
     setSync("offline");
     return;
   }
