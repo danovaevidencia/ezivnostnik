@@ -302,7 +302,16 @@ export function vykresliFakturu(jsPDF, model, opts = {}) {
   doc.setFont(FONT, "normal"); doc.setFontSize(7.3); setC(MUTED);
   doc.text("Faktúra č. " + (model.cislo || ""), L, fy);
   if (opts.isdoc) doc.text("Doklad obsahuje e-faktúru (ISDOC)", W / 2, fy, { align: "center" });
-  doc.text("Vytvorené v eživnostník", R, fy, { align: "right" });
+  // Doména zámerne BEZ diakritiky — URL ju nemá (ezivnostnik.eu, nie eživnostník.eu).
+  // Zvýraznená značkovou modrou, aby ju zákazník našiel.
+  {
+    const label = "Vytvorené v ", url = "ezivnostnik.eu";
+    const wLabel = doc.getTextWidth(label), wUrl = doc.getTextWidth(url);
+    const xStart = R - wLabel - wUrl;
+    setC(MUTED); doc.text(label, xStart, fy);
+    setC(BRAND); doc.text(url, xStart + wLabel, fy);
+    setC(MUTED);
+  }
 
   return doc;
 }
