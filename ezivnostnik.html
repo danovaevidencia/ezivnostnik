@@ -775,7 +775,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.07.30-DP";  // fix: modul Zdieľanie chýbal na ploche (nebol v žiadnej skupine)
+const APP_VERZIA = "2026.07.30-DR";  // ISDOC vložený priamo do PDF (pdf-lib, ako KROS) + VS/Note/PaymentMeans v ISDOC XML
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -4814,6 +4814,7 @@ function editFaktura(idx, predloha){
 function feModal(idx, nova){
   const f=_feEdit;
   const s=faktSumy(f);
+  const S=firmaData.settings||{};
   const hist=odberateliaHistoria();
   openModal(nova?"Nová faktúra":"Upraviť faktúru",`
     <div class="mrow2">
@@ -4869,6 +4870,9 @@ function feModal(idx, nova){
     </div>
     </div>
     <div class="feStlpec">
+    <div class="mfield"><label>Sprievodný text <span style="font-weight:400;color:var(--ink-soft)">— nad položkami na faktúre</span></label>
+      <textarea id="m_popis" rows="2" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;font:inherit;font-size:13px;resize:vertical" placeholder="napr. Fakturujem Vám za poskytnuté služby na zákazke …">${esc(f.popis||S.faktText||'')}</textarea>
+    </div>
     <div style="margin:0 0 6px;font-weight:700;font-size:13px">Položky</div>
     <div id="fePolozky" data-scroll="fePolozky" style="max-height:none">${fePolozkyHtml()}</div>
     <button type="button" class="aabtn" style="margin-top:8px" onclick="fePridajPolozku()">＋ Pridať položku</button>
@@ -4892,6 +4896,7 @@ function feModal(idx, nova){
     f.datum=val("m_datum"); f.vystavenie=val("m_datum");
     f.dodanie=val("m_dodanie")||val("m_datum"); f.splatnost=val("m_splatnost");
     f.opravujeDoklad=val("m_opravuje");
+    f.popis=val("m_popis");   // sprievodný text nad položkami (KROS ho má, my sme ho nemali)
     f.druhPlnenia=val("m_plnenie")||"tuzemsko";
     f.tovarKod=val("m_tovarKod")||""; f.tovarDruh=val("m_tovarDruh")||"";
     f.tovarMn=val("m_tovarMn")||"";   f.tovarMJ=val("m_tovarMJ")||"";
@@ -12859,12 +12864,45 @@ async function exportFakturaPDF(idx){
   // inak by ho edge funkcia nevedela použiť.
   const qrDataUrl=await generujPayBySquareQR(f, m);
   const doc=FP.vykresliFakturu(jsPDF, FP.modelZakaznickejFaktury(f, m, s, S), { qrDataUrl, isdoc:true });
-  doc.save("faktura_"+(f.cislo||"export")+".pdf");
+  const nazov="faktura_"+(f.cislo||"export")+".pdf";
+  // jsPDF nevie vkladať prílohy — ISDOC XML preto prilepíme cez pdf-lib.
+  // Bez toho PDF tvrdí „obsahuje e-faktúru (ISDOC)", ale žiadnu neobsahuje
+  // (na rozdiel od KROSu). Pri zlyhaní (napr. bez siete) uložíme aspoň PDF bez
+  // prílohy — lepšie faktúra bez ISDOC než žiadna faktúra.
+  try{
+    const bytes=doc.output("arraybuffer");
+    const withIsdoc=await pripojISDOCdoPDF(bytes, isdocXml(idx), (f.cislo||"export"));
+    downloadBlob(new Blob([withIsdoc],{type:"application/pdf"}), nazov);
+  }catch(e){
+    console.warn("Vloženie ISDOC do PDF zlyhalo, ukladám PDF bez prílohy:", e);
+    doc.save(nazov);
+  }
+}
+// Prilepí ISDOC XML do hotového PDF ako embedded prílohu (formát ISDOC.PDF ako
+// KROS). pdf-lib z CDN — jsPDF túto schopnosť nemá. Prevzaté princípom zo
+// staršej verzie appky, kde sa PDF rovno kreslilo cez pdf-lib; my kreslíme
+// jsPDF a pdf-lib použijeme len na prílohu.
+async function pripojISDOCdoPDF(pdfBytes, xml, cislo){
+  const { PDFDocument } = await import("https://esm.sh/pdf-lib@1.17.1");
+  const pdf = await PDFDocument.load(pdfBytes);
+  const enc = new TextEncoder();
+  await pdf.attach(enc.encode(xml), "faktura_"+cislo+".isdoc", {
+    mimeType:"application/xml",
+    description:"ISDOC elektronická faktúra",
+    creationDate:new Date(), modificationDate:new Date()
+  });
+  return await pdf.save();
 }
 
 // ISDOC export (elektronická faktúra XML)
 function genUUID(){ return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return (c==='x'?r:(r&0x3|0x8)).toString(16);}); }
 function generujISDOC(idx){
+  downloadBlob(new Blob([isdocXml(idx)],{type:"application/xml"}),"faktura_"+((firmaData.faktury[idx]||{}).cislo||"export")+".isdoc.xml");
+}
+// Vracia ISDOC XML ako reťazec — použiteľné aj na vloženie do PDF (viď
+// exportFakturaPDF). Predtým generovanie a stiahnutie boli zliate, takže XML
+// sa nedalo získať bez toho, aby sa hneď stiahlo.
+function isdocXml(idx){
   const f=firmaData.faktury[idx]; const m=firmaData.meta||{};
   const s=faktSumy(f);
   const esc=x=>String(x==null?"":x).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
@@ -12883,7 +12921,8 @@ function generujISDOC(idx){
          <LineExtensionAmountTaxInclusive>${n2(lineBez+lineDph)}</LineExtensionAmountTaxInclusive>
          <LineExtensionTaxAmount>${n2(lineDph)}</LineExtensionTaxAmount>
          <UnitPrice>${n2(p.cena)}</UnitPrice>
-         <ClassifiedTaxCategory><Percent>${sadzbaPct}</Percent><VATApplicable>true</VATApplicable></ClassifiedTaxCategory>
+         <ClassifiedTaxCategory><Percent>${sadzbaPct}</Percent><VATApplicable>true</VATApplicable>
+   <Note languageID="sk">${esc(f.popis||"")}</Note></ClassifiedTaxCategory>
          <Item><Description>${esc(p.nazov)}</Description></Item>
       </InvoiceLine>`;
   }).join("\n");
@@ -12896,6 +12935,7 @@ function generujISDOC(idx){
    <IssueDate>${(f.datum||f.vystavenie||"").slice(0,10)}</IssueDate>
    <TaxPointDate>${(f.datum||"").slice(0,10)}</TaxPointDate>
    <VATApplicable>true</VATApplicable>
+   <Note languageID="sk">${esc(f.popis||"")}</Note>
    <LocalCurrencyCode>EUR</LocalCurrencyCode>
    <AccountingSupplierParty><Party>
       <PartyIdentification><ID>${esc(m.ico)}</ID></PartyIdentification>
@@ -12917,8 +12957,20 @@ ${lines}
       <TaxInclusiveAmount>${n2(s.spolu)}</TaxInclusiveAmount>
       <PayableAmount>${n2(s.spolu)}</PayableAmount>
    </LegalMonetaryTotal>
+   <PaymentMeans>
+      <Payment>
+         <PaidAmount>${n2(s.spolu)}</PaidAmount>
+         <PaymentMeansCode>42</PaymentMeansCode>
+         <Details>
+            <PaymentDueDate>${esc(String(f.splatnost||"").slice(0,10))}</PaymentDueDate>
+            <IBAN>${esc(String(m.iban||"").replace(/\s/g,""))}</IBAN>
+            <BIC>${esc(m.swift||"")}</BIC>
+            <VariableSymbol>${esc(String(f.vs||f.cislo||"").replace(/\D/g,""))}</VariableSymbol>
+         </Details>
+      </Payment>
+   </PaymentMeans>
 </Invoice>`;
-  downloadBlob(new Blob([xml],{type:"application/xml"}),"faktura_"+(f.cislo||"export")+".isdoc.xml");
+  return xml;
 }
 
 // ── DPH: zber dokladov za mesiac, oddiely KV, sumáre ──
