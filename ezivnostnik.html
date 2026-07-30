@@ -775,7 +775,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.07.30-DN";  // editor faktúry: dvojstĺpcové rozloženie na širokej karte (PC)
+const APP_VERZIA = "2026.07.30-DO";  // bugfix: dátum vystavenia sa rozchádzal s datum (posun o deň) + garantovaná zhoda VS=číslo
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -4795,7 +4795,12 @@ function editFaktura(idx, predloha){
       _feEdit.cislo=cislo;
       _feEdit.vs=String(cislo).replace(/\D/g,"");
     } else {
-      _feEdit={cislo:dalsieCisloFaktury(),odberatel:"",ico:"",icdph:"",datum:new Date().toISOString().slice(0,10),splatnost:"",vs:"",polozky:[{nazov:"",mn:1,mj:"ks",cena:0}],zaplatena:false};
+      // VS = číslo faktúry (nie prázdne). Kým to bol prázdny reťazec s fallbackom
+      // `f.vs||f.cislo` len vo formulári, mohli sa v ojedinelých prípadoch (dve
+      // volania dalsieCisloFaktury s pribudnutou faktúrou medzitým) rozísť.
+      // Priradením naraz je zhoda garantovaná.
+      const _c=dalsieCisloFaktury();
+      _feEdit={cislo:_c,vs:String(_c).replace(/\D/g,""),odberatel:"",ico:"",icdph:"",datum:new Date().toISOString().slice(0,10),splatnost:"",polozky:[{nazov:"",mn:1,mj:"ks",cena:0}],zaplatena:false};
     }
   } else {
     _feEdit=JSON.parse(JSON.stringify(d.faktury[idx]));
@@ -4879,7 +4884,13 @@ function feModal(idx, nova){
   ()=>{
     const f=_feEdit;
     f.cislo=val("m_cislo"); f.vs=val("m_vs")||f.cislo; f.odberatel=val("m_odberatel");
-    f.ico=val("m_ico"); f.icdph=val("m_icdph"); f.datum=val("m_datum"); f.dodanie=val("m_dodanie")||val("m_datum"); f.splatnost=val("m_splatnost");
+    f.ico=val("m_ico"); f.icdph=val("m_icdph");
+    // `datum` a `vystavenie` musia ostať v zhode. Editor ukladal len `datum`,
+    // ale PDF aj UBL čítajú `vystavenie || datum` — takže po zmene dátumu
+    // tlačili STARÉ vystavenie z pôvodných dát (posun o deň v ukážke). Držíme
+    // ich rovnaké; kto niekedy potreboval rozlíšiť dodanie, má naň `dodanie`.
+    f.datum=val("m_datum"); f.vystavenie=val("m_datum");
+    f.dodanie=val("m_dodanie")||val("m_datum"); f.splatnost=val("m_splatnost");
     f.opravujeDoklad=val("m_opravuje");
     f.druhPlnenia=val("m_plnenie")||"tuzemsko";
     f.tovarKod=val("m_tovarKod")||""; f.tovarDruh=val("m_tovarDruh")||"";
