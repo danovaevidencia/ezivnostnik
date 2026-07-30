@@ -330,8 +330,11 @@ export function modelZakaznickejFaktury(f, meta, sumy, settings = {}) {
       ico: f.ico, dic: f.dic, icdph: f.icdph,
     },
     datumy: {
-      vystavenie: f.vystavenie || f.datum,
-      dodanie: f.datum || f.vystavenie,
+      // `datum` má prednosť: editor ho nastavuje pri každom uložení, kým staršie
+      // `vystavenie` mohlo ostať nezmenené z predošlej úpravy (posun o deň).
+      vystavenie: f.datum || f.vystavenie,
+      // dodanie je samostatné pole; staršie faktúry ho nemajú, tam padá na dátum
+      dodanie: f.dodanie || f.datum || f.vystavenie,
       splatnost: f.splatnost,
     },
     platba: { sposob: settings.uhrada || "Bankový prevod", vs: f.vs || f.cislo || "—" },
