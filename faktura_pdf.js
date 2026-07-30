@@ -215,7 +215,16 @@ export function vykresliFakturu(jsPDF, model, opts = {}) {
   // ── POPIS ──
   if (model.popis) {
     doc.setFont(FONT, "normal"); doc.setFontSize(9.3); setC(SOFT);
-    const pL = doc.splitTextToSize(model.popis, R - L);
+    // Jednotlivé zalomenie riadku zmeníme na medzeru — text sa má zalamovať
+    // podľa šírky, nie natvrdo v strede vety (odkiaľ pochádzal riadok pri
+    // vkladaní je jedno). Zámerné odseky (prázdny riadok = \n\n) zachováme.
+    const popisNorm = String(model.popis)
+      .replace(/\r\n?/g, "\n")
+      .replace(/\n{2,}/g, "\u0000")   // dočasne označ odseky
+      .replace(/\n/g, " ")             // mäkké zlomy → medzera
+      .replace(/\u0000/g, "\n")        // vráť odseky
+      .replace(/[ \t]+/g, " ").trim();
+    const pL = doc.splitTextToSize(popisNorm, R - L);
     doc.text(pL, L, y); y += pL.length * 4.7 + 7;
   }
 
