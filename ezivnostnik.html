@@ -425,6 +425,12 @@ button{font-family:inherit;cursor:pointer}
 .mfield input,.mfield select{width:100%;border:1.5px solid var(--line);background:var(--bg);border-radius:10px;padding:10px 12px;font:inherit;font-size:14px}
 .mfield input:focus,.mfield select:focus{outline:none;border-color:var(--brand);background:var(--paper)}
 .mrow2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+/* Dvojstĺpcový editor faktúry na širokej karte. Na úzkom okne (mobil) sa
+   stĺpce zložia pod seba — media query nižšie. Ľavý stĺpec: odberateľ a daňové
+   údaje; pravý: položky a súčty, ktoré potrebujú najviac šírky. */
+.fe2col{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);gap:22px;align-items:start}
+.fe2col .feStlpec{min-width:0}
+@media(max-width:720px){.fe2col{grid-template-columns:1fr;gap:0}}
 /* univerzálny split: 2 stĺpce na PC, pod seba na mobile */
 .split2{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
 @media(max-width:700px){.split2{grid-template-columns:1fr;gap:14px}}
@@ -769,7 +775,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.07.30-DJ";  // zjednotený formulár výdavku (editor = import z dokladu)
+const APP_VERZIA = "2026.07.30-DN";  // editor faktúry: dvojstĺpcové rozloženie na širokej karte (PC)
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -1511,7 +1517,7 @@ function deMesiacneData(rok){
   const odpisMes = _O.mes;
   for(let mi=1; mi<=12; mi++){
     const mk=rok+"-"+String(mi).padStart(2,"0");
-    const fakt=(d.faktury||[]).filter(f=>String(f.datum||f.vystavenie||"").slice(0,7)===mk);
+    const fakt=(d.faktury||[]).filter(f=>faktObdobie(f)===mk);
     const prijmy=r2(fakt.reduce((a,f)=>a+(+f.bez||0),0));
     const vyd=(d.vydavky||[]).filter(x=>String(x.datum||"").slice(0,7)===mk && !x.zaradenyOdpisovany && !(x.mozeBytMajetok&&!x.zaradenyMajetokId));
     let vydavky=r2(vyd.reduce((a,x)=>a+vydavokDoZakladu(x),0));   // PHL podľa zvoleného režimu
@@ -1690,7 +1696,7 @@ function zaplateneZPRok(rok){
   const preddavok=(+S.preddavokZP||0);
   let mesiacov=0;
   for(let mi=0;mi<12;mi++){ const mk=rok+"-"+String(mi+1).padStart(2,"0");
-    const akt=(firmaData.faktury||[]).some(f=>String(f.datum||f.vystavenie||"").slice(0,7)===mk)||(firmaData.vydavky||[]).some(x=>String(x.datum||"").slice(0,7)===mk);
+    const akt=(firmaData.faktury||[]).some(f=>faktObdobie(f)===mk)||(firmaData.vydavky||[]).some(x=>String(x.datum||"").slice(0,7)===mk);
     if(akt) mesiacov++; }
   return {suma:r2(preddavok*Math.max(mesiacov,1)), zdroj:"preddavok", pocet:0};
 }
@@ -1748,7 +1754,7 @@ function monthActiveOd(mesiacIdx, rok, odRRRRMM){
 function calcDanRow(mesiacIdx, rok, S){
   // príjmy z faktúr daného mesiaca (bez DPH)
   const mk=rok+"-"+String(mesiacIdx+1).padStart(2,"0");
-  const faktB=r2((firmaData.faktury||[]).filter(f=>String(f.datum||f.vystavenie||"").slice(0,7)===mk).reduce((a,f)=>a+(+f.bez||0),0));
+  const faktB=r2((firmaData.faktury||[]).filter(f=>faktObdobie(f)===mk).reduce((a,f)=>a+(+f.bez||0),0));
   // odpis auta (z majetku alebo nastavení)
   const _O=odpisDaneRok(rok, S);            // odpis z evidencie majetku, inak z nastavení
   const odpisMes=_O.mes;
@@ -1803,11 +1809,11 @@ function calcDanRow(mesiacIdx, rok, S){
   const cisty=r2(faktB-odvodyDan);
   // odpracované dni = človekodni z položiek faktúr mesiaca (ako stará appka), fallback na výkazy
   let odprac=0;
-  const faktMesPol=(firmaData.faktury||[]).filter(f=>String(f.datum||f.vystavenie||"").slice(0,7)===mk);
+  const faktMesPol=(firmaData.faktury||[]).filter(f=>faktObdobie(f)===mk);
   faktMesPol.forEach(f=>{ (f.polozky||[]).forEach(p=>{ const mj=(p.mj||"").toLowerCase(); if(/člov|clov|deň|den|md/.test(mj)) odprac+=Math.round(+p.mn||0); }); });
   if(odprac===0){ (firmaData.vykazy||[]).forEach(w=>{ (w.polozky||[]).forEach(p=>{ if(String(p.datum||"").slice(0,7)===mk && (+p.hodiny||0)>0) odprac++; }); }); }
   // stav úhrady faktúr mesiaca (spárované z výpisu cez VS alebo sumu)
-  const faktMes=(firmaData.faktury||[]).filter(f=>String(f.datum||f.vystavenie||"").slice(0,7)===mk);
+  const faktMes=(firmaData.faktury||[]).filter(f=>faktObdobie(f)===mk);
   let uhradene=0, neuhradene=0;
   faktMes.forEach(f=>{
     const suma=(+f.spolu||+f.bez||0);
@@ -2224,7 +2230,7 @@ function aktivneMesiaceRoka(rok){
   let n=0;
   for(let mi=1; mi<=12; mi++){
     const mk=rok+"-"+String(mi).padStart(2,"0");
-    const maFakturu=(firmaData.faktury||[]).some(f=>String(f.datum||f.vystavenie||"").slice(0,7)===mk);
+    const maFakturu=(firmaData.faktury||[]).some(f=>faktObdobie(f)===mk);
     const maVydavok=(firmaData.vydavky||[]).some(x=>String(x.datum||"").slice(0,7)===mk);
     if(maFakturu||maVydavok) n++;
   }
@@ -2535,9 +2541,9 @@ function dashMesacne(rok, typ){
   for(let mi=0;mi<12;mi++){
     const mk=rok+"-"+String(mi+1).padStart(2,"0");
     let v=0;
-    if(typ==="prijmy") v=(d.faktury||[]).filter(f=>String(f.datum||f.vystavenie||"").slice(0,7)===mk).reduce((a,f)=>a+(+f.bez||0),0);
+    if(typ==="prijmy") v=(d.faktury||[]).filter(f=>faktObdobie(f)===mk).reduce((a,f)=>a+(+f.bez||0),0);
     else if(typ==="vydavky") v=(d.vydavky||[]).filter(x=>String(x.datum||"").slice(0,7)===mk).reduce((a,x)=>a+(+x.bez||0),0);
-    else if(typ==="dph") v=(d.faktury||[]).filter(f=>String(f.datum||f.vystavenie||"").slice(0,7)===mk).reduce((a,f)=>a+(+f.dph||0),0);
+    else if(typ==="dph") v=(d.faktury||[]).filter(f=>faktObdobie(f)===mk).reduce((a,f)=>a+(+f.dph||0),0);
     else if(typ==="km") v=(d.jazdy||[]).filter(j=>jazdaMonthKey(j)===mk).reduce((a,j)=>a+(+j.km||0),0);
     out.push(v);
   }
@@ -3905,6 +3911,36 @@ function buildProtokolDocx(w,D){
   Packer.toBlob(doc).then(b=>stiahniBlob(b,nadpis.replace(/[^\w.-]+/g,"_")+".docx"));
 }
 
+// Mesiac, za ktorý je výkaz — z obdobia "1.5.2026 - 30.5.2026" alebo z dátumov
+// položiek. Slúži na spárovanie s faktúrou za to isté obdobie.
+function vykazMesiac(w){
+  const m=(w.obdobie||"").match(/(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})/);
+  if(m) return m[3]+"-"+String(+m[2]).padStart(2,"0");
+  const dat=(w.polozky||[]).map(p=>p.datum).filter(Boolean).sort();
+  return dat.length ? String(dat[0]).slice(0,7) : "";
+}
+// Do ktorého DPH obdobia faktúra spadá. Zákon o DPH hovorí, že rozhoduje
+// DÁTUM DODANIA — nie vystavenia ani úhrady. Staršie faktúry pole `dodanie`
+// nemajú, tam sa použije `datum`. Toto je jediný zdroj pravdy pre zaradenie
+// faktúry do obdobia; kto potrebuje mesiac faktúry, volá túto funkciu.
+function faktObdobie(f){
+  return String(f.dodanie||f.datum||f.vystavenie||"").slice(0,7);
+}
+function faktMesiac(f){ return faktObdobie(f); }  // alias pre kontrolu výkaz↔faktúra
+
+// Sedí počet človekodní vo výkaze s vyfakturovaným množstvom za ten istý mesiac?
+// Rozdiel znamená buď nedofakturované dni, alebo výkaz, ktorý nezodpovedá tomu,
+// čo odberateľ dostal na faktúre — a to je vec, ktorú treba vidieť pred podaním,
+// nie až keď sa na ňu spýta odberateľ.
+function vykazKontrolaFaktury(w){
+  const dni=(w.polozky||[]).filter(p=>!p.znacka).length;
+  const vm=vykazMesiac(w); if(!vm) return null;
+  const zhoda=(firmaData.faktury||[]).filter(f=>faktMesiac(f)===vm && +f.dni>0);
+  if(!zhoda.length) return {stav:"chyba_faktura", dni, mesiac:vm};
+  const f=zhoda[0];
+  const sedi=Math.abs((+f.dni||0)-dni)<0.01;
+  return {stav:sedi?"ok":"nesedi", dni, faktDni:+f.dni||0, cislo:f.cislo};
+}
 function appVykazy(){
   const d=firmaData, c=APPS.vykazy.c;
   const vyk=(d.vykazy||[]);
@@ -3912,9 +3948,15 @@ function appVykazy(){
     `<button class="aabtn" style="--_c:${c}" onclick="icsImport()">📅 Import z kalendára</button><button class="aabtn pri" style="--_c:${c}" onclick="editVykaz()">＋ Nový výkaz</button>`)+`
     <div class="csub" style="margin:0 2px 14px">Výkazy prác pre fakturáciu podľa odpracovaných dní. Import z kalendára (.ics) vytvorí návrh výkazu zo stretnutí.</div>
     ${vyk.length?vyk.map((w,i)=>{
-      const dni=(w.polozky||[]).length;
-      const hod=(w.polozky||[]).reduce((a,p)=>a+(+p.hodiny||0),0);
+      const dni=(w.polozky||[]).filter(p=>!p.znacka).length;
+      const hod=(w.polozky||[]).filter(p=>!p.znacka).reduce((a,p)=>a+(+p.hodiny||0),0);
+      const kf=vykazKontrolaFaktury(w);
+      const kfPas = !kf ? "" :
+        kf.stav==="ok" ? `<div style="background:#eef7f0;border-radius:8px;padding:7px 11px;margin-bottom:8px;font-size:12px;color:var(--pos)">✓ ${kf.dni} človekodní sedí s faktúrou ${esc(kf.cislo)}</div>`
+      : kf.stav==="nesedi" ? `<div style="background:#fdf3ee;border-radius:8px;padding:7px 11px;margin-bottom:8px;font-size:12px;color:var(--neg)">⚠ Výkaz má ${kf.dni} čld, ale faktúra ${esc(kf.cislo)} za ten mesiac má ${kf.faktDni} — skontrolujte pred podaním</div>`
+      : `<div style="background:var(--bg);border-radius:8px;padding:7px 11px;margin-bottom:8px;font-size:12px;color:var(--ink-soft)">${kf.dni} človekodní · za tento mesiac zatiaľ nie je faktúra</div>`;
       return `<div class="card" style="margin-bottom:14px">
+        ${kfPas}
         <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:6px;cursor:pointer" onclick="editVykaz(${i})">
           <b style="font-family:'Fraunces',serif;font-size:16px">${esc(w.projekt||"Výkaz")}</b>
           ${w.zakazka?`<span class="apill" style="background:var(--brand-lite);color:var(--brand)">${esc(w.zakazka)}</span>`:''}
@@ -4019,7 +4061,10 @@ function renderVykazEditor(){
         </div>`).join("")
       : `<div class="aempty" style="padding:18px">Výkaz nemá dni. Pridajte ich tlačidlom nižšie alebo importom z kalendára.</div>`}
     </div>
-    <button class="aabtn" style="width:100%;justify-content:center;margin-top:8px" onclick="vykPridajDen()">＋ Pridať deň</button>
+    <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+      <button class="aabtn" style="flex:1;justify-content:center" onclick="vykPridajDen()">＋ Pridať deň</button>
+      ${poz.filter(p=>!p.znacka).length>1?`<button class="aabtn" style="justify-content:center" onclick="vykHromadneHodiny()" title="Nastaviť rovnaký počet hodín všetkým odpracovaným dňom">↕ Hodiny všetkým</button>`:''}
+    </div>
     ${!nova?`<button class="aabtn" style="width:100%;justify-content:center;margin-top:8px" onclick="vykazNaProtokol()">→ Vytvoriť akceptačný protokol</button>`:''}
   `,
   ()=>{
@@ -4056,6 +4101,20 @@ function vykZmen(i, pole, hodnota){
 
 // Nový deň = nasledujúci PRACOVNÝ deň po poslednom (preskočí víkend aj sviatok).
 // Ručné klikanie cez víkendy je pri mesačnom výkaze to, čo človeka odradí.
+// Hromadné nastavenie hodín všetkým odpracovaným dňom naraz. Pri paušále
+// (8 h/deň) je bežné, že po importe z kalendára treba len zjednotiť hodiny —
+// klikať ich po jednom cez dvadsať dní je presne to, čo prevzatie z kalendára
+// malo ušetriť. Dovolenkové dni sa nedotknú.
+function vykHromadneHodiny(){
+  const w=_vykazEdit && _vykazEdit.w; if(!w) return;
+  const def=+((firmaData.settings||{}).vykazPausalHodin)||8;
+  const zadane=prompt("Koľko hodín nastaviť všetkým odpracovaným dňom?", String(def));
+  if(zadane==null) return;
+  const h=parseFloat(String(zadane).replace(",",".")); 
+  if(!(h>=0)){ alert("Zadajte nezáporné číslo."); return; }
+  (w.polozky||[]).forEach(p=>{ if(!p.znacka) p.hodiny=h; });
+  prekresliSoScrollom(renderVykazEditor);
+}
 function vykPridajDen(){
   const w=_vykazEdit.w; const S=firmaData.settings||{};
   let base;
@@ -4696,29 +4755,51 @@ function kopirujFakturu(idx){
   if(!skontrolujLimit("faktury","Vo vyššom pláne máte faktúry bez obmedzenia.")) return;
   const k=JSON.parse(JSON.stringify(zdroj));
   const dnes=new Date().toISOString().slice(0,10);
-  k.cislo=dalsieCisloFaktury();
-  k.datum=dnes; k.vystavenie=dnes;
+  // Číslo sa ZÁMERNE nepredprideľuje. `dalsieCisloFaktury()` len odvodí ďalšie
+  // v poradí — nič si nerezervuje. Keby sme ho pridelili teraz a používateľ dal
+  // Zrušiť, číslo by buď „vypadlo" z radu, alebo by si ho vzala ďalšia faktúra
+  // a vznikli by dve rovnaké. Preto číslo pridelí až editor pri OTVORENÍ ako
+  // pri každej novej faktúre, a zapíše sa až uložením.
+  k.datum=dnes; k.vystavenie=dnes; k.dodanie=dnes;
   const dniSpl=+((d.settings||{}).splatnostDni)||14;
   const spl=new Date(); spl.setDate(spl.getDate()+dniSpl);
   k.splatnost=spl.toISOString().slice(0,10);
-  k.vs=String(k.cislo).replace(/\D/g,"");
+  delete k.cislo; delete k.vs;   // priradí editor
   delete k.zaplatena; delete k.uhrada; delete k.uhradaRucne; delete k.zaplateny;
-  delete k.originalSubor;      // originál patrí pôvodnému dokladu
+  delete k.originalSubor;        // originál patrí pôvodnému dokladu
   delete k.id;
-  if(!d.faktury) d.faktury=[];
-  d.faktury.unshift(k);
-  poZmene(); appFaktury();
-  // otvor kópiu na úpravu — kvôli tomu sa kopíruje
-  editFaktura(d.faktury.indexOf(k));
+  // Otvor ako NOVÚ faktúru s predvyplnenými dátami. Do zoznamu sa dostane až
+  // tlačidlom Uložiť — Zrušiť ju zahodí bez stopy (aj bez spálenia čísla).
+  editFaktura(null, k);
 }
 
-function editFaktura(idx){
+// Keď sa zmení dátum vystavenia, dotiahni naň dodanie — ale len ak ho
+// používateľ ešte nerozlíšil (data-auto="1"). Väčšinou sú rovnaké; kto ich
+// potrebuje mať rôzne, prepíše dodanie a odvtedy sa už nehýbe.
+function feDatumZmena(){
+  const dv=document.getElementById("m_datum"), dd=document.getElementById("m_dodanie");
+  if(!dv||!dd) return;
+  if(dd.dataset.auto!=="0"){ dd.value=dv.value; }
+}
+function editFaktura(idx, predloha){
   const d=firmaData; const nova=idx==null;
   // limit plánu — len pri novej faktúre
   if(nova && !skontrolujLimit("faktury","Vo vyššom pláne máte faktúry bez obmedzenia.")) return;
-  _feEdit = nova
-    ? {cislo:dalsieCisloFaktury(),odberatel:"",ico:"",icdph:"",datum:new Date().toISOString().slice(0,10),splatnost:"",vs:"",polozky:[{nazov:"",mn:1,mj:"ks",cena:0}],zaplatena:false}
-    : JSON.parse(JSON.stringify(d.faktury[idx]));
+  if(nova){
+    if(predloha){
+      // kópia: predvyplnené dáta z inej faktúry. Číslo aj VS priradíme až teraz
+      // (dovtedy `kopirujFakturu` obe zmazalo), takže sa nič nerezervovalo
+      // dopredu a Zrušiť ich nespáli.
+      const cislo=dalsieCisloFaktury();
+      _feEdit=Object.assign({odberatel:"",ico:"",icdph:"",zaplatena:false}, predloha);
+      _feEdit.cislo=cislo;
+      _feEdit.vs=String(cislo).replace(/\D/g,"");
+    } else {
+      _feEdit={cislo:dalsieCisloFaktury(),odberatel:"",ico:"",icdph:"",datum:new Date().toISOString().slice(0,10),splatnost:"",vs:"",polozky:[{nazov:"",mn:1,mj:"ks",cena:0}],zaplatena:false};
+    }
+  } else {
+    _feEdit=JSON.parse(JSON.stringify(d.faktury[idx]));
+  }
   if(!_feEdit.polozky || !_feEdit.polozky.length){
     // staré faktúry bez položiek — vytvor jednu z existujúcich súm
     _feEdit.polozky=[{nazov:"Fakturované služby",mn:1,mj:"ks",cena:+_feEdit.bez||0}];
@@ -4734,6 +4815,8 @@ function feModal(idx, nova){
       <div class="mfield"><label>Číslo faktúry</label><input id="m_cislo" value="${esc(f.cislo)}"></div>
       <div class="mfield"><label>Variabilný symbol</label><input id="m_vs" value="${esc(f.vs||f.cislo)}"></div>
     </div>
+   <div class="fe2col">
+    <div class="feStlpec">
     <div class="mfield" style="position:relative"><label>Odberateľ ${hist.length?`<select onchange="feVyberOdberatel(this.value)" style="float:right;font-size:11px;border:1px solid var(--line);border-radius:6px;padding:2px 5px"><option value="">— z histórie —</option>${hist.map((o,i)=>`<option value="${i}">${esc(o.nazov)}</option>`).join('')}</select>`:''}</label>
       <input id="m_odberatel" value="${esc(f.odberatel)}" autocomplete="off" oninput="feHladajFirmu(this.value,'m_odberatel')" placeholder="Začnite písať názov alebo IČO…">
       <div id="feNasep" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:30;background:var(--paper);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px -8px rgba(19,28,43,.25);max-height:240px;overflow-y:auto;margin-top:2px"></div>
@@ -4743,9 +4826,14 @@ function feModal(idx, nova){
       <div class="mfield"><label>IČ DPH odberateľa</label><input id="m_icdph" value="${esc(f.icdph||'')}"></div>
     </div>
     <div class="mrow2">
-      <div class="mfield"><label>Dátum vystavenia</label><input id="m_datum" type="date" value="${esc((f.datum||f.vystavenie||'').slice(0,10))}"></div>
-      <div class="mfield"><label>Splatnosť</label><input id="m_splatnost" type="date" value="${esc((f.splatnost||'').slice(0,10))}"></div>
+      <div class="mfield"><label>Dátum vystavenia</label><input id="m_datum" type="date" value="${esc((f.datum||f.vystavenie||'').slice(0,10))}" onchange="feDatumZmena()"></div>
+      <div class="mfield"><label>Dátum dodania</label><input id="m_dodanie" type="date" value="${esc((f.dodanie||f.datum||f.vystavenie||'').slice(0,10))}" data-auto="${(f.dodanie&&f.dodanie!==f.datum)?'0':'1'}" oninput="this.dataset.auto='0'"></div>
     </div>
+    <div class="mrow2">
+      <div class="mfield"><label>Splatnosť</label><input id="m_splatnost" type="date" value="${esc((f.splatnost||'').slice(0,10))}"></div>
+      <div class="mfield"></div>
+    </div>
+    <div class="ocr-hint" style="margin:-6px 2px 10px">Pri DPH rozhoduje <b>dátum dodania</b> — do ktorého obdobia faktúra spadne. Vystavenie a dodanie sa väčšinou zhodujú; ak nie, riaďte sa dodaním.</div>
     <div class="mfield"><label>Druh plnenia</label>
       <select id="m_plnenie" onchange="feZmenPlnenie(this.value)">
         ${Object.keys(DRUHY_PLNENIA).map(k=>`<option value="${k}" ${druhPlnenia(f)===k?"selected":""}>${esc(DRUHY_PLNENIA[k].n)}</option>`).join("")}
@@ -4774,8 +4862,10 @@ function feModal(idx, nova){
       <input id="m_opravuje" value="${esc(f.opravujeDoklad||'')}" placeholder="napr. 20260003">
       <div style="font-size:11.5px;color:var(--ink-soft);margin-top:4px">Ak odberateľovi vraciate časť peňazí (zľava, vrátený tovar, preplatok), vystavíte dobropis: sumy zadáte so znamienkom mínus a sem napíšete číslo pôvodnej faktúry. Bez tohto čísla Finančná správa výkaz neprijme.</div>
     </div>
-    <div style="margin:14px 0 6px;font-weight:700;font-size:13px">Položky</div>
-    <div id="fePolozky">${fePolozkyHtml()}</div>
+    </div>
+    <div class="feStlpec">
+    <div style="margin:0 0 6px;font-weight:700;font-size:13px">Položky</div>
+    <div id="fePolozky" data-scroll="fePolozky" style="max-height:none">${fePolozkyHtml()}</div>
     <button type="button" class="aabtn" style="margin-top:8px" onclick="fePridajPolozku()">＋ Pridať položku</button>
     <div style="background:var(--bg);border-radius:9px;padding:11px 13px;margin-top:14px;font-size:13px">
       <div style="display:flex;justify-content:space-between"><span>Základ bez DPH</span><b>${eur(s.bez)}</b></div>
@@ -4783,11 +4873,13 @@ function feModal(idx, nova){
       <div style="display:flex;justify-content:space-between;font-size:15px;margin-top:4px;border-top:1px solid var(--line);padding-top:4px"><span><b>Spolu</b></span><b style="color:var(--brand)">${eur(s.spolu)}</b></div>
     </div>
     <div class="mfield" style="margin-top:12px"><label><input type="checkbox" id="m_zapl" ${f.zaplatena?'checked':''} style="width:auto;margin-right:7px">Uhradená</label></div>
+    </div>
+   </div>
   `,
   ()=>{
     const f=_feEdit;
     f.cislo=val("m_cislo"); f.vs=val("m_vs")||f.cislo; f.odberatel=val("m_odberatel");
-    f.ico=val("m_ico"); f.icdph=val("m_icdph"); f.datum=val("m_datum"); f.splatnost=val("m_splatnost");
+    f.ico=val("m_ico"); f.icdph=val("m_icdph"); f.datum=val("m_datum"); f.dodanie=val("m_dodanie")||val("m_datum"); f.splatnost=val("m_splatnost");
     f.opravujeDoklad=val("m_opravuje");
     f.druhPlnenia=val("m_plnenie")||"tuzemsko";
     f.tovarKod=val("m_tovarKod")||""; f.tovarDruh=val("m_tovarDruh")||"";
@@ -4798,7 +4890,8 @@ function feModal(idx, nova){
     if(nova) firmaData.faktury.push(f); else firmaData.faktury[idx]=f;
     poZmene(); appFaktury();
   },
-  nova?null:()=>{ firmaData.faktury.splice(idx,1); poZmene(); appFaktury(); });
+  nova?null:()=>{ firmaData.faktury.splice(idx,1); poZmene(); appFaktury(); },
+  "siroky");
 }
 function feZmenPlnenie(k){
   _feEdit.druhPlnenia=k;
@@ -9467,7 +9560,7 @@ function prognozaRok(rok){
   const S=firmaData.settings||{};
   const faktury=(firmaData.faktury||[]).filter(f=>String(f.datum||f.vystavenie||"").startsWith(String(rok)));
   const prijmySkut=r2(faktury.reduce((a,f)=>a+(+f.bez||0),0));
-  const mesiaceSFakturou=new Set(faktury.map(f=>String(f.datum||f.vystavenie||"").slice(0,7)));
+  const mesiaceSFakturou=new Set(faktury.map(f=>faktObdobie(f)));
   const mesDoteraz=Math.max(mesiaceSFakturou.size,1);
   const faktor=12/mesDoteraz;
   // skutočné odvody z evidencie (naša calcDanRow)
@@ -12607,6 +12700,7 @@ function exportEFakturaUBL(idx){
   const odbIcDph = (f.odberatel&&f.odberatel.icdph)||S.odberatelIcDph||"";
   const odbAdresa = (f.odberatel&&f.odberatel.adresa)||S.odberatelAdresa||"";
   const datVyst=ublDatum(f.datum||f.vystavenie);
+  const datDod=ublDatum(f.dodanie||f.datum||f.vystavenie);   // rozhodujúci pre DPH
   const datSplat=ublDatum(f.splatnost||f.datum||f.vystavenie);
   const mojePeppol=S.mojePeppolId||("0208:"+(m.ico||""));   // 0208 = SK IČO schéma
   const odbPeppol=(f.odberatel&&f.odberatel.peppolId)||S.odberatelPeppolId||("0208:"+(odbIco||""));
@@ -12642,6 +12736,7 @@ function exportEFakturaUBL(idx){
   <cbc:IssueDate>${datVyst}</cbc:IssueDate>
   <cbc:DueDate>${datSplat}</cbc:DueDate>
   <cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>
+  <cbc:TaxPointDate>${datDod}</cbc:TaxPointDate>
   <cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>
   <cbc:BuyerReference>${ubl(f.vs||f.cislo||"")}</cbc:BuyerReference>
   <cac:AccountingSupplierParty>
@@ -12956,7 +13051,7 @@ function dphZberMesiac(mk){
   // natvrdo „A1", takže vystavený dobropis aj faktúra pre nepodnikateľa
   // skončili v oddiele A.1. Funkcia dphOddielFaktura() to vedela rozlíšiť
   // už predtým, len sa nikde nevolala.
-  (d.faktury||[]).filter(f=>String(f.datum||f.vystavenie||"").slice(0,7)===mk).forEach(f=>{
+  (d.faktury||[]).filter(f=>faktObdobie(f)===mk).forEach(f=>{
     doklady.push({id:"fa_"+f.cislo, typ:"vystup", smer:"vystup", oddiel:dphOddielFaktura(f),
       cislo:f.cislo, datum:(f.datum||f.vystavenie||"").slice(0,10),
       icDph:f.icdph||"", ico:f.ico||"", partner:f.odberatel||"",
@@ -13123,7 +13218,7 @@ function dphMetaChyba(){
 let dphVybObdobie="";
 function dphDostupneObdobia(){
   const set=new Set();
-  (firmaData.faktury||[]).forEach(f=>{const d=String(f.datum||f.vystavenie||"").slice(0,7); if(/^\d{4}-\d{2}$/.test(d))set.add(d);});
+  (firmaData.faktury||[]).forEach(f=>{const d=faktObdobie(f); if(/^\d{4}-\d{2}$/.test(d))set.add(d);});
   (firmaData.vydavky||[]).forEach(x=>{const d=String(x.datum||"").slice(0,7); if(/^\d{4}-\d{2}$/.test(d))set.add(d);});
   return [...set].sort().reverse();
 }
@@ -13444,7 +13539,7 @@ function kontrolaPredPodanim(mk, typ){
   // ── ODSÚHLASENIE S REALITOU ──
   // príjmy v evidencii vs. čo prišlo na účet (ak je banka)
   if((d.vypis||[]).length){
-    const prijmyEvid=(d.faktury||[]).filter(f=>String(f.datum||f.vystavenie||"").slice(0,7)===mk).reduce((a,f)=>a+(+f.spolu||0),0);
+    const prijmyEvid=(d.faktury||[]).filter(f=>faktObdobie(f)===mk).reduce((a,f)=>a+(+f.spolu||0),0);
     const prijmyBanka=(d.vypis||[]).filter(t=>t.smer==="prijem"&&String(t.datum||"").slice(0,7)===mk).reduce((a,t)=>a+(+t.suma||0),0);
     if(prijmyEvid>0 && prijmyBanka>0){
       const rozdiel=Math.abs(prijmyEvid-prijmyBanka);
