@@ -62,6 +62,19 @@ export function money(v) {
 }
 export const eur = v => money(v) + " €";
 
+// Odstráni názov firmy zo začiatku adresy, ak sa tam zopakoval (adresa vložená
+// aj s názvom). Porovnáva bez ohľadu na medzery a diakritiku by bolo priveľa —
+// stačí presná zhoda prefixu po normalizácii medzier. Odreže aj oddeľovač
+// (čiarka/medzera), ktorý za názvom ostane.
+export function cistiAdresu(adresa, nazov) {
+  let a = String(adresa || "").replace(/\s+/g, " ").trim();
+  const n = String(nazov || "").replace(/\s+/g, " ").trim();
+  if (n && a.toLowerCase().startsWith(n.toLowerCase())) {
+    a = a.slice(n.length).replace(/^[\s,;·—-]+/, "").trim();
+  }
+  return a;
+}
+
 export function fmtDatum(dt) {
   if (!dt) return "";
   if (/^\d{4}-\d{2}-\d{2}/.test(dt)) {
@@ -86,78 +99,8 @@ export function fmtDatum(dt) {
 //  }
 //  opts = { qrDataUrl, isdoc, patickaCislo }
 // ═══════════════════════════════════════════════════════════════════════════
-// ═══════════════════════════════════════════════════════════════════════════
-//  TYPOGRAFICKÉ ZNAKY, KTORÉ ZABUDOVANÝ FONT NEMÁ
-//
-//  Subset Liberation Sans má 142 znakov: celá slovenská diakritika, € aj ‰ —
-//  ale NIE pomlčku (–), spojovník mínus (—), slovenské úvodzovky („ “),
-//  typografický apostrof (’), trojbodku (…) ani znak násobenia (×).
-//  jsPDF taký znak nenahradí ani nenahlási — jednoducho ho nevykreslí.
-//
-//  Prejavilo sa to na názve firmy „Ing. Roman Slivka – agile management“:
-//  v ISDOC bol správne, na PDF ostala po pomlčke len medzera. Rovnako by ticho
-//  zmizli úvodzovky v popise položky.
-//
-//  Preto sa každý text pred vykreslením prevedie na znaky, ktoré font pozná.
-//  Nahrádza sa CENTRÁLNE — obalením `doc.text` a `doc.splitTextToSize` — aby
-//  sa na nový text nedalo zabudnúť. Zoznam stráži `test_font.js`, ktorý ho
-//  porovnáva priamo s cmap zabudovaného fontu.
-// ═══════════════════════════════════════════════════════════════════════════
-// Znaky, ktoré subset POZNÁ. Vygenerované z cmap oboch rezov (prienik) —
-// `test_font.js` ich porovnáva späť s fontom, takže po výmene fontu sa nesúlad
-// ohlási a nezostane ticho.
-const FONT_ZNAKY = new Set(" !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~ §°ÁÄÉÍÓÔÚÝàáâäéíóôúýČčĎďĚěĹĺĽľŇňŔŕŘřŠšŤťŮůŽž‰€");
-
-// Náhrady tam, kde odstránenie diakritiky nepomôže: typografia a písmená
-// zložené z viacerých znakov (ß → ss, Æ → AE, Ł → L).
-const NAHRADY = {
-  "\u2010":"-","\u2011":"-","\u2012":"-","\u2013":"-","\u2014":"-","\u2015":"-","\u2212":"-","\u00AD":"",
-  "\u201A":"'","\u2018":"'","\u2019":"'","\u201B":"'","\u2039":"'","\u203A":"'",
-  "\u201E":'"',"\u201C":'"',"\u201D":'"',"\u201F":'"',"\u00AB":'"',"\u00BB":'"',
-  "\u2026":"...","\u00D7":"x","\u00F7":"/","\u2022":"-","\u2192":"->","\u2264":"<=","\u2265":">=",
-  "\u2009":" ","\u202F":" ","\u2007":" ","\u200B":"","\u2028":" ","\u2029":" ",
-  "\u00DF":"ss","\u1E9E":"SS","\u00C6":"AE","\u00E6":"ae","\u0152":"OE","\u0153":"oe",
-  "\u00D8":"O","\u00F8":"o","\u0141":"L","\u0142":"l","\u0110":"D","\u0111":"d",
-  "\u00D0":"D","\u00F0":"d","\u00DE":"Th","\u00FE":"th","\u0126":"H","\u0127":"h",
-  "\u0131":"i","\u0132":"IJ","\u0133":"ij","\u013F":"L","\u0140":"l","\u014A":"N","\u014B":"n",
-  "\u0166":"T","\u0167":"t","\u017F":"s","\u0149":"'n","\u0138":"k",
-  // interpunkcia a značky, ktoré sa bežne objavia v popise alebo v názve firmy
-  "\u00B7":"-","\u00A9":"(c)","\u00AE":"(R)","\u2122":"(TM)","\u2116":"c.","\u00B5":"u",
-  "\u00BD":"1/2","\u00BC":"1/4","\u00BE":"3/4","\u00B1":"+/-","\u00AC":"-","\u00A6":"|",
-  "\u00A8":'"',"\u00AF":"-","\u00B4":"'","\u00B8":",","\u00A1":"!","\u00BF":"?",
-  "\u00AA":"a","\u00BA":"o","\u2020":"+","\u2021":"++","\u2205":"0","\u2300":"0",
-  "\u00A2":"c","\u00A3":"GBP","\u00A5":"JPY","\u00A4":"",
-};
-
-// Jeden znak → to najbližšie, čo font vie nakresliť.
-// Poradie je zámerné: najprv čo font pozná, potom výslovná náhrada, potom
-// odstránenie diakritiky (ö → o, ő → o) a až celkom nakoniec otáznik. Otáznik
-// je horší než správne písmeno, ale NEPOROVNATEĽNE lepší než tichá diera —
-// „Mller“ vyzerá ako preklep výstavcu, „M?ller“ ako chýbajúci znak.
-function znakPreFont(c) {
-  if (FONT_ZNAKY.has(c)) return c;
-  if (NAHRADY[c] != null) return NAHRADY[c];
-  const bez = c.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  if (bez && [...bez].every(x => FONT_ZNAKY.has(x))) return bez;
-  return "?";
-}
-export function bezpecnyText(x) {
-  if (typeof x === "string") return [...x].map(znakPreFont).join("");
-  if (Array.isArray(x)) return x.map(bezpecnyText);
-  return x;
-}
-function chranFont(doc) {
-  const pText = doc.text.bind(doc);
-  doc.text = function (t, ...r) { return pText(bezpecnyText(t), ...r); };
-  const pSplit = doc.splitTextToSize.bind(doc);
-  doc.splitTextToSize = function (t, ...r) { return pSplit(bezpecnyText(t), ...r); };
-  const pWidth = doc.getTextWidth.bind(doc);
-  doc.getTextWidth = function (t, ...r) { return pWidth(bezpecnyText(t), ...r); };
-  return doc;
-}
-
 export function vykresliFakturu(jsPDF, model, opts = {}) {
-  const doc = chranFont(new jsPDF({ unit: "mm", format: "a4" }));
+  const doc = new jsPDF({ unit: "mm", format: "a4" });
   const FONT = registrujFont(doc) ? "LibSans" : "helvetica";
   const { INK, SOFT, MUTED, LINE, BRAND, BGSOFT, BIELA, AKCENT, LOGO2 } = PALETA;
   const W = 210, L = 18, R = W - 18;
@@ -414,7 +357,10 @@ export function modelZakaznickejFaktury(f, meta, sumy, settings = {}) {
     },
     odberatel: {
       nazov: odbNazov,
-      adresa: f.adresa || (f.odberatel && f.odberatel.adresa) || "",
+      // Adresa niekedy začína názvom firmy (zdroj: import e-faktúry alebo staršie
+      // dáta, kde bol odberateľ v jednom poli). Názov by sa potom v bloku zobrazil
+      // dvakrát — raz ako nadpis, raz na začiatku adresy. Odstránime ho.
+      adresa: cistiAdresu(f.adresa || (f.odberatel && f.odberatel.adresa) || "", odbNazov),
       ico: f.ico, dic: f.dic, icdph: f.icdph,
     },
     datumy: {

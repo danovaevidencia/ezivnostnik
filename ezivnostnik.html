@@ -775,7 +775,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.07.30-DU";  // ISDOC: DIČ (TaxScheme TIN) pre odberateľa aj dodávateľa — parita s KROS
+const APP_VERZIA = "2026.07.30-DV";  // faktúra: pole adresy odberateľa + odstránenie duplicitného názvu z adresy (PDF, ISDOC, UBL)
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -4831,6 +4831,8 @@ function feModal(idx, nova){
       <div class="mfield"><label>IČO odberateľa</label><input id="m_ico" value="${esc(f.ico||'')}"></div>
       <div class="mfield"><label>IČ DPH odberateľa</label><input id="m_icdph" value="${esc(f.icdph||'')}"></div>
     </div>
+    <div class="mfield"><label>Adresa odberateľa <span style="font-weight:400;color:var(--ink-soft)">— bez názvu firmy</span></label>
+      <input id="m_odbAdresa" value="${esc(f.adresa||'')}" placeholder="napr. Hlavná 1, 811 01 Bratislava"></div>
     <div class="mrow2">
       <div class="mfield"><label>Dátum vystavenia</label><input id="m_datum" type="date" value="${esc((f.datum||f.vystavenie||'').slice(0,10))}" onchange="feDatumZmena()"></div>
       <div class="mfield"><label>Dátum dodania</label><input id="m_dodanie" type="date" value="${esc((f.dodanie||f.datum||f.vystavenie||'').slice(0,10))}" data-auto="${(f.dodanie&&f.dodanie!==f.datum)?'0':'1'}" oninput="this.dataset.auto='0'"></div>
@@ -4889,6 +4891,12 @@ function feModal(idx, nova){
     const f=_feEdit;
     f.cislo=val("m_cislo"); f.vs=val("m_vs")||f.cislo; f.odberatel=val("m_odberatel");
     f.ico=val("m_ico"); f.icdph=val("m_icdph");
+    // adresa bez názvu firmy — ak ho tam používateľ vloží, orežeme ho, nech sa
+    // v PDF nezobrazí dvakrát (raz ako nadpis, raz v adrese)
+    { let _a=(val("m_odbAdresa")||"").replace(/\s+/g," ").trim();
+      const _n=(val("m_odberatel")||"").replace(/\s+/g," ").trim();
+      if(_n && _a.toLowerCase().startsWith(_n.toLowerCase())) _a=_a.slice(_n.length).replace(/^[\s,;·—-]+/,"").trim();
+      f.adresa=_a; }
     // `datum` a `vystavenie` musia ostať v zhode. Editor ukladal len `datum`,
     // ale PDF aj UBL čítajú `vystavenie || datum` — takže po zmene dátumu
     // tlačili STARÉ vystavenie z pôvodných dát (posun o deň v ukážke). Držíme
@@ -4945,7 +4953,7 @@ let _feHladajTimer=null, _feHladajPosledny="", _feAktKonf=null;
 function feNasepKonfig(vstupId){
   // mapovanie vstupného poľa na cieľové polia + dropdown kontajner
   const K={
-    "m_odberatel":{nasep:"feNasep", ciele:{nazov:"m_odberatel", ico:"m_ico", icdph:"m_icdph"}},
+    "m_odberatel":{nasep:"feNasep", ciele:{nazov:"m_odberatel", ico:"m_ico", icdph:"m_icdph", adresa:"m_odbAdresa"}},
     "m_partner":  {nasep:"feNasepP", ciele:{nazov:"m_partner", ico:"m_dodIco", icdph:"m_dodIcDph"}},
   };
   return K[vstupId]||{nasep:"feNasep", ciele:{nazov:vstupId}};
@@ -12714,7 +12722,9 @@ function exportEFakturaUBL(idx){
   const odbNazov = typeof f.odberatel==="string"?f.odberatel:((f.odberatel&&f.odberatel.nazov)||S.odberatelNazov||"");
   const odbIco = (f.odberatel&&f.odberatel.ico)||S.odberatelIco||"";
   const odbIcDph = (f.odberatel&&f.odberatel.icdph)||S.odberatelIcDph||"";
-  const odbAdresa = (f.odberatel&&f.odberatel.adresa)||S.odberatelAdresa||"";
+  let odbAdresa = f.adresa || (f.odberatel&&f.odberatel.adresa) || S.odberatelAdresa || "";
+  { const _n=String(f.odberatel||"").replace(/\s+/g," ").trim(); const _a=String(odbAdresa).replace(/\s+/g," ").trim();
+    odbAdresa = (_n && _a.toLowerCase().startsWith(_n.toLowerCase())) ? _a.slice(_n.length).replace(/^[\s,;·—-]+/,"").trim() : _a; }
   const datVyst=ublDatum(f.datum||f.vystavenie);
   const datDod=ublDatum(f.dodanie||f.datum||f.vystavenie);   // rozhodujúci pre DPH
   const datSplat=ublDatum(f.splatnost||f.datum||f.vystavenie);
@@ -12912,6 +12922,11 @@ function isdocXml(idx){
     if(mm) return {ulica:mm[1].trim(),cislo:mm[2].trim(),psc:mm[3].replace(/\s/g,""),mesto:mm[4].trim()};
     return {ulica:String(a||""),cislo:"",psc:"",mesto:""}; };
   const da=parseAdr(m.adresa);
+  // adresa odberateľa: z faktúry, očistená od názvu firmy (nech sa nezdvojí)
+  let _oaRaw=String(f.adresa||"").replace(/\s+/g," ").trim();
+  const _on=String(f.odberatel||"").replace(/\s+/g," ").trim();
+  if(_on && _oaRaw.toLowerCase().startsWith(_on.toLowerCase())) _oaRaw=_oaRaw.slice(_on.length).replace(/^[\s,;·—-]+/,"").trim();
+  const oa=parseAdr(_oaRaw);
   const lines=(f.polozky||[]).map((p,i)=>{
     const lineBez=r2((+p.mn||0)*(+p.cena||0)), lineDph=r2(lineBez*s.sadzba);
     return `      <InvoiceLine>
@@ -12947,6 +12962,7 @@ function isdocXml(idx){
    <AccountingCustomerParty><Party>
       <PartyIdentification><ID>${esc(f.ico||"")}</ID></PartyIdentification>
       <PartyName><Name>${esc(f.odberatel)}</Name></PartyName>
+      <PostalAddress><StreetName>${esc(oa.ulica)}</StreetName><BuildingNumber>${esc(oa.cislo)}</BuildingNumber><CityName>${esc(oa.mesto)}</CityName><PostalZone>${esc(oa.psc)}</PostalZone><Country><IdentificationCode>SK</IdentificationCode></Country></PostalAddress>
       <PartyTaxScheme><CompanyID>${esc(f.icdph||"")}</CompanyID><TaxScheme>VAT</TaxScheme></PartyTaxScheme>${f.dic||f.icdph?`
       <PartyTaxScheme><CompanyID>${esc(f.dic||String(f.icdph||"").replace(/^SK/i,""))}</CompanyID><TaxScheme>TIN</TaxScheme></PartyTaxScheme>`:""}
    </Party></AccountingCustomerParty>
