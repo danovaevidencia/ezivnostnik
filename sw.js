@@ -16,11 +16,17 @@
 //     v cache pri každom spustení appky.
 //   · ikony, manifest    → najprv cache (menia sa výnimočne)
 //   · CDN knižnice       → nechávame na HTTP cache prehliadača, sem nesiahame
+//   · POST na /ezivnostnik.html → SHARE TARGET. Android takto posiela súbor
+//     zdieľaný zo systémového menu. GitHub Pages je statický hosting a na POST
+//     odpovie 405 — jediný, kto naň môže odpovedať, je tento worker.
 //
 //  Pri zmene appky staci zvysit VERZIA — stary cache sa vymaze pri aktivacii.
 // ═══════════════════════════════════════════════════════════════════════════
-const VERZIA = "2026.07.30-DW";
+const VERZIA = "2026.07.31-EB";
 const CACHE  = "ezivnostnik-" + VERZIA;
+// Odkladisko pre súbor zo systémového „Zdieľať". Nemá verziu v mene — obsah je
+// dočasný a musí prežiť aj aktualizáciu workera medzi zdieľaním a vyzdvihnutím.
+const ZDIELANE = "ezivnostnik-zdielane";
 
 // minimum na to, aby sa appka otvorila aj bez signálu
 const ZAKLAD = [
@@ -44,7 +50,10 @@ self.addEventListener("install", e => {
 self.addEventListener("activate", e => {
   e.waitUntil((async () => {
     const mena = await caches.keys();
-    await Promise.all(mena.filter(m => m !== CACHE).map(m => caches.delete(m)));
+    // ZDIELANE sa zámerne NEMAŽE: medzi prijatím súboru a jeho vyzdvihnutím
+    // appkou môže prísť aktualizácia workera. Zmazať by znamenalo, že
+    // používateľ zdieľal doklad a nič sa nestalo — bez vysvetlenia.
+    await Promise.all(mena.filter(m => m !== CACHE && m !== ZDIELANE).map(m => caches.delete(m)));
     await self.clients.claim();
   })());
 });
@@ -56,6 +65,33 @@ self.addEventListener("message", e => {
 
 self.addEventListener("fetch", e => {
   const req = e.request;
+
+  // ── SHARE TARGET ──
+  // Musí stáť PRED testom na GET, inak POST prepadne na sieť a share zlyhá.
+  // Odpoveďou je presmerovanie, nie HTML: appka sa má otvoriť normálnym GET,
+  // aby POST neostal v histórii a obnovenie stránky ho neposlalo znova.
+  if (req.method === "POST" && new URL(req.url).pathname.endsWith("/ezivnostnik.html")) {
+    e.respondWith((async () => {
+      try {
+        const fd = await req.formData();
+        const f = fd.get("doklad");
+        if (f && f.size) {
+          const c = await caches.open(ZDIELANE);
+          // Cache API berie Response, takže súbor prežije aj štart appky.
+          // Meno ide do hlavičky zakódované — hlavičky nesmú mať diakritiku.
+          await c.put("/__zdielany", new Response(f, {
+            headers: {
+              "Content-Type": f.type || "application/octet-stream",
+              "X-Nazov": encodeURIComponent(f.name || "doklad"),
+            },
+          }));
+        }
+      } catch (_) {}   // nič sa neuloží → appka sa otvorí normálne, bez dokladu
+      return Response.redirect("/ezivnostnik.html?zdielane=1", 303);
+    })());
+    return;
+  }
+
   if (req.method !== "GET") return;
 
   const url = new URL(req.url);

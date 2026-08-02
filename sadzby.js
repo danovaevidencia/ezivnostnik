@@ -69,6 +69,31 @@ const SADZBY = {
        {od:"2026-01-01", v:121.92, zdroj:"16 % zo 762 € — potvrdzuje Dôvera aj Podnikajte.sk"}]},
   vzKoef:         {n:"Koeficient vymeriavacieho základu", sk:"odvody", mienaSa:"zriedka", overenost:"kod", kontrola:null,
     h:[{od:null, v:0.672948, zdroj:"koeficient na výpočet vymeriavacieho základu"}]},
+  // ── SOCIÁLNE POISTENIE SZČO ──
+  // Od 1. 1. 2026 sa systém prepísal: minimálny VZ vzrástol z 50 % na 60 %
+  // priemernej mzdy spred dvoch rokov a pribudol „osobitný" VZ (mikroodvody)
+  // pre tých, čo nedosiahli hranicu príjmu.
+  socSadzba:      {n:"Sadzba sociálneho poistenia SZČO", sk:"odvody", mienaSa:"zriedka", overenost:"zdroj", kontrola:"2026-07-31",
+    h:[{od:"2025-01-01", v:0.3315, zdroj:"33,15 % — súčet sadzieb všetkých fondov SZČO (Sociálna poisťovňa)"}]},
+  socMinVZ:       {n:"Min. mesačný vymeriavací základ SP", sk:"odvody", mienaSa:"rocne", overenost:"zdroj", kontrola:"2026-07-31",
+    h:[{od:"2025-01-01", v:715, zdroj:"50 % priemernej mzdy za 2023"},
+       {od:"2026-01-01", v:914.40, zdroj:"60 % priemernej mzdy za 2024 (1 524 €) — socpoist.sk, tabuľky od 1. 1. 2026"}]},
+  socMaxVZ:       {n:"Max. mesačný vymeriavací základ SP", sk:"odvody", mienaSa:"rocne", overenost:"zdroj", kontrola:"2026-07-31",
+    h:[{od:"2025-01-01", v:15730, zdroj:"11-násobok jednej dvanástiny VVZ (od 2025 zo 7-násobku)"},
+       {od:"2026-01-01", v:16764, zdroj:"11 × 1 524 € — socpoist.sk, tabuľky od 1. 1. 2026"}]},
+  socMinOdvod:    {n:"Min. mesačný odvod SP", sk:"odvody", mienaSa:"rocne", overenost:"zdroj", kontrola:"2026-07-31",
+    h:[{od:"2026-01-01", v:303.11, zdroj:"33,15 % z 914,40 € — socpoist.sk"}]},
+  // POZOR: hranica sa posudzuje na PRÍJME (bez odpočítania výdavkov), nie na
+  // základe dane. Časť odborných článkov to uvádza nesprávne; Sociálna poisťovňa
+  // hovorí jednoznačne „príjem z podnikania a z inej samostatnej zárobkovej činnosti".
+  socHranicaPrijmu:{n:"Príjem, od ktorého sa SP počíta zo základu dane", sk:"odvody", mienaSa:"rocne", overenost:"zdroj", kontrola:"2026-07-31",
+    h:[{od:"2026-01-01", v:9144, zdroj:"50 % všeobecného vymeriavacieho základu (12 × 1 524 € × 0,5) — socpoist.sk"}]},
+  socOsobitnyVZ:  {n:"Osobitný vymeriavací základ (mikroodvody)", sk:"odvody", mienaSa:"rocne", overenost:"zdroj", kontrola:"2026-07-31",
+    h:[{od:"2026-01-01", v:396.24, zdroj:"26 % z jednej dvanástiny VVZ — socpoist.sk"}]},
+  socOsobitnyOdvod:{n:"Mesačný odvod z osobitného VZ", sk:"odvody", mienaSa:"rocne", overenost:"zdroj", kontrola:"2026-07-31",
+    h:[{od:"2026-01-01", v:131.34, zdroj:"33,15 % z 396,24 € — socpoist.sk"}]},
+  socOslobodenie: {n:"Príjem, do ktorého sa SP neplatí vôbec", sk:"odvody", mienaSa:"rocne", overenost:"zdroj", kontrola:"2026-07-31",
+    h:[{od:"2026-01-01", v:2876.90, zdroj:"10,5-násobok životného minima — novela zák. o soc. poistení schválená 3. 6. 2026"}]},
   nezdanitCast:   {n:"NČZD na daňovníka", sk:"nczd", mienaSa:"rocne", overenost:"zdroj", kontrola:"2026-07-21",
     h:[{od:"2025-01-01", v:5753.79, zdroj:"§ 11 ZDP — 21-násobok ŽM 273,99 € (2025)"},
        {od:"2026-01-01", v:5966.73, zdroj:"§ 11 ZDP — 21-násobok ŽM 284,13 €"}]},
