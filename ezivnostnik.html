@@ -778,7 +778,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.07.31-EB";  // druhý pár očí: krížové kontroly nad celým rokom pred podaním (B11)
+const APP_VERZIA = "2026.08.02-EF";  // fix: zmazaná SaaS faktúra sa vracala pri každom spustení + export/import SaaS faktúr
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -1240,7 +1240,7 @@ function mozemPisat(modul){
   // Vlastník: účtovnícke moduly sú len na čítanie, ak firma ÚČTOVNÍKA MÁ.
   // Bez účtovníka sa nič nemení — dnešní používatelia rozdiel nepocítia.
   if(UCTOVNICKE_MODULY.includes(modul) && firmaMaUctovnika()
-     && !(firmaConfig && firmaConfig.klientMozeUctovat)) return false;
+     && !(firmaConfig && firmaConfig.klient_moze_uctovat)) return false;
   return true;
 }
 // Pás cez obrazovku modulu, keď je len na čítanie — vysvetlí PREČO.
@@ -1285,6 +1285,24 @@ async function nacitajPozvanky(){
   return data || [];
 }
 
+// Zoznam prístupov aj s e-mailami. `auth.users` nie je cez RLS dostupná, preto
+// SECURITY DEFINER funkcia — vydá e-mail len tomu, kto k firme prístup má.
+// Bez nej svietilo v UI „a3f19c8e…", čo je pri jednom účtovníkovi neužitočné
+// a pri viacerých nebezpečné: odvolať prístup podľa skráteného UUID je hádanie.
+let pristupyDetail = [];
+async function nacitajPristupyDetail(){
+  pristupyDetail = [];
+  if(localMode || !sb || !firmaId) return;
+  try{
+    const { data, error } = await sb.rpc("pristupy_firmy_s_emailom", { p_firma_id: firmaId });
+    if(error) throw error;
+    pristupyDetail = data || [];
+  }catch(e){
+    // Staršie prostredie funkciu mať nemusí — vtedy sa vrátime k user_id.
+    console.warn("Prístupy s e-mailom sa nenačítali:", e.message||e);
+  }
+}
+
 async function appZdielanie(){
   if(localMode || !sb){
     document.getElementById("appScreen").innerHTML =
@@ -1299,6 +1317,11 @@ async function appZdielanie(){
   const poz=await nacitajPozvanky();
   const cakajuce=poz.filter(p=>!p.prijate && p.plati_do>new Date().toISOString());
   const { data:{ user } } = await sb.auth.getUser();
+  await nacitajPristupyDetail();
+  // Zoznam z RPC obsahuje aj vlastníka; do tabuľky prístupov patria len ostatní.
+  const detail = pristupyDetail.filter(x=>!x.je_vlastnik);
+  const maUct  = pristupyFirmy.some(p=>p.rola==="uctovnik");
+  const klientPise = !!(firmaConfig && firmaConfig.klient_moze_uctovat);
 
   document.getElementById("appScreen").innerHTML = appHlavicka("zdielanie")+`
     <div class="csub" style="margin-bottom:12px">${pristupyFirmy.length} prístupov · ${cakajuce.length} pozvánok čaká</div>
@@ -1308,6 +1331,10 @@ async function appZdielanie(){
       <div class="mfield"><label>Rola</label>
         <select id="pzRola">${Object.entries(ROLY_POPIS).map(([k,v])=>`<option value="${k}">${v}</option>`).join("")}</select>
       </div>
+      <div class="csub" style="margin:-4px 0 8px;font-size:11.5px">
+        Pozvaný dostane e-mail s odkazom. Prijať ho môže len z účtu s tou istou adresou —
+        preposlanie odkazu inému človeku prístup neudelí.
+      </div>
       <button class="aabtn pri" style="width:100%;justify-content:center;margin-top:6px" onclick="vytvorPozvanku()">＋ Vytvoriť pozvánku</button>
       <div id="pzVysledok" style="margin-top:10px"></div>
     </div>
@@ -1315,15 +1342,36 @@ async function appZdielanie(){
     <div class="card" style="margin-bottom:14px">
       <b style="font-family:'Fraunces',serif;font-size:15px">Kto má prístup</b>
       ${pristupyFirmy.length ? `<div class="alist" style="margin-top:8px">
-        ${pristupyFirmy.map(p=>`<div class="arow" style="grid-template-columns:1fr auto auto;cursor:default;gap:8px">
-          <div><div class="acol-strong" style="font-size:13px">${esc(p.user_id===user.id?"vy":p.user_id.slice(0,8)+"…")}</div>
+        ${pristupyFirmy.map(p=>{
+          const d = detail.find(x=>x.user_id===p.user_id);
+          const meno = p.user_id===user.id ? "vy"
+                     : (d && d.email ? d.email : p.user_id.slice(0,8)+"…");
+          return `<div class="arow" style="grid-template-columns:1fr auto auto;cursor:default;gap:8px">
+          <div style="min-width:0"><div class="acol-strong" style="font-size:13px;overflow:hidden;text-overflow:ellipsis">${esc(meno)}</div>
                <div class="acol-muted">${esc(ROLY_POPIS[p.rola]||p.rola)}</div></div>
           <div class="acol-muted" style="font-size:11px">${p.udelene?fmtDatum(String(p.udelene).slice(0,10)):""}</div>
           <button class="aabtn" style="padding:3px 9px;font-size:11px;border-color:var(--neg);color:var(--neg)" onclick="odvolajPristup('${p.user_id}')">Odvolať</button>
-        </div>`).join("")}</div>`
+        </div>`;}).join("")}</div>`
         : `<div class="aempty" style="padding:14px">Firmu zatiaľ nikto ďalší nevidí.</div>`}
       <div class="csub" style="margin-top:8px">Vlastník sa v zozname neuvádza — vlastníctvo drží samotná firma a odvolať sa nedá.</div>
     </div>
+
+    ${maUct?`<div class="card" style="margin-bottom:14px">
+      <b style="font-family:'Fraunces',serif;font-size:15px">Kto vedie účtovnú agendu</b>
+      <div class="csub" style="margin:6px 0 10px">
+        Kým máte účtovníka, Banka, DPH, priznania a majetok sú pre vás len na čítanie —
+        aby ste si navzájom neprepisovali prácu. Ak chcete zapisovať aj sami, zapnite to tu.
+      </div>
+      <label style="display:flex;gap:10px;align-items:flex-start;cursor:pointer">
+        <input type="checkbox" ${klientPise?"checked":""} onchange="nastavKlientUctuje(this.checked)" style="width:auto;margin-top:3px">
+        <span style="font-size:13px;line-height:1.5">
+          <b>Chcem do tejto agendy zapisovať aj ja</b>
+          <span style="display:block;color:var(--ink-soft);font-size:11.5px;margin-top:2px">
+            Dohodnite sa s účtovníkom — dvaja ľudia v tej istej agende si vedia navzájom prepísať čísla.
+          </span>
+        </span>
+      </label>
+    </div>`:''}
 
     ${cakajuce.length?`<div class="card">
       <b style="font-family:'Fraunces',serif;font-size:15px">Čakajúce pozvánky</b>
@@ -1331,6 +1379,7 @@ async function appZdielanie(){
         ${cakajuce.map(p=>`<div class="arow" style="grid-template-columns:1fr auto auto;cursor:default;gap:8px">
           <div><div class="acol-strong" style="font-size:13px">${esc(p.email)}</div>
                <div class="acol-muted">${esc(ROLY_POPIS[p.rola]||p.rola)} · platí do ${fmtDatum(String(p.plati_do).slice(0,10))}</div></div>
+          <button class="aabtn" style="padding:3px 9px;font-size:11px" onclick="posliPozvankuZnova('${p.token}', this)" title="Poslať e-mail znova">✉</button>
           <button class="aabtn" style="padding:3px 9px;font-size:11px" onclick="kopirujPozvanku('${p.token}')">Kopírovať odkaz</button>
           <button class="aabtn" style="padding:3px 9px;font-size:11px;border-color:var(--neg);color:var(--neg)" onclick="zrusPozvanku('${p.id}')">✕</button>
         </div>`).join("")}
@@ -1364,15 +1413,64 @@ async function vytvorPozvanku(){
     return;
   }
   const url=pozvankaOdkaz(token);
-  // E-mail zatiaľ neodosielame — odkaz sa dá poslať ručne. Až po nasadení
-  // edge funkcie sa to zmení; dovtedy je tok plne funkčný a otestovateľný.
+
+  // Pozvánka je v databáze — od tejto chvíle platí bez ohľadu na to, či sa
+  // e-mail podarí odoslať. Preto sa najprv ukáže odkaz a až potom sa skúša
+  // odoslanie: keby sa poradie otočilo a mail zlyhal, používateľ by nemal
+  // v ruke nič, hoci pozvánka existuje.
+  const odkazBox = `<div style="margin-top:6px;word-break:break-all;font-family:ui-monospace,monospace;font-size:11px">${esc(url)}</div>
+    <button class="aabtn" style="margin-top:8px;padding:4px 10px;font-size:11.5px" onclick="kopirujPozvanku('${token}')">Kopírovať odkaz</button>`;
+
   box.innerHTML=`<div style="background:#eef7f0;border-radius:9px;padding:10px 12px;font-size:12.5px">
-    ✓ Pozvánka vytvorená pre <b>${esc(email)}</b>. Pošlite jej tento odkaz:
-    <div style="margin-top:6px;word-break:break-all;font-family:ui-monospace,monospace;font-size:11px">${esc(url)}</div>
-    <button class="aabtn" style="margin-top:8px;padding:4px 10px;font-size:11.5px" onclick="kopirujPozvanku('${token}')">Kopírovať</button>
+    ✓ Pozvánka vytvorená pre <b>${esc(email)}</b>. <span id="pzMail">Odosielam e-mail…</span>
+    ${odkazBox}
   </div>`;
   document.getElementById("pzEmail").value="";
-  appZdielanie();
+
+  // Odoslanie beží cez edge funkciu — Resend API kľúč nepatrí do prehliadača.
+  // Funkcii sa posiela LEN token; adresu si dotiahne z databázy, takže sa
+  // pozvánka nedá presmerovať inam, než na akú bola vystavená.
+  try{
+    const { data, error } = await sb.functions.invoke("pozvanka", { body:{ token } });
+    const st=document.getElementById("pzMail");
+    if(error || (data && data.chyba)) throw new Error((data&&data.chyba) || error.message);
+    if(st) st.innerHTML = `E-mail odoslaný. <span style="color:var(--ink-soft)">Ak nepríde do pár minút, pošlite odkaz ručne.</span>`;
+  }catch(e){
+    const st=document.getElementById("pzMail");
+    if(st) st.innerHTML = `<span style="color:var(--warn-deep,#8a6d3b)">E-mail sa nepodarilo odoslať — pošlite odkaz ručne.</span>`;
+    console.warn("Pozvánka e-mailom:", e.message||e);
+  }
+  // Prekreslenie AŽ po odoslaní: appZdielanie() prepíše obsah aj s hláškou.
+  setTimeout(appZdielanie, 2500);
+}
+
+// Nastavenie mení VLASTNÍK, nie účtovník — je to rozhodnutie o tom, kto smie
+// do vlastných dát. SQL funkcia to ešte raz overuje na serveri.
+async function nastavKlientUctuje(hodnota){
+  try{
+    const { error } = await sb.rpc("nastav_klient_moze_uctovat",
+      { p_firma_id: firmaId, p_hodnota: !!hodnota });
+    if(error) throw error;
+    if(!firmaConfig) firmaConfig={};
+    firmaConfig.klient_moze_uctovat = !!hodnota;
+    // Zmena rozhoduje o tom, čo smiete otvoriť — plocha aj moduly sa musia
+    // prekresliť hneď, inak by ste videli zámok, ktorý už neplatí.
+    cloudMsg(hodnota ? "Môžete zapisovať aj do účtovnej agendy." : "Účtovnú agendu vedie účtovník.","ok");
+    renderLauncher();
+    appZdielanie();
+  }catch(e){ alert("Nastavenie sa nepodarilo uložiť: "+(e.message||e)); }
+}
+
+async function posliPozvankuZnova(token, btn){
+  if(btn){ btn.textContent="…"; btn.disabled=true; }
+  try{
+    const { data, error } = await sb.functions.invoke("pozvanka", { body:{ token } });
+    if(error || (data && data.chyba)) throw new Error((data&&data.chyba) || error.message);
+    cloudMsg("E-mail odoslaný znova.","ok");
+  }catch(e){
+    alert("Odoslanie zlyhalo: "+(e.message||e)+"\n\nOdkaz môžete poslať ručne cez „Kopírovať odkaz\u201c.");
+  }
+  if(btn){ btn.textContent="✉"; btn.disabled=false; }
 }
 
 async function zrusPozvanku(id){
@@ -1533,6 +1631,8 @@ function zobrazFirmu(){
   // okno výdavku potrebuje kategórie, partnerov aj limity plánu; skôr by sa
   // otvoril modál nad prázdnou appkou.
   if(!_zdielaneSkusene){ _zdielaneSkusene=true; prevezmiZdielane(); spustiSkratku(); }
+  // Čakajúce doklady sa ťahajú na pozadí — plocha na ne nečaká.
+  if(typeof nacitajCakajuce==="function") nacitajCakajuce(true);
 }
 let _zdielaneSkusene=false;
 
@@ -3389,6 +3489,19 @@ function renderHomeStrip(){
     html += `<button class="hchip ${_pwaPrompt ? "pri" : ""}" onclick="nainstalujApp()"
               title="Nainštalovať eživnostník do telefónu">⬇ Nainštalovať do telefónu</button>`;
   }
+  // Doklady, ktoré prišli e-mailom a čakajú. Pás sa ukáže len keď naozaj niečo
+  // je — trvalý prvok „0 čakajúcich" by len zaberal miesto na 390 px obrazovke.
+  const _cak = (typeof cakajuceNove==="function") ? cakajuceNove() : 0;
+  if(_cak > 0){
+    html += `<div onclick="otvorCakajuce()" style="grid-column:1/-1;display:flex;align-items:center;gap:10px;
+        background:var(--bg);border:1px solid var(--line);border-left:3px solid var(--brand);
+        border-radius:9px;padding:10px 13px;margin-top:10px;cursor:pointer;font-size:12.5px">
+      <span style="font-size:16px">📨</span>
+      <div style="flex:1"><b>${_cak} ${_cak===1?"doklad prišiel":(_cak<5?"doklady prišli":"dokladov prišlo")} e-mailom</b>
+        <span style="color:var(--ink-soft)"> — ťuknite a spracujte</span></div>
+      <span style="color:var(--ink-soft)">›</span>
+    </div>`;
+  }
   html += `</div>`;
   host.innerHTML = html;
 }
@@ -3914,7 +4027,7 @@ function pasRolyPlocha(){
   let text="";
   if(r==="nahlad")
     text="🔒 <b>Prístup len na čítanie.</b> Vidíte všetko, meniť nemôžete nič.";
-  else if(r==="vlastnik" && maUct && !(firmaConfig && firmaConfig.klientMozeUctovat))
+  else if(r==="vlastnik" && maUct && !(firmaConfig && firmaConfig.klient_moze_uctovat))
     text="🔒 <b>Banku, DPH, priznania a majetok vedie váš účtovník.</b> Faktúry, výdavky, jazdy a výkazy sú vaše ako doteraz.";
   if(!text) return "";
   return `<div style="grid-column:1/-1;background:var(--bg);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:9px;padding:10px 13px;margin-bottom:12px;font-size:12.5px">${text}</div>`;
@@ -4795,16 +4908,79 @@ function faktToISO(v){
 }
 function faktImport(){
   const inp=document.createElement("input");
-  inp.type="file"; inp.accept=".xlsx,.xls,.xml,.isdoc,.pdf"; inp.multiple=true;
+  inp.type="file"; inp.accept=".xlsx,.xls,.xml,.isdoc,.pdf,.json"; inp.multiple=true;
   inp.onchange=e=>{ const files=[...e.target.files]; if(files.length) faktImportSubory(files); };
   inp.click();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  IMPORT VYDANÝCH SaaS FAKTÚR (JSON z admin panelu)
+//
+//  Faktúry za predplatné vystavuje Stripe webhook do tabuľky `saas_faktury`.
+//  Sú to bežné vydané faktúry — len uhradené kartou namiesto prevodu. Do
+//  daňovej evidencie teda patria rovnako ako ostatné: medzi príjmy a do
+//  kontrolného výkazu (A.1 pri odberateľovi s IČ DPH, inak D.2).
+//
+//  Číselný rad `S2026…` je oddelený od bežného `2026…`. Zákon viac radov
+//  pripúšťa a oddelenie je tu žiaduce: rady vznikajú na dvoch miestach
+//  (webhook a appka) a spoločný rad by sa pri súbehu rozišiel.
+// ═══════════════════════════════════════════════════════════════════════════
+async function importSaasJson(subor){
+  let data;
+  try{ data = JSON.parse(await subor.text()); }
+  catch(e){ alert("Súbor sa nepodarilo prečítať — nie je to platný JSON."); return; }
+
+  if(data?.typ !== "ezivnostnik-saas-faktury" || !Array.isArray(data.faktury)){
+    alert("Toto nie je export faktúr za predplatné z admin panelu."); return;
+  }
+  if(!data.faktury.length){ alert("Export neobsahuje žiadne faktúry."); return; }
+
+  if(!firmaData.faktury) firmaData.faktury=[];
+  const uz = new Set(firmaData.faktury.map(f=>String(f.cislo||"").trim()));
+
+  let pridanych=0, preskocenych=0;
+  const pridane=[];
+  for(const f of data.faktury){
+    const cislo=String(f.cislo||"").trim();
+    if(!cislo){ preskocenych++; continue; }
+    if(uz.has(cislo)){ preskocenych++; continue; }
+
+    const zaklad=r2(+f.zaklad||0), dph=r2(+f.dph||0), spolu=r2(+f.spolu||0);
+    firmaData.faktury.push({
+      cislo, vs:cislo,
+      odberatel: f.odberatel || "—",
+      ico: f.ico||"", icdph: f.icdph||"",
+      // Adresu export nenesie — do KV DPH nevstupuje a doplniť sa dá ručne.
+      adresa: "",
+      datum: f.datum, vystavenie: f.datum, dodanie: f.datum, splatnost: f.datum,
+      popis: "Predplatné eživnostník",
+      bez: zaklad, dph, spolu,
+      polozky: [{ nazov:"Predplatné eživnostník", mn:1, cena:zaklad, mj:"ks" }],
+      // Platba kartou cez Stripe prebehla v deň vystavenia — faktúra je
+      // uhradená hneď, inak by ju appka vykazovala ako pohľadávku.
+      zaplatena: true, datumUhrady: f.datum, sposobUhrady: "karta",
+      zdroj: "saas",
+    });
+    uz.add(cislo); pridane.push(cislo); pridanych++;
+  }
+
+  if(pridanych) poZmene();
+  alert("Import faktúr za predplatné\n\n"
+    + "✓ pridaných: "+pridanych+"\n"
+    + (preskocenych ? "• preskočených (už evidované): "+preskocenych+"\n" : "")
+    + (pridanych ? "\nSú označené ako uhradené kartou a vstupujú do príjmov aj do kontrolného výkazu." : ""));
+  if(pridanych && aktualnaApp==="faktury") appFaktury();
 }
 let _faktImportData=null;
 // rozpozná typ a spracuje 1+ súborov
 async function faktImportSubory(files){
   // XLSX ide vlastnou cestou (KROS dávkový export), ostatné (XML/ISDOC/PDF) parsujeme po jednom
+  // JSON má vlastný tvar (export z admin panelu) — nejde cez rozpoznávanie
+  // faktúr, lebo dáta sú už štruktúrované a netreba nič hádať.
+  const json=files.filter(f=>/\.json$/i.test(f.name));
+  if(json.length){ importSaasJson(json[0]); return; }
   const xlsx=files.filter(f=>/\.xlsx?$/i.test(f.name));
-  const ostatne=files.filter(f=>!/\.xlsx?$/i.test(f.name));
+  const ostatne=files.filter(f=>!/\.xlsx?$/i.test(f.name) && !/\.json$/i.test(f.name));
   if(xlsx.length){ faktImportSubor(xlsx[0]); return; } // KROS XLSX = celý zoznam naraz
   if(!ostatne.length) return;
   openModal("Import faktúr", `<div style="text-align:center;padding:30px"><div style="font-size:15px;margin-bottom:8px">Spracúvam ${ostatne.length} ${ostatne.length===1?'súbor':'súborov'}…</div><div class="csub">Čítam e-faktúry (XML/ISDOC) a PDF doklady.</div></div>`, null);
@@ -12158,7 +12334,9 @@ async function autoZaevidujSaasFaktury(){
   if(localMode || !sb || !firmaId || !firmaData) return 0;
   try{
     const zoz = await nacitajSaasFaktury();
-    const nove = (zoz||[]).filter(f=>!saasFakturaZaevidovana(f.cislo));
+    // Dve podmienky, nie jedna: faktúra sa pridá len ak vo výdavkoch NIE JE
+    // a zároveň tam ešte NIKDY nebola. Prvá sama by zmazanú faktúru vrátila.
+    const nove = (zoz||[]).filter(f=>!saasFakturaZaevidovana(f.cislo) && !saasUzZaevidovana(f.cislo));
     if(!nove.length) return 0;
     if(!firmaData.vydavky) firmaData.vydavky=[];
     let n=0;
@@ -12177,6 +12355,7 @@ async function autoZaevidujSaasFaktury(){
         if(cesta) obj.doklad=cesta;
       }catch(_){}
       firmaData.vydavky.push(obj);
+      saasOznacZaevidovanu(f.cislo);
       if(typeof zapamatajPartnera==="function") zapamatajPartnera(obj);
       n++;
     }
@@ -12186,10 +12365,33 @@ async function autoZaevidujSaasFaktury(){
 }
 
 // je faktúra za predplatné už zaevidovaná vo výdavkoch?
+// Je faktúra PRÁVE TERAZ vo výdavkoch?
 function saasFakturaZaevidovana(cislo){
   return (firmaData?.vydavky || []).some(v =>
     String(v.cislo||"").trim() === String(cislo||"").trim() &&
     String(v.dodavatelIco||"") === SAAS_DODAVATEL.ico);
+}
+
+// ── Pamäť o tom, čo appka už raz zaevidovala ───────────────────────────────
+// Bez nej automatický import nevie rozlíšiť „ešte som to nepridal" od
+// „používateľ to zmazal" — a zmazanú faktúru pri každom spustení vráti späť.
+// Rozhodnutie človeka musí prežiť reštart appky; inak s ňou bojuje.
+function saasZaevidovaneZoznam(){
+  const s=firmaData?.settings; if(!s) return [];
+  if(!Array.isArray(s.saasZaevidovane)) s.saasZaevidovane=[];
+  return s.saasZaevidovane;
+}
+function saasUzZaevidovana(cislo){
+  return saasZaevidovaneZoznam().includes(String(cislo||"").trim());
+}
+function saasOznacZaevidovanu(cislo){
+  const z=saasZaevidovaneZoznam(); const c=String(cislo||"").trim();
+  if(c && !z.includes(c)) z.push(c);
+}
+// Používateľ chce faktúru späť — treba zabudnúť, že už raz bola pridaná.
+function saasZabudniZaevidovanu(cislo){
+  const s=firmaData?.settings; if(!s || !Array.isArray(s.saasZaevidovane)) return;
+  s.saasZaevidovane = s.saasZaevidovane.filter(x=>x!==String(cislo||"").trim());
 }
 
 // zaevidovanie do výdavkov — rovnaký tvar záznamu ako pri importe faktúr
@@ -12197,6 +12399,10 @@ async function zaevidujSaasFakturu(cislo){
   const f = (_saasFaktury||[]).find(x => x.cislo === cislo);
   if(!f){ alert("Faktúra sa nenašla."); return; }
   if(saasFakturaZaevidovana(cislo)){ alert("Táto faktúra už je vo výdavkoch."); return; }
+  // Vo výdavkoch nie je, ale kedysi tam bola → používateľ ju chce späť.
+  // Pamäť sa musí zabudnúť, inak by ju automatika o chvíľu považovala za
+  // vybavenú a pri ďalšom spustení by sa nič nestalo.
+  saasZabudniZaevidovanu(cislo);
 
   const datum = String(f.vystavene||"").slice(0,10) || new Date().toISOString().slice(0,10);
   const obj = {
@@ -12228,6 +12434,7 @@ async function zaevidujSaasFakturu(cislo){
   }catch(e){ console.warn("PDF k výdavku sa nepodarilo priložiť:", e); }
 
   firmaData.vydavky.push(obj);
+  saasOznacZaevidovanu(f.cislo);
   if(typeof zapamatajPartnera==="function") zapamatajPartnera(obj);
   poZmene();
   alert("✓ Faktúra "+f.cislo+" bola zaevidovaná do výdavkov.\n\n"+
@@ -12280,6 +12487,9 @@ async function otvorSaasFaktury(){
   }
   const riadky = zoz.map(f=>{
     const uz = saasFakturaZaevidovana(f.cislo);
+    // Vo výdavkoch nie je, ale kedysi bola → používateľ ju zmazal. Appka mu ju
+    // sama nevráti, ale nemá sa tváriť, že sa nič nestalo.
+    const bola = !uz && saasUzZaevidovana(f.cislo);
     const obd = (f.obdobie_od && f.obdobie_do)
       ? fmtDatum(String(f.obdobie_od).slice(0,10))+" – "+fmtDatum(String(f.obdobie_do).slice(0,10)) : "";
     return `<div class="arow" style="align-items:flex-start">
@@ -12288,10 +12498,11 @@ async function otvorSaasFaktury(){
         <div class="acol-muted">${esc(f.popis||"")}</div>
         <div class="acol-muted">${fmtDatum(String(f.vystavene).slice(0,10))}${obd?" · "+esc(obd):""}
           · základ ${eur(+f.zaklad||0)} · DPH ${eur(+f.dph||0)}</div>
+        ${bola?`<div style="font-size:11px;color:var(--ink-soft);margin-top:3px">Z výdavkov ste ju odstránili — automaticky sa už nevráti.</div>`:""}
       </div>
       <div style="flex:0 0 auto;display:flex;flex-direction:column;gap:6px;align-items:flex-end">
         ${uz ? `<span class="apill" style="background:#e2f3ea;color:#1a6b45;font-size:10px">✓ vo výdavkoch</span>`
-             : `<button class="aabtn" style="padding:6px 11px;font-size:12px" onclick="zaevidujSaasFakturu('${esc(f.cislo)}')">Zaevidovať</button>`}
+             : `<button class="aabtn" style="padding:6px 11px;font-size:12px" onclick="zaevidujSaasFakturu('${esc(f.cislo)}')">${bola?"Pridať späť":"Zaevidovať"}</button>`}
         <button class="aabtn" style="padding:6px 11px;font-size:12px" onclick="stiahniSaasFakturu('${esc(f.cislo)}')">⬇ PDF</button>
       </div>
     </div>`;
@@ -12309,6 +12520,8 @@ async function otvorSaasFaktury(){
 }
 
 async function zaevidujVsetkySaasFaktury(){
+  // Tu sa pamäť ignoruje ZÁMERNE: je to výslovný pokyn používateľa, nie
+  // automatika na pozadí. Kto klikne „Zaevidovať všetky", chce ich všetky.
   const zoz = (_saasFaktury||[]).filter(f=>!saasFakturaZaevidovana(f.cislo));
   if(!zoz.length) return;
   if(!confirm("Zaevidovať "+zoz.length+" faktúr do výdavkov?")) return;
@@ -12329,6 +12542,7 @@ async function zaevidujVsetkySaasFaktury(){
       if(cesta) obj.doklad=cesta;
     }catch(_){}
     firmaData.vydavky.push(obj);
+    saasOznacZaevidovanu(f.cislo);
     if(typeof zapamatajPartnera==="function") zapamatajPartnera(obj);
     n++;
   }
@@ -16082,6 +16296,197 @@ if(!R._sumyNesedia && R.bez>0 && R.spolu>0 && Math.abs(R.spolu-(R.bez+R.dph))>1)
 }
 let _ocrFile=null;
 // rýchle načítanie dokladu z topbaru — malé menu foto / PDF-súbor
+// ═══════════════════════════════════════════════════════════════════════════
+//  DOKLADY PRIJATÉ E-MAILOM (B7)
+//
+//  Firma má vlastnú prijímaciu adresu. Čo na ňu príde od dôveryhodného
+//  odosielateľa, uloží edge funkcia do `cakajuce_doklady` a do Storage.
+//  Appka to tu vyzdvihne — ale doklad do evidencie NEVSTUPUJE sám: čaká,
+//  kým ho človek otvorí a potvrdí.
+//
+//  Rozpoznávanie obsahu sa NEROBÍ nanovo. Stiahnutý súbor ide do `spracujOCR`,
+//  teda do tej istej cesty ako pri ručnom výbere — vrátane ISDOC z prílohy PDF,
+//  QR kódu aj OCR zo skenu. Druhá implementácia by sa pri prvej oprave rozišla.
+// ═══════════════════════════════════════════════════════════════════════════
+let cakajuceDoklady = [];
+let _cakajuceNacitane = false;
+
+async function nacitajCakajuce(tiche){
+  if(localMode || !sb || !firmaId) { cakajuceDoklady=[]; return; }
+  try{
+    const { data, error } = await sb.from("cakajuce_doklady")
+      .select("*").eq("firma_id", firmaId)
+      .in("stav", ["nove","neznamy_odosielatel","bez_prilohy"])
+      .order("prijate", { ascending:false }).limit(200);
+    if(error) throw error;
+    cakajuceDoklady = data || [];
+    _cakajuceNacitane = true;
+  }catch(e){
+    // Tabuľka nemusí existovať v staršom prostredí — appka kvôli tomu nespadne.
+    cakajuceDoklady = [];
+    if(!tiche) console.warn("Čakajúce doklady sa nenačítali:", e.message||e);
+  }
+  if(typeof renderHomeStrip==="function") renderHomeStrip();
+}
+
+const cakajuceNove = () => cakajuceDoklady.filter(x=>x.stav==="nove").length;
+
+// ── prijímacia adresa ──
+async function dokladyAdresa(prerazit){
+  if(localMode || !sb || !firmaId) return null;
+  try{
+    const { data, error } = await sb.rpc("prideľ_doklady_token",
+      { p_firma_id: firmaId, p_prerazit: !!prerazit });
+    if(error) throw error;
+    return data ? String(data)+"@"+DOKLADY_DOMENA : null;
+  }catch(e){ console.warn("Token sa nepodarilo získať:", e.message||e); return null; }
+}
+// Doména, na ktorej appka prijíma doklady. Pilot beží na adrese prideľovanej
+// Resendom; pri prechode na vlastnú doménu sa mení tu aj v secrete edge funkcie.
+const DOKLADY_DOMENA = "tolapnal.resend.app";
+
+// ── obrazovka schránky ─────────────────────────────────────────────────────
+async function otvorCakajuce(){
+  if(localMode){ alert("Doklady e-mailom fungujú len v cloudovom režime — prihláste sa."); return; }
+  await nacitajCakajuce();
+  const adresa = await dokladyAdresa(false);
+  const nove   = cakajuceDoklady.filter(x=>x.stav==="nove");
+  const cudzie = cakajuceDoklady.filter(x=>x.stav==="neznamy_odosielatel");
+  const bezPril= cakajuceDoklady.filter(x=>x.stav==="bez_prilohy");
+
+  openModal("📨 Doklady e-mailom", `
+    <div class="mfield">
+      <label>Vaša prijímacia adresa</label>
+      ${adresa ? `<div style="display:flex;gap:8px;align-items:center">
+        <input id="cdAdresa" value="${esc(adresa)}" readonly style="font-family:monospace;font-size:12px">
+        <button class="aabtn" onclick="kopirujAdresu()" title="Kopírovať">⧉</button>
+      </div>
+      <div class="ocr-hint">Prepošlite sem faktúru a objaví sa tu. Posielať smú len adresy zo zoznamu nižšie.</div>`
+      : `<div class="ocr-hint">Adresa sa nepodarilo načítať — skúste to neskôr.</div>`}
+    </div>
+
+    ${nove.length ? `<div style="margin-top:14px">
+      <div style="font-weight:700;font-size:13px;margin-bottom:8px">Čaká na spracovanie (${nove.length})</div>
+      ${nove.map(x=>`<div class="arow" style="grid-template-columns:auto 1fr auto;gap:10px;align-items:center;cursor:pointer"
+          onclick="spracujCakajuci('${esc(x.id)}')">
+        <div style="font-size:19px">${/pdf/.test(x.subor_typ||"")?"📄":"🖼"}</div>
+        <div style="min-width:0">
+          <div style="font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(x.subor_nazov||"doklad")}</div>
+          <div style="font-size:11px;color:var(--ink-soft)">${esc(x.od_koho||"")} · ${fmtDatum(String(x.prijate||"").slice(0,10))} · ${Math.round((x.subor_bajtov||0)/1024)} kB</div>
+        </div>
+        <div style="font-size:11px;color:var(--brand);font-weight:600">Spracovať →</div>
+      </div>`).join("")}
+    </div>` : `<div class="ocr-hint" style="margin-top:14px">Zatiaľ nič nečaká.</div>`}
+
+    ${cudzie.length ? `<div style="margin-top:16px;background:#fdf6ec;border-left:3px solid var(--warn);border-radius:0 9px 9px 0;padding:11px 13px">
+      <div style="font-weight:700;font-size:12.5px">⚠ Mail od neznámej adresy (${cudzie.length})</div>
+      <div style="font-size:11.5px;color:var(--ink-soft);line-height:1.5;margin:4px 0 8px">
+        Prílohu sme neuložili. Ak adresu poznáte, pridajte ju medzi dôveryhodné a požiadajte o opätovné poslanie.
+      </div>
+      ${[...new Set(cudzie.map(x=>x.od_koho))].map(e=>`<div style="display:flex;gap:8px;align-items:center;margin-top:6px">
+        <div style="flex:1;font-size:12px;font-family:monospace;overflow:hidden;text-overflow:ellipsis">${esc(e||"—")}</div>
+        <button class="aabtn" style="padding:4px 9px;font-size:11px" onclick="pridajOdosielatela('${esc(e)}')">+ Dôverovať</button>
+      </div>`).join("")}
+    </div>` : ""}
+
+    ${bezPril.length ? `<div class="ocr-hint" style="margin-top:12px">${bezPril.length} mailov prišlo bez prílohy — nič sa neuložilo.</div>` : ""}
+
+    <div style="margin-top:16px;border-top:1px solid var(--line);padding-top:12px">
+      <button class="aabtn" onclick="spravujOdosielatelov()">👥 Dôveryhodní odosielatelia</button>
+      <button class="aabtn" onclick="prerazDokladyToken()" title="Stará adresa okamžite prestane fungovať">↻ Nová adresa</button>
+    </div>
+  `, null, null, "siroky");
+}
+
+function kopirujAdresu(){
+  const el=document.getElementById("cdAdresa"); if(!el) return;
+  el.select(); el.setSelectionRange(0, 99999);
+  try{ navigator.clipboard.writeText(el.value); cloudMsg("Adresa skopírovaná.","ok"); }
+  catch(_){ document.execCommand("copy"); }
+}
+
+async function prerazDokladyToken(){
+  if(!confirm("Vygenerovať novú prijímaciu adresu?\n\nStará okamžite prestane fungovať — kto ju má uloženú v kontaktoch, musí dostať novú.")) return;
+  const a=await dokladyAdresa(true);
+  if(a){ cloudMsg("Nová adresa: "+a,"ok"); otvorCakajuce(); }
+}
+
+async function pridajOdosielatela(email){
+  const e=String(email||"").toLowerCase().trim();
+  if(!e) return;
+  try{
+    const { error } = await sb.from("doklady_odosielatelia")
+      .upsert({ firma_id: firmaId, email: e }, { onConflict:"firma_id,email", ignoreDuplicates:true });
+    if(error) throw error;
+    cloudMsg(e+" pridaný medzi dôveryhodných.","ok");
+    otvorCakajuce();
+  }catch(err){ alert("Nepodarilo sa pridať: "+(err.message||err)); }
+}
+
+async function spravujOdosielatelov(){
+  let zoznam=[];
+  try{
+    const { data } = await sb.from("doklady_odosielatelia")
+      .select("*").eq("firma_id", firmaId).order("email");
+    zoznam=data||[];
+  }catch(_){}
+  openModal("👥 Dôveryhodní odosielatelia", `
+    <div class="ocr-hint" style="margin-bottom:12px">
+      Doklad sa uloží len z týchto adries. Mail od kohokoľvek iného sa zaznamená, ale príloha sa zahodí —
+      inak by ktokoľvek, kto uvidí vašu prijímaciu adresu, mohol písať do evidencie.
+    </div>
+    <div class="mfield"><label>Pridať adresu</label>
+      <div style="display:flex;gap:8px">
+        <input id="doNovy" placeholder="uctovnicka@firma.sk" style="flex:1">
+        <button class="aabtn pri" onclick="pridajOdosielatela(val('doNovy'))">Pridať</button>
+      </div>
+    </div>
+    <div style="margin-top:12px">
+      ${zoznam.length ? zoznam.map(x=>`<div style="display:flex;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line-soft)">
+        <div style="flex:1;font-size:12.5px;font-family:monospace;overflow:hidden;text-overflow:ellipsis">${esc(x.email)}</div>
+        <span onclick="zmazOdosielatela('${esc(x.id)}')" style="cursor:pointer;color:var(--neg);font-weight:700">✕</span>
+      </div>`).join("") : '<div class="ocr-hint">Zoznam je prázdny — neuloží sa nič.</div>'}
+    </div>
+  `, null, null, "siroky");
+}
+
+async function zmazOdosielatela(id){
+  try{
+    await sb.from("doklady_odosielatelia").delete().eq("id", id);
+    spravujOdosielatelov();
+  }catch(e){ alert("Nepodarilo sa odstrániť: "+(e.message||e)); }
+}
+
+// ── spracovanie: stiahni a pusti tou istou cestou ako ručný výber ──
+async function spracujCakajuci(id){
+  const z=cakajuceDoklady.find(x=>x.id===id);
+  if(!z || !z.subor_cesta){ alert("Súbor sa nenašiel."); return; }
+  if(!skontrolujLimit("doklady","Vo vyššom pláne môžete načítať doklady bez obmedzenia.")) return;
+  closeModal();
+  try{
+    const { data, error } = await sb.storage.from("dokumenty").download(z.subor_cesta);
+    if(error) throw error;
+    const subor = new File([data], z.subor_nazov || "doklad",
+      { type: z.subor_typ || data.type || "application/octet-stream" });
+    // Označíme ho ešte PRED spracovaním. Keby import padol, doklad sa v schránke
+    // neobjaví znova ako nový — súbor v Storage ostáva a dá sa dohľadať.
+    _cakajuciSpracovavany = id;
+    spracujOCR({ target:{ files:[subor], value:"" } });
+  }catch(e){ alert("Súbor sa nepodarilo načítať: "+(e.message||e)); }
+}
+let _cakajuciSpracovavany = null;
+
+// Volá sa po úspešnom uložení výdavku z OCR cesty.
+async function oznacCakajuciSpracovany(){
+  const id=_cakajuciSpracovavany; _cakajuciSpracovavany=null;
+  if(!id || localMode || !sb) return;
+  try{
+    await sb.from("cakajuce_doklady")
+      .update({ stav:"spracovane", spracovane:new Date().toISOString() }).eq("id", id);
+    await nacitajCakajuce(true);
+  }catch(_){}
+}
+
 function rychlyDoklad(zdroj){
   if(!skontrolujLimit("doklady","Vo vyššom pláne môžete načítať doklady bez obmedzenia.")) return;
   const ex=document.getElementById("rdMenu"); if(ex){ ex.remove(); return; }
@@ -16096,7 +16501,9 @@ function rychlyDoklad(zdroj){
   menu.innerHTML=`
     <button onclick="rdVyber('foto')" style="display:flex;align-items:center;gap:10px;width:100%;border:none;background:none;padding:13px 15px;font-size:14px;cursor:pointer;text-align:left;color:var(--ink)">📷 Odfotiť bloček / doklad</button>
     <div style="height:1px;background:var(--line)"></div>
-    <button onclick="rdVyber('subor')" style="display:flex;align-items:center;gap:10px;width:100%;border:none;background:none;padding:13px 15px;font-size:14px;cursor:pointer;text-align:left;color:var(--ink)">🖼 Načítať zo súboru (PDF / foto)</button>`;
+    <button onclick="rdVyber('subor')" style="display:flex;align-items:center;gap:10px;width:100%;border:none;background:none;padding:13px 15px;font-size:14px;cursor:pointer;text-align:left;color:var(--ink)">🖼 Načítať zo súboru (PDF / foto)</button>
+    <div style="height:1px;background:var(--line)"></div>
+    <button onclick="rdVyber('email')" style="display:flex;align-items:center;gap:10px;width:100%;border:none;background:none;padding:13px 15px;font-size:14px;cursor:pointer;text-align:left;color:var(--ink)">📨 Doklady e-mailom${(typeof cakajuceNove==="function"&&cakajuceNove())?` <span style="background:var(--brand);color:#fff;border-radius:9px;padding:1px 7px;font-size:11px;font-weight:700">${cakajuceNove()}</span>`:""}</button>`;
   document.body.appendChild(menu);
 
   // umiestni pod spúšťacie tlačidlo a udrž v obrazovke (390 px vrátane)
@@ -16125,7 +16532,9 @@ function rychlyDoklad(zdroj){
 }
 function rdVyber(typ){
   const m=document.getElementById("rdMenu"); if(m) m.remove();
-  if(typ==="foto") ocrVydavok(); else ocrVydavokFile();
+  if(typ==="foto") ocrVydavok();
+  else if(typ==="email") otvorCakajuce();
+  else ocrVydavokFile();
 }
 function ocrVydavok(){ document.getElementById("ocrInput").click(); }       // kamera
 function ocrVydavokFile(){ document.getElementById("ocrInputFile").click(); } // PDF/súbor z úložiska
@@ -16747,6 +17156,8 @@ function otvorOcrVysledok(R){
     }
     poZmene();
     if(aktualnaApp==="vydavky") appVydavky();
+    // Doklad prišiel e-mailom a je uložený — až teraz zmizne zo schránky.
+    if(typeof oznacCakajuciSpracovany==="function") oznacCakajuciSpracovany();
   });
   // eKasa doklad → dotiahni z FS hneď, bez čakania na klik
   if(R.ekasaId) setTimeout(()=>ekasaAutoDoplnenie(R.ekasaId), 60);

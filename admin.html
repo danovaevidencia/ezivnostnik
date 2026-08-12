@@ -158,6 +158,7 @@ tr.chce td{background:#fffaf0}
       <div class="head"><h2>Vystavené faktúry za predplatné</h2><div class="sp"></div>
         <select id="sfRok" onchange="nacitajSaasFaktury()" style="background:var(--bg2);color:var(--txt);border:1px solid var(--line);border-radius:7px;padding:5px 9px;font-size:13px"></select>
         <button class="btn" onclick="exportSaasCsv()" style="margin-left:8px">CSV</button>
+        <button class="btn" onclick="exportSaasJson()" style="margin-left:6px" title="Na import do vlastného účtovníctva v eživnostníkovi">JSON</button>
       </div>
       <div class="body">
         <div id="sfLoading" class="loading">Načítavam faktúry…</div>
@@ -417,6 +418,43 @@ function exportSaasCsv(){
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = `saas_faktury_${rok}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// ── JSON na import do vlastného účtovníctva ────────────────────────────────
+// CSV je pre Excel, JSON pre appku. Sú to VYDANÉ faktúry — po importe patria
+// medzi príjmy a do oddielu A.1 kontrolného výkazu (odberateľ s IČ DPH),
+// resp. D.2 (bez IČ DPH). Preto sa exportuje aj `odb_icdph`: bez neho by sa
+// faktúra zaradila do nesprávneho oddielu.
+//
+// Vedomé rozhodnutie: NEexportuje sa e-mail zákazníka. Do daňovej evidencie
+// nepatrí a v súbore na disku je to zbytočné riziko.
+function exportSaasJson(){
+  if(!_saasFakturyAdmin.length){ alert("Nie je čo exportovať."); return; }
+  const rok = document.getElementById("sfRok").value;
+  const data = {
+    typ: "ezivnostnik-saas-faktury",
+    verzia: 1,
+    rok: +rok,
+    vytvorene: new Date().toISOString(),
+    pocet: _saasFakturyAdmin.length,
+    faktury: _saasFakturyAdmin.map(f=>({
+      cislo:     f.cislo || "",
+      datum:     String(f.vystavene||"").slice(0,10),
+      odberatel: f.odb_nazov || "",
+      ico:       f.odb_ico || "",
+      icdph:     f.odb_icdph || "",
+      zaklad:    Math.round((+f.zaklad||0)*100)/100,
+      dph:       Math.round((+f.dph||0)*100)/100,
+      spolu:     Math.round((+f.spolu||0)*100)/100,
+      sadzba:    +f.sadzba_dph || 0.23,
+    })),
+  };
+  const blob = new Blob([JSON.stringify(data, null, 1)], { type:"application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `saas_faktury_${rok}.json`;
   a.click();
   URL.revokeObjectURL(a.href);
 }
