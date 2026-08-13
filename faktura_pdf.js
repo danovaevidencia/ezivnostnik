@@ -435,6 +435,14 @@ export function modelZakaznickejFaktury(f, meta, sumy, settings = {}) {
 }
 
 // Faktúra za predplatné: tvar riadku tabuľky `saas_faktury`
+// Vráti dátum v tvare, ktorému rozumie `fmtDatum` — teda ISO, alebo už
+// naformátovaný slovenský text, ktorý sa nechá prejsť bez zmeny.
+function datumZoZaznamu(v) {
+  const s = String(v || "").trim();
+  if (!s) return "";
+  return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : s;
+}
+
 export function modelSaasFaktury(f, dodavatel) {
   const zaklad = +f.zaklad || 0, dph = +f.dph || 0, spolu = +f.spolu || 0;
   return {
@@ -452,8 +460,14 @@ export function modelSaasFaktury(f, dodavatel) {
       ico: f.odb_ico, dic: f.odb_dic, icdph: f.odb_icdph,
     },
     datumy: {
-      vystavenie: String(f.vystavene || "").slice(0, 10),
-      dodanie: String(f.vystavene || "").slice(0, 10),
+      // `vystavene` chodí v DVOCH tvaroch a treba zniesť oba:
+      //  · zo Supabase ako ISO `2026-08-13` (stĺpec typu date),
+      //  · z webhooku ako slovenský text `13. 8. 2026` — ten si ho zapisuje
+      //    a v tom istom volaní hneď použije, bez cesty cez databázu.
+      // Pôvodné `slice(0,10)` orezávalo slovenský tvar (11 znakov) na
+      // „13. 8. 202" a `fmtDatum` ho už nerozpoznal, takže sa vytlačil tak.
+      vystavenie: datumZoZaznamu(f.vystavene),
+      dodanie: datumZoZaznamu(f.vystavene),
       splatnost: null,           // uhradené kartou, splatnosť nemá zmysel
     },
     platba: { sposob: "Uhradené kartou", vs: null },
