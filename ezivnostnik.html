@@ -807,7 +807,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.13-EN";  // horná lišta: účtové menu, fix nezobraziteľnej ikony odhlásenia a skrytého chipu
+const APP_VERZIA = "2026.08.13-EO";  // schránka dokladov: chyba načítania sa už nestratí + obnova pri návrate do appky
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -1662,6 +1662,7 @@ function zobrazFirmu(){
   if(!_zdielaneSkusene){ _zdielaneSkusene=true; prevezmiZdielane(); spustiSkratku(); }
   // Čakajúce doklady sa ťahajú na pozadí — plocha na ne nečaká.
   if(typeof nacitajCakajuce==="function") nacitajCakajuce(true);
+  zapniObnovuCakajucich();
 }
 let _zdielaneSkusene=false;
 
@@ -3520,6 +3521,17 @@ function renderHomeStrip(){
   }
   // Doklady, ktoré prišli e-mailom a čakajú. Pás sa ukáže len keď naozaj niečo
   // je — trvalý prvok „0 čakajúcich" by len zaberal miesto na 390 px obrazovke.
+  // Keď sa schránku nepodarilo načítať, používateľ to musí vedieť. Inak appka
+  // vyzerá presne tak, ako keby nič nečakalo — a doklady medzitým ležia
+  // v databáze.
+  if(_cakajuceChyba){
+    html += `<div style="grid-column:1/-1;background:#fdf6ec;border-left:3px solid var(--warn);
+        border-radius:0 9px 9px 0;padding:10px 13px;margin-top:10px;font-size:12.5px;line-height:1.5">
+      ⚠ <b>Doklady prijaté e-mailom sa nepodarilo načítať.</b>
+      <span style="color:var(--ink-soft)">Ak vám nejaké prišli, počkajú tam — nič sa nestratilo.</span>
+      <div style="color:var(--ink-soft);font-size:11px;margin-top:3px;font-family:ui-monospace,monospace">${esc(_cakajuceChyba)}</div>
+    </div>`;
+  }
   const _cak = (typeof cakajuceNove==="function") ? cakajuceNove() : 0;
   if(_cak > 0){
     html += `<div onclick="otvorCakajuce()" style="grid-column:1/-1;display:flex;align-items:center;gap:10px;
@@ -16423,6 +16435,7 @@ let _ocrFile=null;
 // ═══════════════════════════════════════════════════════════════════════════
 let cakajuceDoklady = [];
 let _cakajuceNacitane = false;
+let _cakajuceChyba = null;
 
 async function nacitajCakajuce(tiche){
   if(localMode || !sb || !firmaId) { cakajuceDoklady=[]; return; }
@@ -16434,15 +16447,45 @@ async function nacitajCakajuce(tiche){
     if(error) throw error;
     cakajuceDoklady = data || [];
     _cakajuceNacitane = true;
+    _cakajuceChyba = null;
   }catch(e){
     // Tabuľka nemusí existovať v staršom prostredí — appka kvôli tomu nespadne.
     cakajuceDoklady = [];
-    if(!tiche) console.warn("Čakajúce doklady sa nenačítali:", e.message||e);
+    _cakajuceChyba = e && (e.message || String(e)) || "neznáma chyba";
+    // Chybu si zapamätáme. Pôvodne sa len zapísala do konzoly a appka sa
+    // navonok tvárila, že jednoducho nič nečaká — doklady pritom v databáze
+    // ležali a chýbal len grant pre `authenticated`. Ticho zhltnutá chyba
+    // vyzerá presne ako prázdny výsledok (kap. 16).
+    console.warn("Čakajúce doklady sa nenačítali:", _cakajuceChyba);
   }
   if(typeof renderHomeStrip==="function") renderHomeStrip();
 }
 
 const cakajuceNove = () => cakajuceDoklady.filter(x=>x.stav==="nove").length;
+
+// ── Obnovenie schránky pri návrate do appky ────────────────────────────────
+// Typický tok: zákazník prepošle faktúru z mailu a hneď sa prepne do appky.
+// Bez tohto by odznak neuvidel, kým stránku neobnoví — schránka sa načítava
+// len pri otvorení firmy.
+//
+// Zámerne NIE realtime spojenie: doklad e-mailom nie je vec, kde záleží na
+// sekundách, a jedno otvorené spojenie na každého zákazníka je zbytočná záťaž.
+// Kontrola pri návrate na kartu pokryje bežné použitie za nulovú cenu.
+//
+// Brzda 20 s bráni tomu, aby sa prepínanie medzi kartami menilo na sériu
+// dotazov — na mobile sa `visibilitychange` spúšťa aj pri zamknutí obrazovky.
+let _cakajucePosledne = 0;
+let _cakajuceObnovaZapnuta = false;
+function zapniObnovuCakajucich(){
+  if(_cakajuceObnovaZapnuta) return;
+  _cakajuceObnovaZapnuta = true;
+  document.addEventListener("visibilitychange", () => {
+    if(document.visibilityState !== "visible") return;
+    if(Date.now() - _cakajucePosledne < 20000) return;
+    _cakajucePosledne = Date.now();
+    if(typeof nacitajCakajuce==="function") nacitajCakajuce(true);
+  });
+}
 
 // ── prijímacia adresa ──
 async function dokladyAdresa(prerazit){
