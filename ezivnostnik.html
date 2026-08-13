@@ -807,7 +807,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.13-EP";  // doklady e-mailom: karta v Nastaveniach + jednorazové oznámenie, aby sa funkcia dala nájsť
+const APP_VERZIA = "2026.08.13-ER";  // schránka dokladov: doklad sa dá aj odmietnuť, nielen spracovať
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -16388,6 +16388,41 @@ function parseFakturaText(text){
     const en=t.match(/(?:Date of issue|Date due|Issued|Date)\s*:?\s*([A-Z][a-z]+)\s+(\d{1,2}),?\s+(\d{4})/i)||t.match(/([A-Z][a-z]+)\s+(\d{1,2}),\s+(\d{4})/);
     if(en){ const mesiace={january:1,february:2,march:3,april:4,may:5,june:6,july:7,august:8,september:9,october:10,november:11,december:12}; const mo=mesiace[en[1].toLowerCase()]; if(mo) R.datum=en[3]+"-"+String(mo).padStart(2,"0")+"-"+String(en[2]).padStart(2,"0"); }
   }
+  // ── Dátum vystavenia a splatnosti ────────────────────────────────────────
+  // Doteraz sa z textu ťahal len dátum DODANIA (`R.datum`); vystavenie
+  // a splatnosť sa plnili výhradne z PAY by square QR. Faktúra bez QR — teda
+  // každá zahraničná a väčšina PDF — ich nechala prázdne, hoci sú na doklade
+  // napísané.
+  //
+  // Hľadá sa v okne 40 znakov za kľúčovým slovom: na faktúre býva hodnota
+  // v inom stĺpci, takže medzi popisom a dátumom je viac medzier, ale nikdy
+  // nie polovica dokumentu.
+  const MESIACE_EN={january:1,february:2,march:3,april:4,may:5,june:6,
+                    july:7,august:8,september:9,october:10,november:11,december:12};
+  function datumPriKluci(kluce){
+    const okno="[^\\d\\n]{0,40}";
+    // a) 13.8.2026 / 13. 8. 2026
+    let m=t.match(new RegExp("(?:"+kluce+")"+okno+"(\\d{1,2})\\s*[.\\/]\\s*(\\d{1,2})\\s*[.\\/]\\s*(\\d{4})","i"));
+    if(m && platnyDMR(m[1],m[2],m[3]))
+      return m[3]+"-"+String(+m[2]).padStart(2,"0")+"-"+String(+m[1]).padStart(2,"0");
+    // b) 2026-08-13
+    m=t.match(new RegExp("(?:"+kluce+")"+okno+"(\\d{4})-(\\d{2})-(\\d{2})","i"));
+    if(m && +m[1]>=2015 && +m[1]<=2035) return m[1]+"-"+m[2]+"-"+m[3];
+    // c) August 13, 2026 — anglické faktúry
+    m=t.match(new RegExp("(?:"+kluce+")[^A-Za-z\\n]{0,40}([A-Za-z]+)\\s+(\\d{1,2}),?\\s+(\\d{4})","i"));
+    if(m){
+      const mo=MESIACE_EN[String(m[1]).toLowerCase()];
+      if(mo && +m[3]>=2015 && +m[3]<=2035)
+        return m[3]+"-"+String(mo).padStart(2,"0")+"-"+String(+m[2]).padStart(2,"0");
+    }
+    return "";
+  }
+  R.vystavenie = datumPriKluci("d[áa]tum\\s+vystavenia|d[áa]tum\\s+vyhotovenia|date\\s*of\\s*issue|invoice\\s*date|issue\\s*date|data\\s*wystawienia");
+  R.splatnost  = datumPriKluci("splatnos[ťt]|d[áa]tum\\s+splatnosti|date\\s*due|due\\s*date|payment\\s*due|termin\\s*płatno");
+  // Keď doklad dátum dodania neuvádza (typické pre zahraničné faktúry za
+  // službu), použije sa dátum vystavenia — do DPH sa doklad musí niekam zaradiť.
+  if(!R.datum && R.vystavenie) R.datum = R.vystavenie;
+
   // DPH rozpis (sadzba základ daň) — viac vzorov, ukladá rozpis[] pri >1 sadzbe
   const rozpis=[]; const seen=new Set(); let x;
   // číslo s prípadnými tisícovými medzerami: "8 750,00"
@@ -16618,14 +16653,16 @@ async function otvorCakajuce(){
 
     ${nove.length ? `<div style="margin-top:14px">
       <div style="font-weight:700;font-size:13px;margin-bottom:8px">Čaká na spracovanie (${nove.length})</div>
-      ${nove.map(x=>`<div class="arow" style="grid-template-columns:auto 1fr auto;gap:10px;align-items:center;cursor:pointer"
-          onclick="spracujCakajuci('${esc(x.id)}')">
-        <div style="font-size:19px">${/pdf/.test(x.subor_typ||"")?"📄":"🖼"}</div>
-        <div style="min-width:0">
+      ${nove.map(x=>`<div class="arow" style="grid-template-columns:auto 1fr auto auto;gap:10px;align-items:center">
+        <div style="font-size:19px;cursor:pointer" onclick="spracujCakajuci('${esc(x.id)}')">${/pdf/.test(x.subor_typ||"")?"📄":"🖼"}</div>
+        <div style="min-width:0;cursor:pointer" onclick="spracujCakajuci('${esc(x.id)}')">
           <div style="font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(x.subor_nazov||"doklad")}</div>
           <div style="font-size:11px;color:var(--ink-soft)">${esc(x.od_koho||"")} · ${fmtDatum(String(x.prijate||"").slice(0,10))} · ${Math.round((x.subor_bajtov||0)/1024)} kB</div>
         </div>
-        <div style="font-size:11px;color:var(--brand);font-weight:600">Spracovať →</div>
+        <div style="font-size:11px;color:var(--brand);font-weight:600;cursor:pointer" onclick="spracujCakajuci('${esc(x.id)}')">Spracovať →</div>
+        <span onclick="event.stopPropagation();odmietniCakajuci('${esc(x.id)}')"
+              title="Nepotrebujem — odstrániť zo schránky"
+              style="cursor:pointer;color:var(--ink-soft);font-size:15px;padding:0 2px;line-height:1">✕</span>
       </div>`).join("")}
     </div>` : `<div class="ocr-hint" style="margin-top:14px">Zatiaľ nič nečaká.</div>`}
 
@@ -16637,10 +16674,15 @@ async function otvorCakajuce(){
       ${[...new Set(cudzie.map(x=>x.od_koho))].map(e=>`<div style="display:flex;gap:8px;align-items:center;margin-top:6px">
         <div style="flex:1;font-size:12px;font-family:monospace;overflow:hidden;text-overflow:ellipsis">${esc(e||"—")}</div>
         <button class="aabtn" style="padding:4px 9px;font-size:11px" onclick="pridajOdosielatela('${esc(e)}')">+ Dôverovať</button>
+        <span onclick="odbavCakajuce('neznamy_odosielatel','${esc(e)}')" title="Zahodiť maily z tejto adresy"
+              style="cursor:pointer;color:var(--ink-soft);font-size:15px;padding:0 2px">✕</span>
       </div>`).join("")}
     </div>` : ""}
 
-    ${bezPril.length ? `<div class="ocr-hint" style="margin-top:12px">${bezPril.length} mailov prišlo bez prílohy — nič sa neuložilo.</div>` : ""}
+    ${bezPril.length ? `<div class="ocr-hint" style="margin-top:12px;display:flex;gap:8px;align-items:center">
+      <span style="flex:1">${bezPril.length} mailov prišlo bez prílohy — nič sa neuložilo.</span>
+      <button class="aabtn" style="padding:3px 9px;font-size:11px" onclick="odbavCakajuce('bez_prilohy')">Zahodiť</button>
+    </div>` : ""}
 
     <div style="margin-top:16px;border-top:1px solid var(--line);padding-top:12px">
       <button class="aabtn" onclick="spravujOdosielatelov()">👥 Dôveryhodní odosielatelia</button>
@@ -16726,6 +16768,58 @@ async function spracujCakajuci(id){
   }catch(e){ alert("Súbor sa nepodarilo načítať: "+(e.message||e)); }
 }
 let _cakajuciSpracovavany = null;
+
+// ── Odmietnutie čakajúceho dokladu ─────────────────────────────────────────
+// Nie všetko, čo príde na prijímaciu adresu, je doklad do evidencie. Mail od
+// Anthropicu napríklad nesie potvrdenie o platbe AJ faktúru — do výdavkov
+// patrí jedna, druhá je len kópia.
+//
+// Bez tejto možnosti by taký súbor visel v schránke navždy a odznak by hlásil
+// prácu, ktorú netreba urobiť. To je horšie než keby tam nebol: odznak, ktorý
+// nikdy nezhasne, sa prestane čítať.
+//
+// Súbor sa zo Storage MAŽE. Originál má používateľ stále v pošte, takže sa
+// nič nestráca — a držať súbor, ktorý bol výslovne odmietnutý, je len odpad.
+// Hromadné odbavenie záznamov, ktoré nikdy nebudú dokladom: mail od cudzej
+// adresy (prílohu sme neuložili) a mail bez prílohy. Sú to len stopy po tom,
+// že niečo prišlo — keď ich používateľ videl, nemajú dôvod ostávať.
+async function odbavCakajuce(stav, odKoho){
+  const zoznam=cakajuceDoklady.filter(x=>x.stav===stav && (!odKoho || x.od_koho===odKoho));
+  if(!zoznam.length) return;
+  const co = stav==="neznamy_odosielatel"
+    ? "Zahodiť "+zoznam.length+" mailov z adresy "+odKoho+"?"
+    : "Zahodiť "+zoznam.length+" mailov bez prílohy?";
+  if(!confirm(co+"\n\nŽiadne súbory sa neuložili, takže sa nič nestráca.")) return;
+  try{
+    const { error } = await sb.from("cakajuce_doklady")
+      .update({ stav:"odmietnute", spracovane:new Date().toISOString() })
+      .in("id", zoznam.map(x=>x.id));
+    if(error) throw error;
+    await nacitajCakajuce(true);
+    otvorCakajuce();
+  }catch(e){ alert("Nepodarilo sa odstrániť: "+(e.message||e)); }
+}
+
+async function odmietniCakajuci(id){
+  const z=cakajuceDoklady.find(x=>x.id===id);
+  if(!z) return;
+  if(!confirm("Odstrániť „"+(z.subor_nazov||"doklad")+"\u201c zo schránky?\n\n"+
+              "Do výdavkov sa nedostane a súbor sa zmaže. Originál vám ostáva v pošte."))
+    return;
+  try{
+    if(z.subor_cesta){
+      // Chyba mazania nesmie zablokovať odmietnutie — súbor sa dá upratať
+      // neskôr, ale doklad musí zo schránky zmiznúť teraz.
+      try{ await sb.storage.from("dokumenty").remove([z.subor_cesta]); }
+      catch(e){ console.warn("Súbor sa nepodarilo zmazať:", e.message||e); }
+    }
+    const { error } = await sb.from("cakajuce_doklady")
+      .update({ stav:"odmietnute", spracovane:new Date().toISOString() }).eq("id", id);
+    if(error) throw error;
+    await nacitajCakajuce(true);
+    otvorCakajuce();
+  }catch(e){ alert("Nepodarilo sa odstrániť: "+(e.message||e)); }
+}
 
 // Volá sa po úspešnom uložení výdavku z OCR cesty.
 async function oznacCakajuciSpracovany(){
