@@ -807,7 +807,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.13-EO";  // schránka dokladov: chyba načítania sa už nestratí + obnova pri návrate do appky
+const APP_VERZIA = "2026.08.13-EP";  // doklady e-mailom: karta v Nastaveniach + jednorazové oznámenie, aby sa funkcia dala nájsť
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -3518,6 +3518,22 @@ function renderHomeStrip(){
   if(!jeNainstalovana()){
     html += `<button class="hchip ${_pwaPrompt ? "pri" : ""}" onclick="nainstalujApp()"
               title="Nainštalovať eživnostník do telefónu">⬇ Nainštalovať do telefónu</button>`;
+  }
+  // O funkcii treba raz povedať — inak ju nájde len ten, kto omylom otvorí
+  // menu 📷. Pás sa ukáže raz a po zavretí sa už nevráti; kto ho preklikne,
+  // adresu nájde v Nastaveniach.
+  if(!localMode && sb && !(firmaData?.settings||{}).dmOznamene && !_cakajuceChyba){
+    html += `<div style="grid-column:1/-1;background:var(--bg);border:1px solid var(--line);
+        border-left:3px solid var(--brand);border-radius:9px;padding:11px 13px;margin-top:10px;
+        font-size:12.5px;line-height:1.55">
+      <b>📨 Doklady si môžete posielať e-mailom.</b>
+      Prepošlite faktúru na svoju prijímaciu adresu a objaví sa tu ako čakajúci doklad —
+      netreba ju sťahovať ani fotiť.
+      <div style="display:flex;gap:7px;margin-top:9px;flex-wrap:wrap">
+        <button class="aabtn" onclick="otvorApp('data')">Ukázať moju adresu</button>
+        <button class="aabtn" onclick="dmSkryOznamenie()">Zatiaľ nie</button>
+      </div>
+    </div>`;
   }
   // Doklady, ktoré prišli e-mailom a čakajú. Pás sa ukáže len keď naozaj niečo
   // je — trvalý prvok „0 čakajúcich" by len zaberal miesto na 390 px obrazovke.
@@ -9786,6 +9802,68 @@ function majetokVyradInfo(id){
 }
 
 // ── NASTAVENIA A DÁTA ──
+// ── Karta „Doklady e-mailom" v Nastaveniach ───────────────────────────────
+// Doteraz sa adresa dala nájsť len cez menu 📷 → „Doklady e-mailom" — teda
+// tam, kde ju nikto nehľadá. Zákazník o funkcii nemal ako vedieť.
+//
+// Adresa sa načítava asynchrónne (RPC), preto sa karta dopĺňa až po vykreslení
+// obrazovky. Nastavenia na ňu nečakajú.
+async function dmVykresliKartu(){
+  const box=document.getElementById("dmKarta");
+  if(!box) return;
+  let adresa=null, pocet=0;
+  try{
+    adresa=await dokladyAdresa(false);
+    await nacitajCakajuce(true);
+    pocet=cakajuceNove();
+  }catch(_){}
+
+  if(!adresa){
+    box.innerHTML=`<div style="background:#fdf6ec;border-left:3px solid var(--warn);border-radius:0 9px 9px 0;
+      padding:10px 12px;font-size:12.5px;line-height:1.5">
+      Adresu sa nepodarilo načítať. Skúste obnoviť stránku — doklady, ktoré už prišli, sa nestratili.
+    </div>`;
+    return;
+  }
+
+  box.innerHTML=`
+    <div class="mfield" style="margin-bottom:10px">
+      <label>Vaša prijímacia adresa</label>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input id="dmAdresa" value="${esc(adresa)}" readonly style="font-family:ui-monospace,monospace;font-size:12px">
+        <button class="aabtn" onclick="dmKopiruj()" title="Kopírovať">⧉</button>
+      </div>
+    </div>
+    ${pocet?`<div style="background:var(--bg);border-left:3px solid var(--brand);border-radius:0 9px 9px 0;
+      padding:9px 12px;font-size:12.5px;margin-bottom:10px;cursor:pointer" onclick="otvorCakajuce()">
+      📨 <b>${pocet} ${pocet===1?"doklad čaká":(pocet<5?"doklady čakajú":"dokladov čaká")}</b> na spracovanie — ťuknite sem
+    </div>`:''}
+    <div style="display:flex;gap:7px;flex-wrap:wrap">
+      <button class="abtn" onclick="otvorCakajuce()">📨 Schránka dokladov</button>
+      <button class="abtn" onclick="spravujOdosielatelov()">👥 Kto smie posielať</button>
+    </div>
+    <div style="font-size:11.5px;color:var(--ink-soft);margin-top:9px;line-height:1.5">
+      Doklad sa uloží len z adries, ktoré máte v zozname dôveryhodných — inak by vám do evidencie
+      mohol písať ktokoľvek, kto vašu adresu uvidí. Mail od cudzieho odosielateľa sa zaznamená,
+      ale príloha sa zahodí.
+    </div>`;
+}
+// Zavretie sa ukladá k firme, nie do prehliadača — kto appku otvorí na inom
+// zariadení, nemá dôvod vidieť to isté oznámenie druhýkrát.
+function dmSkryOznamenie(){
+  if(!firmaData.settings) firmaData.settings={};
+  firmaData.settings.dmOznamene=true;
+  poZmene();
+  renderHomeStrip();
+}
+
+function dmKopiruj(){
+  const el=document.getElementById("dmAdresa"); if(!el) return;
+  el.select(); el.setSelectionRange(0, 99999);
+  try{ navigator.clipboard.writeText(el.value); cloudMsg("Adresa skopírovaná.","ok"); }
+  catch(_){ document.execCommand("copy"); }
+}
+
 function appData(){
   const d=firmaData||{};
   const fak=(d.faktury||[]).length, vyd=(d.vydavky||[]).length, jaz=(d.jazdy||[]).length, poh=(d.vypis||[]).length;
@@ -9809,6 +9887,15 @@ function appData(){
       <button class="abtn" onclick="exportVsetkoXlsx()" style="width:100%">📊 Kompletný export XLSX</button>
       <div class="cloudmsg" id="xlsxMsg" style="margin-top:8px"></div>
       <div class="cloudmsg" id="cloudMsg"></div>
+
+      ${localMode?'':`<div style="border-top:1px solid var(--line);margin-top:16px;padding-top:14px">
+        <div style="font-size:12px;color:var(--ink-soft);margin-bottom:6px;font-weight:600">Doklady e-mailom</div>
+        <div class="csub" style="margin-bottom:10px;line-height:1.55">
+          Máte vlastnú prijímaciu adresu. Čo na ňu prepošlete, sa objaví v appke ako čakajúci doklad —
+          netreba nič sťahovať ani fotiť. Adresu si uložte medzi kontakty, nech ju máte poruke.
+        </div>
+        <div id="dmKarta"><div class="csub">Načítavam adresu…</div></div>
+      </div>`}
       ${(()=>{ const p=PLANY[aktualnyPlan()]||PLANY.free;
         const limFakt=zostatokLimitu("faktury"), limDokl=zostatokLimitu("doklady");
         const dni=dniDoKoncaPlanu();
@@ -10029,6 +10116,14 @@ function appData(){
       <div class="cloudmsg" id="cloudMsg2"></div>
     </div>`;
   setCrumb("firma · dáta · cloud · nastavenia");
+  // Adresa aj počet čakajúcich sa ťahajú zo servera — obrazovka na ne nečaká.
+  if(!localMode) dmVykresliKartu();
+  // Kto sa dostal sem, o funkcii už vie — pás na ploche netreba.
+  if(firmaData && !(firmaData.settings||{}).dmOznamene){
+    if(!firmaData.settings) firmaData.settings={};
+    firmaData.settings.dmOznamene=true;
+    poZmene();
+  }
 }
 // ── AUTOMATICKÉ DOPLNENIE FIRMY PODĽA IČO (register RPO ŠÚSR) ──
 // Zdroj: oficiálny Register právnických osôb (api.statistics.sk), verejný, CC-BY.
