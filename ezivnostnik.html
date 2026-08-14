@@ -807,7 +807,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.14-EU";  // výpis v zaheslovanom ZIPe + fallback na pôvodný názov RPC, keď admin_24 ešte nebežal
+const APP_VERZIA = "2026.08.14-EY";  // fix: doklady bez čísla zdieľali identitu + kontrola osirelých priradení
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -1660,6 +1660,8 @@ function zobrazFirmu(){
   // okno výdavku potrebuje kategórie, partnerov aj limity plánu; skôr by sa
   // otvoril modál nad prázdnou appkou.
   if(!_zdielaneSkusene){ _zdielaneSkusene=true; prevezmiZdielane(); spustiSkratku(); }
+  // Doklady bez `id` by mali prázdnu identitu — doplní sa raz, ticho.
+  try{ if(doplnIdDokladom()) poZmene(); }catch(_){}
   // Čakajúce doklady sa ťahajú na pozadí — plocha na ne nečaká.
   if(typeof nacitajCakajuce==="function") nacitajCakajuce(true);
   zapniObnovuCakajucich();
@@ -6062,7 +6064,7 @@ function appVydavky(){
     </div>`:''}
     <div class="alist">
       <div class="arow head" style="grid-template-columns:auto 2fr 1fr 1fr 1fr auto auto"><div><input type="checkbox" ${vsetkyVybraneV?'checked':''} onclick="vydVyberVsetky(this.checked)" title="Vybrať všetky" style="cursor:pointer"></div><div>Partner / popis</div><div>Dátum</div><div style="text-align:right">Bez DPH</div><div style="text-align:right">DPH</div><div style="text-align:center">Stav</div><div></div></div>
-      ${list.length?list.map(x=>{const idx=(d.vydavky||[]).indexOf(x);const bezDat=!x.datum||!/^\d{4}-\d{2}/.test(String(x.datum));const st=x.cislo?uhradaStav("vydavok",x.cislo):null;const fb=st?(UHRADA_FARBY[st.stav]||UHRADA_FARBY.neznamy):null;const uhr=vydJeUhradeny(x);return `<div class="arow" style="grid-template-columns:auto 2fr 1fr 1fr 1fr auto auto" onclick="editVydavok(${idx})"><div>${x.cislo?`<input type="checkbox" ${vydVybrane.has(String(x.cislo))?'checked':''} onclick="event.stopPropagation();vydToggleVyber('${esc(String(x.cislo))}',this.checked)" style="cursor:pointer">`:''}</div><div><div class="acol-strong">${esc(x.partner||"—")} ${x.doklad?'<span title="Doklad v cloude" style="cursor:pointer" onclick="event.stopPropagation();otvorDoklad(\''+esc(x.doklad)+'\')">📎</span>':''}</div><div class="acol-muted">${esc(x.popis||x.druh||"")}</div></div><div class="acol-muted">${bezDat?'<span class="apill neg">bez dátumu</span>':fmtDatum(x.datum)}</div><div class="acol-sum">${eur(+x.bez||0)}</div><div class="acol-sum" style="color:var(--ink-soft)">${eur(+x.dph||0)}</div><div style="text-align:center">${fb?`<span title="${esc((st.n||fb.n)+(st.text?' — '+st.text:''))}" style="color:${fb.f};font-size:14px">${fb.ic}</span>`:'<span style="color:var(--ink-soft)">·</span>'}</div><div>${x.cislo?(!uhr?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vyberSposobUhrady(null,_s=>{oznacDokladUhradeny('vydavok','${esc(String(x.cislo))}',_s);appVydavky();})" title="Označiť ako uhradené">✓</button>`:((st.zdroj==='rucne'||st.zdroj==='legacy')?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();zrusDokladUhradu('vydavok','${esc(String(x.cislo))}');appVydavky()" title="Zrušiť potvrdenie úhrady">✕</button>`:'')):''}</div></div>`;}).join(''):'<div class="aempty">Žiadne výdavky v tomto filtri.</div>'}
+      ${list.length?list.map(x=>{const idx=(d.vydavky||[]).indexOf(x);const bezDat=!x.datum||!/^\d{4}-\d{2}/.test(String(x.datum));const st=x.cislo?uhradaStav("vydavok",x.cislo):null;const fb=st?(UHRADA_FARBY[st.stav]||UHRADA_FARBY.neznamy):null;const uhr=vydJeUhradeny(x);return `<div class="arow" style="grid-template-columns:auto 2fr 1fr 1fr 1fr auto auto" onclick="editVydavok(${idx})"><div>${x.cislo?`<input type="checkbox" ${vydVybrane.has(String(x.cislo))?'checked':''} onclick="event.stopPropagation();vydToggleVyber('${esc(String(x.cislo))}',this.checked)" style="cursor:pointer">`:''}</div><div><div class="acol-strong">${esc(x.partner||"—")} ${x.doklad?'<span title="Doklad v cloude" style="cursor:pointer" onclick="event.stopPropagation();otvorDoklad(\''+esc(x.doklad)+'\')">📎</span>':''}</div><div class="acol-muted">${esc(x.popis||x.druh||"")}${(()=>{const kde=uhradyPopis("vydavok",dokladKluc(x));return kde?` <span style="color:var(--pos)">· zaplatené ${esc(kde)}</span>`:"";})()}</div></div><div class="acol-muted">${bezDat?'<span class="apill neg">bez dátumu</span>':fmtDatum(x.datum)}</div><div class="acol-sum">${eur(+x.bez||0)}</div><div class="acol-sum" style="color:var(--ink-soft)">${eur(+x.dph||0)}</div><div style="text-align:center">${fb?`<span title="${esc((st.n||fb.n)+(st.text?' — '+st.text:''))}" style="color:${fb.f};font-size:14px">${fb.ic}</span>`:'<span style="color:var(--ink-soft)">·</span>'}</div><div>${x.cislo?(!uhr?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vyberSposobUhrady(null,_s=>{oznacDokladUhradeny('vydavok','${esc(String(x.cislo))}',_s);appVydavky();})" title="Označiť ako uhradené">✓</button>`:((st.zdroj==='rucne'||st.zdroj==='legacy')?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();zrusDokladUhradu('vydavok','${esc(String(x.cislo))}');appVydavky()" title="Zrušiť potvrdenie úhrady">✕</button>`:'')):''}</div></div>`;}).join(''):'<div class="aempty">Žiadne výdavky v tomto filtri.</div>'}
     </div>`;
   setCrumb(`${vyd.length} dokladov · ${vRok}${vMesiac?' · '+mesiacLabel(vMesiac):''} · ${eur(bezSpolu)} bez DPH`);
 }
@@ -6114,7 +6116,18 @@ function vydavokDoplnkovePolia(obj){
 }
 
 function vydavokFormHtml(x, nova, idx){
-  return `    <div class="mfield"><label>Druh dokladu</label><select id="m_druh" onchange="mAktualizujOddiel();const b=document.getElementById('m_phmBox');if(b)b.style.display=(this.value==='PHM (tankovanie)')?'block':(document.getElementById('m_litre')&&document.getElementById('m_litre').value?'block':'none')"><option ${x.druh==="Došlá faktúra"?"selected":""}>Došlá faktúra</option><option ${x.druh==="Bloček"?"selected":""}>Bloček</option><option ${x.druh==="PHM (tankovanie)"?"selected":""}>PHM (tankovanie)</option><option ${x.druh==="Interný doklad"?"selected":""}>Interný doklad</option></select></div>
+  // Kde je doklad zaplatený — priamo v editore, nie až v Párovaní. Kto opravuje
+  // sumu, má vidieť, že na doklad už niečo prišlo: zmena sumy tam mení aj to,
+  // koľko zostáva doplatiť.
+  const _uhr = nova ? [] : uhradyDokladuPohyby("vydavok", dokladKluc(x));
+  const _uhrHtml = _uhr.length ? `<div style="background:#eef7f0;border-left:3px solid var(--pos);border-radius:0 9px 9px 0;
+      padding:9px 12px;margin-bottom:12px;font-size:12.5px;line-height:1.5">
+      <b>Zaplatené z účtu</b>
+      ${_uhr.map(u=>`<div style="color:var(--ink-soft);font-size:11.5px">${fmtDatum(u.datum)} · ${eur(u.suma)}${u.partner?" · "+esc(u.partner):""}</div>`).join("")}
+      ${_uhr.length>1?`<div style="font-size:11.5px;margin-top:3px">Spolu ${eur(r2(_uhr.reduce((a,u)=>a+u.suma,0)))}</div>`:""}
+      <div style="font-size:11px;color:var(--ink-soft);margin-top:4px">Priradenie zmeníte v Banke → Párovanie.</div>
+    </div>` : "";
+  return `    ${_uhrHtml}<div class="mfield"><label>Druh dokladu</label><select id="m_druh" onchange="mAktualizujOddiel();const b=document.getElementById('m_phmBox');if(b)b.style.display=(this.value==='PHM (tankovanie)')?'block':(document.getElementById('m_litre')&&document.getElementById('m_litre').value?'block':'none')"><option ${x.druh==="Došlá faktúra"?"selected":""}>Došlá faktúra</option><option ${x.druh==="Bloček"?"selected":""}>Bloček</option><option ${x.druh==="PHM (tankovanie)"?"selected":""}>PHM (tankovanie)</option><option ${x.druh==="Interný doklad"?"selected":""}>Interný doklad</option></select></div>
     <div class="mfield" style="position:relative"><label>Partner</label>
       <input id="m_partner" value="${esc(x.partner)}" autocomplete="off" oninput="feHladajFirmu(this.value,'m_partner')" placeholder="Začnite písať názov alebo IČO dodávateľa…">
       <div id="feNasepP" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:30;background:var(--paper);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px -8px rgba(19,28,43,.25);max-height:240px;overflow-y:auto;margin-top:2px"></div>
@@ -14824,6 +14837,50 @@ function rocnaKontrola(rok){
   if(dupl.length) pridaj("pozor","duplicity", dupl.length+" možných duplicít vo výdavkoch",
     "Rovnaké číslo dokladu, suma aj dodávateľ vo viacerých mesiacoch.", dupl);
 
+  // ── 3b. Rovnaké číslo pri RÔZNYCH sumách ──
+  //
+  // Toto nie je duplicita — je to horšie. Appka identifikuje doklad ČÍSLOM,
+  // takže párovanie s bankou aj kontrolný výkaz pracujú s prvým nájdeným.
+  // Prejaví sa to tak, že platba sa spáruje len sčasti: banka priradí sumu
+  // iného dokladu, než na ktorý používateľ klikol.
+  //
+  // Doložený prípad: štyri faktúry od Anthropicu dostali číslo „FXLY6UUY"
+  // (zákaznícke ID bez poradia), lebo pdf.js rozdelil text a vzor sa zastavil
+  // na medzere. Opravené vo vzore (EV), ale doklady zapísané predtým to
+  // nenapraví — preto táto kontrola.
+  const podlaCisla={};
+  vydavky.forEach(x=>{
+    const c=String(x.cislo||"").trim(); if(!c) return;
+    (podlaCisla[c]=podlaCisla[c]||[]).push(x);
+  });
+  const kolizie=Object.entries(podlaCisla)
+    .filter(([,g])=>g.length>1 && new Set(g.map(x=>r2(+x.spolu||0))).size>1)
+    .map(([c,g])=>c+" · "+g.length+"× · "+g.map(x=>eur(+x.spolu||0)).join(", "));
+  if(kolizie.length) pridaj("chyba","rovnakeCislo",
+    kolizie.length+" čísel dokladu má viac dokladov s rôznou sumou",
+    "Doklad sa v appke rozpoznáva podľa čísla — pri zhode sa použije prvý. "+
+    "Párovanie s bankou aj kontrolný výkaz preto môžu pracovať s nesprávnou sumou. "+
+    "Doplňte dokladom celé, odlišné čísla.", kolizie);
+
+  // ── 3c. Úhrada priradená k dokladu, ktorý neexistuje ──
+  //
+  // Vzniklo to tak, že doklady bez čísla mali spoločnú identitu prázdneho
+  // reťazca (opravené v EX). Úhrada zapísaná predtým na „" už nepatrí nikomu:
+  // pohyb sa tvári spárovaný, ale doklad k nemu nie je. Nechať to tak by
+  // znamenalo, že v banke vyzerá všetko vybavené a v evidencii nie.
+  const sirotyU=[];
+  (d.vypis||[]).forEach(t=>(t.uhrady||[]).forEach(u=>{
+    const k=String(u.cislo||"").trim();
+    if(!k || !najdiDoklad(u.typ, k))
+      sirotyU.push(fmtDatum(t.datum)+" · "+eur(Math.abs(+t.suma||0))+
+                   (t.partner?" · "+t.partner:"")+" → "+(k||"(bez čísla)"));
+  }));
+  if(sirotyU.length) pridaj("chyba","sirotaUhrada",
+    sirotyU.length+" priradení ukazuje na doklad, ktorý neexistuje",
+    "Pohyb sa tvári spárovaný, ale doklad k nemu nie je — v banke vyzerá vybavený, "+
+    "v evidencii chýba. Otvorte Banka → Párovanie, priradenie odoberte a priraďte znova.",
+    sirotyU.slice(0,8));
+
   // ── 4. Príjem na účte bez faktúry ──
   if((d.vypis||[]).length){
     const nespar=(d.vypis||[]).filter(t=>t.smer==="prijem" && vRoku(t.datum) && !t.skryty && !t.vratenie
@@ -16446,13 +16503,39 @@ function parseFakturaText(text){
     // ak stále nič, ber prvý neprázdny riadok, čo nie je "Invoice"
     if(!R.partner){ const l=t.split("\n").map(s=>s.trim()).filter(s=>s && !/^invoice/i.test(s) && s.length>3); if(l.length) R.partner=l[0].slice(0,45); }
   }
-  // číslo dokladu (SK aj EN)
-  let c=t.match(/Faktúra\s*(?:č\.|číslo)\s*:?\s*([0-9][A-Z0-9\-\/]{3,})/i)
-       ||t.match(/FAKT[ÚU]RA\s*:?\s*([0-9][0-9\-\/]{3,})/i)          // KROS/OMEGA: "FAKTÚRA: 1826064793"
-       ||t.match(/Invoice\s*(?:number|#|no\.?)\s*:?\s*([A-Z0-9][A-Z0-9\-\/]{3,})/i)
-       ||t.match(/Invoice\s*(?:number|#|no\.?)\s*:?\s*\n\s*([A-Z0-9][A-Z0-9\-\/]{3,})/i)   // hodnota pod popiskom
-       ||t.match(/(?:doklad|bloček|účtenka)[^\d]{0,15}(\d{4,})/i);
-  R.cislo=odstranZdvojenie(c?c[1]:"");
+  // ── ČÍSLO DOKLADU (SK aj EN) ─────────────────────────────────────────────
+  //
+  // Dve chyby, ktoré tu boli a obe sa prejavili až na faktúre od Anthropicu:
+  //
+  // 1. `\s*` medzi popiskom a hodnotou PRECHÁDZALO CEZ KONIEC RIADKA. Pri
+  //    stĺpcovom rozložení (popisky v jednom bloku, hodnoty v druhom) sa vzor
+  //    trafil na susedný popisok — z „Invoice number\nDate of issue" vyšlo
+  //    číslo dokladu „Date". Preto sa medzery píšu explicitne ako `[ \t]`.
+  //
+  // 2. pdf.js rozdeľuje text na bloky a appka ich spája medzerou, takže
+  //    „FXLY6UUY-0009" prišlo ako „FXLY6UUY -0009". Vzor sa na medzere zastavil
+  //    a uložil len „FXLY6UUY" — a keďže to je u Anthropicu ZÁKAZNÍCKE ID,
+  //    všetky faktúry od nich dostali rovnaké číslo. Párovanie s bankou potom
+  //    pracovalo so sumou prvej z nich. Preto vzor znesie medzeru okolo pomlčky
+  //    a medzery sa z výsledku odstránia.
+  //
+  // Sito na koniec: číslo faktúry má vždy aspoň jednu číslicu. Bez neho by
+  // prešiel ktorýkoľvek susedný popisok.
+  const CIS_JADRO = "([A-Z0-9][A-Z0-9\\/]*(?:[ \\t]*[-\\/][ \\t]*[A-Z0-9]+)*)";
+  const cisVzory=[
+    new RegExp("Faktúra[ \\t]*(?:č\\.|číslo)[ \\t]*:?[ \\t]*"+CIS_JADRO,"ig"),
+    new RegExp("FAKT[ÚU]RA[ \\t]*:?[ \\t]*([0-9][0-9\\-\\/ \\t]{3,})","ig"),   // KROS/OMEGA
+    new RegExp("Invoice[ \\t]*(?:number|#|no\\.?)[ \\t]*:?[ \\t]*"+CIS_JADRO,"ig"),
+    new RegExp("Invoice[ \\t]*(?:number|#|no\\.?)[ \\t]*:?[ \\t]*\\n[ \\t]*"+CIS_JADRO,"ig"),
+    /(?:doklad|bloček|účtenka)[^\d\n]{0,15}(\d{4,})/ig,
+  ];
+  const cisPlatne=s=>{ const x=String(s||"").replace(/[ \t]/g,""); return (/\d/.test(x) && x.length>=4) ? x : ""; };
+  let cislo="";
+  for(const v of cisVzory){
+    for(const m of t.matchAll(v)){ const x=cisPlatne(m[1]); if(x){ cislo=x; break; } }
+    if(cislo) break;
+  }
+  R.cislo=odstranZdvojenie(cislo);
   // variabilný symbol — ak nie je uvedený, pri mnohých faktúrach = číslo faktúry
   let vsM=t.match(/variabiln[ýy]\s*symbol\s*:?\s*(\d{4,})/i)||t.match(/\bVS\s*:?\s*(\d{4,})/i);
   R.vs = vsM ? odstranZdvojenie(vsM[1]) : (R.cislo||"");
@@ -17406,7 +17489,8 @@ function faktPdfNahlad(){
     let pridane=0, preskocene=0;
     _faktPdfData.forEach(R=>{
       if(!R._import || R._chyba) return;
-      const obj={druh:"Došlá faktúra", partner:R.partner||"", cislo:R.cislo||"", datum:(R.datum||"").slice(0,10)||new Date().toISOString().slice(0,10),
+      const obj={id:"v"+Date.now().toString(36)+Math.random().toString(36).slice(2,7),
+        druh:"Došlá faktúra", partner:R.partner||"", cislo:R.cislo||"", datum:(R.datum||"").slice(0,10)||new Date().toISOString().slice(0,10),
         bez:+R.bez||0, dph:+R.dph||0, spolu:+R.spolu||0, mesiac:((R.datum||"").slice(0,7))||new Date().toISOString().slice(0,7),
         zahranicny:!!R.zahranicny, kodKrajiny:R.kodKrajiny||"", dodavatelIco:R.dodavatelIco||"", dodavatelIcDph:R.dodavatelIcDph||R.icdph||"", iban:R.iban||"", zdroj:R._efaktura?(R._isdoc?"efaktura-isdoc":"efaktura-ubl"):"pdf-import"};
       if(R.rozpis&&R.rozpis.length>1){ obj.rozpis=R.rozpis; normalizujRozpis(obj); }
@@ -18049,9 +18133,43 @@ function txRozdelene(tx){
 function txZostava(tx){ return r2(txSuma(tx)-txRozdelene(tx)); }
 
 // celková suma dokladu
-function dokladSuma(typ, cislo){
+// ── IDENTITA DOKLADU ───────────────────────────────────────────────────────
+//
+// Appka doklad rozpoznáva ČÍSLOM. Lenže číslo nie je jedinečné:
+//   · doklad ho nemusí mať vôbec (bloček, interný doklad) — a vtedy mali
+//     VŠETKY také doklady spoločnú identitu prázdneho reťazca. `dokladSuma`
+//     vrátila sumu prvého z nich a `dokladUhradene` spočítala úhrady všetkých,
+//     takže sa doklad tváril zaplatený platbou, ktorá patrila inému;
+//   · a keď sa číslo zle rozpozná, kolidujú aj doklady, ktoré ho majú
+//     (doložené: štyri faktúry od Anthropicu s číslom „FXLY6UUY").
+//
+// Kľúčom je preto číslo, a keď chýba, `#id` — to je jedinečné vždy.
+// Pre doklady S číslom sa kľúč rovná číslu, takže existujúce úhrady
+// ostávajú platné a netreba migráciu.
+// Doklady zapísané pred zavedením kľúča `id` nemusia mať — a bez neho by
+// doklad bez čísla ostal s prázdnou identitou, teda presne s tou chybou, ktorú
+// kľúč rieši. Doplní sa raz, ticho, pri načítaní firmy.
+function doplnIdDokladom(){
+  if(!firmaData) return 0;
+  let n=0;
+  const daj=x=>{ if(!x.id){ x.id="v"+Date.now().toString(36)+Math.random().toString(36).slice(2,7)+(n); n++; } };
+  (firmaData.vydavky||[]).forEach(daj);
+  (firmaData.faktury||[]).forEach(daj);
+  return n;
+}
+
+function dokladKluc(x){
+  const c=String(x && x.cislo || "").trim();
+  return c || (x && x.id ? "#"+x.id : "");
+}
+function najdiDoklad(typ, kluc){
   const zoz = typ==="faktura" ? (firmaData.faktury||[]) : (firmaData.vydavky||[]);
-  const d = zoz.find(x=>String(x.cislo)===String(cislo));
+  const k=String(kluc||"");
+  if(!k) return null;                      // bez kľúča sa nedá nič priradiť
+  return zoz.find(x=>dokladKluc(x)===k) || null;
+}
+function dokladSuma(typ, cislo){
+  const d = najdiDoklad(typ, cislo);
   if(!d) return 0;
   return r2(+d.spolu || +d.bez || 0);
 }
@@ -18064,6 +18182,28 @@ function dokladUhradene(typ, cislo){
   return r2(s);
 }
 function dokladZostava(typ, cislo){ return r2(dokladSuma(typ,cislo)-dokladUhradene(typ,cislo)); }
+
+// Ktoré pohyby doklad zaplatili. Appka doteraz vedela povedať, ŽE je doklad
+// zaplatený, ale nie ČÍM — a to je práve údaj, ktorý človek hľadá, keď mu
+// párovanie povie „už zaplatené" a on nevie, kde priradenie odobrať.
+function uhradyDokladuPohyby(typ, cislo){
+  const c=String(cislo||"").trim(); if(!c) return [];
+  const out=[];
+  (firmaData.vypis||[]).forEach(t=>(t.uhrady||[]).forEach(u=>{
+    if(u.typ===typ && String(u.cislo)===c)
+      out.push({ datum:t.datum||"", suma:r2(+u.suma||0), partner:t.partner||"", id:txId(t) });
+  }));
+  return out.sort((a,b)=>String(a.datum).localeCompare(String(b.datum)));
+}
+// Krátky popis do riadka: „29. 7. · 303,50 €" alebo „2 platby · 303,50 €"
+function uhradyPopis(typ, cislo){
+  const u=uhradyDokladuPohyby(typ, cislo);
+  if(!u.length) return "";
+  const spolu=r2(u.reduce((a,x)=>a+x.suma,0));
+  return u.length===1
+    ? fmtDatum(u[0].datum)+" · "+eur(u[0].suma)
+    : u.length+" platby · "+eur(spolu);
+}
 
 // stav dokladu v ľudskej reči
 function dokladStavUhrady(typ, cislo){
@@ -18274,7 +18414,7 @@ function parUzSparovany(k, okremTxId){
   return (firmaData.vypis||[]).some(t=>{
     if(txId(t)===okremTxId) return false;
     const p=t.potvrdenaZhoda;
-    return p && p.typ===k.typ && String(p.cislo)===String(k.cislo);
+    return p && p.typ===k.typ && String(p.cislo)===String(k.kluc||k.cislo);
   });
 }
 
@@ -18343,7 +18483,7 @@ function parSparujJednoznacne(){
   if(!confirm("Spárovať "+navrhy.length+" jednoznačných pohybov?\n\n"+ukazka+
               (navrhy.length>8?"\n… a ďalších "+(navrhy.length-8):"")+
               "\n\nSpárované sa dá kedykoľvek zmeniť.")) return;
-  navrhy.forEach(({t,k})=>{ t.potvrdenaZhoda={typ:k.typ, cislo:String(k.cislo)}; delete t.odmietnutaZhoda; });
+  navrhy.forEach(({t,k})=>{ t.potvrdenaZhoda={typ:k.typ, cislo:String(k.kluc||k.cislo)}; delete t.odmietnutaZhoda; });
   firmaDirty=true; ulozFirmu(); renderSplit();
   setTimeout(()=>alert("✓ Spárovaných: "+navrhy.length),80);
 }
@@ -18362,8 +18502,11 @@ function parPocetJednoznacnych(){
 function splitKandidati(tx, ajNerelevantne){
   if(!tx) return {rel:[], zvysok:0, vsetky:[]};
   const suma=+tx.suma||0;
-  const mapF=f=>({typ:"faktura", z:f, cislo:f.cislo, nazov:(typeof f.odberatel==="string"?f.odberatel:(f.odberatel&&f.odberatel.nazov)||""), suma:+f.spolu||+f.bez||0});
-  const mapX=x=>({typ:"vydavok", z:x, cislo:x.cislo, nazov:x.partner||x.popis||"", suma:+x.spolu||+x.bez||0});
+  // `kluc` je identita (číslo alebo #id), `cislo` je to, čo sa zobrazuje.
+  // Predtým slúžilo číslo na oboje a doklady bez neho si navzájom prepisovali
+  // stav úhrady.
+  const mapF=f=>({typ:"faktura", z:f, kluc:dokladKluc(f), cislo:f.cislo, nazov:(typeof f.odberatel==="string"?f.odberatel:(f.odberatel&&f.odberatel.nazov)||""), suma:+f.spolu||+f.bez||0});
+  const mapX=x=>({typ:"vydavok", z:x, kluc:dokladKluc(x), cislo:x.cislo, nazov:x.partner||x.popis||"", suma:+x.spolu||+x.bez||0});
   const zdroj = tx.smer==="prijem" ? (firmaData.faktury||[]).map(mapF) : (firmaData.vydavky||[]).map(mapX);
   const vsTx=String(tx.vs||"").replace(/\D/g,"");
   const jeRel=k=>{
@@ -18374,7 +18517,7 @@ function splitKandidati(tx, ajNerelevantne){
     if(dni!==null && dni<=30 && parNazvySedia(tx.proti||tx.popis, k.nazov)) return true;
     return false;
   };
-  const jeVolny=k=>{ const st=dokladStavUhrady(k.typ,k.cislo); return st.stav!=="uhradene"; };
+  const jeVolny=k=>{ const st=dokladStavUhrady(k.typ,k.kluc||k.cislo); return st.stav!=="uhradene"; };
   const rel=zdroj.filter(k=>jeRel(k)&&jeVolny(k));
   const ine=zdroj.filter(k=>!rel.includes(k)).sort((a,b)=>Math.abs(a.suma-suma)-Math.abs(b.suma-suma));
   return {rel, zvysok:ine.length, vsetky: ajNerelevantne ? [...rel, ...ine] : rel};
@@ -18551,12 +18694,16 @@ function renderSplit(){
           return ohodnotene.slice(0,30).map((k,i)=>{
             const odporucane = jasny && i===0;
             const znacky=k.dovody.map(d=>`<span class="sp-tag ${d.ok?'match':'open'}">${d.ok?'✓':'·'} ${esc(d.t)}</span>`).join(" ");
-            return `<div class="sp-item ${odporucane?'match':(k.sedi?'':'dim')}" onclick="splitSparuj('${txId(vybrany)}','${k.typ}','${esc(String(k.cislo))}')"${zam("banka")}>
+            return `<div class="sp-item ${odporucane?'match':(k.sedi?'':'dim')}" onclick="splitSparuj('${txId(vybrany)}','${k.typ}','${esc(String(k.kluc))}')"${zam("banka")}>
               <div class="sp-r1"><span>${odporucane?'<b>⭐ ':''}${esc(String(k.cislo||"—"))}${odporucane?'</b>':''} ${k.nazov?'· '+esc(k.nazov):''}</span><span class="sp-amt">${eur(k.suma)}</span></div>
               <div class="sp-r2">${k.z&&k.z.datum?fmtDatum(k.z.datum)+" · ":""}${znacky}${(()=>{
-                const st=dokladStavUhrady(k.typ,k.cislo);
-                if(st.stav==="ciastocne") return ` <span class="sp-tag cast">${esc(st.text)}</span>`;
-                if(st.stav==="uhradene")  return ` <span class="sp-tag done">už zaplatené</span>`;
+                const st=dokladStavUhrady(k.typ,k.kluc);
+                const kde=uhradyPopis(k.typ,k.kluc);
+                if(st.stav==="ciastocne") return ` <span class="sp-tag cast">${esc(st.text)}</span>`+
+                  (kde?` <span class="sp-tag">${esc(kde)}</span>`:"");
+                // „už zaplatené" bez toho, ČÍM, nechávalo človeka hľadať ručne,
+                // ktorý pohyb má rozviazať.
+                if(st.stav==="uhradene")  return ` <span class="sp-tag done">zaplatené${kde?" · "+esc(kde):""}</span>`;
                 return ""; })()}</div>
             </div>`;
           }).join("")+dalsieBtn;
@@ -18600,7 +18747,26 @@ function splitSparuj(txIdVal, typ, cislo){
   const tx=(firmaData.vypis||[]).find(t=>txId(t)===txIdVal); if(!tx) return;
   const zostPohyb=txZostava(tx), zostDoklad=dokladZostava(typ,cislo);
   const pridane=pridajUhradu(tx, typ, cislo);
-  if(!pridane){ alert("Tento pohyb je už celý rozdelený medzi doklady."); return; }
+  if(!pridane){
+    // Priradiť sa nedá z DVOCH dôvodov a pôvodná hláška vinila vždy pohyb:
+    // „Tento pohyb je už celý rozdelený medzi doklady." Keď bol pritom
+    // vyčerpaný DOKLAD (zaplatený inou platbou), používateľ hľadal chybu na
+    // nesprávnej strane — pohyb mal v zozname ešte návrh a tváril sa voľný.
+    if(zostPohyb<=0.005){
+      alert("Tento pohyb je už celý rozdelený medzi doklady.\n\n"+
+            "Ak chcete niečo zmeniť, najprv odoberte niektoré z priradení.");
+    }else{
+      const kde=(firmaData.vypis||[]).filter(t=>txId(t)!==txIdVal &&
+        (t.uhrady||[]).some(u=>u.typ===typ && String(u.cislo)===String(cislo)));
+      alert("Tento doklad je už zaplatený.\n\n"+
+            "Suma dokladu: "+eur(dokladSuma(typ,cislo))+" · priradené: "+eur(dokladUhradene(typ,cislo))+"\n"+
+            (kde.length ? "Zaplatil ho pohyb: "+kde.map(t=>fmtDatum(t.datum)+" · "+eur(Math.abs(+t.suma||0))+
+                          (t.partner?" · "+t.partner:"")).join("\n")+"\n\n" : "\n")+
+            "Ak sem patrí táto platba, odoberte priradenie z toho druhého pohybu. "+
+            "Ak ste doklad zaplatili dvakrát, jedna z platieb je preplatok.");
+    }
+    return;
+  }
   firmaDirty=true; ulozFirmu();
   const poDoklade=dokladZostava(typ,cislo), poPohybe=txZostava(tx);
   // ak ostalo niečo nerozdelené, nechaj pohyb vybraný a povedz to
