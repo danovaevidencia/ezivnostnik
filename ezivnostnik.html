@@ -751,7 +751,7 @@ button{font-family:inherit;cursor:pointer}
 
 <!-- skryté: file inputy -->
 <input type="file" id="fileInput" accept="application/json,.json" style="display:none" onchange="importJSON(event)">
-<input type="file" id="vypisInput" accept=".xml,text/xml,application/xml" style="display:none" onchange="spracujVypis(event)">
+<input type="file" id="vypisInput" accept=".xml,.zip,text/xml,application/xml,application/zip" style="display:none" onchange="spracujVypis(event)">
 <input type="file" id="ocrInput" accept="image/*,application/pdf" capture="environment" style="display:none" onchange="spracujOCR(event)">
 <input type="file" id="ocrInputFile" accept="image/*,application/pdf" style="display:none" onchange="spracujOCR(event)">
 <input type="file" id="faktPdfInput" accept="application/pdf,application/xml,text/xml,.xml" multiple style="display:none" onchange="faktPdfSpracuj(event)">
@@ -807,7 +807,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.13-ER";  // schránka dokladov: doklad sa dá aj odmietnuť, nielen spracovať
+const APP_VERZIA = "2026.08.14-ET";  // bankový výpis v zaheslovanom ZIPe — ručne aj e-mailom, heslo neopúšťa zariadenie
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -9819,9 +9819,13 @@ async function dmVykresliKartu(){
   }catch(_){}
 
   if(!adresa){
+    // Dôvod sa vypisuje zámerne: bez neho je „nepodarilo sa" len konštatovanie,
+    // s ktorým sa nedá nič robiť — ani nahlásiť. Rovnaká chyba ako pri schránke
+    // (permission denied), ktorú by nikto nenašiel, keby ju appka zhltla.
     box.innerHTML=`<div style="background:#fdf6ec;border-left:3px solid var(--warn);border-radius:0 9px 9px 0;
       padding:10px 12px;font-size:12.5px;line-height:1.5">
       Adresu sa nepodarilo načítať. Skúste obnoviť stránku — doklady, ktoré už prišli, sa nestratili.
+      ${_adresaChyba?`<div style="color:var(--ink-soft);font-size:11px;margin-top:4px;font-family:ui-monospace,monospace">${esc(_adresaChyba)}</div>`:''}
     </div>`;
     return;
   }
@@ -13456,32 +13460,169 @@ function vypisZrusZhodu(txId){
 }
 
 // import bankového výpisu (SEPA XML)
+// ═══════════════════════════════════════════════════════════════════════════
+//  BANKOVÝ VÝPIS V ZAHESLOVANOM ZIPE
+//
+//  Banky posielajú camt.053 skoro vždy zabalený a zaheslovaný. Overené na
+//  výpise z Tatra banky: ZipCrypto + Deflate, jeden súbor v archíve.
+//
+//  🔒 PRAVIDLO, KTORÉ TU DRŽÍ VŠETKO POKOPE:
+//     Server nesmie mať súbor A heslo naraz.
+//
+//  Zaheslovaný archív už na serveri leží (prišiel e-mailom do Storage) a chráni
+//  ho jedine to heslo. Keby sme heslo uložili k sebe, tú ochranu zmažeme — kto
+//  sa dostane k databáze, má výpis aj kľúč k nemu.
+//
+//  Preto sa rozbaľuje LEN v prehliadači a heslo sa ukladá nanajvýš do
+//  `localStorage` toho zariadenia — nikdy do `firmaData`, ktoré sa synchronizuje.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ZIP sa pozná podľa prvých bajtov, nie podľa MIME typu: banky posielajú
+// prílohu často ako `application/octet-stream` a názov nemusí mať príponu.
+function jeZipBajty(bajty){
+  return bajty && bajty.length>4 && bajty[0]===0x50 && bajty[1]===0x4B
+      && (bajty[2]===0x03 || bajty[2]===0x05 || bajty[2]===0x07);
+}
+
+let _zipLib=null;
+async function nacitajZipLib(){
+  if(_zipLib) return _zipLib;
+  const m=await import("https://esm.sh/@zip.js/zip.js@2.7.45");
+  // Bez web workerov: v jednom HTML súbore nie je odkiaľ ich načítať a archív
+  // s výpisom má pár desiatok kB — rozbalenie je otázka milisekúnd.
+  m.configure({ useWebWorkers:false });
+  _zipLib=m;
+  return m;
+}
+
+// Zoznam súborov v archíve. Centrálny adresár ZIP-u NIE JE šifrovaný, takže
+// názvy vieme ukázať ešte pred tým, než sa spýtame na heslo — používateľ vidí,
+// čo vlastne odomyká.
+async function zipObsah(subor){
+  const zip=await nacitajZipLib();
+  const rd=new zip.ZipReader(new zip.BlobReader(subor));
+  try{
+    const polozky=await rd.getEntries();
+    return polozky.filter(x=>!x.directory).map(x=>({
+      nazov:x.filename, velkost:x.uncompressedSize||0, zaheslovany:!!x.encrypted,
+    }));
+  } finally { try{ await rd.close(); }catch(_){} }
+}
+
+// Vytiahne prvý XML zo archívu ako text. Heslo môže byť prázdne — nezaheslovaný
+// archív sa rozbalí bez neho.
+async function zipVytiahniXml(subor, heslo){
+  const zip=await nacitajZipLib();
+  const rd=new zip.ZipReader(new zip.BlobReader(subor), heslo ? { password:heslo } : {});
+  try{
+    const polozky=(await rd.getEntries()).filter(x=>!x.directory);
+    const xml=polozky.find(x=>/\.xml$/i.test(x.filename)) || polozky[0];
+    if(!xml) throw new Error("Archív je prázdny.");
+    return await xml.getData(new zip.TextWriter("utf-8"));
+  } finally { try{ await rd.close(); }catch(_){} }
+}
+
+// Heslo k výpisom. Zámerne `localStorage`, nie `firmaData`: to sa synchronizuje
+// do cloudu a heslo by skončilo vedľa archívu, ktorý odomyká.
+const zipHesloKluc = () => "eziv_vypis_heslo_"+(firmaId||"local");
+const zipHesloUlozene = () => { try{ return localStorage.getItem(zipHesloKluc())||""; }catch(_){ return ""; } };
+function zipHesloUloz(heslo, pamataj){
+  try{
+    if(pamataj && heslo) localStorage.setItem(zipHesloKluc(), heslo);
+    else localStorage.removeItem(zipHesloKluc());
+  }catch(_){}
+}
+
+// Vráti text XML výpisu zo súboru, ktorý môže byť XML aj (zaheslovaný) ZIP.
+// Vracia null, keď to používateľ zruší — volajúci vtedy nemá čo hlásiť.
+async function textVypisu(subor){
+  const bajty=new Uint8Array(await subor.slice(0,8).arrayBuffer());
+  if(!jeZipBajty(bajty)) return await subor.text();
+
+  let obsah=[];
+  try{ obsah=await zipObsah(subor); }
+  catch(e){ alert("Archív sa nepodarilo otvoriť: "+(e.message||e)); return null; }
+  if(!obsah.length){ alert("Archív neobsahuje žiadny súbor."); return null; }
+
+  const zaheslovany=obsah.some(x=>x.zaheslovany);
+  const nazvy=obsah.map(x=>x.nazov).join(", ");
+  if(!zaheslovany){
+    try{ return await zipVytiahniXml(subor, ""); }
+    catch(e){ alert("Archív sa nepodarilo rozbaliť: "+(e.message||e)); return null; }
+  }
+
+  // Skús najprv zapamätané heslo — bežný prípad je ten istý výpis každý mesiac.
+  const ulozene=zipHesloUlozene();
+  if(ulozene){
+    try{ return await zipVytiahniXml(subor, ulozene); }
+    catch(_){ /* heslo sa zmenilo — spýtame sa nižšie */ }
+  }
+
+  for(let pokus=0; pokus<3; pokus++){
+    const heslo=prompt(
+      "🔒 Archív je zaheslovaný\n\n"+
+      "Obsahuje: "+nazvy+"\n\n"+
+      (pokus ? "Heslo nesedelo, skúste znova.\n\n" : "")+
+      "Heslo posiela banka — býva v sprievodnom e-maile alebo v internetbankingu.\n"+
+      "Zadajte heslo k archívu:", "");
+    if(heslo===null) return null;
+    try{
+      const text=await zipVytiahniXml(subor, heslo);
+      if(confirm("Heslo sedí.\n\nZapamätať si ho na tomto zariadení?\n\n"+
+                 "Uloží sa len tu — do cloudu sa neposiela, aby neležalo vedľa archívu, ktorý odomyká."))
+        zipHesloUloz(heslo, true);
+      return text;
+    }catch(e){
+      // zip.js pri zlom hesle hlási chybu integrity, nie „zlé heslo"
+      if(pokus===2){ alert("Heslo sa nepodarilo overiť ani na tretí pokus.\n\n"+(e.message||e)); return null; }
+    }
+  }
+  return null;
+}
+
 function importVypis(){
   if(!strazZapis("banka")) return;
   if(!skontrolujLimit("bankaImporty","Vo vyššom pláne môžete importovať výpisy bez obmedzenia.")) return;
   document.getElementById("vypisInput").click();
 }
-function spracujVypis(e){
+async function spracujVypis(e){
   if(!strazZapis("banka")) return;
   const file=e.target.files[0]; if(!file) return;
-  const rd=new FileReader();
-  rd.onload=()=>{
-    const parsed=parseVypis(String(rd.result));
-    if(!parsed || !parsed.txns.length){ alert("Súbor sa nepodarilo prečítať. Podporovaný je bankový výpis vo formáte SEPA XML (ISO 20022, camt.053)."); return; }
-    if(!firmaData.vypis) firmaData.vypis=[];
-    // počítadlo importov (pre limit plánu)
-    if(!firmaData.settings) firmaData.settings={};
-    firmaData.settings.pocetImportovBanka = (+firmaData.settings.pocetImportovBanka||0) + 1;
-    // pridaj len nové (podľa id)
-    const existId=new Set(firmaData.vypis.map(t=>t.id));
-    const nove=parsed.txns.filter(t=>!existId.has(t.id));
-    firmaData.vypis=firmaData.vypis.concat(nove);
-    poZmene();
-    if(aktualnaApp==="banka") appBanka();
-    alert("Import hotový: pridaných "+nove.length+" pohybov"+(nove.length<parsed.txns.length?" ("+(parsed.txns.length-nove.length)+" už existovalo)":"")+".");
-  };
-  rd.readAsText(file);
   e.target.value="";
+  const text=await textVypisu(file);
+  if(text===null) return;          // používateľ zrušil alebo sa nepodarilo
+  importujVypisText(text);
+}
+
+// Spoločné pre ručný výber aj pre doklad prijatý e-mailom — inak by sa dve
+// cesty k tomu istému importu časom rozišli (kap. 16).
+function importujVypisText(text){
+  const parsed=parseVypis(String(text));
+  if(!parsed || !parsed.txns.length){
+    alert("Súbor sa nepodarilo prečítať. Podporovaný je bankový výpis vo formáte SEPA XML (ISO 20022, camt.053).");
+    return 0;
+  }
+  if(!firmaData.vypis) firmaData.vypis=[];
+  if(!firmaData.settings) firmaData.settings={};
+
+  // pridaj len nové (podľa id)
+  const existId=new Set(firmaData.vypis.map(t=>t.id));
+  const nove=parsed.txns.filter(t=>!existId.has(t.id));
+
+  // Počítadlo pre limit plánu sa zvyšuje LEN keď import naozaj niečo pridal.
+  // Predtým sa zvyšovalo pri každom volaní — kto omylom nahral ten istý výpis
+  // dvakrát, minul si limit za nič. Pri príjme e-mailom by to bolo ešte horšie:
+  // ten istý výpis môže doraziť opakovane bez toho, aby oň človek požiadal.
+  if(nove.length) firmaData.settings.pocetImportovBanka = (+firmaData.settings.pocetImportovBanka||0) + 1;
+
+  firmaData.vypis=firmaData.vypis.concat(nove);
+  poZmene();
+  if(aktualnaApp==="banka") appBanka();
+  alert(nove.length
+    ? "Import hotový: pridaných "+nove.length+" pohybov"+
+      (nove.length<parsed.txns.length?" ("+(parsed.txns.length-nove.length)+" už existovalo)":"")+"."
+    : "Všetkých "+parsed.txns.length+" pohybov už evidujete — nič sa nepridalo.");
+  return nove.length;
 }
 
 // ═══════════════════════════════════════════════════
@@ -16618,14 +16759,25 @@ function zapniObnovuCakajucich(){
 }
 
 // ── prijímacia adresa ──
+let _adresaChyba = null;
 async function dokladyAdresa(prerazit){
-  if(localMode || !sb || !firmaId) return null;
+  _adresaChyba = null;
+  if(localMode || !sb || !firmaId){ _adresaChyba="Adresa funguje len s cloudovým účtom."; return null; }
   try{
-    const { data, error } = await sb.rpc("prideľ_doklady_token",
+    // ASCII názov: pôvodná funkcia mala v názve mäkčeň a PostgREST ju volá
+    // cez URL, kde sa neASCII znak kóduje. Fungovalo to, ale je to zbytočná
+    // neistota v ceste, ktorá sa ťažko ladí. Staršia funkcia ostáva v databáze
+    // ako obal, takže appka nasadená pred touto zmenou beží ďalej.
+    const { data, error } = await sb.rpc("pridel_doklady_token",
       { p_firma_id: firmaId, p_prerazit: !!prerazit });
     if(error) throw error;
-    return data ? String(data)+"@"+DOKLADY_DOMENA : null;
-  }catch(e){ console.warn("Token sa nepodarilo získať:", e.message||e); return null; }
+    if(!data){ _adresaChyba="Databáza nevrátila adresu."; return null; }
+    return String(data)+"@"+DOKLADY_DOMENA;
+  }catch(e){
+    _adresaChyba = (e && (e.message || e.hint || String(e))) || "neznáma chyba";
+    console.warn("Token sa nepodarilo získať:", _adresaChyba);
+    return null;
+  }
 }
 // Doména, na ktorej appka prijíma doklady. Pilot beží na adrese prideľovanej
 // Resendom; pri prechode na vlastnú doménu sa mení tu aj v secrete edge funkcie.
@@ -16654,12 +16806,12 @@ async function otvorCakajuce(){
     ${nove.length ? `<div style="margin-top:14px">
       <div style="font-weight:700;font-size:13px;margin-bottom:8px">Čaká na spracovanie (${nove.length})</div>
       ${nove.map(x=>`<div class="arow" style="grid-template-columns:auto 1fr auto auto;gap:10px;align-items:center">
-        <div style="font-size:19px;cursor:pointer" onclick="spracujCakajuci('${esc(x.id)}')">${/pdf/.test(x.subor_typ||"")?"📄":"🖼"}</div>
+        <div style="font-size:19px;cursor:pointer" onclick="spracujCakajuci('${esc(x.id)}')">${jeVypisSubor(x)?"🏦":(/pdf/.test(x.subor_typ||"")?"📄":"🖼")}</div>
         <div style="min-width:0;cursor:pointer" onclick="spracujCakajuci('${esc(x.id)}')">
           <div style="font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(x.subor_nazov||"doklad")}</div>
           <div style="font-size:11px;color:var(--ink-soft)">${esc(x.od_koho||"")} · ${fmtDatum(String(x.prijate||"").slice(0,10))} · ${Math.round((x.subor_bajtov||0)/1024)} kB</div>
         </div>
-        <div style="font-size:11px;color:var(--brand);font-weight:600;cursor:pointer" onclick="spracujCakajuci('${esc(x.id)}')">Spracovať →</div>
+        <div style="font-size:11px;color:var(--brand);font-weight:600;cursor:pointer" onclick="spracujCakajuci('${esc(x.id)}')">${jeVypisSubor(x)?"Importovať →":"Spracovať →"}</div>
         <span onclick="event.stopPropagation();odmietniCakajuci('${esc(x.id)}')"
               title="Nepotrebujem — odstrániť zo schránky"
               style="cursor:pointer;color:var(--ink-soft);font-size:15px;padding:0 2px;line-height:1">✕</span>
@@ -16751,9 +16903,57 @@ async function zmazOdosielatela(id){
 }
 
 // ── spracovanie: stiahni a pusti tou istou cestou ako ručný výber ──
+// Bankový výpis nie je doklad do výdavkov — je to zoznam pohybov. Podľa názvu
+// ho vieme len tipnúť; istotu dá až `parseVypis`, ktorý hľadá element <Stmt>.
+// Tu ide o to, čo ukázať v zozname a kam kliknutie viesť.
+function jeVypisSubor(z){
+  const n=String(z && z.subor_nazov || "").toLowerCase();
+  const t=String(z && z.subor_typ || "").toLowerCase();
+  if(/\.zip$/.test(n) || t.includes("zip")) return true;
+  // XML býva aj e-faktúra (ISDOC/UBL). Názov od banky obsahuje číslo účtu
+  // a dátum — dlhé číslo je teda rozumný tip.
+  if(/\.xml$/.test(n) && /\d{6,}/.test(n)) return true;
+  return false;
+}
+
+// Výpis prijatý e-mailom. Ide TOU ISTOU cestou ako ručný import — vrátane
+// rozbaľovania zaheslovaného archívu aj počítadla limitu.
+async function importujCakajuciVypis(id){
+  const z=cakajuceDoklady.find(x=>x.id===id);
+  if(!z || !z.subor_cesta) return false;
+  if(!strazZapis("banka")) return false;
+  if(!skontrolujLimit("bankaImporty","Vo vyššom pláne môžete importovať výpisy bez obmedzenia.")) return false;
+  try{
+    const { data, error } = await sb.storage.from("dokumenty").download(z.subor_cesta);
+    if(error) throw error;
+    const subor=new File([data], z.subor_nazov||"vypis", { type:z.subor_typ||"application/octet-stream" });
+    const text=await textVypisu(subor);
+    if(text===null) return false;                 // zrušené alebo zlé heslo
+    if(!parseVypis(String(text))) return false;   // nie je to výpis — nech to skúsi ako doklad
+    importujVypisText(text);
+    // Archív s výpisom je najcitlivejší súbor, aký nám v Storage leží. Pohyby
+    // sú v evidencii, takže ho po importe netreba držať.
+    try{ await sb.storage.from("dokumenty").remove([z.subor_cesta]); }
+    catch(e){ console.warn("Archív sa nepodarilo zmazať:", e.message||e); }
+    await sb.from("cakajuce_doklady")
+      .update({ stav:"spracovane", spracovane:new Date().toISOString() }).eq("id", id);
+    await nacitajCakajuce(true);
+    return true;
+  }catch(e){ alert("Výpis sa nepodarilo načítať: "+(e.message||e)); return false; }
+}
+
 async function spracujCakajuci(id){
   const z=cakajuceDoklady.find(x=>x.id===id);
   if(!z || !z.subor_cesta){ alert("Súbor sa nenašiel."); return; }
+  // Výpis ide inou cestou než doklad. Rozhodne obsah: keď `parseVypis` nájde
+  // element <Stmt>, sú to bankové pohyby a OCR by na nich nemalo čo robiť.
+  if(jeVypisSubor(z)){
+    closeModal();
+    if(await importujCakajuciVypis(id)) return;
+    // Nebol to výpis (alebo sa nerozbalil) — ak doklad v schránke ostal,
+    // skúsime ho ešte bežnou cestou.
+    if(!cakajuceDoklady.find(x=>x.id===id)) return;
+  }
   if(!skontrolujLimit("doklady","Vo vyššom pláne môžete načítať doklady bez obmedzenia.")) return;
   closeModal();
   try{
