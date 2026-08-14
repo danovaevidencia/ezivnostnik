@@ -807,7 +807,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.14-ET";  // bankový výpis v zaheslovanom ZIPe — ručne aj e-mailom, heslo neopúšťa zariadenie
+const APP_VERZIA = "2026.08.14-EU";  // výpis v zaheslovanom ZIPe + fallback na pôvodný názov RPC, keď admin_24 ešte nebežal
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -16768,8 +16768,18 @@ async function dokladyAdresa(prerazit){
     // cez URL, kde sa neASCII znak kóduje. Fungovalo to, ale je to zbytočná
     // neistota v ceste, ktorá sa ťažko ladí. Staršia funkcia ostáva v databáze
     // ako obal, takže appka nasadená pred touto zmenou beží ďalej.
-    const { data, error } = await sb.rpc("pridel_doklady_token",
+    let { data, error } = await sb.rpc("pridel_doklady_token",
       { p_firma_id: firmaId, p_prerazit: !!prerazit });
+
+    // Na poradí nasadenia nesmie záležať. V databáze ostal pôvodný názov ako
+    // obal, aby staršia appka bežala ďalej — opačný smer treba ošetriť tu:
+    // novšia appka nad databázou bez `admin_24` by inak spadla na
+    // „Could not find the function ... in the schema cache".
+    if(error && /schema cache|does not exist|Could not find the function/i.test(error.message||"")){
+      console.warn("ASCII funkcia chýba, skúšam pôvodný názov — spusti admin_24.");
+      ({ data, error } = await sb.rpc("prideľ_doklady_token",
+        { p_firma_id: firmaId, p_prerazit: !!prerazit }));
+    }
     if(error) throw error;
     if(!data){ _adresaChyba="Databáza nevrátila adresu."; return null; }
     return String(data)+"@"+DOKLADY_DOMENA;
