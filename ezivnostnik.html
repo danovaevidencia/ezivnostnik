@@ -807,7 +807,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.14-EY";  // fix: doklady bez čísla zdieľali identitu + kontrola osirelých priradení
+const APP_VERZIA = "2026.08.14-EZ";  // vlastník sa pridá medzi dôveryhodných odosielateľov sám (nová firma mala prázdny zoznam)
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -16843,6 +16843,20 @@ function zapniObnovuCakajucich(){
 
 // ── prijímacia adresa ──
 let _adresaChyba = null;
+
+// Pridá prihláseného používateľa medzi dôveryhodných odosielateľov, ak tam ešte
+// nie je. Beží na pozadí — adresa sa nemá kvôli tomu zdržať.
+async function zabezpecVlastnikaVWhiteliste(){
+  try{
+    if(localMode || !sb || !firmaId) return;
+    const { data:{ user } } = await sb.auth.getUser();
+    const email=String(user && user.email || "").toLowerCase().trim();
+    if(!email) return;
+    await sb.from("doklady_odosielatelia")
+      .upsert({ firma_id: firmaId, email }, { onConflict:"firma_id,email", ignoreDuplicates:true });
+  }catch(e){ console.warn("Vlastníka sa nepodarilo pridať medzi odosielateľov:", e.message||e); }
+}
+
 async function dokladyAdresa(prerazit){
   _adresaChyba = null;
   if(localMode || !sb || !firmaId){ _adresaChyba="Adresa funguje len s cloudovým účtom."; return null; }
@@ -16865,6 +16879,10 @@ async function dokladyAdresa(prerazit){
     }
     if(error) throw error;
     if(!data){ _adresaChyba="Databáza nevrátila adresu."; return null; }
+    // Vlastník účtu je dôveryhodný z definície. Bez tohto má nová firma prázdny
+    // whitelist a PRVÝ doklad, ktorý si na svoju adresu pošle, sa odmietne —
+    // zbytočne zlý prvý dojem z funkcie, ktorú práve objavil.
+    zabezpecVlastnikaVWhiteliste();
     return String(data)+"@"+DOKLADY_DOMENA;
   }catch(e){
     _adresaChyba = (e && (e.message || e.hint || String(e))) || "neznáma chyba";
