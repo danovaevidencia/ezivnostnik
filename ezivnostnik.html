@@ -807,7 +807,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.14-EZ";  // vlastník sa pridá medzi dôveryhodných odosielateľov sám (nová firma mala prázdny zoznam)
+const APP_VERZIA = "2026.08.14-FA";  // doklady e-mailom: prijímame od kohokoľvek, blokujú sa len vybrané adresy
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -9857,12 +9857,12 @@ async function dmVykresliKartu(){
     </div>`:''}
     <div style="display:flex;gap:7px;flex-wrap:wrap">
       <button class="abtn" onclick="otvorCakajuce()">📨 Schránka dokladov</button>
-      <button class="abtn" onclick="spravujOdosielatelov()">👥 Kto smie posielať</button>
+      <button class="abtn" onclick="spravujOdosielatelov()">🚫 Blokované adresy</button>
     </div>
     <div style="font-size:11.5px;color:var(--ink-soft);margin-top:9px;line-height:1.5">
-      Doklad sa uloží len z adries, ktoré máte v zozname dôveryhodných — inak by vám do evidencie
-      mohol písať ktokoľvek, kto vašu adresu uvidí. Mail od cudzieho odosielateľa sa zaznamená,
-      ale príloha sa zahodí.
+      Doklad prijmeme od kohokoľvek — do evidencie sa aj tak nedostane sám, čaká na vaše potvrdenie.
+      Adresa sa nedá uhádnuť; keby sa predsa dostala k nežiaducemu odosielateľovi, vygenerujte novú
+      a stará okamžite prestane fungovať.
     </div>`;
 }
 // Zavretie sa ukladá k firme, nie do prehliadača — kto appku otvorí na inom
@@ -16844,19 +16844,6 @@ function zapniObnovuCakajucich(){
 // ── prijímacia adresa ──
 let _adresaChyba = null;
 
-// Pridá prihláseného používateľa medzi dôveryhodných odosielateľov, ak tam ešte
-// nie je. Beží na pozadí — adresa sa nemá kvôli tomu zdržať.
-async function zabezpecVlastnikaVWhiteliste(){
-  try{
-    if(localMode || !sb || !firmaId) return;
-    const { data:{ user } } = await sb.auth.getUser();
-    const email=String(user && user.email || "").toLowerCase().trim();
-    if(!email) return;
-    await sb.from("doklady_odosielatelia")
-      .upsert({ firma_id: firmaId, email }, { onConflict:"firma_id,email", ignoreDuplicates:true });
-  }catch(e){ console.warn("Vlastníka sa nepodarilo pridať medzi odosielateľov:", e.message||e); }
-}
-
 async function dokladyAdresa(prerazit){
   _adresaChyba = null;
   if(localMode || !sb || !firmaId){ _adresaChyba="Adresa funguje len s cloudovým účtom."; return null; }
@@ -16879,10 +16866,6 @@ async function dokladyAdresa(prerazit){
     }
     if(error) throw error;
     if(!data){ _adresaChyba="Databáza nevrátila adresu."; return null; }
-    // Vlastník účtu je dôveryhodný z definície. Bez tohto má nová firma prázdny
-    // whitelist a PRVÝ doklad, ktorý si na svoju adresu pošle, sa odmietne —
-    // zbytočne zlý prvý dojem z funkcie, ktorú práve objavil.
-    zabezpecVlastnikaVWhiteliste();
     return String(data)+"@"+DOKLADY_DOMENA;
   }catch(e){
     _adresaChyba = (e && (e.message || e.hint || String(e))) || "neznáma chyba";
@@ -16930,13 +16913,14 @@ async function otvorCakajuce(){
     </div>` : `<div class="ocr-hint" style="margin-top:14px">Zatiaľ nič nečaká.</div>`}
 
     ${cudzie.length ? `<div style="margin-top:16px;background:#fdf6ec;border-left:3px solid var(--warn);border-radius:0 9px 9px 0;padding:11px 13px">
-      <div style="font-weight:700;font-size:12.5px">⚠ Mail od neznámej adresy (${cudzie.length})</div>
+      <div style="font-weight:700;font-size:12.5px">⚠ Mail od blokovanej adresy (${cudzie.length})</div>
       <div style="font-size:11.5px;color:var(--ink-soft);line-height:1.5;margin:4px 0 8px">
-        Prílohu sme neuložili. Ak adresu poznáte, pridajte ju medzi dôveryhodné a požiadajte o opätovné poslanie.
+        Prílohu sme neuložili, lebo túto adresu máte zablokovanú. Ak to bol omyl, odblokujte ju
+        a požiadajte o opätovné poslanie.
       </div>
       ${[...new Set(cudzie.map(x=>x.od_koho))].map(e=>`<div style="display:flex;gap:8px;align-items:center;margin-top:6px">
         <div style="flex:1;font-size:12px;font-family:monospace;overflow:hidden;text-overflow:ellipsis">${esc(e||"—")}</div>
-        <button class="aabtn" style="padding:4px 9px;font-size:11px" onclick="pridajOdosielatela('${esc(e)}')">+ Dôverovať</button>
+        <button class="aabtn" style="padding:4px 9px;font-size:11px" onclick="odblokujPodlaEmailu('${esc(e)}')">Odblokovať</button>
         <span onclick="odbavCakajuce('neznamy_odosielatel','${esc(e)}')" title="Zahodiť maily z tejto adresy"
               style="cursor:pointer;color:var(--ink-soft);font-size:15px;padding:0 2px">✕</span>
       </div>`).join("")}
@@ -16948,7 +16932,7 @@ async function otvorCakajuce(){
     </div>` : ""}
 
     <div style="margin-top:16px;border-top:1px solid var(--line);padding-top:12px">
-      <button class="aabtn" onclick="spravujOdosielatelov()">👥 Dôveryhodní odosielatelia</button>
+      <button class="aabtn" onclick="spravujOdosielatelov()">🚫 Blokované adresy</button>
       <button class="aabtn" onclick="prerazDokladyToken()" title="Stará adresa okamžite prestane fungovať">↻ Nová adresa</button>
     </div>
   `, null, null, "siroky");
@@ -16967,45 +16951,72 @@ async function prerazDokladyToken(){
   if(a){ cloudMsg("Nová adresa: "+a,"ok"); otvorCakajuce(); }
 }
 
-async function pridajOdosielatela(email){
+async function blokujOdosielatela(email){
+  const e=String(email||"").toLowerCase().trim();
+  if(!e) return;
+  if(!confirm("Zablokovať "+e+"?\n\nPrílohy z tejto adresy sa už neuložia. Mail sa aj tak zaznamená, aby ste vedeli, že vám píše.")) return;
+  try{
+    const { error } = await sb.from("doklady_odosielatelia")
+      .upsert({ firma_id: firmaId, email: e, blokovany: true, poznamka: "blokované" },
+              { onConflict:"firma_id,email" });
+    if(error) throw error;
+    cloudMsg(e+" je zablokovaná.","ok");
+    otvorCakajuce();
+  }catch(err){ alert("Nepodarilo sa zablokovať: "+(err.message||err)); }
+}
+// Odblokovanie priamo zo schránky — používateľ tam vidí adresu, nie jej id.
+async function odblokujPodlaEmailu(email){
   const e=String(email||"").toLowerCase().trim();
   if(!e) return;
   try{
     const { error } = await sb.from("doklady_odosielatelia")
-      .upsert({ firma_id: firmaId, email: e }, { onConflict:"firma_id,email", ignoreDuplicates:true });
+      .update({ blokovany:false }).eq("firma_id", firmaId).eq("email", e);
     if(error) throw error;
-    cloudMsg(e+" pridaný medzi dôveryhodných.","ok");
+    cloudMsg(e+" je odblokovaná.","ok");
     otvorCakajuce();
-  }catch(err){ alert("Nepodarilo sa pridať: "+(err.message||err)); }
+  }catch(err){ alert("Nepodarilo sa odblokovať: "+(err.message||err)); }
+}
+async function odblokujOdosielatela(id){
+  try{
+    await sb.from("doklady_odosielatelia").update({ blokovany:false }).eq("id", id);
+    spravujOdosielatelov();
+  }catch(e){ alert("Nepodarilo sa odblokovať: "+(e.message||e)); }
 }
 
 async function spravujOdosielatelov(){
   let zoznam=[];
   try{
     const { data } = await sb.from("doklady_odosielatelia")
-      .select("*").eq("firma_id", firmaId).order("email");
+      .select("*").eq("firma_id", firmaId).eq("blokovany", true).order("email");
     zoznam=data||[];
   }catch(_){}
-  openModal("👥 Dôveryhodní odosielatelia", `
+  openModal("🚫 Blokované adresy", `
     <div class="ocr-hint" style="margin-bottom:12px">
-      Doklad sa uloží len z týchto adries. Mail od kohokoľvek iného sa zaznamená, ale príloha sa zahodí —
-      inak by ktokoľvek, kto uvidí vašu prijímaciu adresu, mohol písať do evidencie.
+      Doklady prijímame od kohokoľvek — do evidencie sa aj tak nedostanú samy, čakajú na vaše potvrdenie.
+      Sem patria len adresy, od ktorých nechcete dostávať nič. Ich prílohy sa zahodia, ale mail sa zaznamená,
+      aby ste vedeli, že vám tá adresa stále píše.
     </div>
-    <div class="mfield"><label>Pridať adresu</label>
+    <div class="mfield"><label>Zablokovať adresu</label>
       <div style="display:flex;gap:8px">
-        <input id="doNovy" placeholder="uctovnicka@firma.sk" style="flex:1">
-        <button class="aabtn pri" onclick="pridajOdosielatela(val('doNovy'))">Pridať</button>
+        <input id="doNovy" placeholder="reklama@spam.sk" style="flex:1">
+        <button class="aabtn" style="border-color:var(--neg);color:var(--neg)" onclick="blokujOdosielatela(val('doNovy'))">Zablokovať</button>
       </div>
     </div>
     <div style="margin-top:12px">
       ${zoznam.length ? zoznam.map(x=>`<div style="display:flex;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line-soft)">
         <div style="flex:1;font-size:12.5px;font-family:monospace;overflow:hidden;text-overflow:ellipsis">${esc(x.email)}</div>
-        <span onclick="zmazOdosielatela('${esc(x.id)}')" style="cursor:pointer;color:var(--neg);font-weight:700">✕</span>
-      </div>`).join("") : '<div class="ocr-hint">Zoznam je prázdny — neuloží sa nič.</div>'}
+        <button class="aabtn" style="padding:3px 9px;font-size:11px" onclick="odblokujOdosielatela('${esc(x.id)}')">Odblokovať</button>
+      </div>`).join("") : '<div class="ocr-hint">Nikto nie je blokovaný — doklady chodia od všetkých.</div>'}
+    </div>
+    <div class="ocr-hint" style="margin-top:12px">
+      Ak by sa vaša adresa dostala k niekomu nežiaducemu, jednoduchšie než blokovať je
+      <b>vygenerovať novú</b> — tá stará okamžite prestane fungovať.
     </div>
   `, null, null, "siroky");
 }
 
+// Zoznam sa už nepoužíva ako whitelist (admin_27) — mazanie záznamu nahradilo
+// odblokovanie. Funkcia ostáva pre prípad, že by na ňu odkazoval starší kód.
 async function zmazOdosielatela(id){
   try{
     await sb.from("doklady_odosielatelia").delete().eq("id", id);
