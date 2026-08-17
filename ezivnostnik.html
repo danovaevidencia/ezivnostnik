@@ -887,7 +887,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.17-FJ";  // kolízia čísel sa dá odlíšiť bez zmeny čísla; hláška pri zápise už neklame o duplicite
+const APP_VERZIA = "2026.08.17-FK";  // tankovanie za koncom knihy jázd nie je chýbajúca jazda; otázka na súkromné jazdy sa pýta raz
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -8212,7 +8212,9 @@ function rocnaKontrolaHtml(rok){
           ${x.priklady.map(p=>"· "+esc(p)).join("<br>")}
           ${x.priklady.length>=8?"<br>· …":""}
         </div>`:""}
-        ${x.akcia?`<button class="aabtn" style="margin-top:9px;padding:6px 12px;font-size:12px" onclick="${esc(x.akcia.fn)}">${esc(x.akcia.l)}</button>`:""}
+        ${x.akcia&&x.akcia.length?`<div style="margin-top:9px;display:flex;gap:7px;flex-wrap:wrap">${
+          x.akcia.map(a=>`<button class="aabtn" style="padding:6px 12px;font-size:12px" onclick="${esc(a.fn)}">${esc(a.l)}</button>`).join("")
+        }</div>`:""}
       </div>`).join("")}
       <div class="ob-hint">
         Nič z toho nie je automaticky chyba — väčšina nálezov má legitímne vysvetlenie.
@@ -9797,6 +9799,24 @@ function editJazda(idx, gpsRezim){
   ()=>{const obj={cesta:val("m_cesta"),ucel:val("m_ucel"),datum:val("m_datum"),km:parseFloat(val("m_km"))||0,sukromna:chk("m_sukromna")};
     if(!d.jazdy)d.jazdy=[]; if(nova)d.jazdy.push(obj); else d.jazdy[idx]=Object.assign(d.jazdy[idx],obj); poZmene(); appJazdy();},
   nova?null:()=>{ d.jazdy.splice(idx,1); poZmene(); appJazdy(); });
+}
+// Odpoveď na otázku, či auto slúži aj na súkromné cesty. Ukladá sa, aby sa
+// kontrola nepýtala donekonečna — a dá sa zmeniť, lebo sa to časom mení.
+function nastavAutoSukromne(hodnota){
+  if(!strazZapis("jazdy")) return;
+  if(!firmaData.settings) firmaData.settings={};
+  if(hodnota==="nie" && !confirm("Auto teda používate výhradne na podnikanie?\n\n"
+    +"Appka bude uplatňovať 100 % nákladov na auto a prestane sa pýtať.\n\n"
+    +"Pri daňovej kontrole to musíte vedieť obhájiť — úplne podnikateľské využitie "
+    +"je možné, ale kontrola sa naň pýta ako prvé. Ak máte aj druhé auto na súkromné "
+    +"jazdy, je to bežná a obhájiteľná situácia.\n\n"
+    +"Odpoveď zmeníte kedykoľvek v Knihe jázd.")) return;
+  firmaData.settings.autoSukromne=hodnota;
+  poZmene();
+  if(hodnota==="ano") alert("Zapamätané.\n\nSúkromnú jazdu označíte v jej editore zaškrtnutím „súkromná“ — "
+    +"ostane v knihe kvôli spojitosti tachometra, ale nezapočíta sa do podnikateľských kilometrov.");
+  if(aktualnaApp==="uzavierka" && typeof appUzavierka==="function") appUzavierka();
+  else if(aktualnaApp==="jazdy" && typeof appJazdy==="function") appJazdy();
 }
 function mSukromnaPozn(){
   const p=document.getElementById("m_sukromnaPozn"); if(!p) return;
@@ -15046,9 +15066,12 @@ function rocnaKontrola(rok){
   const d=firmaData, S=d.settings||{}, out=[];
   const R=String(rok);
   const vRoku=x=>String(x||"").slice(0,4)===R;
-  // `akcia` je nepovinná: {l:"popis tlačidla", fn:"volanie()"}. Nález, ktorý
-  // appka vie odstrániť sama, nemá posielať človeka hľadať, kde sa to robí.
-  const pridaj=(zavaznost,k,t,detail,priklady,akcia)=>out.push({zavaznost,k,t,d:detail,priklady:priklady||[],akcia:akcia||null});
+  // `akcia` je nepovinná: {l:"popis tlačidla", fn:"volanie()"} alebo pole
+  // takých objektov. Nález, ktorý appka vie odstrániť sama, nemá posielať
+  // človeka hľadať, kde sa to robí — a otázka, na ktorú sú dve odpovede,
+  // má ponúknuť obe, nie jednu a „Zrušiť".
+  const pridaj=(zavaznost,k,t,detail,priklady,akcia)=>out.push({zavaznost,k,t,d:detail,
+    priklady:priklady||[], akcia: akcia ? (Array.isArray(akcia)?akcia:[akcia]) : null});
 
   const faktury=(d.faktury||[]).filter(f=>vRoku(f.datum||f.vystavenie));
   const vydavky=(d.vydavky||[]).filter(x=>vRoku(x.datum));
@@ -15183,22 +15206,67 @@ function rocnaKontrola(rok){
     if(typeof autaVMajetku==="function" && autaVMajetku().length && (d.jazdy||[]).length){
       const dniSJazdou=new Set((d.jazdy||[]).map(j=>jazdaDayKey(j)).filter(Boolean));
       const phm=vydavky.filter(x=>/PHM|tankovan/i.test(String(x.druh||"")) || (+x.litre>0));
-      const bezJazdy=phm.filter(x=>x.datum && !dniSJazdou.has(String(x.datum).slice(0,10)));
+      // Posledný deň, po ktorý je kniha vedená. Tankovanie ZA týmto dňom nie je
+      // chýbajúca jazda — je to neimportované obdobie, a hlásiť ho ako chybu
+      // posiela človeka dopĺňať jazdy namiesto doimportovania z vozidla.
+      const posledny=[...dniSJazdou].sort().pop()||"";
+      // Deň pred cestou a deň po nej sú bežné časy na tankovanie. Bez tejto
+      // výnimky kontrola hlási aj doklady, ku ktorým jazda pokojne existuje —
+      // a falošný poplach naučí preskakovať aj pravé nálezy.
+      const jazdaVOkoli=k=>{
+        const t0=Date.parse(k+"T12:00:00Z"); if(isNaN(t0)) return false;
+        return [-1,1].some(o=>dniSJazdou.has(new Date(t0+o*86400000).toISOString().slice(0,10)));
+      };
+      const poKnihe=[], bezJazdy=[];
+      phm.forEach(x=>{
+        const k=String(x.datum||"").slice(0,10); if(!k) return;
+        if(dniSJazdou.has(k)) return;
+        if(posledny && k>posledny) poKnihe.push(x);
+        else if(!jazdaVOkoli(k)) bezJazdy.push(x);
+      });
       if(bezJazdy.length)
         pridaj("pozor","phmBezJazdy", bezJazdy.length+" tankovaní v deň, keď kniha jázd nemá jazdu",
-          "Tankovať sa dá aj deň pred cestou, ale pri kontrole je to prvá otázka. Doplňte jazdu alebo označte doklad ako súkromný.",
+          "Ani deň predtým či potom v knihe jazda nie je. Pri kontrole je to prvá otázka — doplňte jazdu alebo označte doklad ako súkromný.",
           bezJazdy.slice(0,8).map(x=>fmtDatum(x.datum)+" · "+(x.partner||"—")+" · "+eur(x.spolu)));
+      // Iný nález, iná odpoveď: nechýba jazda, chýba obdobie.
+      if(poKnihe.length)
+        pridaj("pozor","knihaZaostava", poKnihe.length+" tankovaní je novších než posledná jazda v knihe",
+          "Kniha jázd je vedená do "+fmtDatum(posledny)+", doklady máte aj po tomto dni. "+
+          "Nie je to chýbajúca jazda, ale nedotiahnuté obdobie — doimportujte jazdy z vozidla.",
+          poKnihe.slice(0,8).map(x=>fmtDatum(x.datum)+" · "+(x.partner||"—")+" · "+eur(x.spolu)),
+          {l:"Otvoriť knihu jázd", fn:"otvorApp('jazdy')"});
     }
   }catch(_){}
 
   // ── 6. Celý rok bez jedinej súkromnej jazdy ──
+  //
+  // Pôvodne to bolo hlásenie bez odpovede: „označte tie jazdy" — ale ktoré?
+  // Ponúkať hromadné označenie víkendov by bolo hádanie: v reálnej knihe malo
+  // všetkých 106 víkendových jázd pracovný účel. Appka nevie, ktorá jazda bola
+  // súkromná; vie sa však opýtať, či vôbec nejaká bola.
+  //
+  // Odpoveď „nie" je legitímna a musí sa dať zapamätať. Kontrola, ktorá sa pýta
+  // stále to isté aj po odpovedi, sa naučí preskakovať.
   try{
     if(typeof autaVMajetku==="function" && autaVMajetku().length){
       const jazdy=jazdyRoka(rok);
-      if(jazdy.length>=30 && kmSukromne(jazdy)<=0)
-        pridaj("pozor","ziadneSukromne", "Za celý rok nie je označená ani jedna súkromná jazda",
-          "Pri aute v obchodnom majetku je úplne podnikateľské využitie možné, ale nezvyčajné — a daňová kontrola sa naň pýta. "+
-          "Ak auto používate aj súkromne, označte tie jazdy; inak sa uplatňuje 100 % nákladov.");
+      const odpoved=(d.settings||{}).autoSukromne;
+      if(jazdy.length>=30 && kmSukromne(jazdy)<=0 && odpoved!=="nie"){
+        const priznane = odpoved==="ano";
+        pridaj(priznane?"chyba":"pozor","ziadneSukromne",
+          priznane ? "Auto používate aj súkromne, ale ani jedna jazda tak nie je označená"
+                   : "Za celý rok nie je označená ani jedna súkromná jazda",
+          priznane
+            ? "Sami ste uviedli, že auto slúži aj na súkromné cesty. Kým tie jazdy nie sú označené, "+
+              "appka počíta 100 % nákladov — a to je presne to, čo daňová kontrola rozporuje. "+
+              "Súkromnú jazdu označíte v jej editore zaškrtnutím „súkromná“."
+            : "Pri aute v obchodnom majetku je úplne podnikateľské využitie možné, ale nezvyčajné — "+
+              "a daňová kontrola sa naň pýta. Odpovedzte raz a appka sa pýtať prestane.",
+          [],
+          priznane ? {l:"Otvoriť knihu jázd", fn:"otvorApp('jazdy')"}
+                   : [{l:"Áno, jazdím ním aj súkromne", fn:"nastavAutoSukromne('ano')"},
+                      {l:"Nie, len na podnikanie", fn:"nastavAutoSukromne('nie')"}]);
+      }
     }
   }catch(_){}
 
