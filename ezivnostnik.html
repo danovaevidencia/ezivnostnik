@@ -887,7 +887,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.17-FK";  // tankovanie za koncom knihy jázd nie je chýbajúca jazda; otázka na súkromné jazdy sa pýta raz
+const APP_VERZIA = "2026.08.17-FL";  // doklad sa kontroluje pri zápise tými istými pravidlami ako o rok v ročnej kontrole
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -6489,6 +6489,13 @@ function editVydavok(idx){
     // litre (PHM) — ulož a synchronizuj s prehľadom tankovaní
     const litreVal=parseFloat(val("m_litre"))||0;
     if(litreVal>0) obj.litre=litreVal; else delete obj.litre;
+    // Doplnenie z pamäte partnerov musí bežať PRED kontrolou — inak by appka
+    // pýtala IČ DPH, ktoré o riadok nižšie sama doplní.
+    if(doplnZPartnera(obj)) zapisAutomat("icdph", 1);
+    // Pravidlá nad jedným dokladom — tie isté, aké o rok vyhodnotí ročná
+    // kontrola. Beží aj pri úprave: chyba sa dá do dokladu vniesť aj neskôr,
+    // a človek, ktorý ho práve otvoril, je jediný, kto vie, čo na ňom bolo.
+    if(!dokladKontrolaPriZapise(obj, "vydavok")) return false;
     // kontrola duplicít (len pri novom výdavku; pri úprave ignoruj seba)
     if(nova){
       // kontrola: doklad z iného mesiaca? (chytí OCR/preklep v dátume)
@@ -6521,14 +6528,12 @@ function editVydavok(idx){
       // Pamäť partnerov sa musí aj čítať, nielen plniť — inak doklad od dávno
       // známeho dodávateľa ostane bez IČ DPH a vyplaví sa až v ročnej kontrole.
       // Dopĺňa výhradne prázdne polia, takže ručne zadané prepísať nemôže.
-      if(doplnZPartnera(obj)) zapisAutomat("icdph", 1);
       d.vydavky.push(obj);
       zapamatajPartnera(obj);
     } else {
       if(!d.vydavky[idx].id) d.vydavky[idx].id="v"+Date.now()+Math.random().toString(36).slice(2,7);
       obj.id=d.vydavky[idx].id;
       d.vydavky[idx]=Object.assign(d.vydavky[idx],obj);
-      if(doplnZPartnera(d.vydavky[idx])) zapisAutomat("icdph", 1);
       zapamatajPartnera(d.vydavky[idx]);
     }
     // synchronizuj tankovanie prepojené s týmto výdavkom
@@ -15061,6 +15066,72 @@ function kontrolaPredPodanim(mk, typ){
 //  Každé pravidlo je viazané na dôkaz, že sa téma týka: jazdy len keď je auto
 //  v majetku, banka len keď je výpis, DPH len u platiteľa.
 // ═══════════════════════════════════════════════════════════════════════════
+// ═══ PRAVIDLÁ VYHODNOTITEĽNÉ NAD JEDNÝM DOKLADOM ═══════════════════════
+//
+// Ročná kontrola má jednu nevýhodu: beží raz a nájde chyby, ktoré vznikali
+// dvanásť mesiacov. Doklad sa pritom dá skontrolovať v okamihu zápisu, kým ho
+// má človek pred sebou a pamätá si, čo na ňom bolo.
+//
+// Tabuľka je JEDNA a používajú ju obe cesty. Napísať kontrolu pri zápise vedľa
+// ročnej by bola siedma verzia tej istej chyby, ktorá sa v tomto projekte našla
+// už šesťkrát: dve miesta odpovedajúce na tú istú otázku rozdielne.
+//
+// `plati` vracia true, keď je doklad problémový. Kontext (kniha jázd, auto
+// v majetku) sa počíta raz cez `dokladKontext()` — pri 90 dokladoch by inak
+// každý znova prechádzal 800 jázd.
+function dokladKontext(){
+  let maAuto=false;
+  try{ maAuto = typeof autaVMajetku==="function" && autaVMajetku().length>0; }catch(_){}
+  const dni=new Set((firmaData.jazdy||[]).map(j=>jazdaDayKey(j)).filter(Boolean));
+  return {maAuto, dniSJazdou:dni, poslednaJazda:[...dni].sort().pop()||""};
+}
+const PRAVIDLA_DOKLADU=[
+  {
+    k:"dphBezIc", typ:"vydavok",
+    plati:(x)=>{
+      try{ if(!jePlatcaDPH()) return false; }catch(_){ return false; }
+      return (+x.dph||0)>0 && !x.zahranicny
+        && !String(x.dodavatelIcDph||"").trim() && String(x.druh||"")!=="Bloček";
+    },
+    hlaska:(x)=>"⚠ Doklad si odpočítava DPH "+eur(x.dph)+", ale dodávateľ nemá IČ DPH.\n\n"
+      +"Bez neho nárok na odpočet nevzniká a kontrolný výkaz taký doklad odmietne.\n\n"
+      +"Doplňte IČ DPH podľa dokladu (pomôže tlačidlo „Skontrolovať / doplniť z registra“). "
+      +"Ak dodávateľ platcom DPH nie je, dajte DPH na 0 a celú sumu do základu.\n\n"
+      +"Uložiť doklad aj tak?"
+  },
+  {
+    // Tankovanie deň pred cestou je bežné, preto ±1 deň. Doklad novší než celá
+    // kniha sa tu zámerne NEHLÁSI — to nie je chýbajúca jazda, ale nedotiahnuté
+    // obdobie, a rieši ho samostatný nález v ročnej kontrole.
+    k:"phmBezJazdy", typ:"vydavok",
+    plati:(x,ctx)=>{
+      if(!ctx || !ctx.maAuto || !ctx.dniSJazdou.size) return false;
+      if(!(/PHM|tankovan/i.test(String(x.druh||"")) || (+x.litre>0))) return false;
+      const k=String(x.datum||"").slice(0,10); if(!k) return false;
+      if(ctx.dniSJazdou.has(k)) return false;
+      if(ctx.poslednaJazda && k>ctx.poslednaJazda) return false;
+      const t0=Date.parse(k+"T12:00:00Z"); if(isNaN(t0)) return false;
+      return ![-1,1].some(o=>ctx.dniSJazdou.has(new Date(t0+o*86400000).toISOString().slice(0,10)));
+    },
+    hlaska:(x)=>"⚠ V knihe jázd nie je jazda z "+fmtDatum(x.datum)+" ani z okolitých dní.\n\n"
+      +"Tankovanie bez jazdy je pri daňovej kontrole prvá otázka.\n\n"
+      +"Doplňte jazdu do knihy, alebo ak išlo o súkromnú cestu, doklad si neuplatňujte.\n\n"
+      +"Uložiť doklad aj tak?"
+  },
+];
+// Nálezy pre jeden doklad. `ctx` je nepovinný — bez neho sa dopočíta.
+function dokladNalezy(x, typ, ctx){
+  const c=ctx||dokladKontext();
+  return PRAVIDLA_DOKLADU.filter(p=>p.typ===typ && (()=>{ try{ return p.plati(x,c); }catch(_){ return false; } })());
+}
+// Spýta sa na každý nález a vráti false, keď človek uloženie odmietne.
+function dokladKontrolaPriZapise(x, typ){
+  for(const p of dokladNalezy(x, typ)){
+    if(!confirm(p.hlaska(x))) return false;
+  }
+  return true;
+}
+
 function rocnaKontrola(rok){
   if(!firmaData) return [];
   const d=firmaData, S=d.settings||{}, out=[];
@@ -15209,20 +15280,18 @@ function rocnaKontrola(rok){
       // Posledný deň, po ktorý je kniha vedená. Tankovanie ZA týmto dňom nie je
       // chýbajúca jazda — je to neimportované obdobie, a hlásiť ho ako chybu
       // posiela človeka dopĺňať jazdy namiesto doimportovania z vozidla.
-      const posledny=[...dniSJazdou].sort().pop()||"";
-      // Deň pred cestou a deň po nej sú bežné časy na tankovanie. Bez tejto
-      // výnimky kontrola hlási aj doklady, ku ktorým jazda pokojne existuje —
-      // a falošný poplach naučí preskakovať aj pravé nálezy.
-      const jazdaVOkoli=k=>{
-        const t0=Date.parse(k+"T12:00:00Z"); if(isNaN(t0)) return false;
-        return [-1,1].some(o=>dniSJazdou.has(new Date(t0+o*86400000).toISOString().slice(0,10)));
-      };
+      const ctx=dokladKontext();
+      const posledny=ctx.poslednaJazda;
+      // Samotné „chýba jazda" rozhoduje pravidlo zdieľané s kontrolou pri zápise,
+      // aby sa obe cesty nemohli rozísť. Tu sa dopĺňa len druhá vetva — doklady
+      // za koncom knihy, ktoré pravidlo zámerne prepúšťa.
+      const P=PRAVIDLA_DOKLADU.find(p=>p.k==="phmBezJazdy");
       const poKnihe=[], bezJazdy=[];
       phm.forEach(x=>{
         const k=String(x.datum||"").slice(0,10); if(!k) return;
         if(dniSJazdou.has(k)) return;
         if(posledny && k>posledny) poKnihe.push(x);
-        else if(!jazdaVOkoli(k)) bezJazdy.push(x);
+        else if(P && P.plati(x, ctx)) bezJazdy.push(x);
       });
       if(bezJazdy.length)
         pridaj("pozor","phmBezJazdy", bezJazdy.length+" tankovaní v deň, keď kniha jázd nemá jazdu",
@@ -15271,9 +15340,10 @@ function rocnaKontrola(rok){
   }catch(_){}
 
   // ── 7. Odpočet DPH z dokladu bez IČ DPH — cez celý rok ──
-  if(jePlatcaDPH()){
-    const bezIc=vydavky.filter(x=>(+x.dph||0)>0 && !x.zahranicny
-      && !String(x.dodavatelIcDph||"").trim() && String(x.druh||"")!=="Bloček");
+  {
+    // Tá istá podmienka, akú používa kontrola pri zápise — z jednej tabuľky.
+    const P=PRAVIDLA_DOKLADU.find(p=>p.k==="dphBezIc");
+    const bezIc=P ? vydavky.filter(x=>{ try{ return P.plati(x); }catch(_){ return false; } }) : [];
     if(bezIc.length){
       const dan=r2(bezIc.reduce((a,x)=>a+(+x.dph||0),0));
       // Tlačidlo len vtedy, keď má čo robiť. Ponuka „opraviť", ktorá po kliknutí
