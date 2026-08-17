@@ -887,7 +887,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.17-FE";  // zoznamy faktúr a výdavkov sa na mobile už neorezávajú
+const APP_VERZIA = "2026.08.17-FF";  // appka dopĺňa IČ DPH z pamäte partnerov a sama priraďuje isté platby faktúr
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -1707,6 +1707,24 @@ function doplnChybajuceId(){
 function zobrazFirmu(){
   doplnChybajuceId();
   migrujUhrady();
+  // Istá zhoda príjmu s faktúrou sa zapíše aj bez kliknutia. Beží tu, nie až
+  // v Banke, lebo `uhrady` číta rovnako pohľadávky, DPH aj ročná kontrola —
+  // modul, ktorý používateľ práve neotvoril, by inak ukazoval iný stav.
+  //
+  // Hláška je tu zámerne, hoci pri štarte ruší: appka práve zmenila stav úhrad
+  // bez toho, aby o to niekto požiadal. Vyskočí len keď sa naozaj niečo
+  // priradilo, čiže po aktualizácii raz a potom takmer nikdy. Odklad je kvôli
+  // tomu, aby sa najprv vykreslila obrazovka a človek videl, čoho sa to týka.
+  try{
+    const _sp=autoParujIstePrijmy();
+    if(_sp){
+      poZmene();
+      setTimeout(()=>alert("Appka za vás priradila "+_sp+" "+(_sp===1?"platbu":_sp<5?"platby":"platieb")+
+        " k faktúram podľa variabilného symbolu.\n\nFaktúry sú tým označené ako uhradené. "+
+        "Ak niektoré priradenie nesedí, odoberiete ho v Banka → Párovanie.\n\n"+
+        "Záznam ostáva v zvončeku."), 400);
+    }
+  }catch(_){}
   // faktúry za predplatné rovno do výdavkov (raz za session, na pozadí)
   if(!_saasAutoDone && firmaData && !localMode){ _saasAutoDone=true; autoZaevidujSaasFaktury(); }
   // pozastavený účet (admin nastavil aktivny=false) → zablokuj appku
@@ -3198,6 +3216,46 @@ function notifPrecitajVsetko(){
   poZmene(); renderNotifBadge(); otvorNotifikacie();
 }
 
+// ═══ DENNÍK AUTOMATIKY ═════════════════════════════════════════════════
+//
+// Čokoľvek, čo appka urobí za používateľa bez opýtania, musí byť dohľadateľné.
+// Bez záznamu je automatika neodlíšiteľná od chyby: údaj sa na doklade objaví
+// a nikto nevie, odkiaľ — ani či ho treba opraviť.
+//
+// Notifikácie sa inak odvodzujú zo stavu dát. „Appka za vás niečo urobila" je
+// ale udalosť, nie stav — zo stavu sa spätne odvodiť nedá, preto denník.
+//
+// Texty sú tu, nie na mieste zápisu: rovnaká udalosť sa hlási z viacerých
+// ciest (načítanie, import, tlačidlo) a tri kópie tej istej vety by sa rozišli.
+const AUTOMAT_TEXTY={
+  parovanie:{ ic:"🤖", modul:"banka",
+    nazov:n=>"Priradených "+n+" "+(n===1?"platba":n<5?"platby":"platieb")+" k faktúram",
+    detail:"Appka ich spárovala podľa variabilného symbolu a faktúry označila ako uhradené. Ak niektoré priradenie nesedí, odoberiete ho v Banka → Párovanie." },
+  icdph:{ ic:"🤖", modul:"vydavky",
+    nazov:n=>"Doplnené IČ DPH k "+n+" "+(n===1?"dokladu":n<5?"dokladom":"dokladom"),
+    detail:"Appka ho prevzala od toho istého dodávateľa z iných dokladov. Ak dodávateľ platcom DPH nie je, opravte to v editore dokladu." }
+};
+// Záznamy z toho istého dňa a druhu sa zlučujú — po importe výpisu by inak
+// zvonček hlásil dvadsať riadkov o tom istom.
+function zapisAutomat(druh, pocet){
+  if(!firmaData || !pocet || !AUTOMAT_TEXTY[druh]) return;
+  if(!Array.isArray(firmaData.automat)) firmaData.automat=[];
+  const kluc="auto:"+druh+":"+new Date().toISOString().slice(0,10);
+  const uz=firmaData.automat.find(z=>z.kluc===kluc);
+  if(uz){
+    uz.pocet=(+uz.pocet||0)+pocet;
+    uz.kedy=new Date().toISOString();
+    // Po zlúčení musí notifikácia vyskočiť znova — inak by sa nový počet
+    // schoval pod hlásenie, ktoré si používateľ prečítal, keď bol nižší.
+    const P=(firmaData.settings||{}).notifPrecitane;
+    if(P && P[kluc]) delete P[kluc];
+  } else {
+    firmaData.automat.push({kluc, kedy:new Date().toISOString(), druh, pocet});
+  }
+  // Denník je pomôcka, nie archív — celý sa synchronizuje do cloudu.
+  if(firmaData.automat.length>40) firmaData.automat=firmaData.automat.slice(-40);
+}
+
 // zozbieraj všetko, čo si zaslúži pozornosť
 function zbierNotifikacie(){
   const out=[], dnes=new Date();
@@ -3294,6 +3352,19 @@ function zbierNotifikacie(){
       if(d>=0 && d<=30) out.push({kluc:"dok:"+(dok.nazov||"")+":"+String(dok.platnostDo).slice(0,10),
         ic:"📄", nal:d<=7?"warn":"info", nazov:(dok.nazov||"Dokument")+" expiruje",
         detail:d===0?"dnes":"o "+d+" dní", akcia:()=>otvorApp("dokumenty")});
+    });
+  }catch(_){}
+
+  // ── čo appka urobila za používateľa ──
+  // Staršie než 30 dní sa už nehlási: zmenu, ktorú mesiac nikto nerozporoval,
+  // netreba pripomínať — v denníku ostáva, len prestane pýtať pozornosť.
+  try{
+    (firmaData.automat||[]).forEach(z=>{
+      const T=AUTOMAT_TEXTY[z.druh]; if(!T || !z.pocet) return;
+      if(Math.round((dnes-new Date(z.kedy))/86400000)>30) return;
+      out.push({kluc:z.kluc, ic:T.ic, nal:"info",
+        nazov:T.nazov(z.pocet), detail:T.detail,
+        akcia:()=>otvorApp(T.modul)});
     });
   }catch(_){}
 
@@ -6413,12 +6484,17 @@ function editVydavok(idx){
         if(!confirm("⚠ Možná duplicita!\n\nUž evidujete podobný výdavok:\n• "+(d0.partner||"—")+"\n• "+fmtDatum(d0.datum)+" · "+eur(d0.spolu)+(d0.cislo?"\n• č. "+d0.cislo:"")+"\n\nNaozaj chcete pridať tento výdavok?")) return false;
       }
       obj.id = obj.id || ("v"+Date.now()+Math.random().toString(36).slice(2,7));
+      // Pamäť partnerov sa musí aj čítať, nielen plniť — inak doklad od dávno
+      // známeho dodávateľa ostane bez IČ DPH a vyplaví sa až v ročnej kontrole.
+      // Dopĺňa výhradne prázdne polia, takže ručne zadané prepísať nemôže.
+      if(doplnZPartnera(obj)) zapisAutomat("icdph", 1);
       d.vydavky.push(obj);
       zapamatajPartnera(obj);
     } else {
       if(!d.vydavky[idx].id) d.vydavky[idx].id="v"+Date.now()+Math.random().toString(36).slice(2,7);
       obj.id=d.vydavky[idx].id;
       d.vydavky[idx]=Object.assign(d.vydavky[idx],obj);
+      if(doplnZPartnera(d.vydavky[idx])) zapisAutomat("icdph", 1);
       zapamatajPartnera(d.vydavky[idx]);
     }
     // synchronizuj tankovanie prepojené s týmto výdavkom
@@ -8069,6 +8145,7 @@ function rocnaKontrolaHtml(rok){
           ${x.priklady.map(p=>"· "+esc(p)).join("<br>")}
           ${x.priklady.length>=8?"<br>· …":""}
         </div>`:""}
+        ${x.akcia?`<button class="aabtn" style="margin-top:9px;padding:6px 12px;font-size:12px" onclick="${esc(x.akcia.fn)}">${esc(x.akcia.l)}</button>`:""}
       </div>`).join("")}
       <div class="ob-hint">
         Nič z toho nie je automaticky chyba — väčšina nálezov má legitímne vysvetlenie.
@@ -13724,11 +13801,16 @@ function importujVypisText(text){
   if(nove.length) firmaData.settings.pocetImportovBanka = (+firmaData.settings.pocetImportovBanka||0) + 1;
 
   firmaData.vypis=firmaData.vypis.concat(nove);
+  // Platby faktúr s variabilným symbolom sa priradia hneď pri importe. Čakať,
+  // kým to človek naklikká v Párovaní, znamená, že do tej doby sú tie faktúry
+  // všade inde vedené ako neuhradené.
+  let sparene=0; try{ sparene=autoParujIstePrijmy(); }catch(_){}
   poZmene();
   if(aktualnaApp==="banka") appBanka();
   alert(nove.length
     ? "Import hotový: pridaných "+nove.length+" pohybov"+
-      (nove.length<parsed.txns.length?" ("+(parsed.txns.length-nove.length)+" už existovalo)":"")+"."
+      (nove.length<parsed.txns.length?" ("+(parsed.txns.length-nove.length)+" už existovalo)":"")+"."+
+      (sparene?"\n\nRovno sa priradilo "+sparene+" platieb faktúr podľa variabilného symbolu.":"")
     : "Všetkých "+parsed.txns.length+" pohybov už evidujete — nič sa nepridalo.");
   return nove.length;
 }
@@ -14882,7 +14964,9 @@ function rocnaKontrola(rok){
   const d=firmaData, S=d.settings||{}, out=[];
   const R=String(rok);
   const vRoku=x=>String(x||"").slice(0,4)===R;
-  const pridaj=(zavaznost,k,t,detail,priklady)=>out.push({zavaznost,k,t,d:detail,priklady:priklady||[]});
+  // `akcia` je nepovinná: {l:"popis tlačidla", fn:"volanie()"}. Nález, ktorý
+  // appka vie odstrániť sama, nemá posielať človeka hľadať, kde sa to robí.
+  const pridaj=(zavaznost,k,t,detail,priklady,akcia)=>out.push({zavaznost,k,t,d:detail,priklady:priklady||[],akcia:akcia||null});
 
   const faktury=(d.faktury||[]).filter(f=>vRoku(f.datum||f.vystavenie));
   const vydavky=(d.vydavky||[]).filter(x=>vRoku(x.datum));
@@ -15019,9 +15103,15 @@ function rocnaKontrola(rok){
       && !String(x.dodavatelIcDph||"").trim() && String(x.druh||"")!=="Bloček");
     if(bezIc.length){
       const dan=r2(bezIc.reduce((a,x)=>a+(+x.dph||0),0));
+      // Tlačidlo len vtedy, keď má čo robiť. Ponuka „opraviť", ktorá po kliknutí
+      // nič neurobí, je horšia než žiadna — nabudúce ju človek preskočí.
+      let daSa=0;
+      try{ daSa=bezIc.filter(x=>{ const p=najdiPartnera(x); return p && p.icdph; }).length; }catch(_){}
       pridaj("chyba","dphBezIc", bezIc.length+" dokladov si odpočítava DPH ("+eur(dan)+") bez IČ DPH dodávateľa",
-        "Bez IČ DPH nárok na odpočet nevzniká a kontrolný výkaz taký doklad odmietne.",
-        bezIc.slice(0,8).map(x=>(x.cislo||"—")+" · "+(x.partner||"—")+" · DPH "+eur(x.dph)));
+        "Bez IČ DPH nárok na odpočet nevzniká a kontrolný výkaz taký doklad odmietne."
+        + (daSa ? " Pri "+daSa+" z nich appka IČ DPH pozná z iných dokladov toho istého dodávateľa." : ""),
+        bezIc.slice(0,8).map(x=>(x.cislo||"—")+" · "+(x.partner||"—")+" · DPH "+eur(x.dph)),
+        daSa ? {l:"Doplniť IČ DPH do "+daSa+" dokladov", fn:"doplnPartnerovDoVydavkov()"} : null);
     }
   }
 
@@ -18575,6 +18665,74 @@ function odoberUhradu(tx, typ, cislo){
   tx.uhrady=(tx.uhrady||[]).filter(u=>!(u.typ===typ && String(u.cislo)===String(cislo)));
   if(!tx.uhrady.length) delete tx.potvrdenaZhoda;
   else tx.potvrdenaZhoda={typ:tx.uhrady[0].typ, cislo:tx.uhrady[0].cislo};
+}
+
+// ═══ ISTÉ PLATBY FAKTÚR SA PRIRADIA SAMY ═══════════════════════════════
+//
+// `vypisSparuj` vedela od začiatku povedať, že príjem s variabilným symbolom
+// rovným číslu faktúry k tej faktúre patrí — vracia istotu „ista" a Banka taký
+// pohyb aj zobrazuje ako spárovaný. Do `tx.uhrady` sa však nezapisovalo nič,
+// kým to človek nepotvrdil ručne, a `dokladUhradene`, pohľadávky aj ročná
+// kontrola čítajú práve `uhrady`. Ten istý pohyb bol teda v Banke zelený
+// a v ročnej kontrole červený, faktúra k nemu neuhradená — a používateľ nemal
+// z čoho pochopiť, prečo si appka protirečí.
+//
+// `_autoPar` je príznak „tento pohyb už automatika videla". Bez neho by sa
+// priradenie, ktoré si používateľ odobral, pri najbližšom načítaní vrátilo.
+// Automatika, ktorá prebíja rozhodnutie človeka, je horšia než žiadna.
+function autoParujIstePrijmy(){
+  if(!firmaData || typeof vypisSparuj!=="function") return 0;
+  let n=0;
+  (firmaData.vypis||[]).forEach(t=>{
+    if(t._autoPar || t.smer!=="prijem" || t.skryty) return;
+    t._autoPar=1;                                   // videné — druhýkrát už nie
+    if((t.uhrady||[]).length || t.odmietnutaZhoda) return;
+    let s=null; try{ s=vypisSparuj(t); }catch(_){ return; }
+    if(!s || s.typ!=="faktura" || s.istota!=="ista" || !s.zaznam) return;
+    const c=String(s.zaznam.cislo||"").trim(); if(!c) return;
+    // `pridajUhradu` má strop na zostatok dokladu, takže druhá platba s tým
+    // istým VS sa nepriradí a ostane v kontrole vidieť. To je zámer: preplatok
+    // je nález, nie šum, a nemá sa stratiť tým, že ho automatika ticho zhltne.
+    if(pridajUhradu(t, "faktura", c) > 0) n++;
+  });
+  // Denník sa píše tu, nie u volajúceho — automatiku spúšťajú tri cesty
+  // (načítanie firmy, import výpisu, prekreslenie) a jedna by sa zabudla.
+  if(n) zapisAutomat("parovanie", n);
+  return n;
+}
+
+// ═══ DOPLNENIE ÚDAJOV DODÁVATEĽA DO UŽ ZAPÍSANÝCH DOKLADOV ═════════════
+//
+// `zapamatajPartnera` sa volá pri každom uložení výdavku, takže pamäť partnerov
+// sa roky plnila. Opačný smer `doplnZPartnera` sa volal jedine pri OCR fotky
+// dokladu — doklad zapísaný ručne alebo importom XML ostal bez IČ DPH, hoci ho
+// appka pri tom istom dodávateľovi dávno mala. Prejavilo sa to až v ročnej
+// kontrole ako „odpočíta DPH bez IČ DPH dodávateľa".
+//
+// Suchý beh na kópiách je tu preto, že hromadná zmena bez náhľadu je presne to,
+// čo sa nedá vziať späť ani pochopiť spätne.
+function doplnPartnerovDoVydavkov(){
+  if(!strazZapis("vydavky")) return;
+  const V=firmaData.vydavky||[];
+  const nahlad=[];
+  V.forEach(x=>{ const k=Object.assign({}, x); if(doplnZPartnera(k)) nahlad.push({x, k}); });
+  if(!nahlad.length){
+    alert("Niet čo doplniť.\n\nBuď doklady údaje dodávateľa už majú, alebo ich pamäť partnerov nepozná — potom ich treba doplniť z registra alebo ručne.");
+    return;
+  }
+  const riadok=({x,k})=>"• "+(x.partner||"—")+" · "+fmtDatum(x.datum)
+    + (k.dodavatelIcDph && !String(x.dodavatelIcDph||"").trim() ? "\n    IČ DPH → "+k.dodavatelIcDph : "")
+    + (k.dodavatelIco  && !String(x.dodavatelIco||"").trim()  ? "\n    IČO → "+k.dodavatelIco : "");
+  if(!confirm("Doplniť údaje dodávateľa do "+nahlad.length+" dokladov z pamäte partnerov?\n\n"
+    + nahlad.slice(0,8).map(riadok).join("\n")
+    + (nahlad.length>8 ? "\n… a ďalších "+(nahlad.length-8) : "")
+    + "\n\nDopĺňajú sa len prázdne polia — čo je na doklade vyplnené, ostane.")) return;
+  let n=0;
+  V.forEach(x=>{ if(doplnZPartnera(x)) n++; });
+  zapisAutomat("icdph", n);
+  poZmene();
+  alert("Doplnené v "+n+" dokladoch.\n\nZáznam nájdete aj v zvončeku — keby sa niektorý dodávateľ ukázal ako neplatca DPH, opravíte to v editore dokladu.");
+  if(typeof appUzavierka==="function" && aktualnaApp==="uzavierka") appUzavierka();
 }
 
 // ═══════════════════════════════════════════════════════════════
