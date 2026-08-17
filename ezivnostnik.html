@@ -887,7 +887,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.17-FH";  // identita dokladu stojí na kľúči, nie na čísle; najdiDoklad bola definovaná trikrát
+const APP_VERZIA = "2026.08.17-FI";  // stav párovania zapisuje jediná cesta; 14 pohybov malo potvrdenú zhodu bez úhrady
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -5037,8 +5037,15 @@ function fakHromadneZmazat(){
   if(!confirm("Naozaj zmazať "+fakVybrane.size+" vybraných faktúr?\n\nZmažú sa aj ich priradenia k bankovým pohybom. Akcia sa nedá vrátiť.")) return;
   const kluce=new Set([...fakVybrane].map(String));
   firmaData.faktury=(firmaData.faktury||[]).filter(f=>!kluce.has(dokladKluc(f)));
-  // úhrady na pohyboch, ktoré ukazovali na zmazané doklady, by ostali visieť ako duchovia
-  (firmaData.vypis||[]).forEach(t=>{ if(Array.isArray(t.uhrady)) t.uhrady=t.uhrady.filter(u=>!(u.typ==="faktura"&&kluce.has(String(u.cislo)))); });
+  // Úhrady na pohyboch, ktoré ukazovali na zmazané doklady, by ostali visieť ako
+  // duchovia. Cez odoberUhradu, nie priamym filtrom: ten čistil `uhrady`, ale
+  // `potvrdenaZhoda` nechával ukazovať na doklad, ktorý už neexistuje — pohyb sa
+  // potom v Banke ďalej tváril spárovaný.
+  (firmaData.vypis||[]).forEach(t=>{
+    (t.uhrady||[]).slice().forEach(u=>{
+      if(u.typ==="faktura" && kluce.has(String(u.cislo))) odoberUhradu(t, u.typ, u.cislo);
+    });
+  });
   fakVybrane.clear(); poZmene(); appFaktury();
 }
 function fakHromadneUhradit(){
@@ -6171,7 +6178,12 @@ function vydHromadneZmazat(){
   const vydIds=new Set((firmaData.vydavky||[]).filter(x=>kluce.has(dokladKluc(x))).map(x=>x.id).filter(Boolean));
   firmaData.vydavky=(firmaData.vydavky||[]).filter(x=>!kluce.has(dokladKluc(x)));
   if(vydIds.size) firmaData.tankovania=(firmaData.tankovania||[]).filter(t=>!vydIds.has(t.vydavokId));
-  (firmaData.vypis||[]).forEach(t=>{ if(Array.isArray(t.uhrady)) t.uhrady=t.uhrady.filter(u=>!(u.typ==="vydavok"&&kluce.has(String(u.cislo)))); });
+  // Cez odoberUhradu — priamy filter nechával `potvrdenaZhoda` na zmazanom doklade.
+  (firmaData.vypis||[]).forEach(t=>{
+    (t.uhrady||[]).slice().forEach(u=>{
+      if(u.typ==="vydavok" && kluce.has(String(u.cislo))) odoberUhradu(t, u.typ, u.cislo);
+    });
+  });
   vydVybrane.clear(); poZmene(); appVydavky();
 }
 function vydHromadneZrusit(){
@@ -13668,7 +13680,12 @@ function vypisZoradKandidatov(kand, tx, typ){
 function vypisPotvrdZhodu(txId, typ, cislo){
   if(!strazZapis("banka")) return;
   const tx=(firmaData.vypis||[]).find(t=>(t.id||t.datum+t.suma)===txId); if(!tx) return;
-  tx.potvrdenaZhoda={typ, cislo}; delete tx.odmietnutaZhoda; vypisRozbaleny=null;
+  // Cez pridajUhradu, nie priamym zápisom `potvrdenaZhoda`. Priamy zápis nechal
+  // `uhrady` prázdne, takže pohyb sa v Banke tváril spárovaný, ale doklad o ňom
+  // nevedel: `dokladUhradene` vrátilo 0, faktúra ostala v pohľadávkach a editor
+  // nezobrazil „Zaplatené z účtu". V ostrých dátach tak skončilo 14 pohybov.
+  pridajUhradu(tx, typ, cislo);
+  vypisRozbaleny=null;
   poZmene(); appBanka();
 }
 function vypisOdmietniZhodu(txId){
@@ -13680,6 +13697,9 @@ function vypisOdmietniZhodu(txId){
 function vypisZrusZhodu(txId){
   if(!strazZapis("banka")) return;
   const tx=(firmaData.vypis||[]).find(t=>(t.id||t.datum+t.suma)===txId); if(!tx) return;
+  // Zrušiť zhodu musí zmazať aj úhrady — inak by doklad ostal vedený ako
+  // zaplatený pohybom, ktorý sa už netvári spárovaný.
+  (tx.uhrady||[]).slice().forEach(u=>odoberUhradu(tx, u.typ, u.cislo));
   delete tx.potvrdenaZhoda; delete tx.odmietnutaZhoda; vypisRozbaleny=null;
   poZmene(); appBanka();
 }
@@ -18370,6 +18390,22 @@ function migrujUhrady(){
     } else t.uhrady=[];
   });
 
+  // ── potvrdená zhoda bez úhrady ──
+  // Prvý prevod vyššie beží len raz, kým `uhrady` ešte nie je pole. Potvrdenia
+  // zapísané NESKÔR (tlačidlom v Banke alebo hromadným párovaním) sa doň už
+  // nedostali, lebo tie cesty zapisovali výhradne `potvrdenaZhoda`. Pohyb sa
+  // teda tváril spárovaný, ale `dokladUhradene` vrátilo 0: doklad ostal vedený
+  // ako neuhradený a v editore nebolo vidieť, čím sa zaplatil.
+  // V reálnych dátach 14 zo 113 pohybov.
+  // Cez pridajUhradu, nie priamym zápisom: má strop na zostatok dokladu, takže
+  // z pohybu väčšieho než doklad nevyrobí preplatok, ktorý by kontrola vzápätí
+  // nahlásila ako chybu — falošný poplach vyrobený vlastnou migráciou.
+  (firmaData.vypis||[]).forEach(t=>{
+    const pz=t.potvrdenaZhoda;
+    if(!pz || !pz.cislo || (t.uhrady||[]).length) return;
+    if(pridajUhradu(t, pz.typ||"vydavok", String(pz.cislo)) > 0) n++;
+  });
+
   // ── Pravidlá ignorovania zo starého poľa `vypisPravidla` ──
   // Staršia verzia ich ukladala na koreň dát; dnešný kód číta VÝHRADNE
   // `settings.ignorPravidla`. Bez tejto migrácie pravidlo existuje, používateľ
@@ -18939,9 +18975,14 @@ function parSparujJednoznacne(){
   if(!confirm("Spárovať "+navrhy.length+" jednoznačných pohybov?\n\n"+ukazka+
               (navrhy.length>8?"\n… a ďalších "+(navrhy.length-8):"")+
               "\n\nSpárované sa dá kedykoľvek zmeniť.")) return;
-  navrhy.forEach(({t,k})=>{ t.potvrdenaZhoda={typ:k.typ, cislo:String(k.kluc||k.cislo)}; delete t.odmietnutaZhoda; });
+  // Cez pridajUhradu — priamy zápis `potvrdenaZhoda` nechával `uhrady` prázdne
+  // a doklad o platbe nevedel. Vracia priradenú sumu, takže sa dá povedať, keď
+  // sa niečo nepriradilo (doklad je už celý zaplatený inou platbou).
+  let n=0, preskocene=0;
+  navrhy.forEach(({t,k})=>{ if(pridajUhradu(t, k.typ, String(k.kluc||k.cislo))>0) n++; else preskocene++; });
   firmaDirty=true; ulozFirmu(); renderSplit();
-  setTimeout(()=>alert("✓ Spárovaných: "+navrhy.length),80);
+  setTimeout(()=>alert("✓ Spárovaných: "+n+
+    (preskocene?"\n\n"+preskocene+" sa nepriradilo — príslušný doklad je už celý uhradený.":"")),80);
 }
 
 // koľko pohybov sa dá spárovať automaticky
