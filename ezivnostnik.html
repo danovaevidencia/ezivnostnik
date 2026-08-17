@@ -457,6 +457,42 @@ button{font-family:inherit;cursor:pointer}
 .acol-strong{font-weight:650}
 .acol-sum{font-weight:700;font-family:'Fraunces',serif;text-align:right}
 .acol-muted{color:var(--ink-soft);font-size:12px}
+/* Grid bunka sa bez min-width:0 nikdy nezúži pod svoj obsah. Dlhý názov
+   partnera preto roztlačil celý riadok a `.alist{overflow:hidden}` odrezal
+   všetko vpravo od neho — na mobile miznuli sumy, stav aj tlačidlá, bez
+   vodorovného posunu, ktorým by sa to dalo obísť. */
+.arow>*{min-width:0}
+/* Riadok dokladu (faktúry, výdavky). Na mobile sa TIE ISTÉ bunky preskladajú
+   do dvoch riadkov cez grid-template-areas — údaje sa nevykresľujú druhýkrát,
+   takže sa mobilná a stolová podoba nemôžu rozísť. */
+.rdok{grid-template-columns:auto 2fr 1fr 1fr 1fr auto auto}
+.rdok.rf{grid-template-columns:auto 1fr 2fr 1fr 1fr auto auto}
+.rdok.rf>.c-main{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media(max-width:560px){
+  .rdok{gap:2px 8px;padding:11px 12px;
+        grid-template-columns:auto minmax(0,1fr) auto auto auto;
+        grid-template-areas:"cb main main main stav"
+                            "cb date sub  sum  act"}
+  .rdok.rf{grid-template-columns:auto minmax(0,1fr) auto auto;
+        grid-template-areas:"cb main main stav"
+                            "cb sub  date sum"
+                            "cb act  act  act"}
+  .rdok>.c-cb{grid-area:cb;align-self:start;padding-top:2px}
+  .rdok>.c-main{grid-area:main}
+  .rdok>.c-date{grid-area:date}
+  .rdok>.c-sub{grid-area:sub}
+  .rdok>.c-sum{grid-area:sum}
+  .rdok>.c-stav{grid-area:stav;justify-self:end;white-space:nowrap}
+  .rdok>.c-act{grid-area:act;display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end;align-items:center}
+  .rdok.rf>.c-act:empty{display:none}
+  .rdok>.c-date,.rdok>.c-sub{font-size:11.5px}
+  /* Hlavička sa na mobile nedá zarovnať s preskladanými bunkami, ale nesmie
+     zmiznúť celá — je v nej výber všetkých dokladov. */
+  .rdok.head{grid-template-columns:auto 1fr;grid-template-areas:"cb main"}
+  .rdok.head>*:not(.c-cb):not(.c-main){display:none}
+  /* Bez hlavičky by pri výdavku nebolo vidieť, ktoré z dvoch čísel je DPH. */
+  .rdok.rv>.c-sub::before{content:"DPH ";font-family:'Inter','Segoe UI',system-ui,sans-serif;font-weight:600;color:var(--ink-soft)}
+}
 .apill{font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:20px;display:inline-block}
 .apill.ok{background:var(--sfc-pos);color:var(--pos)}.apill.warn{background:var(--sfc-warn);color:var(--accent-deep)}.apill.neg{background:var(--sfc-neg);color:var(--neg)}
 .aempty{text-align:center;color:var(--ink-soft);padding:34px 20px}
@@ -851,7 +887,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.15-FD";  // prenos z paralelného vlákna: klikateľná sync bodka + potvrdenie rozporov úhrad
+const APP_VERZIA = "2026.08.17-FE";  // zoznamy faktúr a výdavkov sa na mobile už neorezávajú
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -4981,8 +5017,8 @@ function appFaktury(){
       <span onclick="fakZrusVyber()" style="margin-left:auto;cursor:pointer;color:var(--ink-soft);font-size:12px">Zrušiť výber</span>
     </div>`:''}
     <div class="alist">
-      <div class="arow head" style="grid-template-columns:auto 1fr 2fr 1fr 1fr auto auto"><div><input type="checkbox" ${vsetkyVybrane?'checked':''} onclick="fakVyberVsetky(this.checked)" title="Vybrať všetky" style="cursor:pointer"></div><div>Číslo</div><div>Odberateľ</div><div>Dátum</div><div style="text-align:right">Suma</div><div>Stav</div><div></div></div>
-      ${list.length?list.map(f=>{const idx=(d.faktury||[]).indexOf(f);const fk=dokladKluc(f);const st=uhradaStav("faktura", fk);const fb=UHRADA_FARBY[st.stav]||UHRADA_FARBY.neznamy;const uhradena=faktJeUhradena(f);return `<div class="arow" style="grid-template-columns:auto 1fr 2fr 1fr 1fr auto auto"><div><input type="checkbox" ${fakVybrane.has(fk)?'checked':''} onclick="event.stopPropagation();fakToggleVyber('${esc(fk)}',this.checked)" style="cursor:pointer"></div><div class="acol-strong" style="color:${c}" onclick="editFaktura(${idx})">${esc(f.cislo||"—")}</div><div onclick="editFaktura(${idx})">${esc(f.odberatel||"—")}</div><div class="acol-muted" onclick="editFaktura(${idx})">${fmtDatum(f.datum||f.vystavenie)}</div><div class="acol-sum" onclick="editFaktura(${idx})">${eur(+f.spolu||0)}</div><div onclick="editFaktura(${idx})" title="${esc(st.text||'')}"><span style="display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:600;color:${fb.f}">${fb.ic} ${fb.n}</span></div><div style="display:flex;gap:5px;align-items:center">${!uhradena?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vyberSposobUhrady(null,_s=>{oznacDokladUhradeny('faktura','${esc(fk)}',_s);appFaktury();})" title="Označiť ako uhradené">✓</button>`:((st.zdroj==='rucne'||st.zdroj==='legacy')?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();zrusDokladUhradu('faktura','${esc(fk)}');appFaktury()" title="Zrušiť potvrdenie úhrady">✕</button>`:'')}<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();exportFakturaPDF(${idx})" title="${f.originalSubor?'Stiahnuť pôvodný PDF':'Vygenerovať PDF faktúry'}">${f.originalSubor?'📎':'PDF'}</button><button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();exportEFakturaUBL(${idx})" title="E-faktúra UBL 2.1 / Peppol (povinné od 2027)">e-fa</button><button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();kopirujFakturu(${idx})" title="Vytvoriť kópiu — nové číslo a dátum, ostatné prevzaté">⧉</button></div></div>`;}).join(''):'<div class="aempty">Žiadne faktúry v tomto filtri.</div>'}
+      <div class="arow head rdok rf"><div class="c-cb"><input type="checkbox" ${vsetkyVybrane?'checked':''} onclick="fakVyberVsetky(this.checked)" title="Vybrať všetky" style="cursor:pointer"></div><div class="c-sub">Číslo</div><div class="c-main">Odberateľ</div><div class="c-date">Dátum</div><div class="c-sum" style="text-align:right">Suma</div><div class="c-stav">Stav</div><div class="c-act"></div></div>
+      ${list.length?list.map(f=>{const idx=(d.faktury||[]).indexOf(f);const fk=dokladKluc(f);const st=uhradaStav("faktura", fk);const fb=UHRADA_FARBY[st.stav]||UHRADA_FARBY.neznamy;const uhradena=faktJeUhradena(f);return `<div class="arow rdok rf"><div class="c-cb"><input type="checkbox" ${fakVybrane.has(fk)?'checked':''} onclick="event.stopPropagation();fakToggleVyber('${esc(fk)}',this.checked)" style="cursor:pointer"></div><div class="acol-strong c-sub" style="color:${c}" onclick="editFaktura(${idx})">${esc(f.cislo||"—")}</div><div class="c-main" onclick="editFaktura(${idx})">${esc(f.odberatel||"—")}</div><div class="acol-muted c-date" onclick="editFaktura(${idx})">${fmtDatum(f.datum||f.vystavenie)}</div><div class="acol-sum c-sum" onclick="editFaktura(${idx})">${eur(+f.spolu||0)}</div><div class="c-stav" onclick="editFaktura(${idx})" title="${esc(st.text||'')}"><span style="display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:600;color:${fb.f}">${fb.ic} ${fb.n}</span></div><div class="c-act" style="display:flex;gap:5px;align-items:center">${!uhradena?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vyberSposobUhrady(null,_s=>{oznacDokladUhradeny('faktura','${esc(fk)}',_s);appFaktury();})" title="Označiť ako uhradené">✓</button>`:((st.zdroj==='rucne'||st.zdroj==='legacy')?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();zrusDokladUhradu('faktura','${esc(fk)}');appFaktury()" title="Zrušiť potvrdenie úhrady">✕</button>`:'')}<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();exportFakturaPDF(${idx})" title="${f.originalSubor?'Stiahnuť pôvodný PDF':'Vygenerovať PDF faktúry'}">${f.originalSubor?'📎':'PDF'}</button><button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();exportEFakturaUBL(${idx})" title="E-faktúra UBL 2.1 / Peppol (povinné od 2027)">e-fa</button><button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();kopirujFakturu(${idx})" title="Vytvoriť kópiu — nové číslo a dátum, ostatné prevzaté">⧉</button></div></div>`;}).join(''):'<div class="aempty">Žiadne faktúry v tomto filtri.</div>'}
     </div>`;
   setCrumb(`${fak.length} faktúr · ${eur(spolu)}`);
 }
@@ -6122,8 +6158,8 @@ function appVydavky(){
       <span onclick="vydZrusVyber()" style="margin-left:auto;cursor:pointer;color:var(--ink-soft);font-size:12px">Zrušiť výber</span>
     </div>`:''}
     <div class="alist">
-      <div class="arow head" style="grid-template-columns:auto 2fr 1fr 1fr 1fr auto auto"><div><input type="checkbox" ${vsetkyVybraneV?'checked':''} onclick="vydVyberVsetky(this.checked)" title="Vybrať všetky" style="cursor:pointer"></div><div>Partner / popis</div><div>Dátum</div><div style="text-align:right">Bez DPH</div><div style="text-align:right">DPH</div><div style="text-align:center">Stav</div><div></div></div>
-      ${list.length?list.map(x=>{const idx=(d.vydavky||[]).indexOf(x);const bezDat=!x.datum||!/^\d{4}-\d{2}/.test(String(x.datum));const kl=dokladKluc(x);const st=kl?uhradaStav("vydavok",kl):null;const fb=st?(UHRADA_FARBY[st.stav]||UHRADA_FARBY.neznamy):null;const uhr=vydJeUhradeny(x);return `<div class="arow" style="grid-template-columns:auto 2fr 1fr 1fr 1fr auto auto" onclick="editVydavok(${idx})"><div>${kl?`<input type="checkbox" ${vydVybrane.has(kl)?'checked':''} onclick="event.stopPropagation();vydToggleVyber('${esc(kl)}',this.checked)" style="cursor:pointer">`:''}</div><div><div class="acol-strong" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(x.partner||"—")} ${x.doklad?'<span title="Doklad v cloude" style="cursor:pointer" onclick="event.stopPropagation();otvorDoklad(\''+esc(x.doklad)+'\')">📎</span>':''}</div><div class="acol-muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(x.popis||x.druh||"")}${(()=>{const kde=uhradyPopis("vydavok",kl,true);return kde?` <span style="color:var(--pos)">· zaplatené ${esc(kde)}</span>`:"";})()}</div></div><div class="acol-muted">${bezDat?'<span class="apill neg">bez dátumu</span>':fmtDatum(x.datum)}</div><div class="acol-sum">${eur(+x.bez||0)}</div><div class="acol-sum" style="color:var(--ink-soft)">${eur(+x.dph||0)}</div><div style="text-align:center">${fb?`<span title="${esc((st.n||fb.n)+(st.text?' — '+st.text:''))}" style="color:${fb.f};font-size:14px">${fb.ic}</span>`:'<span style="color:var(--ink-soft)">·</span>'}</div><div>${kl?(!uhr?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vyberSposobUhrady(null,_s=>{oznacDokladUhradeny('vydavok','${esc(kl)}',_s);appVydavky();})" title="Označiť ako uhradené">✓</button>`:((st.zdroj==='rucne'||st.zdroj==='legacy')?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();zrusDokladUhradu('vydavok','${esc(kl)}');appVydavky()" title="Zrušiť potvrdenie úhrady">✕</button>`:'')):''}</div></div>`;}).join(''):'<div class="aempty">Žiadne výdavky v tomto filtri.</div>'}
+      <div class="arow head rdok rv"><div class="c-cb"><input type="checkbox" ${vsetkyVybraneV?'checked':''} onclick="vydVyberVsetky(this.checked)" title="Vybrať všetky" style="cursor:pointer"></div><div class="c-main">Partner / popis</div><div class="c-date">Dátum</div><div class="c-sum" style="text-align:right">Bez DPH</div><div class="c-sub" style="text-align:right">DPH</div><div class="c-stav" style="text-align:center">Stav</div><div class="c-act"></div></div>
+      ${list.length?list.map(x=>{const idx=(d.vydavky||[]).indexOf(x);const bezDat=!x.datum||!/^\d{4}-\d{2}/.test(String(x.datum));const kl=dokladKluc(x);const st=kl?uhradaStav("vydavok",kl):null;const fb=st?(UHRADA_FARBY[st.stav]||UHRADA_FARBY.neznamy):null;const uhr=vydJeUhradeny(x);return `<div class="arow rdok rv" onclick="editVydavok(${idx})"><div class="c-cb">${kl?`<input type="checkbox" ${vydVybrane.has(kl)?'checked':''} onclick="event.stopPropagation();vydToggleVyber('${esc(kl)}',this.checked)" style="cursor:pointer">`:''}</div><div class="c-main"><div class="acol-strong" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(x.partner||"—")} ${x.doklad?'<span title="Doklad v cloude" style="cursor:pointer" onclick="event.stopPropagation();otvorDoklad(\''+esc(x.doklad)+'\')">📎</span>':''}</div><div class="acol-muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(x.popis||x.druh||"")}${(()=>{const kde=uhradyPopis("vydavok",kl,true);return kde?` <span style="color:var(--pos)">· zaplatené ${esc(kde)}</span>`:"";})()}</div></div><div class="acol-muted c-date">${bezDat?'<span class="apill neg">bez dátumu</span>':fmtDatum(x.datum)}</div><div class="acol-sum c-sum">${eur(+x.bez||0)}</div><div class="acol-sum c-sub" style="color:var(--ink-soft)">${eur(+x.dph||0)}</div><div class="c-stav" style="text-align:center">${fb?`<span title="${esc((st.n||fb.n)+(st.text?' — '+st.text:''))}" style="color:${fb.f};font-size:14px">${fb.ic}</span>`:'<span style="color:var(--ink-soft)">·</span>'}</div><div class="c-act">${kl?(!uhr?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vyberSposobUhrady(null,_s=>{oznacDokladUhradeny('vydavok','${esc(kl)}',_s);appVydavky();})" title="Označiť ako uhradené">✓</button>`:((st.zdroj==='rucne'||st.zdroj==='legacy')?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();zrusDokladUhradu('vydavok','${esc(kl)}');appVydavky()" title="Zrušiť potvrdenie úhrady">✕</button>`:'')):''}</div></div>`;}).join(''):'<div class="aempty">Žiadne výdavky v tomto filtri.</div>'}
     </div>`;
   setCrumb(`${vyd.length} dokladov · ${vRok}${vMesiac?' · '+mesiacLabel(vMesiac):''} · ${eur(bezSpolu)} bez DPH`);
 }
