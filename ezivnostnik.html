@@ -887,7 +887,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.17-FF";  // appka dopĺňa IČ DPH z pamäte partnerov a sama priraďuje isté platby faktúr
+const APP_VERZIA = "2026.08.17-FG";  // ročná kontrola rešpektuje pravidlá ignorovania; IBAN sa porovnáva bez medzier
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -6755,6 +6755,39 @@ function pridajPravidloIgnoruj(typ){
 function zmazPravidloIgnoruj(i){
   if(!strazZapis("banka")) return;
   if(firmaData.settings&&firmaData.settings.ignorPravidla){ firmaData.settings.ignorPravidla.splice(i,1); poZmene(); appBanka(); }
+}
+// Pravidlo na celý protiúčet — ponúka sa z ročnej kontroly, keď sa medzi
+// nespárovanými príjmami opakuje ten istý účet bez variabilného symbolu.
+// Typicky vlastný vklad alebo presun medzi vlastnými účtami: jedna odpoveď
+// namiesto toho, aby sa appka pýtala na každý pohyb zvlášť.
+function ignorujProtiucet(iban){
+  if(!strazZapis("banka")) return;
+  const ib=String(iban||"").replace(/\s/g,"").toUpperCase();
+  if(!ib) return;
+  if(!firmaData.settings) firmaData.settings={};
+  if(!firmaData.settings.ignorPravidla) firmaData.settings.ignorPravidla=[];
+  if(firmaData.settings.ignorPravidla.some(p=>p.typ==="iban" &&
+      String(p.hodnota||"").replace(/\s/g,"").toUpperCase()===ib)){
+    alert("Pravidlo na tento účet už existuje.\n\nNájdete ho v Banka → Pravidlá."); return;
+  }
+  const dotkne=(firmaData.vypis||[]).filter(t=>
+    String(t.ibanProti||t.iban||"").replace(/\s/g,"").toUpperCase()===ib);
+  const sDokladom=dotkne.filter(t=>(t.uhrady||[]).length);
+  const suma=r2(dotkne.reduce((a,t)=>a+Math.abs(+t.suma||0),0));
+  // Ak z toho účtu už niečo uhradilo doklad, nie je to čistý vlastný vklad —
+  // človek to musí vedieť skôr, než pravidlo zapne, nie sa to dozvedieť potom.
+  if(!confirm("Neúčtovať pohyby z účtu "+ib+"?\n\n"
+    + "Týka sa to "+dotkne.length+" pohybov za "+eur(suma)+". Appka ich prestane ponúkať "
+    + "na spárovanie a ročná kontrola ich prestane hlásiť.\n\n"
+    + "Hodí sa to na vlastné vklady a presuny medzi vlastnými účtami — nie na účet, "
+    + "z ktorého vám chodia tržby.\n"
+    + (sDokladom.length ? "\n⚠ "+sDokladom.length+" z nich už má priradený doklad. Tie priradenia ostanú, pravidlo ich nezruší.\n" : "")
+    + "\nPravidlo kedykoľvek zmažete v Banka → Pravidlá.")) return;
+  firmaData.settings.ignorPravidla.push({typ:"iban", hodnota:ib});
+  poZmene();
+  alert("Pravidlo pridané. "+dotkne.length+" pohybov sa už nebude hlásiť.");
+  if(aktualnaApp==="uzavierka" && typeof appUzavierka==="function") appUzavierka();
+  else if(aktualnaApp==="banka" && typeof appBanka==="function") appBanka();
 }
 
 // ── DPH A DANE ──
@@ -13562,11 +13595,18 @@ function vypisSparuj(tx){
   const pravidla=(d.settings&&d.settings.ignorPravidla)||[];
   if(pravidla.length){
     const proti=(tx.proti||"").toLowerCase(), iban=(tx.ibanProti||tx.iban||"").toLowerCase(), popis=(tx.popis||"").toLowerCase();
+    // IBAN banka zobrazuje po štvoriciach a človek ho tak aj opíše do pravidla.
+    // Vo výpise príde bez medzier, takže porovnanie znak po znaku nikdy nesedelo
+    // a pravidlo bolo ticho mŕtve — vyzeralo zapísané a nerobilo nič.
+    const ibanN=iban.replace(/\s/g,"");
     for(const p of pravidla){
       const h=(p.hodnota||"").toLowerCase();
       if(!h) continue;
-      if(p.typ==="iban" && iban.includes(h)) return {typ:"pravidlo", ignoruj:true, istota:"ista", preco:"pravidlo IBAN"};
-      if(p.typ==="popis" && (proti.includes(h)||popis.includes(h))) return {typ:"pravidlo", ignoruj:true, istota:"ista", preco:"pravidlo: "+p.hodnota};
+      if(p.typ==="iban"){
+        const hn=h.replace(/\s/g,"");           // prázdny by cez includes sedel na všetko
+        if(hn && ibanN.includes(hn)) return {typ:"pravidlo", ignoruj:true, istota:"ista", preco:"pravidlo IBAN"};
+      }
+      else if(p.typ==="popis" && (proti.includes(h)||popis.includes(h))) return {typ:"pravidlo", ignoruj:true, istota:"ista", preco:"pravidlo: "+p.hodnota};
     }
   }
   if(tx.potvrdenaZhoda){
@@ -15061,14 +15101,32 @@ function rocnaKontrola(rok){
     sirotyU.slice(0,8));
 
   // ── 4. Príjem na účte bez faktúry ──
+  //
+  // Pravidlá ignorovania sa musia rešpektovať aj tu. Banka podľa nich pohyb
+  // preskočí, kontrola ho hlásila ďalej — ten istý pohyb bol teda v jednom
+  // module vybavený a v druhom červený. Na ostrých dátach to bolo 18 z 25
+  // nálezov, čiže väčšina toho, čo človeka odrádzalo kontrolu vôbec čítať.
   if((d.vypis||[]).length){
+    const ignor=t=>{ try{ return typeof jePohybIgnorovany==="function" && jePohybIgnorovany(t); }catch(_){ return false; } };
     const nespar=(d.vypis||[]).filter(t=>t.smer==="prijem" && vRoku(t.datum) && !t.skryty && !t.vratenie
-      && !(t.uhrady||[]).length && !t.potvrdenaZhoda);
+      && !(t.uhrady||[]).length && !t.potvrdenaZhoda && !ignor(t));
     const suma=r2(nespar.reduce((a,t)=>a+Math.abs(+t.suma||0),0));
-    if(nespar.length && suma>0)
+    if(nespar.length && suma>0){
+      // Keď sa medzi zvyšnými príjmami opakuje ten istý protiúčet a ani jeden
+      // z nich nemá variabilný symbol, je to takmer isto vlastný vklad alebo
+      // presun medzi vlastnými účtami. Namiesto osemnástich otázok stačí jedno
+      // pravidlo — a ponúknuť sa má tam, kde človek problém vidí.
+      const podlaUctu={};
+      nespar.forEach(t=>{ const ib=String(t.ibanProti||"").replace(/\s/g,""); if(ib) (podlaUctu[ib]=podlaUctu[ib]||[]).push(t); });
+      const kand=Object.entries(podlaUctu)
+        .filter(([,g])=>g.length>=3 && g.every(t=>!String(t.vs||"").trim()))
+        .sort((a,b)=>b[1].length-a[1].length)[0];
       pridaj("pozor","prijemBezFaktury", nespar.length+" príjmov na účte bez priradenej faktúry ("+eur(suma)+")",
         "Môže ísť o vrátku, vklad či presun medzi vlastnými účtami — alebo o tržbu, ktorá nie je vyfakturovaná.",
-        nespar.slice(0,8).map(t=>fmtDatum(t.datum)+" · "+eur(Math.abs(+t.suma||0))+" · "+(t.partner||t.popis||"—")));
+        nespar.slice(0,8).map(t=>fmtDatum(t.datum)+" · "+eur(Math.abs(+t.suma||0))+" · "+(t.proti||t.popis||"—")),
+        kand ? {l:"Neúčtovať príjmy z účtu …"+kand[0].slice(-4)+" ("+kand[1].length+"×)",
+                fn:"ignorujProtiucet('"+kand[0]+"')"} : null);
+    }
   }
 
   // ── 5. Tankovanie v deň bez jazdy ──
