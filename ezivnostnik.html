@@ -887,7 +887,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.17-FI";  // stav párovania zapisuje jediná cesta; 14 pohybov malo potvrdenú zhodu bez úhrady
+const APP_VERZIA = "2026.08.17-FJ";  // kolízia čísel sa dá odlíšiť bez zmeny čísla; hláška pri zápise už neklame o duplicite
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -3231,6 +3231,9 @@ const AUTOMAT_TEXTY={
   parovanie:{ ic:"🤖", modul:"banka",
     nazov:n=>"Priradených "+n+" "+(n===1?"platba":n<5?"platby":"platieb")+" k faktúram",
     detail:"Appka ich spárovala podľa variabilného symbolu a faktúry označila ako uhradené. Ak niektoré priradenie nesedí, odoberiete ho v Banka → Párovanie." },
+  kolizia:{ ic:"🤖", modul:"vydavky",
+    nazov:n=>"Odlíšených "+n+" dokladov s rovnakým číslom",
+    detail:"Číslo na doklade sa nezmenilo — appka ich odteraz rozoznáva podľa vlastnej identity, aby si navzájom neprepisovali úhrady. Skontrolujte v Banke, či platby sedia na správne doklady." },
   icdph:{ ic:"🤖", modul:"vydavky",
     nazov:n=>"Doplnené IČ DPH k "+n+" "+(n===1?"dokladu":n<5?"dokladom":"dokladom"),
     detail:"Appka ho prevzala od toho istého dodávateľa z iných dokladov. Ak dodávateľ platcom DPH nie je, opravte to v editore dokladu." }
@@ -6492,8 +6495,27 @@ function editVydavok(idx){
       if(!overMesiacDokladu(obj.datum)) return false;
       const dupl=najdiDuplicityVydavku(obj);
       if(dupl.length){
-        const d0=dupl[0];
-        if(!confirm("⚠ Možná duplicita!\n\nUž evidujete podobný výdavok:\n• "+(d0.partner||"—")+"\n• "+fmtDatum(d0.datum)+" · "+eur(d0.spolu)+(d0.cislo?"\n• č. "+d0.cislo:"")+"\n\nNaozaj chcete pridať tento výdavok?")) return false;
+        // Rovnaké číslo pri INEJ sume nie je duplicita — sú to dva rôzne doklady
+        // s jednou identitou. Pýtať sa „naozaj pridať?" je vtedy zavádzajúce:
+        // človek správne odpovie áno a nedozvie sa, že si tie doklady odteraz
+        // budú prepisovať úhrady. Presne takto vznikli štyri doklady „FXLY6UUY".
+        const nCislo=String(obj.cislo||"").trim();
+        const nSuma=r2(+obj.spolu||0);
+        const kolizia=nCislo ? dupl.filter(x=>String(x.cislo||"").trim()===nCislo
+                                           && Math.abs(r2(+x.spolu||0)-nSuma)>=0.02) : [];
+        if(kolizia.length===dupl.length && kolizia.length){
+          if(!confirm("⚠ Číslo „"+nCislo+"“ už má iný doklad s inou sumou.\n\n"
+            +kolizia.slice(0,3).map(x=>"• "+fmtDatum(x.datum)+" · "+eur(x.spolu)+" · "+(x.partner||"—")).join("\n")
+            +"\n• "+fmtDatum(obj.datum)+" · "+eur(nSuma)+" · tento doklad\n\n"
+            +"Nie je to duplicita, ale appka rozoznáva doklady podľa čísla — párovanie s bankou "
+            +"aj kontrolný výkaz by pracovali s prvým nájdeným, teda s cudzou sumou.\n\n"
+            +"Ak má doklad na papieri iné číslo, opravte ho. Ak dodávateľ naozaj posiela rovnaké "
+            +"číslo (zákaznícke ID), pridajte ho a v Ročnej kontrole ich dajte odlíšiť.\n\n"
+            +"Pridať doklad s týmto číslom?")) return false;
+        } else {
+          const d0=dupl[0];
+          if(!confirm("⚠ Možná duplicita!\n\nUž evidujete podobný výdavok:\n• "+(d0.partner||"—")+"\n• "+fmtDatum(d0.datum)+" · "+eur(d0.spolu)+(d0.cislo?"\n• č. "+d0.cislo:"")+"\n\nNaozaj chcete pridať tento výdavok?")) return false;
+        }
       }
       obj.id = obj.id || ("v"+Date.now()+Math.random().toString(36).slice(2,7));
       // Pamäť partnerov sa musí aj čítať, nielen plniť — inak doklad od dávno
@@ -15089,19 +15111,21 @@ function rocnaKontrola(rok){
   // (zákaznícke ID bez poradia), lebo pdf.js rozdelil text a vzor sa zastavil
   // na medzere. Opravené vo vzore (EV), ale doklady zapísané predtým to
   // nenapraví — preto táto kontrola.
-  const podlaCisla={};
-  vydavky.forEach(x=>{
-    const c=String(x.cislo||"").trim(); if(!c) return;
-    (podlaCisla[c]=podlaCisla[c]||[]).push(x);
-  });
-  const kolizie=Object.entries(podlaCisla)
-    .filter(([,g])=>g.length>1 && new Set(g.map(x=>r2(+x.spolu||0))).size>1)
-    .map(([c,g])=>c+" · "+g.length+"× · "+g.map(x=>eur(+x.spolu||0)).join(", "));
+  // Hľadanie je v `kolizneCisla()` — to isté musí vidieť aj tlačidlo, ktoré
+  // kolíziu odstraňuje, inak by nález a oprava pracovali s iným zoznamom.
+  // Nález ide cez celú evidenciu, nielen cez zvolený rok: kolízia neprestane
+  // škodiť tým, že jeden z dvoch dokladov je z minulého roka.
+  const kolSkupiny=[...kolizneCisla("vydavok"), ...kolizneCisla("faktura")];
+  const kolizie=kolSkupiny.map(s=>s.cislo+" · "+s.doklady.length+"× · "
+    +s.doklady.map(x=>eur(+x.spolu||0)).join(", "));
   if(kolizie.length) pridaj("chyba","rovnakeCislo",
     kolizie.length+" čísel dokladu má viac dokladov s rôznou sumou",
     "Doklad sa v appke rozpoznáva podľa čísla — pri zhode sa použije prvý. "+
     "Párovanie s bankou aj kontrolný výkaz preto môžu pracovať s nesprávnou sumou. "+
-    "Doplňte dokladom celé, odlišné čísla.", kolizie);
+    "Ak má doklad na papieri iné číslo, opravte ho; ak dodávateľ naozaj posiela rovnaké "+
+    "(zákaznícke ID), nechajte ich odlíšiť — číslo pre výkaz ostane zachované.", kolizie,
+    {l:"Odlíšiť "+kolSkupiny.reduce((a,s)=>a+s.doklady.length,0)+" dokladov",
+     fn:"rozlisKolizneDoklady()"});
 
   // ── 3c. Úhrada priradená k dokladu, ktorý neexistuje ──
   //
@@ -18501,9 +18525,29 @@ function doplnIdDokladom(){
   return n;
 }
 
+// `klucId` znamená „tento doklad sa identifikuje svojím id, nie číslom“.
+// Nastavuje sa, keď to isté číslo nesie viac dokladov s rôznou sumou —
+// napríklad keď dodávateľ posiela zákaznícke ID namiesto čísla faktúry.
+// Číslo sa pritom NEMENÍ: ide do kontrolného výkazu a musí sedieť s papierom.
+// Mení sa len to, čím appka doklad rozoznáva od ostatných.
 function dokladKluc(x){
+  if(x && x.klucId && x.id) return "#"+x.id;
   const c=String(x && x.cislo || "").trim();
   return c || (x && x.id ? "#"+x.id : "");
+}
+// Skupiny dokladov, ktoré zdieľajú číslo, ale líšia sa sumou. Nie duplicity —
+// dve rôzne faktúry s jednou identitou. Appka podľa čísla nájde prvú a párovanie
+// aj kontrolný výkaz potom pracujú s cudzou sumou.
+function kolizneCisla(typ){
+  const zoz=dokladZoznam(typ), podla={};
+  zoz.forEach(x=>{
+    if(x.klucId) return;                       // už odlíšený, nekoliduje
+    const c=String(x.cislo||"").trim(); if(!c) return;
+    (podla[c]=podla[c]||[]).push(x);
+  });
+  return Object.entries(podla)
+    .filter(([,g])=>g.length>1 && new Set(g.map(x=>r2(+x.spolu||0))).size>1)
+    .map(([c,g])=>({cislo:c, doklady:g}));
 }
 function najdiDoklad(typ, kluc){
   const zoz = typ==="faktura" ? (firmaData.faktury||[]) : (firmaData.vydavky||[]);
@@ -18782,6 +18826,53 @@ function siroteUhrady(){
   }));
   return out;
 }
+// Odlíši doklady, ktoré zdieľajú číslo. Číslo ostáva nedotknuté — mení sa len
+// identita (`klucId`), takže kontrolný výkaz vidí ďalej to, čo je na papieri.
+//
+// Úhrady zapísané na spoločné číslo treba preniesť na konkrétny doklad. Jediný
+// spoľahlivý rozlišovač je suma: pri troch dokladoch s rôznymi sumami vie appka
+// povedať, ktorému platba patrí. Keď to jednoznačné nie je, úhrada sa NEHÁDŽE
+// naslepo — odoberie sa a pohyb sa vráti medzi nespárované, kde o ňom rozhodne
+// človek. Zlé priradenie sa hľadá horšie než chýbajúce.
+function rozlisKolizneDoklady(){
+  if(!strazZapis("vydavky")) return;
+  const skupiny=[...kolizneCisla("vydavok").map(s=>({...s, typ:"vydavok"})),
+                 ...kolizneCisla("faktura").map(s=>({...s, typ:"faktura"}))];
+  if(!skupiny.length){ alert("Žiadne číslo dokladu nenesie viac dokladov s rôznou sumou."); return; }
+  const pocet=skupiny.reduce((a,s)=>a+s.doklady.length,0);
+  const ukazka=skupiny.slice(0,5).map(s=>
+    "• č. "+s.cislo+" — "+s.doklady.length+" dokladov: "+s.doklady.map(x=>eur(+x.spolu||0)).join(", ")).join("\n");
+  if(!confirm("Odlíšiť "+pocet+" dokladov v "+skupiny.length+" kolidujúcich číslach?\n\n"+ukazka
+    +(skupiny.length>5?"\n… a ďalších "+(skupiny.length-5):"")
+    +"\n\nČíslo dokladu sa NEMENÍ — ostáva na doklade aj v kontrolnom výkaze. "
+    +"Mení sa len to, čím ich appka rozoznáva medzi sebou.\n\n"
+    +"Platby priradené na spoločné číslo sa prenesú na doklad podľa sumy. "
+    +"Kde to jednoznačné nebude, priradenie sa odoberie a pohyb nájdete v Banke medzi nespárovanými.")) return;
+
+  let prenesene=0, vratene=0;
+  skupiny.forEach(s=>{
+    // úhrady na spoločné číslo si zapamätaj skôr, než sa kľúče zmenia
+    const dotknute=[];
+    (firmaData.vypis||[]).forEach(t=>(t.uhrady||[]).forEach(u=>{
+      if(u.typ===s.typ && String(u.cislo)===s.cislo) dotknute.push({t,u});
+    }));
+    s.doklady.forEach(x=>{ x.klucId=true; });
+    dotknute.forEach(({t,u})=>{
+      const suma=r2(+u.suma||0);
+      const sedia=s.doklady.filter(x=>Math.abs(r2(+x.spolu||0)-suma)<0.02);
+      odoberUhradu(t, u.typ, u.cislo);
+      if(sedia.length===1 && pridajUhradu(t, s.typ, dokladKluc(sedia[0]), suma)>0) prenesene++;
+      else vratene++;
+    });
+  });
+  poZmene();
+  if(typeof zapisAutomat==="function") zapisAutomat("kolizia", pocet);
+  alert("Odlíšených "+pocet+" dokladov.\n\n"
+    +"Platby prenesené podľa sumy: "+prenesene
+    +(vratene?"\nVrátené medzi nespárované: "+vratene+" — sumu nebolo možné priradiť jednoznačne." : ""));
+  if(aktualnaApp==="uzavierka" && typeof appUzavierka==="function") appUzavierka();
+}
+
 function odoberSiroteUhrady(){
   if(!strazZapis("banka")) return;
   const zoz=siroteUhrady();
