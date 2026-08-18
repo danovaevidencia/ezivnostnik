@@ -887,7 +887,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.18-FM";  // vrátené, čo sa stratilo pri uploade 30. 7.: priznanie B pod účtovníkom, chyby zdieľania, pozvánka po prihlásení
+const APP_VERZIA = "2026.08.18-FN";  // appka pripomenie chýbajúcu faktúru za predplatné skôr, než sa podá kontrolný výkaz
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -14809,6 +14809,59 @@ function dphKontroly(doklady){
   });
   return v;
 }
+// ═══ CHÝBAJÚCA FAKTÚRA Z RADU „S" ═════════════════════════════════════════
+//
+// Faktúry za predplatné vystavuje webhook do `saas_faktury` a do evidencie sa
+// dostávajú RUČNE: export JSON z admin panelu, import v appke. Automaticky to
+// nejde — appka číta `saas_faktury` scopnuté na vlastnú firmu (pohľad
+// zákazníka) a administrátorský pohľad od `admin_29` žiada druhý faktor, ktorý
+// appka nemá. Bola to zámerná voľba, nie prehliadnutie.
+//
+// Cena tej voľby je, že sa na import dá zabudnúť — a vtedy v kontrolnom výkaze
+// aj v priznaní DPH chýbajú VLASTNÉ tržby. Nikto to nezbadá, lebo výkaz sa
+// vygeneruje bez námietky.
+//
+// Kontrola je viazaná na dôkaz, že sa téma týka tejto firmy: rad `S…` už
+// niekedy evidovala. Bežnému živnostníkovi sa nezobrazí nikdy — falošný poplach
+// naučí preskakovať aj pravé nálezy.
+const SAAS_RAD = /^S\d{4}/;
+
+// Mesiace roka, v ktorých firma eviduje aspoň jednu faktúru z radu S.
+function saasMesiace(){
+  const von = new Set();
+  (firmaData.faktury || []).forEach(f => {
+    if(SAAS_RAD.test(String(f.cislo || "").trim())){
+      const m = String(f.datum || f.vystavenie || "").slice(0, 7);
+      if(m) von.add(m);
+    }
+  });
+  return von;
+}
+
+// Vráti text nálezu, alebo "" — mesiac `mk` je diera v rade S.
+//
+// Hlási sa najviac tri mesiace od poslednej S-faktúry. Kto predplatné prestane
+// fakturovať, dostane pripomienku dvakrát-trikrát a potom ticho; bez tohto
+// stropu by kontrola otravovala navždy a stala by sa šumom.
+function saasMedzera(mk){
+  if(!mk) return "";
+  const mes = saasMesiace();
+  if(!mes.size || mes.has(mk)) return "";
+  const predch = [...mes].filter(m => m < mk).sort().pop();
+  if(!predch) return "";
+  const [r1, m1] = predch.split("-").map(Number);
+  const [r2_, m2] = mk.split("-").map(Number);
+  const odstup = (r2_ - r1) * 12 + (m2 - m1);
+  if(odstup > 3) return "";
+  // Pozor na úvodzovky: koncová slovenská je „ … “ (U+201C), nie rovná — tá by
+  // reťazec ukončila a syntax spadne až pri kontrole, nie pri písaní.
+  return "Za tento mesiac nie je zaevidovaná ani jedna faktúra z radu „S…“, "
+    + "hoci naposledy ste ich vystavovali " + predch.replace("-", "/") + ". "
+    + "Ak predplatné v tomto mesiaci bežalo, stiahnite JSON z admin panelu "
+    + "a naimportujte ho vo Faktúrach — inak v kontrolnom výkaze aj v priznaní "
+    + "DPH chýbajú vaše vlastné tržby.";
+}
+
 // blok na obrazovke výkazu — zobrazí sa len vtedy, keď je čo rozhodnúť
 function dphOdpoctyHtml(mk, S){
   const pov=r2(S.danovaPovinnost);
@@ -14862,6 +14915,9 @@ function dphVykazHtml(rok){
   const vystup=doklady.filter(d=>["A1","A2","C1","D1","D2"].includes(d.oddiel));
   const vstup=doklady.filter(d=>["B1","B2","B31","B32","C2"].includes(d.oddiel));
   const kontroly=dphKontroly(doklady);
+  // Nález o chýbajúcej vlastnej faktúre nevie vzniknúť z prechádzania dokladov —
+  // je to nález o doklade, ktorý TAM NIE JE. Preto sa dopĺňa tu, nad mesiacom.
+  { const s=saasMedzera(mk); if(s) kontroly.push({typ:"warn", text:s}); }
   const [r,mm]=mk.split("-");
   const nazovObd=MES_SK[+mm-1]+" "+r;
   // sumár oddielov
@@ -15447,6 +15503,36 @@ function rocnaKontrola(rok){
       pridaj("chyba","majetokBezOdpisu", bezOdpisu.length+" položiek majetku nemá vstupnú cenu alebo odpisovú skupinu",
         "Bez nich sa odpis nedá vypočítať a do výdavkov sa nedostane.",
         bezOdpisu.slice(0,8).map(m=>m.nazov||"—"));
+  }catch(_){}
+
+  // ── 9b. Mesiace bez faktúry z radu „S" ──
+  // Ten istý dôkaz ako pri mesačnej kontrole: rad S už firma niekedy evidovala.
+  // Bežnému živnostníkovi sa nález nezobrazí nikdy.
+  try{
+    const mesS=saasMesiace();
+    if(mesS.size){
+      const vRokuS=[...mesS].filter(m=>m.slice(0,4)===R).sort();
+      if(vRokuS.length){
+        const dnesMK=new Date().toISOString().slice(0,7);
+        const diery=[];
+        // Od prvého mesiaca s S-faktúrou po posledný uzavretý mesiac roka.
+        const [prvyR,prvyM]=vRokuS[0].split("-").map(Number);
+        for(let i=0;i<12;i++){
+          const m=prvyM+i; if(m>12) break;
+          const mk=prvyR+"-"+String(m).padStart(2,"0");
+          if(mk>=dnesMK) break;               // bežiaci mesiac ešte nie je diera
+          if(!mesS.has(mk) && saasMedzera(mk)) diery.push(mk.replace("-","/"));
+        }
+        if(diery.length)
+          pridaj("pozor","saasChybaMesiac",
+            diery.length+" mesiacov bez faktúry za predplatné",
+            "Faktúry z radu „S…“ sa do evidencie dostávajú ručne — exportom z admin panelu "+
+            "a importom vo Faktúrach. Kým tam nie sú, chýbajú vaše vlastné tržby v kontrolnom "+
+            "výkaze aj v priznaní DPH.",
+            diery,
+            {l:"Otvoriť Faktúry", fn:"otvorApp('faktury')"});
+      }
+    }
   }catch(_){}
 
   // ── 10. Medzery v číslovaní faktúr ──
