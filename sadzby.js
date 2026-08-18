@@ -4,7 +4,8 @@
 //  Sadzby, ich história v čase, kontroly a export do sadzby.json.
 //  Načítavajú ho OBA súbory:
 //    · ezivnostnik.html — číta sadzby a zobrazuje ich prehľad
-//    · admin.html       — edituje ich a vyrába sadzby.json
+//    · dev/admin/admin.html — edituje ich a vyrába sadzby.json; nie je na
+//      GitHub Pages, ťahá si tento súbor z nasadenej appky cez https
 //
 //  Preto tu NESMIE byť nič, čo závisí od appky: žiadne firmaData, žiadne
 //  výpočty dane, žiadne pomocné funkcie z ezivnostnik.html. Modul si vystačí
