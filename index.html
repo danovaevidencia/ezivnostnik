@@ -211,6 +211,14 @@ section{padding:56px 0}
 
 /* ══ E-INVOICE STRIP ══ */
 .strip{background:linear-gradient(135deg,var(--brand),var(--brand-deep));color:#fff;border-radius:22px;padding:34px 28px;margin-top:8px;position:relative;overflow:hidden}
+/* ── Články ── */
+.cl-zoz{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;margin-top:26px}
+.cl-kus{background:var(--paper,#fff);border:1px solid var(--line);border-radius:16px;padding:20px 22px;text-decoration:none;color:inherit;display:block;transition:.16s}
+.cl-kus:hover{border-color:var(--brand)}
+.cl-kus b{font-size:17px;line-height:1.3;display:block}
+.cl-kus p{font-size:14px;color:var(--ink-soft);margin-top:8px}
+.cl-kus .d{font-size:12px;color:var(--ink-soft);opacity:.75;margin-top:12px}
+.cl-viac{display:inline-block;margin-top:22px;font-weight:600;color:var(--brand);text-decoration:none}
 /* cenník */
 .cenn{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:8px}
 .cen{background:var(--paper);border:1px solid var(--line);border-radius:18px;padding:24px 22px;display:flex;flex-direction:column}
@@ -434,6 +442,20 @@ footer{background:var(--paper);border-top:1px solid var(--line);padding:32px 0;f
   </div>
 </section>
 
+<!-- ══ ČLÁNKY ══ -->
+<!-- Sekcia sa vykreslí, len keď články naozaj dorazia. Keď načítanie zlyhá
+     alebo článok ešte žiadny nie je, ostane skrytá — prázdny box s točiacim
+     sa kolieskom je horší než nič. -->
+<section id="clankySekcia" hidden>
+  <div class="wrap">
+    <div class="eyebrow">Články</div>
+    <h2 class="h2">Dane a odvody po slovensky</h2>
+    <p class="sec-lead">Zmeny v zákonoch a usmernenia Finančnej správy zhrnuté vlastnými slovami — s odkazom na zdroj, aby ste si to vedeli overiť.</p>
+    <div class="cl-zoz" id="clankyZoz"></div>
+    <a class="cl-viac" href="/clanky/">Všetky články →</a>
+  </div>
+</section>
+
 <!-- ══ CENNÍK ══ -->
 <section id="cennik">
   <div class="wrap">
@@ -506,6 +528,7 @@ footer{background:var(--paper);border-top:1px solid var(--line);padding:32px 0;f
       <b>e<i>živnostník</i></b>
     </div>
     <div class="foot-links">
+      <a href="/clanky/">Články</a>
       <a href="sukromie.html">Ochrana osobných údajov</a>
       <a href="podmienky.html">Obchodné podmienky</a>
       <a onclick="goApp('login')">Prihlásiť sa</a>
@@ -524,6 +547,39 @@ const APP_URL = "ezivnostnik.html";
 function goApp(mode){
   location.href = APP_URL + "?vstup=" + encodeURIComponent(mode);
 }
+
+// ═══ ČLÁNKY ═══
+// Tri najnovšie priamo cez Supabase REST — bez knižnice. Landing dnes žiadnu
+// nemá a ťahať kvôli trom perexom celé supabase-js by bolo drahšie než tento
+// jeden fetch. Kľúč je publikovateľný (anon) a číta len zverejnené články,
+// o zvyšok sa stará RLS.
+const SUPABASE_URL = "https://jriuljhmacgvxyrptbme.supabase.co";
+const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
+
+function clDatum(iso){
+  const m = String(iso||"").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? (+m[3]) + ". " + (+m[2]) + ". " + m[1] : "";
+}
+function clEsc(s){
+  return String(s==null?"":s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+}
+
+fetch(SUPABASE_URL + "/rest/v1/clanky?select=slug,nazov,perex,publikovane,zmenene"
+      + "&zverejneny=eq.true&order=publikovane.desc&limit=3", {
+  headers: { apikey: SUPABASE_KEY, Authorization: "Bearer " + SUPABASE_KEY },
+})
+  .then(r => r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status)))
+  .then(zoz => {
+    if (!Array.isArray(zoz) || !zoz.length) return;
+    document.getElementById("clankyZoz").innerHTML = zoz.map(c => `
+      <a class="cl-kus" href="/clanky/${clEsc(c.slug)}.html">
+        <b>${clEsc(c.nazov)}</b>
+        <p>${clEsc(c.perex||"")}</p>
+        <div class="d">${clEsc(clDatum(c.zmenene || c.publikovane))}</div>
+      </a>`).join("");
+    document.getElementById("clankySekcia").hidden = false;
+  })
+  .catch(e => console.error("clanky:", e.message));
 
 </script>
 </body>

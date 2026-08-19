@@ -724,6 +724,32 @@ button{font-family:inherit;cursor:pointer}
 .vzor{font-size:12px;padding:6px 11px;border-radius:999px;border:1px solid var(--line);
   background:var(--paper);cursor:pointer;user-select:none;white-space:nowrap;transition:border-color .15s}
 .vzor:hover{border-color:var(--brand);background:var(--brand-lite)}
+/* ── ODBORNÉ ČLÁNKY ── */
+/* Kontextový pás: jeden riadok, 32 px. Keď preň nie je článok, nekreslí sa
+   vôbec — preto tu nie je žiadny „prázdny" stav. */
+.clPas{display:flex;align-items:center;gap:8px;background:var(--paper);border:1px solid var(--line);
+  border-left:3px solid #7a5cc4;border-radius:9px;padding:8px 10px;margin:0 2px 12px;font-size:12.5px}
+.clPasIc{flex:0 0 auto}
+.clPasTx{flex:1;cursor:pointer;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.clPasTx:after{content:" ›";color:#7a5cc4;font-weight:700}
+.clPasX{background:none;border:none;color:var(--ink-soft);font-size:17px;line-height:1;cursor:pointer;padding:0 2px}
+.clKarta{cursor:pointer;margin-bottom:10px}
+.clKarta b{font-size:15.5px}
+.clDatum{font-size:11.5px;color:var(--ink-soft);margin-top:8px}
+.clSpat{font-size:13px;color:#7a5cc4;cursor:pointer;margin:0 2px 10px}
+.clClanok h2{font-size:19px;margin-bottom:2px}
+.clClanok h3{font-size:15.5px;margin:18px 0 6px}
+.clClanok p{font-size:14.5px;line-height:1.65;margin-bottom:11px}
+.clClanok ul,.clClanok ol{margin:0 0 11px 20px}
+.clClanok li{font-size:14.5px;line-height:1.6;margin-bottom:4px}
+.clClanok img{max-width:100%;height:auto;border-radius:9px;margin:10px 0;display:block}
+.clClanok blockquote{border-left:3px solid #7a5cc4;padding-left:11px;margin:11px 0;color:var(--ink-soft)}
+.clClanok table{width:100%;border-collapse:collapse;margin:11px 0;font-size:13.5px}
+.clClanok th,.clClanok td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--line);vertical-align:top}
+.cl-patka{margin-top:18px;padding-top:12px;border-top:1px solid var(--line);font-size:12px;color:var(--ink-soft)}
+.cl-patka div{margin-bottom:5px}
+.cl-disclaimer{font-size:11.5px}
+a.clWeb{display:inline-block;margin-top:12px;font-size:12.5px;color:#7a5cc4;text-decoration:none}
 </style>
 </head>
 <body>
@@ -899,7 +925,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.18-FP";  // svetlá paleta bola od FC neplatná (premenné definované samy sebou); horná lišta sa prefarbuje s témou
+const APP_VERZIA = "2026.08.18-FQ";  // odborné články: čítačka v appke, kontextový odkaz v moduloch, statické stránky na webe
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -1832,6 +1858,9 @@ function zobrazFirmu(){
   // Čakajúce doklady sa ťahajú na pozadí — plocha na ne nečaká.
   if(typeof nacitajCakajuce==="function") nacitajCakajuce(true);
   zapniObnovuCakajucich();
+  // Články tiež na pozadí. Sú to verejné dáta a plocha ich nepotrebuje —
+  // keď dorazia neskôr, obrazovka sa prekreslí sama.
+  clankyNacitaj();
 }
 let _zdielaneSkusene=false;
 
@@ -3449,6 +3478,18 @@ function zbierNotifikacie(){
       akcia:()=>otvorApp(bez.vyd.length?"vydavky":"faktury")});
   }catch(_){}
 
+  // ── nové odborné články ──
+  // Ohlasujú sa len tie z posledných dvoch mesiacov a najviac tri. Zvonček je
+  // na veci, ktoré niečo znamenajú; dvadsať riadkov s článkami by ho zaplavilo
+  // a naučilo preskakovať aj termíny.
+  try{
+    CLANKY.filter(c => dni(c.publikovane) > -60).slice(0,3).forEach(c=>{
+      out.push({kluc:"clanok:"+c.id, ic:"📘", nal:"info",
+        nazov:c.nazov, detail:c.perex||"",
+        akcia:()=>otvorClanokVAppke(c.id)});
+    });
+  }catch(_){}
+
   return out;
 }
 
@@ -4168,6 +4209,7 @@ const APPS={
   majetok:  {n:"Majetok",         ic:"⌂", c:"#a06a2c", d:"Dlhodobý majetok, odpisy"},
   zdielanie:{n:"Zdieľanie firmy",ic:"👥",c:"#5b6779", d:"Prístup pre účtovníka, pozvánky"},
   data:     {n:"Nastavenia a dáta",ic:"⚙",c:"#5b6779", d:"Firma, import/export, cloud"},
+  clanky:   {n:"Články",          ic:"📘",c:"#7a5cc4", d:"Odborné články a rady"},
 };
 
 // ═══ FÁZA 1: INFORMAČNÁ ARCHITEKTÚRA — skupiny modulov ═══
@@ -4181,7 +4223,7 @@ const SKUPINY=[
   {id:"agenda",  n:"Firemná agenda",  ic:"🚗", c:"var(--ink-warn)", dd:"auto, majetok, papiere",        moduly:["jazdy","majetok","dokumenty","dovolenka","zdielanie"]},
 ];
 // samostatné (mimo skupín): kalendar (prierezový), data (nastavenia v hlavičke)
-const SKUPINA_SAMOSTATNE=["kalendar"];
+const SKUPINA_SAMOSTATNE=["kalendar","clanky"];
 
 function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function fmtDatum(dt){
@@ -4380,7 +4422,15 @@ function appHlavicka(id, akcie){
   return `<div class="appbar" style="--_c:${a.c}"><button class="appback" onclick="domov()">‹</button><div class="appic" style="background:${a.c}">${a.ic}</div><div class="apptitle"><h2>${a.n}</h2><div class="crumb" id="appCrumb"></div></div><div class="sp"></div><div class="appacts">${akcie||""}</div></div>`;
 }
 
+// Modul vykreslí svoj obsah, potom sa nad neho predsadí kontextový odkaz na
+// článok — ak preň nejaký je. Keď nie je, nekreslí sa nič: trvalý prvok,
+// ktorý väčšinou hlási „nič", miesto na 390 px nezaberá.
 function renderApp(id){
+  renderAppModul(id);
+  clankyPasVloz(id);
+}
+function renderAppModul(id){
+  if(id==="clanky") return appClanky();
   if(id==="faktury") return appFaktury();
   if(id==="vykazy") return appVykazy();
   if(id==="kalendar") return appKalendar();
@@ -4400,6 +4450,172 @@ function renderApp(id){
   if(id==="zdielanie") return appZdielanie();
   if(id==="data") return appData();
   if(id==="sadzby") return appSadzby();   // údržbová obrazovka, nie je v navigácii
+}
+
+// ═══════════════════════════════════════════════════
+//  ODBORNÉ ČLÁNKY — čítačka, kontextový odkaz, offline kópia
+//
+//  Články sú verejný obsah z tabuľky `clanky`. Modul je dostupný VŽDY —
+//  v deme, bez plánu aj pri pozastavenom účte. Obsah zadarmo je dôvod,
+//  prečo vôbec je.
+//
+//  Návrh: dev/docs/NAVRH_CLANKY.md
+// ═══════════════════════════════════════════════════
+let CLANKY=[];                 // zverejnené, najnovšie hore
+let _clModul=null;             // clanky.js, načítaný lenivo
+let _clOtvoreny=null;          // id článku v čítačke; null = zoznam
+const CL_CACHE="clanky_cache";
+// „Teraz nie" platí do zatvorenia appky. V pamäti zámerne — keby to prežilo
+// reštart, bola by to tá istá voľba ako „už nezobrazovať", len bez povedania.
+const CL_DOCASNE=new Set();
+
+// Lenivo, ako jsPDF. Štart appky sa nesmie zdržať kvôli modulu, ktorý väčšina
+// spustení nepotrebuje.
+function clankyModul(){
+  if(_clModul) return Promise.resolve(_clModul);
+  return import("/clanky.js").then(m=>{ _clModul=m; return m; });
+}
+
+// Verejný obsah, ktorý je aj tak na webe — do localStorage patrí. Nie sú to
+// dáta firmy; vďaka kópii sa Články otvoria aj bez signálu.
+function clankyZCache(){
+  try{ const s=localStorage.getItem(CL_CACHE); const p=s?JSON.parse(s):[]; return Array.isArray(p)?p:[]; }
+  catch(_){ return []; }
+}
+
+function clankyNacitaj(){
+  CLANKY=clankyZCache();
+  if(CLANKY.length) clankyPrekresli();
+  clankyModul().catch(e=>console.error("clanky.js sa nenačítal:", e.message||e));
+  if(!sb) return Promise.resolve();
+  return sb.from("clanky")
+    .select("id,slug,nazov,perex,telo,moduly,obrazok,zdroj_nazov,zdroj_url,publikovane,zmenene")
+    .eq("zverejneny", true)
+    .order("publikovane", { ascending:false })
+    .then(({data, error})=>{
+      // Ticho zhltnutá chyba vyzerá presne ako „žiadne články" — a to je stav,
+      // ktorý tu bude bežný, takže by ju nikto nikdy nenašiel.
+      if(error){ console.error("clanky:", error.message); return; }
+      CLANKY=data||[];
+      try{ localStorage.setItem(CL_CACHE, JSON.stringify(CLANKY)); }catch(_){}
+      clankyPrekresli();
+      try{ renderNotifBadge(); }catch(_){}
+    });
+}
+
+// Články doraziť môžu aj potom, čo si používateľ otvoril modul. Vtedy sa
+// obrazovka prekreslí — inak by sa kontextový odkaz ukázal až pri ďalšom kliku.
+function clankyPrekresli(){
+  try{
+    if(aktualnaApp) renderApp(aktualnaApp);
+    else if(aktualnaSuperApka) prepniZalozku(aktualnaZalozka);
+  }catch(_){}
+}
+
+// ── skrývanie kontextového odkazu ──
+function clankySkryteZoznam(){
+  const S=(firmaData&&firmaData.settings)||{};
+  return Array.isArray(S.clankySkryte)?S.clankySkryte:[];
+}
+// Natrvalo ide do settings, teda do cloudu: zavreté na mobile má ostať
+// zavreté aj na počítači. Nie je to tajomstvo, len preferencia.
+function clankySkry(id, natrvalo){
+  if(natrvalo){
+    if(!firmaData) return;
+    if(!firmaData.settings) firmaData.settings={};
+    const z=clankySkryteZoznam();
+    if(!z.includes(id)) z.push(id);
+    firmaData.settings.clankySkryte=z;
+    try{ poZmene(); }catch(_){}
+  } else CL_DOCASNE.add(id);
+  clankyPrekresli();
+}
+
+// ── kontextový pás v module ──
+function clankyPreModul(modul){
+  if(!_clModul || !CLANKY.length) return null;
+  return _clModul.vyberPreModul(CLANKY, modul, clankySkryteZoznam(), [...CL_DOCASNE]);
+}
+
+function clankyPasVloz(modul){
+  const box=document.getElementById("appScreen");
+  if(!box || modul==="clanky") return;
+  const c=clankyPreModul(modul);
+  if(!c) return;
+  const pas=document.createElement("div");
+  pas.className="clPas";
+  pas.innerHTML=`<span class="clPasIc">📘</span>
+    <span class="clPasTx" onclick="otvorClanokVAppke('${esc(c.id)}')">${esc(c.nazov)}</span>
+    <button class="clPasX" onclick="clankyPonukaSkryt('${esc(c.id)}')" aria-label="Skryť">×</button>`;
+  // Pás patrí pod hlavičku modulu, nie nad ňu — nad ňou by vyzeral ako
+  // hlásenie appky, nie ako poznámka k tomu, čo je pod ním.
+  const hlavicka=box.querySelector(".appbar");
+  if(hlavicka && hlavicka.nextSibling) box.insertBefore(pas, hlavicka.nextSibling);
+  else box.insertBefore(pas, box.firstChild);
+}
+
+// Dve voľby, nie jedna. Jednorazové skrytie chráni pred omylom, trvalé pred
+// otravovaním — a nezvratnú z nich treba pomenovať, nie schovať pod krížik.
+function clankyPonukaSkryt(id){
+  const c=CLANKY.find(x=>x.id===id);
+  openModal("Skryť odkaz na článok", `
+    <div class="csub" style="margin-bottom:14px">${esc(c?c.nazov:"")}</div>
+    <button class="aabtn" style="width:100%;margin-bottom:8px" onclick="closeModal();clankySkry('${esc(id)}',false)">Teraz nie</button>
+    <button class="aabtn" style="width:100%" onclick="closeModal();clankySkry('${esc(id)}',true)">Už nezobrazovať</button>
+    <div class="csub" style="margin-top:10px">„Teraz nie" platí do zatvorenia aplikácie. Článok nájdete v sekcii Články aj tak.</div>`, null);
+}
+
+// ── čítačka ──
+function otvorClanokVAppke(id){
+  _clOtvoreny=id;
+  otvorApp("clanky");
+}
+
+function appClanky(){
+  const box=document.getElementById("appScreen");
+  const hlavicka=appHlavicka("clanky");
+
+  if(!_clModul){
+    box.innerHTML=hlavicka+`<div class="csub" style="margin:14px 2px">Načítavam…</div>`;
+    clankyModul().then(()=>{ if(aktualnaApp==="clanky") appClanky(); });
+    return;
+  }
+  const C=_clModul;
+
+  if(!CLANKY.length){
+    box.innerHTML=hlavicka+`<div class="card" style="margin-top:14px">
+      <div class="csub">Zatiaľ tu nič nie je. Články pribúdajú priebežne — nájdete v nich
+      zhrnutia toho, čo sa mení v daniach a odvodoch, vlastnými slovami a s odkazom na zdroj.</div></div>`;
+    return;
+  }
+
+  const c=_clOtvoreny && CLANKY.find(x=>x.id===_clOtvoreny);
+  if(c){
+    // Telo sa čistí aj tu. Do appky ide HTML z databázy — a to je posledné
+    // miesto, kde sa dá zachytiť, keby v nej bolo niečo iné, než čo prešlo.
+    box.innerHTML=hlavicka+`
+      <div class="clSpat" onclick="_clOtvoreny=null;appClanky()">‹ Všetky články</div>
+      <div class="card clClanok">
+        <h2>${esc(c.nazov)}</h2>
+        <div class="csub" style="margin:4px 0 14px">Aktualizované ${esc(C.formatDatum(c.zmenene||c.publikovane))}</div>
+        ${c.perex?`<p><b>${esc(c.perex)}</b></p>`:""}
+        ${C.cistiHtml(c.telo||"")}
+        ${C.patkaHtml(c)}
+        <a class="clWeb" href="https://ezivnostnik.eu/clanky/${esc(c.slug)}.html" target="_blank" rel="noopener noreferrer">Otvoriť na webe — na poslanie ďalej ↗</a>
+      </div>`;
+    window.scrollTo(0,0);
+    try{ notifPrecitaj("clanok:"+c.id, false); }catch(_){}
+    return;
+  }
+
+  const karty=CLANKY.map(a=>`
+    <div class="card clKarta" onclick="_clOtvoreny='${esc(a.id)}';appClanky()">
+      <b>${esc(a.nazov)}</b>
+      <div class="csub" style="margin-top:5px">${esc(a.perex||C.textZHtml(a.telo,140))}</div>
+      <div class="clDatum">${esc(C.formatDatum(a.zmenene||a.publikovane))}</div>
+    </div>`).join("");
+  box.innerHTML=hlavicka+`<div class="csub" style="margin:0 2px 14px">
+    Dane, odvody a účtovníctvo bez omáčky. Každý článok má odkaz na zdroj.</div>${karty}`;
 }
 
 // ═══ SUPER APKA — zoskupené moduly so záložkami (mobil) / split (široké) ═══
