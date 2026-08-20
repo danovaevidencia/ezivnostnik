@@ -22,7 +22,7 @@
 
 // Edge funkcia si ju overuje. Keby esm.sh podal starú kópiu súboru, nasadenie
 // spadne s hláškou namiesto toho, aby ticho generovalo stránky starou čističkou.
-export const VERZIA = "1";
+export const VERZIA = "2";
 
 // ── Čo smie prejsť ─────────────────────────────────────────────────────────
 // Kľúč = tag, hodnota = povolené atribúty. Čo tu nie je, vypadne.
@@ -116,7 +116,12 @@ export function cistiHtml(html, parser) {
     let atr = "";
     for (const meno of POVOLENE[tag]) {
       let v = n.getAttribute ? n.getAttribute(meno) : null;
-      if (v == null || v === "") continue;
+      if (v == null) continue;
+      // Prázdny atribút sa zahadzuje — okrem `alt` pri obrázku. Tam `alt=""`
+      // NIE JE to isté ako žiadny alt: hovorí čítačke pre nevidiacich, že
+      // obrázok je dekoračný a má ho preskočiť. Bez atribútu prečíta adresu
+      // súboru, čo je pri mene odvodenom z odtlačku obsahu čistý nezmysel.
+      if (v === "" && !(tag === "img" && meno === "alt")) continue;
 
       if (meno === "href") { v = bezpecnyOdkaz(v); if (!v) continue; }
       else if (meno === "src") { v = bezpecnyObrazok(v); if (!v) continue; }
