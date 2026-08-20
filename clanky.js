@@ -22,7 +22,7 @@
 
 // Edge funkcia si ju overuje. Keby esm.sh podal starú kópiu súboru, nasadenie
 // spadne s hláškou namiesto toho, aby ticho generovalo stránky starou čističkou.
-export const VERZIA = "2";
+export const VERZIA = "3";
 
 // ── Čo smie prejsť ─────────────────────────────────────────────────────────
 // Kľúč = tag, hodnota = povolené atribúty. Čo tu nie je, vypadne.
@@ -32,11 +32,16 @@ export const POVOLENE = {
   strong:[], em:[], u:[], s:[],
   a:["href","title"],
   img:["src","alt","title"],
-  blockquote:[], hr:[], br:[],
+  blockquote:["class"], hr:[], br:[],
   table:[], thead:[], tbody:[], tr:[],
   th:["colspan","rowspan"], td:["colspan","rowspan"],
   code:[], pre:[],
 };
+
+// Jediné povolené triedy, a len na `blockquote`. Článok nesmie nosiť vlastné
+// farby ani štýly — appka má tmavý režim a natvrdo zapísaná farba by v ňom
+// ostala svetlá na tmavom. Namiesto toho pomenuje blok a vzhľad dodá systém.
+export const TRIEDY = ["poznamka", "varovanie", "priklad"];
 
 // Obsah týchto tagov sa NEZACHOVÁVA. Pri ostatných nepovolených sa obal zahodí
 // a text vnútri ostane — prilepený odsek zo stránky nemá zmiznúť len preto,
@@ -125,6 +130,7 @@ export function cistiHtml(html, parser) {
 
       if (meno === "href") { v = bezpecnyOdkaz(v); if (!v) continue; }
       else if (meno === "src") { v = bezpecnyObrazok(v); if (!v) continue; }
+      else if (meno === "class") { if (!TRIEDY.includes(v)) continue; }
       else if (meno === "colspan" || meno === "rowspan") {
         const c = parseInt(v, 10);
         if (!(c > 1 && c <= 20)) continue;
@@ -188,6 +194,7 @@ export function overSubset(html) {
       if (hod === undefined) return `atribút ${meno} bez hodnoty v úvodzovkách`;
       if (meno === "href" && !bezpecnyOdkaz(odesc(hod))) return "nebezpečný href: " + hod.slice(0, 40);
       if (meno === "src" && !bezpecnyObrazok(odesc(hod))) return "nebezpečný src: " + hod.slice(0, 40);
+      if (meno === "class" && !TRIEDY.includes(hod)) return "neznáma trieda: " + hod.slice(0, 40);
     }
     if (zvysok && koniec !== zvysok.length) return `nečitateľné atribúty v <${tag}>`;
   }
