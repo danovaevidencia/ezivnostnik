@@ -367,6 +367,7 @@ tr.chce td{background:#fffaf0}
 
       <div class="field"><label>Text článku</label>
         <div class="clLista">
+          <span id="clListaFormat">
           <button type="button" onclick="clPrikaz('bold')" title="Tučné"><b>B</b></button>
           <button type="button" onclick="clPrikaz('italic')" title="Kurzíva"><i>I</i></button>
           <button type="button" onclick="clBlok('h2')" title="Nadpis">H2</button>
@@ -378,8 +379,13 @@ tr.chce td{background:#fffaf0}
           <button type="button" onclick="clOdkaz()" title="Odkaz">🔗</button>
           <button type="button" onclick="clObrazok()" title="Obrázok">🖼</button>
           <button type="button" onclick="clPrikaz('removeFormat')" title="Zrušiť formátovanie">✕ formát</button>
+          </span>
+          <button type="button" id="clBtnHtml" onclick="clPrepniHtml()"
+                  title="Upraviť telo článku ako HTML — na vloženie hotového kódu">&lt;/&gt; HTML</button>
         </div>
         <div id="clTelo" class="clEditor" contenteditable="true"></div>
+        <textarea id="clTeloHtml" class="clEditor hidden" spellcheck="false"
+                  style="font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12.5px;line-height:1.5;white-space:pre"></textarea>
         <input type="file" id="clSubor" accept="image/*" class="hidden" onchange="clVlozObrazok(this)">
         <div class="clWeb" style="margin-top:5px">
           Obrázky sa zmenšia na 1600 px a do repozitára sa nahrajú až pri zverejnení.
@@ -1126,6 +1132,11 @@ async function otvorClanok(id){
   // kde sa to dá zachytiť pred vykreslením.
   document.getElementById("clTelo").innerHTML = c ? C.cistiHtml(c.telo||"") : "";
 
+  // Každý článok sa otvára v textovom režime. Prepína sa LEN zobrazenie —
+  // clPrepniHtml() by obsah preniesol späť z textarea a prepísal by ním telo,
+  // ktoré sme práve načítali.
+  clZobrazRezim(false);
+
   document.getElementById("clModuly").innerHTML = Object.entries(CL_MODULY).map(([k,n]) =>
     `<label class="chk"><input type="checkbox" class="clMod" value="${esc(k)}"
        ${c && (c.moduly||[]).includes(k) ? "checked" : ""}> ${esc(n)}</label>`).join("");
@@ -1166,6 +1177,55 @@ async function clNavrhniSlug(){
   if(pole.disabled || pole.dataset.rucne === "1") return;
   const C = await clModul();
   pole.value = C.slugify(document.getElementById("clNazov").value);
+}
+
+// ── prepínač HTML ──
+// Články vznikajú aj mimo panela (z Markdownu, z generátora). Prilepiť hotový
+// kód do WYSIWYG sa nedá — vložil by sa doslova aj so značkami. Prepínač dá
+// prístup k telu ako k textu.
+//
+// Pri každom prepnutí prechádza obsah cez cistiHtml, takže sa v oboch smeroch
+// vidí presne to, čo sa aj uloží. Kto vloží `<script>`, uvidí po prepnutí,
+// že tam nie je — a nemusí na to prísť až podľa toho, že článok nefunguje.
+let clRezimHtml = false;
+
+// Len zobrazenie — obsah nepresúva. Oddelené preto, že otvorenie článku musí
+// vedieť prepnúť späť na text bez toho, aby prenieslo obsah starého textarea.
+function clZobrazRezim(html){
+  clRezimHtml = !!html;
+  document.getElementById("clTelo").classList.toggle("hidden", clRezimHtml);
+  document.getElementById("clTeloHtml").classList.toggle("hidden", !clRezimHtml);
+  document.getElementById("clBtnHtml").textContent = clRezimHtml ? "◀ Späť na text" : "</> HTML";
+  // Formátovacie tlačidlá by v HTML režime pôsobili na skrytý div — vyzeralo
+  // by to, že nefungujú.
+  const lista = document.getElementById("clListaFormat");
+  lista.style.opacity = clRezimHtml ? ".35" : "1";
+  lista.style.pointerEvents = clRezimHtml ? "none" : "auto";
+}
+
+async function clPrepniHtml(){
+  const C = await clModul();
+  const div = document.getElementById("clTelo");
+  const ta  = document.getElementById("clTeloHtml");
+
+  if(!clRezimHtml){
+    // Zalomenie medzi značkami je len na čítanie; čistička biele znaky medzi
+    // blokmi ignoruje, takže sa tým do článku nič nepridá.
+    ta.value = C.cistiHtml(div.innerHTML).replace(/></g, ">\n<");
+    clZobrazRezim(true);
+    ta.focus();
+  } else {
+    div.innerHTML = C.cistiHtml(ta.value);
+    clZobrazRezim(false);
+  }
+}
+
+// Telo sa berie z toho, čo je práve otvorené. Bez tohto by uloženie v HTML
+// režime zahodilo všetko, čo tam človek práve napísal.
+function clTeloSurove(){
+  return clRezimHtml
+    ? document.getElementById("clTeloHtml").value
+    : document.getElementById("clTelo").innerHTML;
 }
 
 // ── editor ──
@@ -1273,7 +1333,7 @@ async function ulozClanok(zverejnit){
   if(!slug){  err.textContent = "Adresa na webe je prázdna."; return; }
   if(zverejnit && !perex){ err.textContent = "Perex je povinný — ide do zoznamu aj na Facebook."; return; }
 
-  const telo = C.cistiHtml(document.getElementById("clTelo").innerHTML);
+  const telo = C.cistiHtml(clTeloSurove());
   if(zverejnit && !C.textZHtml(telo)){ err.textContent = "Článok je prázdny."; return; }
 
   // Čo neprejde validátorom, neprejde ani v edge funkcii — nech to admin vidí
