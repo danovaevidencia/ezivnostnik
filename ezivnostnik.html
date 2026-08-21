@@ -939,7 +939,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.21-FZ";  // dávka 4 z kap. 45.8 — lenivé knižnice, memoizácia, indexy
+const APP_VERZIA = "2026.08.21-GA";  // dávka 5 z kap. 45.5 — tiché chyby nahlas
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -1752,7 +1752,14 @@ async function prepniFirmu(id){
 async function nacitajFirmu(idPoziadavka){
   if(localMode || !sb){
     const ls = localStorage.getItem("eziv_firma");
-    if(ls){ try{ firmaData = JSON.parse(ls); }catch(e){} }
+    // Poškodený cache ticho viedol na prázdnu firmu a onboarding NAD existujúcimi
+    // dátami. Nahlas: dáta sú stále v localStorage, používateľ nemá nič prepisovať.
+    if(ls){ try{ firmaData = JSON.parse(ls); }catch(e){
+      console.error("lokálny cache firmy sa nedá prečítať:", e);
+      alert("Uložené dáta firmy sa nepodarilo prečítať (poškodený lokálny záznam).\n\n"+
+            "NEZAKLADAJTE novú firmu — dáta v prehliadači stále sú. Skúste appku otvoriť znova; "+
+            "ak sa to opakuje, ozvite sa na podporu.");
+    } }
     migrujSadzbyZNastaveni();
     zobrazFirmu(); return;
   }
@@ -1848,7 +1855,7 @@ function zobrazFirmu(){
         "Ak niektoré priradenie nesedí, odoberiete ho v Banka → Párovanie.\n\n"+
         "Záznam ostáva v zvončeku."), 400);
     }
-  }catch(_){}
+  }catch(e){ console.error("autoParujIstePrijmy pri zobrazení firmy:", e); }
   // faktúry za predplatné rovno do výdavkov (raz za session, na pozadí)
   if(!_saasAutoDone && firmaData && !localMode){ _saasAutoDone=true; autoZaevidujSaasFaktury(); }
   // pozastavený účet (admin nastavil aktivny=false) → zablokuj appku
@@ -3493,6 +3500,11 @@ function zbierNotifikacie(){
 
   // ── faktúry za predplatné ──
   try{
+    // zlyhanie načítania nesmie vyzerať ako „žiadne faktúry" (kap. 45.5)
+    if(_saasChyba) out.push({kluc:"saas:chyba", ic:"⚠", nal:"warn",
+      nazov:"Faktúry za predplatné sa nepodarilo načítať",
+      detail:"Ak nejaké pribudli, appka ich zatiaľ nevidí. "+_saasChyba,
+      akcia:()=>otvorSaasFaktury()});
     // automaticky pridané do výdavkov → informuj (nedávne)
     (firmaData.vydavky||[]).filter(v=>v.zdroj==="predplatne" && (!v.datum || dni(v.datum)>=-60)).forEach(v=>{
       out.push({kluc:"saasfakt:"+(v.cislo||v.id), ic:"🧾", nal:"info",
@@ -8604,7 +8616,11 @@ function sadzbyDopadHtml(){
 // obrazovku by z nich urobilo šum, ktorý sa naučí preskakovať.
 function rocnaKontrolaHtml(rok){
   let N=[];
-  try{ N=rocnaKontrola(rok); }catch(_){ return ""; }
+  // Úplný pád kontroly nesmie kartu ticho zmiznúť — vyzeralo by to ako „čisté"
+  try{ N=rocnaKontrola(rok); }catch(e){ console.error("rocnaKontrola:", e);
+    return `<div class="card" style="margin-bottom:14px;padding:12px 15px;font-size:13px;border-left:3px solid var(--warn)">
+      ⚠ <b>Ročnú kontrolu ${rok} sa nepodarilo spustiť.</b>
+      <span style="color:var(--ink-soft)">Nie je to čistý výsledok — kontrola nebežala. Detail je v konzole prehliadača.</span></div>`; }
   const chyb=N.filter(x=>x.zavaznost==="chyba").length;
   const poz=N.length-chyb;
   const c=APPS.uzavierka.c;
@@ -13216,10 +13232,17 @@ async function nacitajSaasFaktury(){
       .order("vystavene", { ascending:false }).limit(24);
     if(error) throw error;
     _saasFaktury = data || [];
-  }catch(e){ _saasFaktury = []; }
+    _saasChyba = null;
+  }catch(e){
+    // Chyba siete/RLS nesmie vyzerať ako „žiadne faktúry" (kap. 45.5, vzor EO)
+    _saasFaktury = [];
+    _saasChyba = e.message || String(e);
+    console.error("nacitajSaasFaktury:", e);
+  }
   try{ renderNotifBadge(); }catch(_){}
   return _saasFaktury;
 }
+let _saasChyba=null;
 
 // Automatické (tiché) zaevidovanie faktúr za predplatné do výdavkov — bez tlačidla.
 // Zákazník ich má rovno vo Výdavkoch (aj s PDF prílohou), dozvie sa o tom cez zvonček.
@@ -13247,7 +13270,7 @@ async function autoZaevidujSaasFaktury(){
         const blob=(await saasFakturaPDF(f)).output("blob");
         const cesta=await dokladUpload(new File([blob],"faktura-"+f.cislo+".pdf",{type:"application/pdf"}),"predplatne");
         if(cesta) obj.doklad=cesta;
-      }catch(_){}
+      }catch(e){ console.error("PDF príloha SaaS faktúry "+f.cislo+":", e); }  // výdavok vznikne aj bez prílohy
       firmaData.vydavky.push(obj);
       saasOznacZaevidovanu(f.cislo);
       if(typeof zapamatajPartnera==="function") zapamatajPartnera(obj);
@@ -13255,7 +13278,7 @@ async function autoZaevidujSaasFaktury(){
     }
     if(n){ poZmene(); try{ renderNotifBadge(); }catch(_){} }
     return n;
-  }catch(_){ return 0; }
+  }catch(e){ console.error("autoZaevidujSaasFaktury:", e); return 0; }
 }
 
 // je faktúra za predplatné už zaevidovaná vo výdavkoch?
@@ -13376,7 +13399,12 @@ async function otvorSaasFaktury(){
   openModal("Faktúry za predplatné", '<div class="csub">Načítavam…</div>', null);
   const zoz = await nacitajSaasFaktury();
   if(!zoz.length){
-    openModal("Faktúry za predplatné", `<div class="aempty" style="padding:22px 0">
+    // prázdno a chyba načítania sú dva rôzne stavy — nesmú vyzerať rovnako
+    openModal("Faktúry za predplatné", _saasChyba
+      ? `<div style="background:var(--sfc-warn);border-left:3px solid var(--warn);border-radius:0 9px 9px 0;padding:11px 13px;font-size:13px">
+          ⚠ <b>Načítanie zlyhalo.</b> Faktúry existovať môžu, appka sa k nim teraz nedostala.
+          <div style="color:var(--ink-soft);font-size:11px;margin-top:4px;font-family:ui-monospace,monospace">${esc(_saasChyba)}</div></div>`
+      : `<div class="aempty" style="padding:22px 0">
       Zatiaľ tu nič nie je. Faktúra sa vystaví automaticky po prvej platbe predplatného.</div>`, null);
     return;
   }
@@ -15626,6 +15654,12 @@ function rocnaKontrola(rok){
   // má ponúknuť obe, nie jednu a „Zrušiť".
   const pridaj=(zavaznost,k,t,detail,priklady,akcia)=>out.push({zavaznost,k,t,d:detail,
     priklady:priklady||[], akcia: akcia ? (Array.isArray(akcia)?akcia:[akcia]) : null});
+  // Kontrola, ktorá spadne, nesmie vyzerať ako kontrola, ktorá nič nenašla —
+  // to je zelená bez overenia (kap. 45.5). Zlyhanie je nález.
+  const zlyhalo=(nazov,e)=>{ console.error("rocnaKontrola/"+nazov+":", e);
+    pridaj("pozor","kontrolaZlyhala:"+nazov, "Kontrolu „"+nazov+"“ sa nepodarilo spustiť",
+      "Ostatné pravidlá prebehli, toto jedno spadlo — jeho tému appka tento rok neoverila. "+
+      "Technický detail: "+((e&&e.message)||e), []); };
 
   const faktury=(d.faktury||[]).filter(f=>vRoku(f.datum||f.vystavenie));
   const vydavky=(d.vydavky||[]).filter(x=>vRoku(x.datum));
@@ -15788,7 +15822,7 @@ function rocnaKontrola(rok){
           poKnihe.slice(0,8).map(x=>fmtDatum(x.datum)+" · "+(x.partner||"—")+" · "+eur(x.spolu)),
           {l:"Otvoriť knihu jázd", fn:"otvorApp('jazdy')"});
     }
-  }catch(_){}
+  }catch(e){ zlyhalo("tankovania vs. kniha jázd", e); }
 
   // ── 6. Celý rok bez jedinej súkromnej jazdy ──
   //
@@ -15820,7 +15854,7 @@ function rocnaKontrola(rok){
                       {l:"Nie, len na podnikanie", fn:"nastavAutoSukromne('nie')"}]);
       }
     }
-  }catch(_){}
+  }catch(e){ zlyhalo("súkromné jazdy", e); }
 
   // ── 7. Odpočet DPH z dokladu bez IČ DPH — cez celý rok ──
   {
@@ -15864,7 +15898,7 @@ function rocnaKontrola(rok){
       pridaj("chyba","majetokBezOdpisu", bezOdpisu.length+" položiek majetku nemá vstupnú cenu alebo odpisovú skupinu",
         "Bez nich sa odpis nedá vypočítať a do výdavkov sa nedostane.",
         bezOdpisu.slice(0,8).map(m=>m.nazov||"—"));
-  }catch(_){}
+  }catch(e){ zlyhalo("majetok bez odpisu", e); }
 
   // ── 9b. Mesiace bez faktúry z radu „S" ──
   // Ten istý dôkaz ako pri mesačnej kontrole: rad S už firma niekedy evidovala.
@@ -15894,7 +15928,7 @@ function rocnaKontrola(rok){
             {l:"Otvoriť Faktúry", fn:"otvorApp('faktury')"});
       }
     }
-  }catch(_){}
+  }catch(e){ zlyhalo("mesiace bez faktúry za predplatné", e); }
 
   // ── 10. Medzery v číslovaní faktúr ──
   const cisla=faktury.map(f=>({c:String(f.cislo||""), n:parseInt(String(f.cislo||"").replace(/\D/g,""),10)}))
@@ -17269,7 +17303,7 @@ async function obrazokNaText(file, onProgress, opts){
 
   // 4) prvé OCR na predspracovanom obrázku (sivá + kontrast + rozumné rozlíšenie)
   let pracovny=baseCanvas;
-  try{ if(onProgress) onProgress("Upravujem obrázok pre OCR…"); pracovny=predspracujCanvas(baseCanvas); }catch(_){ pracovny=baseCanvas; }
+  try{ if(onProgress) onProgress("Upravujem obrázok pre OCR…"); pracovny=predspracujCanvas(baseCanvas); }catch(e){ console.error("predspracovanie OCR zlyhalo, beriem originál:", e); pracovny=baseCanvas; }
   let najlepsi=await rozpoznaj(pracovny), najSkore=skore(najlepsi);
   // ak úprava nepomohla, skús pôvodný obrázok bez úprav
   if(najSkore<4 && pracovny!==baseCanvas){
@@ -19602,7 +19636,7 @@ function autoParujIstePrijmy(){
     if(t._autoPar || t.smer!=="prijem" || t.skryty) return;
     t._autoPar=1;                                   // videné — druhýkrát už nie
     if((t.uhrady||[]).length || t.odmietnutaZhoda) return;
-    let s=null; try{ s=vypisSparuj(t); }catch(_){ return; }
+    let s=null; try{ s=vypisSparuj(t); }catch(e){ console.error("vypisSparuj pri automatike:", e); return; }
     if(!s || s.typ!=="faktura" || s.istota!=="ista" || !s.zaznam) return;
     const c=String(s.zaznam.cislo||"").trim(); if(!c) return;
     // `pridajUhradu` má strop na zostatok dokladu, takže druhá platba s tým
