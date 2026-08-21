@@ -939,7 +939,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.21-GC";  // dávka 7 z kap. 45.7 — pohľadávky s akciami a PDF upomienka
+const APP_VERZIA = "2026.08.21-GD";  // dávka 8 z kap. 45.4 — štvrťročný platiteľ DPH
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -8331,7 +8331,7 @@ function dphNastavTab(t){ dphTab=t; appDPH(); window.scrollTo({top:0,behavior:"s
 // ═══ ZOZNAM ODOSLANÝCH PODANÍ ═══
 function dphPodaniaHtml(){
   const dph=firmaData.dph||{};
-  const obdobia=Object.keys(dph).filter(k=>/^\d{4}-\d{2}$/.test(k) && (dph[k].export||dph[k].subory)).sort().reverse();
+  const obdobia=Object.keys(dph).filter(k=>/^\d{4}-(\d{2}|Q[1-4])$/.test(k) && (dph[k].export||dph[k].subory)).sort().reverse();
   if(!obdobia.length) return `
     <div class="card">
       <h2 style="font-size:16px;margin-bottom:6px">Odoslané podania</h2>
@@ -8340,8 +8340,7 @@ function dphPodaniaHtml(){
 
   const riadok=(mk)=>{
     const z=dph[mk]||{}, e=z.export||{}, sub=z.subory||{};
-    const [rok,mes]=mk.split("-").map(Number);
-    const nazovObd=(MES_VELKE[mes-1]||mes)+" "+rok;
+    const nazovObd=dphParsujObdobie(mk).nazov;
     const zmena=dphZmeneneOdExportu(mk);
     const p=z.podanie||null;
     const tlacidlo=(typ,popis)=>{
@@ -15253,11 +15252,49 @@ function dphMetaChyba(){
 // XML: Kontrolný výkaz DPH (verne zo starej appky)
 // ── DPH VÝKAZ MODUL (Release 2): výber obdobia, náhľad oddielov, kontrola ──
 let dphVybObdobie="";
+
+// ═══ ŠTVRŤROČNÝ PLATITEĽ (kap. 45.4, R2) ═══════════════════════════════════
+// Primitívom OSTÁVA mesačný zber dphZberMesiac — štvrťrok je obálka nad tromi
+// mesiacmi, žiadna druhá kópia pravidiel oddielov a sadzieb (kap. 16).
+// Kód obdobia: "2026-05" (mesiac) alebo "2026-Q2" (štvrťrok). Tvar XML overený
+// proti oficiálnemu kv_dph_2025.xsd: Obdobie je Rok + CHOICE Mesiac/Stvrtrok.
+function dphJeStvrtrocny(){ return ((firmaData&&firmaData.settings)||{}).dphObdobie==="stvrtrocne"; }
+function dphParsujObdobie(kod){
+  const q=String(kod||"").match(/^(\d{4})-Q([1-4])$/);
+  if(q){ const st=+q[2];
+    return {rok:+q[1], mesiac:null, stvrtrok:st,
+      mesiace:[1,2,3].map(i=>q[1]+"-"+String((st-1)*3+i).padStart(2,"0")),
+      nazov:st+". štvrťrok "+q[1]};
+  }
+  const [r,m]=String(kod||"").split("-").map(Number);
+  return {rok:r, mesiac:m, stvrtrok:null, mesiace:[String(kod||"")],
+    nazov:(MES_SK[(m||1)-1]||"")+" "+r};
+}
+function dphZberObdobie(kod){
+  const P=dphParsujObdobie(kod);
+  if(!P.stvrtrok) return dphZberMesiac(P.mesiace[0]);
+  // id dokladu dostane prefix mesiaca — inak by sa výdavky z rôznych mesiacov
+  // s rovnakým poradovým číslom zliali a ručné preradenie oddielu by trafilo oba
+  const doklady=P.mesiace.flatMap(m=>dphZberMesiac(m).map(dk=>Object.assign({}, dk, {id:m+"·"+dk.id})));
+  const upr=(((firmaData||{}).dph||{})[kod]||{}).upravy||{};
+  doklady.forEach(dk=>{ if(upr[dk.id]) dk.oddiel=upr[dk.id]; });
+  return doklady;
+}
+function dphNastavObdobieTyp(v){
+  if(!strazZapis("dph")) return;
+  firmaData.settings=firmaData.settings||{};
+  firmaData.settings.dphObdobie=(v==="stvrtrocne")?"stvrtrocne":"mesacne";
+  dphVybObdobie="";           // zoznam období sa mení — nechaj vybrať najnovšie
+  poZmene(); appDPH();
+}
 function dphDostupneObdobia(){
   const set=new Set();
   (firmaData.faktury||[]).forEach(f=>{const d=faktObdobie(f); if(/^\d{4}-\d{2}$/.test(d))set.add(d);});
   (firmaData.vydavky||[]).forEach(x=>{const d=String(x.datum||"").slice(0,7); if(/^\d{4}-\d{2}$/.test(d))set.add(d);});
-  return [...set].sort().reverse();
+  const mes=[...set].sort().reverse();
+  if(!dphJeStvrtrocny()) return mes;
+  const qs=new Set(mes.map(mk=>{const [r,m]=mk.split("-").map(Number); return r+"-Q"+(Math.floor((m-1)/3)+1);}));
+  return [...qs].sort().reverse();
 }
 function dphKontroly(doklady){
   const v=[];
@@ -15384,16 +15421,17 @@ function dphVykazHtml(rok){
   if(!obdobia.length) return `<div class="card" style="margin-bottom:14px"><h2 style="font-size:16px;margin-bottom:6px">Kontrolný výkaz a priznanie DPH</h2><div class="csub">Zatiaľ žiadne doklady na vykázanie.</div></div>`;
   if(!dphVybObdobie || !obdobia.includes(dphVybObdobie)) dphVybObdobie=obdobia[0];
   const mk=dphVybObdobie;
-  const doklady=dphZberMesiac(mk);
+  const P=dphParsujObdobie(mk);
+  const doklady=dphZberObdobie(mk);
   const S=dphSumare(doklady);
   const vystup=doklady.filter(d=>["A1","A2","C1","D1","D2"].includes(d.oddiel));
   const vstup=doklady.filter(d=>["B1","B2","B31","B32","C2"].includes(d.oddiel));
   const kontroly=dphKontroly(doklady);
   // Nález o chýbajúcej vlastnej faktúre nevie vzniknúť z prechádzania dokladov —
-  // je to nález o doklade, ktorý TAM NIE JE. Preto sa dopĺňa tu, nad mesiacom.
-  { const s=saasMedzera(mk); if(s) kontroly.push({typ:"warn", text:s}); }
-  const [r,mm]=mk.split("-");
-  const nazovObd=MES_SK[+mm-1]+" "+r;
+  // je to nález o doklade, ktorý TAM NIE JE. Kontrola je mesačná — pri
+  // štvrťroku beží pre každý z troch mesiacov.
+  P.mesiace.forEach(m=>{ const s=saasMedzera(m); if(s) kontroly.push({typ:"warn", text:s}); });
+  const nazovObd=P.nazov;
   // sumár oddielov
   const oddielSum={};
   doklady.forEach(d=>{ if(!oddielSum[d.oddiel])oddielSum[d.oddiel]={z:0,d:0,n:0}; const dan=(d.oddiel==="B1"&&d.samozdanenie)?(d.danSamozdanenie||0):d.dan; oddielSum[d.oddiel].z+=d.zaklad; oddielSum[d.oddiel].d+=dan; oddielSum[d.oddiel].n++; });
@@ -15416,7 +15454,12 @@ function dphVykazHtml(rok){
     <h2 style="font-size:16px;margin-bottom:4px">Kontrolný výkaz a priznanie DPH</h2>
     <div class="csub" style="margin-bottom:12px">Vyberte obdobie, skontrolujte zaradenie dokladov do oddielov, potom vygenerujte XML pre portál FS. <b>Za správnosť zodpovedá platiteľ.</b></div>
     <div class="atool" style="--_c:#4557b8;flex-wrap:wrap">
-      ${obdobia.map(o=>{const[oy,om]=o.split("-");return `<span class="achip ${o===mk?'on':''}" onclick="dphVybObdobie='${o}';appDPH()">${MES_SK[+om-1].slice(0,3)} ${oy}</span>`}).join('')}
+      ${obdobia.map(o=>{const[oy,om]=o.split("-");const lbl=/^Q/.test(om)?om+" "+oy:MES_SK[+om-1].slice(0,3)+" "+oy;return `<span class="achip ${o===mk?'on':''}" onclick="dphVybObdobie='${o}';appDPH()">${lbl}</span>`}).join('')}
+      <span style="margin-left:auto"></span>
+      <select onchange="dphNastavObdobieTyp(this.value)"${zam("dph")} title="Zdaňovacie obdobie podľa registrácie. Nový platiteľ je prvých 12 mesiacov mesačný; štvrťročné si môže zvoliť potom (obrat do 100 000 €)." style="background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-size:12px">
+        <option value="mesacne" ${dphJeStvrtrocny()?'':'selected'}>mesačný platiteľ</option>
+        <option value="stvrtrocne" ${dphJeStvrtrocny()?'selected':''}>štvrťročný platiteľ</option>
+      </select>
     </div>
     <div class="amini" style="margin-top:12px">
       <div class="aminbox"><div class="al">DPH na výstupe</div><div class="av">${eur(S.vystupDanCelkom)}</div></div>
@@ -15492,8 +15535,16 @@ function dphNastavOddiel(id, oddiel){
 function kontrolaPredPodanim(mk, typ){
   const d=firmaData;
   const chyby=[], podozrenia=[], odsuhlasenie=[];
-  const doklady=dphZberMesiac(mk);
-  const [rok,mes]=mk.split("-").map(Number);
+  const P=dphParsujObdobie(mk);
+  const doklady=dphZberObdobie(mk);
+  const [rok,mes]=[P.rok, P.mesiac||((P.stvrtrok-1)*3+1)];
+  // štvrťročné podanie stojí na troch mesiacoch — neuzavretý mesiac znamená,
+  // že sa doň ešte dá omylom zapísať doklad po vygenerovaní XML
+  if(P.stvrtrok){
+    const otvorene=P.mesiace.filter(m=>!mesiacUzavrety(m+"-01"));
+    if(otvorene.length) podozrenia.push({text:`Mesiace ${otvorene.map(m=>m.slice(5)+"/"+m.slice(0,4)).join(", ")} štvrťroka nie sú uzavreté.`,
+      detail:"Uzavrite ich v Uzávierke — inak sa do obdobia dá po podaní ešte zapísať doklad."});
+  }
 
   // ── CHYBY (FS odmietne / určite zle) ──
   // doklady s DPH bez platného IČ DPH
@@ -15509,7 +15560,7 @@ function kontrolaPredPodanim(mk, typ){
       else if(!platneICDPH(dk.icDph)) chyby.push({text:`Doklad „${dk.cislo||dk.partner||"—"}" má neplatné IČ DPH: ${dk.icDph}`, detail:"Neprešlo kontrolou deliteľnosti 11 — FS odmietne.", zdrojId:dk.zdrojId||""});
     }
     // dátum mimo obdobia
-    if(dk.datum && dk.datum.slice(0,7)!==mk) podozrenia.push({text:`Doklad „${dk.cislo||dk.partner||"—"}" má dátum ${fmtDatum(dk.datum)}, ale je v období ${mk}.`, detail:"Skontroluj, či patrí do tohto mesiaca."});
+    if(dk.datum && !P.mesiace.includes(dk.datum.slice(0,7))) podozrenia.push({text:`Doklad „${dk.cislo||dk.partner||"—"}" má dátum ${fmtDatum(dk.datum)}, ale je v období ${mk}.`, detail:"Skontroluj, či patrí do tohto obdobia."});
     // základ 0 pri nenulovej DPH
     if((+dk.dan)>0 && (+dk.zaklad)<=0) chyby.push({text:`Doklad „${dk.cislo||dk.partner||"—"}" má DPH ${eur(dk.dan)}, ale nulový/záporný základ.`, detail:"Základ dane musí byť kladný."});
   });
@@ -16033,8 +16084,9 @@ function rocnaKontrola(rok){
 
 // ═══ NÁHĽAD PRIZNANIA DPH — replika formulára FS s číslami riadkov ═══
 function dpTeloHtml(mk){
-  const [rok,mes]=mk.split("-").map(Number);
-  const doklady=dphZberMesiac(mk);
+  const P=dphParsujObdobie(mk);
+  const rok=P.rok, mes=P.mesiac;
+  const doklady=dphZberObdobie(mk);
   const S=dphSumare(doklady);
   const m=dphMeta();
   const eur2=v=>(+v||0).toFixed(2).replace(".",",");
@@ -16053,7 +16105,7 @@ function dpTeloHtml(mk){
     <div class="kvf-hd">
       <div class="kvf-logo">DPH</div>
       <div class="kvf-tt"><b>DAŇOVÉ PRIZNANIE</b><span>k dani z pridanej hodnoty</span></div>
-      <div class="kvf-obd"><div>Obdobie</div><b>${String(mes).padStart(2,"0")} / ${rok}</b></div>
+      <div class="kvf-obd"><div>Obdobie</div><b>${mes?String(mes).padStart(2,"0")+" / "+rok:"Q"+P.stvrtrok+" / "+rok}</b></div>
     </div>
     <div class="kvf-ident">
       <div class="kvf-row"><span class="kvf-lbl">IČ DPH platiteľa</span><span class="kvf-val mono">${esc(m.icdph||"—")}</span></div>
@@ -16195,10 +16247,11 @@ async function dphDoplnIcDphChybajuce(mk){
   const stav=document.getElementById("dphDoplnStav");
   const setS=(t,c)=>{ if(stav){ stav.textContent=t; stav.style.color=c||"var(--ink-soft)"; } };
   // nájdi výdavky v období bez IČ DPH (ktoré ho potrebujú — majú DPH, nie sú zahraničné)
+  const mesiaceObd=dphParsujObdobie(mk).mesiace;
   const chybne=(firmaData.vydavky||[]).filter(v=>{
     const mkV=String(v.datum||"").slice(0,7);
     const dph=(+v.dph||0) + ((v.rozpis||[]).reduce((a,r)=>a+(+r.dph||0),0));
-    return mkV===mk && dph>0 && !v.zahranicny && !String(v.dodavatelIcDph||v.icdph||"").trim();
+    return mesiaceObd.includes(mkV) && dph>0 && !v.zahranicny && !String(v.dodavatelIcDph||v.icdph||"").trim();
   });
   if(!chybne.length){ setS("Niet čo doplniť — všetky doklady majú IČ DPH.","var(--pos)"); return; }
   // zoskup podľa dodávateľa (kľúč = IČO alebo normalizovaný názov)
@@ -16250,7 +16303,7 @@ let _kvMk     = "";
 
 function kvPrepniRezim(r){ _kvRezim=r; dphNahladFormular(_kvMk); }
 function kvStrana(od, i){
-  const dk=dphZberMesiac(_kvMk).filter(d=>d.oddiel===od);
+  const dk=dphZberObdobie(_kvMk).filter(d=>d.oddiel===od);
   if(!dk.length) return;
   _kvStrana[od]=Math.max(0, Math.min(i, dk.length-1));
   dphNahladFormular(_kvMk);
@@ -16337,8 +16390,9 @@ function dpDphNahladFormular(mk){ dphNahladFormular(mk, "dp"); }
 
 function kvTeloHtml(mk){
   _kvMk=mk;
-  const [rok,mes]=mk.split("-").map(Number);
-  const doklady=dphZberMesiac(mk);
+  const P=dphParsujObdobie(mk);
+  const rok=P.rok, mes=P.mesiac;
+  const doklady=dphZberObdobie(mk);
   const S=dphSumare(doklady);
   const m=dphMeta();
   const eur2=v=>(+v||0).toFixed(2).replace(".",",");
@@ -16363,7 +16417,7 @@ function kvTeloHtml(mk){
       </div>
       <div class="kvf-obd">
         <div>Obdobie</div>
-        <b>${String(mes).padStart(2,"0")} / ${rok}</b>
+        <b>${mes?String(mes).padStart(2,"0")+" / "+rok:"Q"+P.stvrtrok+" / "+rok}</b>
       </div>
     </div>
 
@@ -16434,7 +16488,7 @@ function dphOddielBlok(kod, nazov, pocet, sumar, tabulka){
 
 // odtlačok obdobia: počet dokladov + súčty (stačí na zistenie zmeny)
 function dphOdtlacok(mk){
-  const dk=dphZberMesiac(mk);
+  const dk=dphZberObdobie(mk);
   const z=r2(dk.reduce((a,d)=>a+(+d.zaklad||0),0));
   const d=r2(dk.reduce((a,x)=>a+(+x.dan||0),0));
   return dk.length+"|"+z.toFixed(2)+"|"+d.toFixed(2);
@@ -16772,7 +16826,7 @@ function dphStiahni(typ, mk){
   dphZaznamExport(typ, mk);
   dphUlozSubor(mk, typ, xml);        // kópia do archívu (beží na pozadí)
   if(typ==="kv" && dphDruhPodania(mk)!=="D"){
-    const S=dphSumare(dphZberMesiac(mk));
+    const S=dphSumare(dphZberObdobie(mk));
     dphUlozPodanie(mk, xml, dphDruhPodania(mk), S.danovaPovinnost);
   }
 }
@@ -16881,9 +16935,11 @@ function dphDruhNazov(d){ return d==="O" ? "opravný" : (d==="D" ? "dodatočný"
 
 // termín podania = 25. deň mesiaca nasledujúceho po období
 function dphTermin(mk){
-  const [r,m]=mk.split("-").map(Number);
-  const d=new Date(r, m, 25);            // m je 1-based → new Date(r,m,25) = nasl. mesiac
-  return d;
+  const P=dphParsujObdobie(mk);
+  // 25. deň po skončení obdobia: mesiac → nasledujúci mesiac; štvrťrok →
+  // mesiac po jeho poslednom mesiaci (Q1 → 25. 4. atď.)
+  const m=P.mesiac || P.stvrtrok*3;
+  return new Date(P.rok, m, 25);         // m je 1-based → new Date(r,m,25) = nasl. mesiac
 }
 function dphDniDoTerminu(mk){
   const t=dphTermin(mk); if(!t) return null;
@@ -16940,8 +16996,9 @@ function dphVysvetlivky(){
 }
 
 function dphGenerujKV(mk){
-  const [rok,mes]=mk.split("-").map(Number);
-  const doklady=dphZberMesiac(mk);
+  const P=dphParsujObdobie(mk);
+  const rok=P.rok, mes=P.mesiac;
+  const doklady=dphZberObdobie(mk);
   const m=dphMeta();
   const esc=x=>String(x==null?"":x).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
   const n=v=>(+v||0).toFixed(2);
@@ -17016,7 +17073,7 @@ function dphGenerujKV(mk){
   return `<?xml version="1.0" encoding="utf-8"?>\r\n`+
 `<KVDPH_2025 xmlns="https://ekr.financnasprava.sk/Formulare/XSD/kv_dph_2025.xsd">\r\n`+
 `<Identifikacia>\r\n<IcDphPlatitela>${esc(m.icdph)}</IcDphPlatitela>\r\n<Druh>${dphDruhPodania(mk)}</Druh>\r\n`+
-`<Obdobie>\r\n<Rok>${rok}</Rok>\r\n<Mesiac>${mes}</Mesiac>\r\n</Obdobie>\r\n`+
+`<Obdobie>\r\n<Rok>${rok}</Rok>\r\n${mes?`<Mesiac>${mes}</Mesiac>`:`<Stvrtrok>${P.stvrtrok}</Stvrtrok>`}\r\n</Obdobie>\r\n`+
 `<Nazov>${esc(m.nazov)}</Nazov>\r\n<Stat>Slovenská republika</Stat>\r\n<Obec>${esc(m.obec)}</Obec>\r\n`+
 `<PSC>${esc(m.psc)}</PSC>\r\n<Ulica>${esc(m.ulica)}</Ulica>\r\n<Cislo>${esc(m.cislo)}</Cislo>\r\n<Tel></Tel>\r\n<Email></Email>\r\n</Identifikacia>\r\n`+
 `<Transakcie>\r\n${riadky}</Transakcie>\r\n</KVDPH_2025>\r\n`;
@@ -17024,8 +17081,9 @@ function dphGenerujKV(mk){
 
 // XML: Daňové priznanie DPH (verne)
 function dphGenerujDP(mk){
-  const [rok,mes]=mk.split("-").map(Number);
-  const doklady=dphZberMesiac(mk);
+  const P=dphParsujObdobie(mk);
+  const rok=P.rok, mes=P.mesiac;
+  const doklady=dphZberObdobie(mk);
   const S=dphSumare(doklady);
   const m=dphMeta();
   const esc=x=>String(x==null?"":x).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
@@ -17121,7 +17179,7 @@ function dphGenerujDP(mk){
 `<datumZisteniaDdp>${D==="D"?dnes:""}</datumZisteniaDdp>\r\n</typDP>\r\n`+
 `<osoba>\r\n<platitel>1</platitel>\r\n<registrovana>0</registrovana>\r\n<inaPovinna>0</inaPovinna>\r\n`+
 `<zdanitelna>0</zdanitelna>\r\n<zastupca>0</zastupca>\r\n<zastupca69aa>0</zastupca69aa>\r\n</osoba>\r\n`+
-`<zdanObd>\r\n<mesiac>${mes}</mesiac>\r\n<stvrtrok></stvrtrok>\r\n<rok>${rok}</rok>\r\n</zdanObd>\r\n`+
+`<zdanObd>\r\n<mesiac>${mes||""}</mesiac>\r\n<stvrtrok>${P.stvrtrok||""}</stvrtrok>\r\n<rok>${rok}</rok>\r\n</zdanObd>\r\n`+
 `<meno>\r\n<riadok>${esc(m.nazov)}</riadok>\r\n</meno>\r\n`+
 `<adresa>\r\n<ulica>${esc(m.ulica)}</ulica>\r\n<cislo>${esc(m.cislo)}</cislo>\r\n<psc>${esc(m.psc)}</psc>\r\n`+
 `<obec>${esc(m.obec)}</obec>\r\n<telefon>${tel}</telefon>\r\n<email>${mail}</email>\r\n</adresa>\r\n`+
