@@ -428,7 +428,10 @@ button{font-family:inherit;cursor:pointer}
 /* široká obrazovka — panely vedľa seba */
 @media(min-width:700px){
   .sp-wrap{flex-direction:row;align-items:stretch}
-  .sp-pane{flex:1;max-height:70vh}
+  /* Panely vyplnia výšku okna — prázdna plocha pod krátkym zoznamom bola
+     mŕtva; teraz je to priestor zoznamu (45.7 follow-up). */
+  .sp-pane{flex:1;height:calc(100vh - 150px);max-height:none}
+  .wrap-siroky{max-width:1520px}
 }
 
 /* appka — hlavička a obsah */
@@ -477,8 +480,12 @@ button{font-family:inherit;cursor:pointer}
 /* Riadok dokladu (faktúry, výdavky). Na mobile sa TIE ISTÉ bunky preskladajú
    do dvoch riadkov cez grid-template-areas — údaje sa nevykresľujú druhýkrát,
    takže sa mobilná a stolová podoba nemôžu rozísť. */
-.rdok{grid-template-columns:auto 2fr 1fr 1fr 1fr auto auto}
-.rdok.rf{grid-template-columns:auto 1fr 2fr 1fr 1fr auto auto}
+/* Posledné dva stĺpce (stav, akcie) majú PEVNÚ šírku: každý riadok je vlastný
+   grid a auto-stĺpce sa šírkovo rozchádzali podľa obsahu — riadok s tlačidlom ✓
+   mal čísla DPH inde než riadok so zelenou bodkou. Čísla musia byť v zvislici. */
+.rdok{grid-template-columns:auto 2fr 1fr 1fr 1fr 40px 40px}
+.rdok.rf{grid-template-columns:auto 1fr 2fr 1fr 1fr 150px 162px}
+.rdok>.c-act{display:flex;gap:5px;justify-content:flex-end;align-items:center}
 .rdok.rf>.c-main{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 @media(max-width:560px){
   .rdok{gap:2px 8px;padding:11px 12px;
@@ -939,7 +946,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.21-GD";  // dávka 8 z kap. 45.4 — štvrťročný platiteľ DPH
+const APP_VERZIA = "2026.08.21-GF";  // KV DPH: dátum dodania namiesto vystavenia (chyba v XML pre FS)
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -1352,7 +1359,7 @@ function resetStavuModulov(){
   Object.keys(_hladaj).forEach(k=>delete _hladaj[k]);         // hľadanie je per firma
   Object.keys(_zobrazLimit).forEach(k=>delete _zobrazLimit[k]);
   dphTab="vykaz"; dphVybObdobie="";
-  splitVybranyPohyb=null; splitMesiac=""; splitStavFilter="nespar"; splitVsetciKand=false;
+  splitVybranyPohyb=null; splitMesiac=""; splitStavFilter="nespar"; splitVsetciKand=false; splitDokladyMesiac="";
   vwFilterKm=0; _vwParsed=[]; _vwMeta=null; _vwTankovania=[];
   if(typeof vwSprievodca==="function") vwSprievodca._init=false;
   // zavri všetko rozpracované, nech na obrazovke nezostane cudzí obsah
@@ -4761,6 +4768,11 @@ function renderSuperApka(skupinaId, moduly){
   const siroke=window.innerWidth>=760;
   const zalozka=(m)=>{ const a=APPS[m]; const on=m===akt;
     return `<button class="saTab${on?' on':''}" style="--_c:${a.c}" onclick="prepniZalozku('${m}')"><span class="saTabIc">${a.ic}</span><span class="saTabTx">${a.n}</span></button>`; };
+  const taby=moduly.map(zalozka);
+  // Párovanie nie je modul s vlastnou obrazovkou v appScreen, ale patrí k Banke —
+  // v menu je hneď pod ňou (Romanova požiadavka; tlačidlo v hlavičke Banky nahradilo)
+  if(skupinaId==="banka") taby.splice(moduly.indexOf("banka")+1, 0,
+    `<button class="saTab" style="--_c:#0f7d8c" onclick="otvorSplit()"><span class="saTabIc">⊟</span><span class="saTabTx">Párovanie</span></button>`);
   const hlavicka=`<div class="saHead" style="--_c:${g.c}">
       <button class="saBack" onclick="domov()" aria-label="Späť domov">‹</button>
       <div class="saHeadIc">${g.ic}</div>
@@ -4769,12 +4781,12 @@ function renderSuperApka(skupinaId, moduly){
   if(siroke){
     appScreen.innerHTML=`${hlavicka}
       <div class="saSplit">
-        <div class="saSide">${moduly.map(zalozka).join("")}</div>
+        <div class="saSide">${taby.join("")}</div>
         <div class="saMain">${obsah}</div>
       </div>`;
   } else {
     appScreen.innerHTML=`${hlavicka}
-      <div class="saTabs">${moduly.map(zalozka).join("")}</div>
+      <div class="saTabs">${taby.join("")}</div>
       <div class="saMain">${obsah}</div>`;
   }
 }
@@ -5011,8 +5023,16 @@ function vykazMesiac(w){
 // DÁTUM DODANIA — nie vystavenia ani úhrady. Staršie faktúry pole `dodanie`
 // nemajú, tam sa použije `datum`. Toto je jediný zdroj pravdy pre zaradenie
 // faktúry do obdobia; kto potrebuje mesiac faktúry, volá túto funkciu.
+// Dátum, ktorý pri faktúre rozhoduje o DPH — dodanie, nie vystavenie.
+// Musí byť JEDNO pravidlo: obdobie výkazu aj stĺpec „Dátum dodania" v KV
+// z neho vychádzajú. Kým to boli dve miesta, faktúra vystavená 19. 8.
+// s dodaním 31. 7. správne spadla do júla, ale do KV šla s augustovým
+// dátumom — a appka na seba sama hlásila „dátum mimo obdobia".
+function faktDatumDodania(f){
+  return String((f&&(f.dodanie||f.datum||f.vystavenie))||"").slice(0,10);
+}
 function faktObdobie(f){
-  return String(f.dodanie||f.datum||f.vystavenie||"").slice(0,7);
+  return faktDatumDodania(f).slice(0,7);
 }
 function faktMesiac(f){ return faktObdobie(f); }  // alias pre kontrolu výkaz↔faktúra
 
@@ -6078,13 +6098,13 @@ function feModal(idx, nova){
     const _chceZapl=chk("m_zapl"), _kluc=dokladKluc(f);
     if(_chceZapl && !dokladJeUhradeny("faktura", _kluc)) oznacDokladUhradeny("faktura", _kluc);
     else if(!_chceZapl && dokladJeUhradeny("faktura", _kluc)) zrusDokladUhradu("faktura", _kluc);
-    poZmene(); appFaktury();
+    poZmene(); obnovPoEditacii("faktury");
   },
   nova?null:()=>{
     const _f=firmaData.faktury[idx]||{};
     if(!strazUzavierku(faktObdobie(_f), "Zmazanie tejto faktúry")) return;
     if(!overDopadNaPodanie(faktObdobie(_f), "Zmazanie tejto faktúry")) return;
-    firmaData.faktury.splice(idx,1); poZmene(); appFaktury(); },
+    firmaData.faktury.splice(idx,1); poZmene(); obnovPoEditacii("faktury"); },
   "siroky");
 }
 function feZmenPlnenie(k){
@@ -6976,14 +6996,14 @@ function editVydavok(idx){
       if(tIdx>=0){ d.tankovania[tIdx]=Object.assign(d.tankovania[tIdx],tankObj); }
       else { tankObj.id="t"+Date.now()+Math.random().toString(36).slice(2,7); d.tankovania.push(tankObj); }
     } else if(tIdx>=0){ d.tankovania.splice(tIdx,1); }  // litre zmazané → zmaž tankovanie
-    poZmene(); appVydavky();},
+    poZmene(); obnovPoEditacii("vydavky");},
   nova?null:()=>{
     const vyd=d.vydavky[idx];
     // zmaž aj prepojené tankovanie (PHM doklad vytvára výdavok + tankovanie)
     if(vyd && vyd.id && d.tankovania){ d.tankovania=d.tankovania.filter(t=>t.vydavokId!==vyd.id); }
     if(!strazUzavierku((d.vydavky[idx]||{}).datum, "Zmazanie tohto dokladu")) return;
     if(!overDopadNaPodanie((d.vydavky[idx]||{}).datum, "Zmazanie tohto dokladu")) return;
-    d.vydavky.splice(idx,1); poZmene(); appVydavky();
+    d.vydavky.splice(idx,1); poZmene(); obnovPoEditacii("vydavky");
   });
   vydavokFormInit();
   // inicializuj rozpis editor
@@ -7074,7 +7094,7 @@ function appBanka(){
   else if(bFilter==="vydaj") list=vypis.filter(t=>t.smer==="vydaj");
   else if(bFilter==="ignor") list=cely.filter(t=>(!bMesiac||String(t.datum||"").slice(0,7)===bMesiac) && !t.skryty && jePohybIgnorovany(t));
   else if(bFilter==="skryte") list=cely.filter(t=>(!bMesiac||String(t.datum||"").slice(0,7)===bMesiac) && t.skryty);
-  document.getElementById("appScreen").innerHTML=appHlavicka("banka",`<button class="aabtn" style="--_c:${c}" onclick="otvorSplit()">⊟ Párovanie (split)</button><button class="aabtn pri" style="--_c:${c}" onclick="importVypis()"${zam("banka")}>📥 Import výpisu</button>`)+pasIbaCitanie("banka")+`
+  document.getElementById("appScreen").innerHTML=appHlavicka("banka",`<button class="aabtn pri" style="--_c:${c}" onclick="importVypis()"${zam("banka")}>📥 Import výpisu</button>`)+pasIbaCitanie("banka")+`
     <div class="amini">
       <div class="aminbox"><div class="al">Príjmy (výpis)</div><div class="av pos">${eur(prijmy)}</div></div>
       <div class="aminbox"><div class="al">Výdaje</div><div class="av">${eur(vydaje)}</div></div>
@@ -8479,9 +8499,11 @@ function faktDoObratu(f){
   return !!(D && D.obrat);
 }
 function obratRoka(rok){
+  // Do obratu vstupuje hodnota DODANÝCH plnení a platiteľom sa človek stáva
+  // dňom dodania, ktorým sa prah prekročil — nie dňom vystavenia faktúry.
   const fakt=(firmaData.faktury||[])
-    .filter(f=>String(f.datum||f.vystavenie||"").slice(0,4)===String(rok) && faktDoObratu(f))
-    .map(f=>({cislo:f.cislo||"", datum:(f.datum||f.vystavenie||"").slice(0,10), bez:r2(+f.bez||0)}))
+    .filter(f=>faktDatumDodania(f).slice(0,4)===String(rok) && faktDoObratu(f))
+    .map(f=>({cislo:f.cislo||"", datum:faktDatumDodania(f), bez:r2(+f.bez||0)}))
     .sort((a,b)=>a.datum<b.datum?-1:a.datum>b.datum?1:0);
   // kumulatívne, aby sa dal určiť deň prekročenia vyššieho prahu
   const prahRocny=sadzbaRoka("obratRocny", rok)||OBRAT_ROCNY;
@@ -8490,7 +8512,7 @@ function obratRoka(rok){
   fakt.forEach(f=>{ beh=r2(beh+f.bez); if(denOkamzity===null && beh>prahOkamzity) denOkamzity=f.datum; });
   const obrat=beh;
   const mimo=r2((firmaData.faktury||[])
-    .filter(f=>String(f.datum||f.vystavenie||"").slice(0,4)===String(rok) && !faktDoObratu(f))
+    .filter(f=>faktDatumDodania(f).slice(0,4)===String(rok) && !faktDoObratu(f))
     .reduce((a,f)=>a+(+f.bez||0),0));
   return {
     rok, obrat, pocet:fakt.length, mimo,
@@ -11048,7 +11070,7 @@ function appPohladavky(){
     <div class="csub" style="margin:0 2px 12px">${pzTab==='pohl'?'Vystavené faktúry — komu a koľko dlhujú vám. Klik otvorí faktúru; pri faktúre po splatnosti viete vygenerovať PDF upomienku.':'Došlé faktúry — komu dlhujete vy. Klik otvorí výdavok.'}</div>
     <div class="alist">
       ${pzTab==='pohl'
-        ? (pohlZobraz.length?pohlZobraz.map(p=>`<div class="arow" style="grid-template-columns:1.6fr 1fr auto auto;cursor:pointer;${p.poSplat?'background:var(--sfc-neg)':p.uhradena?'opacity:.6':''}" onclick="editFaktura(${p.idx})" title="Otvoriť faktúru">
+        ? (pohlZobraz.length?pohlZobraz.map(p=>`<div class="arow" style="grid-template-columns:1.6fr 1fr 110px 150px;cursor:pointer;${p.poSplat?'background:var(--sfc-neg)':p.uhradena?'opacity:.6':''}" onclick="editFaktura(${p.idx})" title="Otvoriť faktúru">
             <div><div class="acol-strong">${esc(p.partner||"—")}</div><div class="acol-muted">${esc(p.cislo||"")} · splatnosť ${fmtDatum(p.splatnost)}</div></div>
             <div class="acol-muted" style="text-align:right">${p.uhradena?'<span class="apill ok">uhradená</span>':p.poSplat?'<span class="apill neg">po splatnosti '+p.dni+' dní</span>':'<span class="apill warn">otvorená</span>'}</div>
             <div class="acol-sum">${eur(p.suma)}</div>
@@ -11070,6 +11092,7 @@ function appCashflow(){
   if(!cfRok && roky.length) cfRok=roky[0];
   let vypis=vsetky.filter(t=>String(t.datum||"").slice(0,4)===cfRok);
   if(cfMesiac) vypis=vypis.filter(t=>String(t.datum||"").slice(0,7)===cfMesiac);
+  if((_hladaj.cashflow||"").trim()) vypis=vypis.filter(t=>hladajZhoda(_hladaj.cashflow, t.proti, t.popis, t.vs, t.suma));
   const mesiace=[...new Set(vsetky.filter(t=>String(t.datum||"").slice(0,4)===cfRok).map(t=>String(t.datum||"").slice(0,7)).filter(m=>/^\d{4}-\d{2}$/.test(m)))].sort().reverse();
   const prijmy=vypis.filter(t=>t.smer==="prijem");
   const vydaje=vypis.filter(t=>t.smer==="vydaj");
@@ -11125,6 +11148,7 @@ function appCashflow(){
       </select>
       <div style="flex-basis:100%;height:0"></div>
       ${['vsetko|Všetko','prijmy|Príjmy','vydaje|Výdaje'].map(x=>{const[k,l]=x.split('|');return `<span class="achip ${cfSmer===k?'on':''}" onclick="cfSmer='${k}';cfOtvoreny='-1';appCashflow()">${l}</span>`}).join('')}
+      ${hladatkoHtml('cashflow','appCashflow','🔍 Protistrana, VS, suma…')}
     </div>
     <div class="csub" style="margin:0 2px 12px">Ťuknutím na riadok zobrazíte detail párovania. Príjmy sa párujú cez VS a sumu, výdaje cez sumu a klasifikáciu.</div>
     ${cfSmer==="vsetko"
@@ -15088,8 +15112,10 @@ function dphZberMesiac(mk){
   // skončili v oddiele A.1. Funkcia dphOddielFaktura() to vedela rozlíšiť
   // už predtým, len sa nikde nevolala.
   (d.faktury||[]).filter(f=>faktObdobie(f)===mk).forEach(f=>{
-    doklady.push({id:"fa_"+f.cislo, typ:"vystup", smer:"vystup", oddiel:dphOddielFaktura(f),
-      cislo:f.cislo, datum:(f.datum||f.vystavenie||"").slice(0,10),
+    doklady.push({id:"fa_"+f.cislo, zdrojId:f.id, typ:"vystup", smer:"vystup", oddiel:dphOddielFaktura(f),
+      // KV stĺpec 3 je „Dátum dodania tovaru alebo služby alebo dátum prijatia
+      // platby" — nie dátum vystavenia (kap. 43.10, A3 z analýzy KROS)
+      cislo:f.cislo, datum:faktDatumDodania(f),
       icDph:f.icdph||"", ico:f.ico||"", partner:f.odberatel||"",
       zaklad:r2(+f.bez||0), dan:r2(+f.dph||0), sadzba:dphSadzbaZ(f),
       plnenie:druhPlnenia(f), opravujeDoklad:f.opravujeDoklad||"", tovar:a2Tovar(f)});
@@ -15426,6 +15452,9 @@ function dphVykazHtml(rok){
   const S=dphSumare(doklady);
   const vystup=doklady.filter(d=>["A1","A2","C1","D1","D2"].includes(d.oddiel));
   const vstup=doklady.filter(d=>["B1","B2","B31","B32","C2"].includes(d.oddiel));
+  const qDph=(_hladaj.dph||"").trim();
+  const vystupZobraz=qDph?vystup.filter(x=>hladajZhoda(qDph, x.cislo, x.partner, x.icDph, x.zaklad, x.dan)):vystup;
+  const vstupZobraz=qDph?vstup.filter(x=>hladajZhoda(qDph, x.cislo, x.partner, x.icDph, x.zaklad, x.dan)):vstup;
   const kontroly=dphKontroly(doklady);
   // Nález o chýbajúcej vlastnej faktúre nevie vzniknúť z prechádzania dokladov —
   // je to nález o doklade, ktorý TAM NIE JE. Kontrola je mesačná — pri
@@ -15436,18 +15465,24 @@ function dphVykazHtml(rok){
   const oddielSum={};
   doklady.forEach(d=>{ if(!oddielSum[d.oddiel])oddielSum[d.oddiel]={z:0,d:0,n:0}; const dan=(d.oddiel==="B1"&&d.samozdanenie)?(d.danSamozdanenie||0):d.dan; oddielSum[d.oddiel].z+=d.zaklad; oddielSum[d.oddiel].d+=dan; oddielSum[d.oddiel].n++; });
 
-  const riadokDokladu=(d)=>`<div class="arow" style="grid-template-columns:auto 1.3fr 1fr auto;align-items:center;gap:8px;font-size:12.5px">
-    <select onchange="dphNastavOddiel('${esc(d.id)}',this.value)"${zam("dph")} style="border:1px solid var(--line);border-radius:7px;padding:3px 5px;font:inherit;font-size:11px;font-weight:700">
+  // Pevné šírky číselných stĺpcov — auto stĺpce sa rozchádzali podľa obsahu
+  // a čísla neboli v zvislici (rovnaká choroba ako v zoznamoch dokladov).
+  // Klik na riadok otvorí editor dokladu; select a „doplniť IČ DPH" klik nešíria.
+  const dokGrid="grid-template-columns:64px minmax(0,1fr) 96px 56px 96px";
+  const dokHead=`<div class="arow head" style="${dokGrid};gap:8px"><div></div><div>Partner</div><div style="text-align:right">Základ</div><div style="text-align:right">Sadzba</div><div style="text-align:right">DPH</div></div>`;
+  const riadokDokladu=(d)=>`<div class="arow" style="${dokGrid};align-items:center;gap:8px;font-size:12.5px;cursor:pointer" onclick="dphOtvorDoklad('${d.smer}','${esc(d.zdrojId||"")}','${esc(String(d.cislo||""))}')" title="Otvoriť doklad">
+    <select onclick="event.stopPropagation()" onchange="dphNastavOddiel('${esc(d.id)}',this.value)"${zam("dph")} style="width:60px;border:1px solid var(--line);border-radius:7px;padding:3px 5px;font:inherit;font-size:11px;font-weight:700">
       ${Object.keys(DPH_ODDIELY).map(o=>`<option value="${o}" ${d.oddiel===o?'selected':''}>${o}</option>`).join('')}
     </select>
     <div style="min-width:0"><div class="acol-strong" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(d.partner||d.cislo||"—")}${d.samozdanenie?' <span title="samozdanenie">⇄</span>':''}${d.zahranicny?' 🌐':''}${d.rozpisRiadok?' <span style="color:var(--ink-soft)" title="riadok z rozpisu na viac sadzieb">↳</span>':''}</div><div class="acol-muted">${fmtDatum(d.datum)}${
       d.icDph ? ' · '+esc(d.icDph)
       : (d.oddiel==='B2'
-          ? ` · <button onclick="dphEditIcDph('${esc(d.zdrojId||"")}',this,'${esc(d.cislo||"")}','${esc(d.datum||"")}')"${zam("dph")} style="border:none;background:none;padding:0;font:inherit;color:var(--neg);text-decoration:underline;cursor:pointer">doplniť IČ DPH ⚠</button>`
+          ? ` · <button onclick="event.stopPropagation();dphEditIcDph('${esc(d.zdrojId||"")}',this,'${esc(d.cislo||"")}','${esc(d.datum||"")}')"${zam("dph")} style="border:none;background:none;padding:0;font:inherit;color:var(--neg);text-decoration:underline;cursor:pointer">doplniť IČ DPH ⚠</button>`
           : '')
     }</div></div>
-    <div style="text-align:right"><div>${d.sadzba}%</div><div class="acol-muted">${eur(d.zaklad)}</div></div>
-    <div class="acol-sum">${eur((d.oddiel==="B1"&&d.samozdanenie)?(d.danSamozdanenie||0):d.dan)}</div>
+    <div class="acol-muted" style="text-align:right;white-space:nowrap">${eur(d.zaklad)}</div>
+    <div class="acol-muted" style="text-align:right">${d.sadzba} %</div>
+    <div class="acol-sum" style="white-space:nowrap">${eur((d.oddiel==="B1"&&d.samozdanenie)?(d.danSamozdanenie||0):d.dan)}</div>
   </div>`;
 
   return `<div class="card" style="margin-bottom:14px">
@@ -15478,13 +15513,16 @@ function dphVykazHtml(rok){
       <div style="font-size:11px;color:var(--ink-soft);margin-top:5px">Doplní z uložených partnerov (z predošlých faktúr) alebo z registra. Ten istý dodávateľ sa opraví naraz.</div>`:''}
     </div>`:`<div style="background:var(--sfc-pos);border-radius:10px;padding:10px 13px;margin-top:12px;font-size:12.5px;color:var(--pos)">✓ Nenašli sme žiadne problémy v dokladoch za ${nazovObd}.</div>`}
 
-    <div style="margin-top:16px">
-      <div style="font-weight:700;font-size:13px;margin-bottom:8px">Doklady na výstupe — predaj (${vystup.length})</div>
-      <div class="alist">${vystup.length?vystup.map(riadokDokladu).join(''):'<div class="aempty" style="font-size:12px">Žiadne vyšlé doklady.</div>'}</div>
+    <div style="margin-top:16px;display:flex;gap:6px;align-items:center">
+      ${hladatkoHtml('dph','appDPH','🔍 Číslo, partner, IČ DPH, suma…')}
+    </div>
+    <div style="margin-top:12px">
+      <div style="font-weight:700;font-size:13px;margin-bottom:8px">Doklady na výstupe — predaj (${qDph?vystupZobraz.length+" z "+vystup.length:vystup.length})</div>
+      <div class="alist">${vystupZobraz.length?dokHead+vystupZobraz.map(riadokDokladu).join(''):'<div class="aempty" style="font-size:12px">'+(qDph?'Hľadaniu nezodpovedá žiadny vyšlý doklad.':'Žiadne vyšlé doklady.')+'</div>'}</div>
     </div>
     <div style="margin-top:16px">
-      <div style="font-weight:700;font-size:13px;margin-bottom:8px">Doklady na vstupe — nákup (${vstup.length})</div>
-      <div class="alist">${vstup.length?vstup.map(riadokDokladu).join(''):'<div class="aempty" style="font-size:12px">Žiadne prijaté doklady.</div>'}</div>
+      <div style="font-weight:700;font-size:13px;margin-bottom:8px">Doklady na vstupe — nákup (${qDph?vstupZobraz.length+" z "+vstup.length:vstup.length})</div>
+      <div class="alist">${vstupZobraz.length?dokHead+vstupZobraz.map(riadokDokladu).join(''):'<div class="aempty" style="font-size:12px">'+(qDph?'Hľadaniu nezodpovedá žiadny prijatý doklad.':'Žiadne prijaté doklady.')+'</div>'}</div>
     </div>
 
     <div style="margin-top:16px">
@@ -15520,6 +15558,16 @@ function dphVykazHtml(rok){
       <button class="aabtn" onclick="dphVysvetlivky()">? Vysvetlivky k oddielom</button>
     </div>
   </div>`;
+}
+// klik na riadok dokladu vo výkaze → editor faktúry/výdavku (Romanova
+// požiadavka z monitora). Primárne cez zdrojId, fallback cez číslo.
+function dphOtvorDoklad(smer, zdrojId, cislo){
+  const typ = smer==="vystup" ? "faktura" : "vydavok";
+  const zoz=dokladZoznam(typ);
+  let idx = zdrojId ? zoz.findIndex(x=>String(x.id)===String(zdrojId)) : -1;
+  if(idx<0 && cislo) idx=zoz.findIndex(x=>dokladKluc(x)===cislo || String(x.cislo)===cislo);
+  if(idx<0) return;
+  if(typ==="faktura") editFaktura(idx); else editVydavok(idx);
 }
 function dphNastavOddiel(id, oddiel){
   if(!strazZapis("dph")) return;
@@ -19176,7 +19224,9 @@ const SPLIT_MODULY={
   dokumenty:{n:"Dokumenty",  ic:"📄", c:"var(--ink-warn)"},
   kalendar: {n:"Kalendár",   ic:"📅", c:"var(--ink-pos)"},
 };
+let _splitNavrat=null;   // odkiaľ sa split otvoril — ‹ sa vracia tam, nie na plochu
 function otvorSplit(lavy, pravy){
+  _splitNavrat=(typeof aktualnaSuperApka!=="undefined" && aktualnaSuperApka) ? aktualnaSuperApka : null;
   aktualnaApp="split";
   splitVybranyPohyb=null;
   if(lavy) splitLavy=lavy;
@@ -19184,12 +19234,37 @@ function otvorSplit(lavy, pravy){
   document.getElementById("homeView").classList.add("hidden");
   document.getElementById("appScreen").classList.add("hidden");
   document.getElementById("splitScreen").classList.remove("hidden");
+  document.querySelector(".wrap")?.classList.add("wrap-siroky");   // split využije šírku monitora
   window.scrollTo(0,0);
   renderSplit();
 }
 function zavriSplit(){
   document.getElementById("splitScreen").classList.add("hidden");
+  document.querySelector(".wrap")?.classList.remove("wrap-siroky");
+  if(_splitNavrat && typeof otvorSuperApku==="function"){ const s=_splitNavrat; _splitNavrat=null; otvorSuperApku(s); return; }
   domov();
+}
+// Otvorenie editora dokladu priamo z Párovania — klik na riadok páruje,
+// ceruzka otvára detail. Po uložení sa prekreslí split, nie skrytý modul.
+function splitOtvorDoklad(typ, kluc){
+  const d=najdiDoklad(typ, kluc); if(!d) return;
+  const idx=dokladZoznam(typ).indexOf(d); if(idx<0) return;
+  if(typ==="faktura") editFaktura(idx); else editVydavok(idx);
+}
+// Editor dokladu sa dá otvoriť z vlastného modulu, z Párovania aj z Pohľadávok.
+// Po uložení/zmazaní sa musí prekresliť obrazovka, z ktorej sa otvoril —
+// dovtedy sa vždy kreslil vlastný modul do skrytého appScreen a otvorená
+// obrazovka ostala stáť na starých dátach.
+function obnovPoEditacii(modul){
+  const split=document.getElementById("splitScreen");
+  if(split && !split.classList.contains("hidden")){ renderSplit(); return; }
+  // editor sa dá otvoriť aj z Pohľadávok, DPH výkazu a Cashflowu —
+  // prekresliť treba skutočne otvorenú obrazovku, nie skrytý vlastný modul
+  const otvorene=aktualnaZalozka||aktualnaApp;
+  if(otvorene==="pohladavky"){ appPohladavky(); return; }
+  if(otvorene==="dph"){ appDPH(); return; }
+  if(otvorene==="cashflow"){ appCashflow(); return; }
+  if(modul==="faktury") appFaktury(); else appVydavky();
 }
 function splitPohybStav(tx){
   if(tx.skryty) return {spar:true, skryty:true};
@@ -19972,6 +20047,12 @@ function splitKandidati(tx, ajNerelevantne){
 }
 let splitVsetciKand=false;
 function splitUkazVsetkychKand(){ splitVsetciKand=true; renderSplit(); }
+// Filter dokladov v pravom paneli (Romanova požiadavka z monitora): mesiac
+// + fulltext. Aktívny filter automaticky prehľadáva VŠETKY doklady, nielen
+// relevantné — kto filtruje na júl, hľadá doklad, nie návrh párovania.
+let splitDokladyMesiac="";
+function splitNastavDokladyMesiac(v){ splitDokladyMesiac=v; renderSplit(); }
+function splitDokladyFilterAktivny(){ return !!(splitDokladyMesiac || (_hladaj.splitDoklady||"").trim()); }
 function txId(tx){ return tx.id||String(tx.datum)+String(tx.suma); }
 // je aktuálna kombinácia párovací režim? (banka + doklady)
 function splitJeParovanie(){ return (splitLavy==="banka" && splitPravy==="doklady") || (splitLavy==="doklady" && splitPravy==="banka"); }
@@ -19994,13 +20075,13 @@ function splitNahlad(modulId){
     return wrap(H(f.length), (f.length?f.map(x=>{
       const odb=typeof x.odberatel==="string"?x.odberatel:(x.odberatel&&x.odberatel.nazov)||"";
       const uhr=faktJeUhradena(x);
-      return `<div class="sp-item"><div class="sp-r1"><span>${esc(x.cislo||"—")} ${odb?'· '+esc(odb):''}</span><span class="sp-amt">${eur0(+x.spolu||0)}</span></div><div class="sp-r2">${fmtDatum(x.datum||x.vystavenie)} <span class="sp-tag ${uhr?'done':'open'}">${uhr?'uhradená':'neuhradená'}</span></div></div>`;
+      return `<div class="sp-item" onclick="splitOtvorDoklad('faktura','${esc(dokladKluc(x))}')" title="Otvoriť faktúru"><div class="sp-r1"><span>${esc(x.cislo||"—")} ${odb?'· '+esc(odb):''}</span><span class="sp-amt">${eur0(+x.spolu||0)}</span></div><div class="sp-r2">${fmtDatum(x.datum||x.vystavenie)} <span class="sp-tag ${uhr?'done':'open'}">${uhr?'uhradená':'neuhradená'}</span></div></div>`;
     }).join(""):'<div class="aempty">Žiadne faktúry.</div>')+openBtn);
   }
   if(modulId==="vydavky"){
     const v=(d.vydavky||[]).slice().sort((a,b)=>String(b.datum||"").localeCompare(String(a.datum||"")));
     return wrap(H(v.length), (v.length?v.slice(0,60).map(x=>
-      `<div class="sp-item"><div class="sp-r1"><span>${esc(x.partner||x.popis||x.cislo||"—")}</span><span class="sp-amt">${eur0(+x.spolu||+x.bez||0)}</span></div><div class="sp-r2">${fmtDatum(x.datum)}${x.druh?" · "+esc(x.druh):""}</div></div>`
+      `<div class="sp-item" onclick="splitOtvorDoklad('vydavok','${esc(dokladKluc(x))}')" title="Otvoriť výdavok"><div class="sp-r1"><span>${esc(x.partner||x.popis||x.cislo||"—")}</span><span class="sp-amt">${eur0(+x.spolu||+x.bez||0)}</span></div><div class="sp-r2">${fmtDatum(x.datum)}${x.druh?" · "+esc(x.druh):""}</div></div>`
     ).join(""):'<div class="aempty">Žiadne výdavky.</div>')+openBtn);
   }
   if(modulId==="pohladavky"){
@@ -20058,10 +20139,11 @@ function renderSplit(){
       pohyby=pohyby.filter(t=>!t.skryty && !jePohybIgnorovany(t));
       if(splitStavFilter==="nespar") pohyby=pohyby.filter(t=>{const st=splitPohybStav(t); return !st.spar||st.ciastocne;});
     }
+    if((_hladaj.splitBanka||"").trim()) pohyby=pohyby.filter(t=>hladajZhoda(_hladaj.splitBanka, t.proti, t.popis, t.vs, t.suma, t.ibanProti));
     const vybrany = splitVybranyPohyb ? vsetkyPohyby.find(t=>txId(t)===splitVybranyPohyb) : null;
     const vratenia=najdiVratenia();
     const vratMapa={}; vratenia.filter(v=>!v.iste).forEach(v=>{ vratMapa[txId(v.vratenie)]=v; vratMapa[txId(v.platba)]=v; });
-    const kandInfo = vybrany ? splitKandidati(vybrany, splitVsetciKand) : {rel:[],zvysok:0,vsetky:[]};
+    const kandInfo = vybrany ? splitKandidati(vybrany, splitVsetciKand || splitDokladyFilterAktivny()) : {rel:[],zvysok:0,vsetky:[]};
     const kand = kandInfo.vsetky;
     const nespar = pohyby.filter(t=>!splitPohybStav(t).spar).length;
     const pocetAuto=parPocetJednoznacnych();
@@ -20073,6 +20155,7 @@ function renderSplit(){
           ${mesiace.map(m=>`<option value="${m}" ${splitMesiac===m?'selected':''}>${m.slice(5)}/${m.slice(0,4)}</option>`).join("")}
         </select>
         ${chip("nespar","nespárované")}${chip("vsetky","všetky")}${pocIgnor?chip("ignor","⊘",pocIgnor):""}${pocSkryte?chip("skryte","🗄",pocSkryte):""}
+        ${hladatkoHtml('splitBanka','renderSplit','🔍 Protistrana, VS, suma…')}
       </div>
       ${pocetAuto?`<div style="padding:9px 12px;background:var(--brand-lite);border-bottom:1px solid var(--line)">
         <button class="aabtn pri" style="width:100%;font-size:12.5px;padding:7px 12px" onclick="parSparujJednoznacne()"${zam("banka")}>✨ Spárovať jednoznačné (${pocetAuto})</button>
@@ -20099,6 +20182,15 @@ function renderSplit(){
             if(r<=0.005) return "<br>Ťuknite na doklad, ktorý bol touto platbou zaplatený.";
             if(z>0.005) return `<br><b>Priradené ${eur(r)}, zostáva ${eur(z)}.</b> Vyberte ďalší doklad.`;
             return "<br><b>Celá platba je priradená.</b>"; })()}</div>
+        ${(()=>{
+          const dokMes=[...new Set((( jePrijem?d.faktury:d.vydavky)||[]).map(x=>String(x.datum||x.vystavenie||"").slice(0,7)).filter(m=>/^\d{4}-\d{2}$/.test(m)))].sort().reverse();
+          return `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:9px">
+          <select onchange="splitNastavDokladyMesiac(this.value)" style="background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:4px 7px;font-size:12px">
+            <option value="">všetky obdobia</option>
+            ${dokMes.map(m=>`<option value="${m}" ${splitDokladyMesiac===m?'selected':''}>${m.slice(5)}/${m.slice(0,4)}</option>`).join("")}
+          </select>
+          ${hladatkoHtml('splitDoklady','renderSplit','🔍 Číslo, partner, suma…')}
+        </div>`; })()}
         ${(()=>{
           // NÁVRH VRÁTENIA — najdôležitejšia akcia, keď existuje protikus.
           const vr=vratMapa[txId(vybrany)];
@@ -20134,17 +20226,21 @@ function renderSplit(){
             </div>`).join("")}
           </div>`; })()}
         ${(()=>{
-          const ohodnotene=kand.map(k=>({...k, ...parSkore(vybrany,k)})).sort((a,b)=>b.skore-a.skore);
+          let ohodnotene=kand.map(k=>({...k, ...parSkore(vybrany,k)})).sort((a,b)=>b.skore-a.skore);
+          const filterAktivny=splitDokladyFilterAktivny();
+          if(splitDokladyMesiac) ohodnotene=ohodnotene.filter(k=>String((k.z&&(k.z.datum||k.z.vystavenie))||"").slice(0,7)===splitDokladyMesiac);
+          const qDok=(_hladaj.splitDoklady||"").trim();
+          if(qDok) ohodnotene=ohodnotene.filter(k=>hladajZhoda(qDok, k.cislo, k.nazov, k.suma, k.z&&k.z.popis, k.z&&(k.z.vs||k.z.variabilny)));
           const najlepsi=ohodnotene[0], druhy=ohodnotene[1];
           const jasny = najlepsi && najlepsi.skore>=90 && (!druhy || najlepsi.skore-druhy.skore>=25);
-          const dalsieBtn = (!splitVsetciKand && kandInfo.zvysok)
+          const dalsieBtn = (!splitVsetciKand && !filterAktivny && kandInfo.zvysok)
             ? `<div style="text-align:center;padding:10px"><button class="aabtn" style="padding:6px 14px;font-size:12px" onclick="splitUkazVsetkychKand()">zobraziť ďalšie doklady (${kandInfo.zvysok})</button></div>` : "";
-          if(!ohodnotene.length) return '<div class="aempty">Žiadny relevantný doklad — suma, VS ani partner nesedia.</div>'+dalsieBtn;
-          return ohodnotene.slice(0,30).map((k,i)=>{
+          if(!ohodnotene.length) return `<div class="aempty">${filterAktivny?'Filtru nezodpovedá žiadny doklad.':'Žiadny relevantný doklad — suma, VS ani partner nesedia.'}</div>`+dalsieBtn;
+          return ohodnotene.slice(0, filterAktivny?200:30).map((k,i)=>{
             const odporucane = jasny && i===0;
             const znacky=k.dovody.map(d=>`<span class="sp-tag ${d.ok?'match':'open'}">${d.ok?'✓':'·'} ${esc(d.t)}</span>`).join(" ");
             return `<div class="sp-item ${odporucane?'match':(k.sedi?'':'dim')}" onclick="splitSparuj('${txId(vybrany)}','${k.typ}','${esc(String(k.kluc))}')"${zam("banka")}>
-              <div class="sp-r1"><span>${odporucane?'<b>⭐ ':''}${esc(String(k.cislo||"—"))}${odporucane?'</b>':''} ${k.nazov?'· '+esc(k.nazov):''}</span><span class="sp-amt">${eur(k.suma)}</span></div>
+              <div class="sp-r1"><span>${odporucane?'<b>⭐ ':''}${esc(String(k.cislo||"—"))}${odporucane?'</b>':''} ${k.nazov?'· '+esc(k.nazov):''}</span><span style="display:flex;gap:6px;align-items:center"><span class="sp-amt">${eur(k.suma)}</span><button class="aabtn" style="padding:2px 7px;font-size:11px" onclick="event.stopPropagation();splitOtvorDoklad('${k.typ}','${esc(String(k.kluc))}')" title="Otvoriť a upraviť doklad">✎</button></span></div>
               <div class="sp-r2">${k.z&&k.z.datum?fmtDatum(k.z.datum)+" · ":""}${znacky}${(()=>{
                 const st=dokladStavUhrady(k.typ,k.kluc);
                 const kde=uhradyPopis(k.typ,k.kluc);
