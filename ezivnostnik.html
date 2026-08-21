@@ -941,7 +941,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.19-FV";  // pomenované bloky v článkoch (poznámka, varovanie, príklad)
+const APP_VERZIA = "2026.08.21-FW";  // dávka 1 z kap. 45.3 — mŕtve polia, preklepy, onboarding
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -1815,8 +1815,22 @@ function doplnChybajuceId(){
   return n;
 }
 
+// Výdavok z domáceho nabíjania dostával kategóriu "Prevádzka vozidla" — zobrazený
+// názov namiesto kľúča. Taký kľúč v KATEGORIE_VYDAVKOV nie je a účinok kategórie
+// padal na fallback. Premapúvajú sa len známe zlé hodnoty — hádať mapovanie
+// neznámeho kľúča by bol falošný poplach.
+function opravKluceKategorii(){
+  if(!firmaData) return 0;
+  const mapa={"Prevádzka vozidla":"prevadzka"};
+  let n=0;
+  (firmaData.vydavky||[]).forEach(x=>{ if(x.kategoria && mapa[x.kategoria]){ x.kategoria=mapa[x.kategoria]; n++; } });
+  if(n) poZmene();
+  return n;
+}
+
 function zobrazFirmu(){
   doplnChybajuceId();
+  opravKluceKategorii();
   migrujUhrady();
   // Istá zhoda príjmu s faktúrou sa zapíše aj bez kliknutia. Beží tu, nie až
   // v Banke, lebo `uhrady` číta rovnako pohľadávky, DPH aj ročná kontrola —
@@ -3445,6 +3459,20 @@ function zbierNotifikacie(){
         ic:"📅", nal:t.dni<=3?"warn":"info", nazov:t.nazov,
         detail:t.dni===0?"dnes":t.dni===1?"zajtra":"o "+t.dni+" dní",
         akcia:()=>otvorApp("kalendar")}));
+  }catch(_){}
+
+  // ── vlastné udalosti kalendára — zvonia podľa zvolenej pripomienky ──
+  // Voľba „X dní vopred" sa pri udalosti ukladala, ale nič ju nečítalo.
+  // „Bez pripomienky" (0) znamená nezvoniť — udalosť ostáva len v kalendári.
+  try{
+    (firmaData.udalosti||[]).forEach(u=>{
+      const p=+u.pripomienka||0; if(!p) return;
+      const dd=dni(u.datum);
+      if(dd<0 || dd>p) return;
+      out.push({kluc:"udalost:"+(u.id||u.datum), ic:"●", nal:dd<=1?"warn":"info", nazov:u.nazov,
+        detail:dd===0?"dnes":dd===1?"zajtra":"o "+dd+" dní",
+        akcia:()=>otvorApp("kalendar")});
+    });
   }catch(_){}
 
   // ── meškajúce faktúry (všetky, nielen dve) ──
@@ -7555,7 +7583,9 @@ function kategoriaOvplyvnujeZaklad(x){
 }
 function vydavokDoZakladu(x){
   if(!kategoriaOvplyvnujeZaklad(x)) return 0;
-  const suma=r2(+((x&&x.bez))||0);
+  // hotovostné zaokrúhlenie na 5 centov je súčasť daňového výdavku (kladné)
+  // alebo príjmu (záporné) — UI to pri doklade sľubuje, tak to musí platiť
+  const suma=r2((+((x&&x.bez))||0)+(+((x&&x.zaokruhlenie))||0));
   if(jePHL(x)) return r2(suma*phlPercent()/100);              // písmeno l) alebo e)
   if(x && x.autoDoklad) return r2(suma*autoVydavkyPercent()/100);   // písmeno t)
   return suma;
@@ -8277,15 +8307,13 @@ function appDPH(){
       ${[["vykaz","🧾 Kontrolný výkaz a priznanie"],
          ["podania","📁 Odoslané podania"],
          ["dane","💶 Dane a odvody"],
-         ["uzavierka","📋 Ročná uzávierka"],
-         ["dovolenka","🏖 Dovolenka"]]
+         ["uzavierka","📋 Ročná uzávierka"]]
         .map(([k,l])=>`<span class="achip ${dphTab===k?'on':''}" onclick="dphNastavTab('${k}')">${l}</span>`).join("")}
     </div>
 
     ${dphTab==="vykaz" ? dphVykazHtml(rok) : ""}
     ${dphTab==="podania" ? dphPodaniaHtml() : ""}
     ${dphTab==="uzavierka" ? uzavierkaHtml(rok) : ""}
-    ${dphTab==="dovolenka" ? dovolenkaHtml(rok) : ""}
     ${dphTab!=="dane" ? "" : `
     <div class="card" style="margin-bottom:14px">
       <h2 style="font-size:16px;margin-bottom:6px">Koľko odložiť na dane a odvody ${rok}</h2>
@@ -8902,7 +8930,6 @@ function dovExportXlsx(){
   XLSX.writeFile(wb,"dovolenka_"+dovRok+".xlsx");
 }
 // (starý placeholder — ponechaný pre kompatibilitu s prognózou, ale prázdny)
-function dovolenkaHtml(rok){ return ""; }
 function dphPoMesiacoch(rok){
   const out=[];
   for(let mi=1;mi<=12;mi++){
@@ -9299,7 +9326,7 @@ function kjwVytvorVydavokNabijanie(){
   firmaData.vydavky.push({
     id:"dn"+Date.now()+Math.random().toString(36).slice(2,7),
     cislo, datum:_kjW.doD, partner:"Domáca elektrina (vlastný výpočet)",
-    druh:"Interný doklad", popis, kategoria:"Prevádzka vozidla",
+    druh:"Interný doklad", popis, kategoria:"prevadzka",
     bez:D.suma, dph:0, spolu:D.suma,
     uhradaRucne:{datum:_kjW.doD, sposob:"ine"}, zaplatena:true
   });
@@ -11520,10 +11547,10 @@ function pbKrokObsah(krok, v, S){
     const deti=S.deti||[];
     const bd=v.bonusDetail;
     return `<h2 style="font-size:16px;margin-bottom:12px">Daň a daňový bonus</h2>
-      <div class="mfield" style="margin-bottom:10px"><label style="display:flex;align-items:center;gap:8px"><input type="checkbox" ${v.progresia?'checked':''} onchange="firmaData.settings.pbProgresia=this.checked;poZmene();appPriznanieB()" style="width:auto"> Použiť progresívnu sadzbu 19 % / 25 % (len ak príjmy nad 100 000 €)</label></div>
+      ${v.progresia?`<div class="csub" style="margin-bottom:10px">Príjmy presiahli hranicu 100 000 € — daň sa počíta progresívne po pásmach. Uplatňuje sa automaticky, nič netreba zapínať.</div>`:''}
       ${pbRiadok("Základ dane spolu (§5 + §6)", v.zakladCelkom, "r72")}
       ${pbRiadok("Základ dane po NČZD", v.zakladZniz)}
-      ${pbRiadok("Daň "+(v.progresia?"(19/25 %)":"(15 %)"), v.dan, "r96", true)}
+      ${pbRiadok("Daň "+(v.progresia?"(progresívne pásma)":"(15 %)"), v.dan, "r96", true)}
       <div style="margin:14px 0 8px;font-weight:700;font-size:14px">Daňový bonus na deti</div>
       <div style="margin-bottom:10px">
         ${deti.length?deti.map((dt,i)=>`<div style="display:flex;gap:8px;align-items:center;margin-bottom:5px">
@@ -13948,10 +13975,6 @@ function zrusVratenie(txIdVal){
   const b=V.find(t=>txId(t)===a.vratenie.s);
   delete a.vratenie; if(b) delete b.vratenie;
   firmaDirty=true; ulozFirmu();
-}
-function jeSucastVratenia(tx){
-  const id=txId(tx);
-  return najdiVratenia().some(v=>txId(v.vratenie)===id || txId(v.platba)===id);
 }
 // Prejde výpis a spáruje, čo je isté. Vracia prehľad, nie len počet —
 // používateľ má vidieť, čo sa stalo, nie len že sa niečo stalo.
@@ -17858,15 +17881,6 @@ async function spravujOdosielatelov(){
   `, null, null, "siroky");
 }
 
-// Zoznam sa už nepoužíva ako whitelist (admin_27) — mazanie záznamu nahradilo
-// odblokovanie. Funkcia ostáva pre prípad, že by na ňu odkazoval starší kód.
-async function zmazOdosielatela(id){
-  try{
-    await sb.from("doklady_odosielatelia").delete().eq("id", id);
-    spravujOdosielatelov();
-  }catch(e){ alert("Nepodarilo sa odstrániť: "+(e.message||e)); }
-}
-
 // ── spracovanie: stiahni a pusti tou istou cestou ako ručný výber ──
 // Bankový výpis nie je doklad do výdavkov — je to zoznam pohybov. Podľa názvu
 // ho vieme len tipnúť; istotu dá až `parseVypis`, ktorý hľadá element <Stmt>.
@@ -19199,12 +19213,12 @@ function vyberSposobUhrady(nadpis, cb){
     </div>
     <div class="csub">Pri karte a prevode appka počká na bankový výpis a úhradu sama overí. Hotovosť sa vo výpise neobjaví — doklad ostane potvrdený ručne.</div>`, null);
   document.getElementById("modalDelete").classList.add("hidden");
-  const ok=document.getElementById("modalConfirm"); if(ok) ok.style.display="none";
+  const ok=document.getElementById("modalOk"); if(ok) ok.style.display="none";
 }
 function _uhradaSposobVyber(k){
   const cb=_uhradaSposobCb; _uhradaSposobCb=null;
   closeModal();
-  const ok=document.getElementById("modalConfirm"); if(ok) ok.style.display="";
+  const ok=document.getElementById("modalOk"); if(ok) ok.style.display="";
   if(cb) cb(k);
 }
 function oznacDokladUhradeny(typ, cislo, sposob){
@@ -20258,7 +20272,9 @@ async function kalNacitajFS(){
     const evs=parseICS(text);
     if(!evs.length) throw new Error("prázdny");
     const dnes=new Date(), horizont=new Date(dnes.getFullYear(),dnes.getMonth()+12,0);
-    firmaData.udalostiFS=evs.filter(ev=>ev.start&&!ev.start.allDay===false).map(ev=>({
+    // termíny FS sú celodenné; udalosti s časom by boli šum (pôvodná podmienka
+    // !ev.start.allDay===false robila to isté, ale len vďaka preklepu)
+    firmaData.udalostiFS=evs.filter(ev=>ev.start&&ev.start.allDay).map(ev=>({
       datum:ev.start.iso, nazov:cleanMeetingName(ev.summary||"Daňová povinnosť"), zdroj:"fs"
     })).filter(u=>{ const d=new Date(u.datum); return d>=new Date(dnes.getFullYear(),dnes.getMonth(),1) && d<=horizont; });
     poZmene(); appKalendar();
@@ -20550,7 +20566,7 @@ document.addEventListener("keydown", e=>{
 //  Zapisuje do reálnych settings/meta kľúčov, ktoré čítajú daňové výpočty.
 // ═══════════════════════════════════════════════════════════════
 let _ob = null;
-const OB_KROKOV = 7;
+const OB_KROKOV = 6;
 
 // daňové konštanty 2026 (predvyplnené centrálne — používateľ ich nemusí hľadať)
 const KONST_2026 = {
@@ -20570,7 +20586,6 @@ function spustiOnboarding(){
   if(!_ob) _ob = {
     krok:1,
     ico:"", nazov:"", adresa:"", dic:"", icdph:"", icdphNavrh:"",
-    evidencia:"danova",        // danova | jednoduche
     platca:null,               // true | false
     vydavkyRezim:"skutocne",   // skutocne | pausal (paušál len pre neplatiteľa)
     manzel:false, manzelPrijem:0,
@@ -20622,29 +20637,11 @@ function obKrokObsah(k){
         <div class="ob-field"><label>IČ DPH (ak ste platiteľ)</label><input id="ob_icdph" value="${esc(o.icdph)}" placeholder="SK0000000000" oninput="obZadajIcDph(this.value)"></div>
       </div>
       <div class="ob-field" style="background:var(--bg);border-radius:10px;padding:11px 13px">
-        <label style="display:block;margin-bottom:7px">Ste platiteľ DPH?</label>
-        <label style="display:inline-flex;align-items:center;gap:7px;cursor:pointer;font-size:14px">
-          <input type="checkbox" id="ob_platca" ${o.icdph||o.platca?'checked':''} onchange="obTogglePlatca(this.checked)" style="width:17px;height:17px">
-          Áno, som platiteľ DPH (mesačný/štvrťročný)
-        </label>
-        <div style="margin-top:7px;font-size:11.5px;color:var(--ink-soft)">DIČ a IČ DPH register neposkytuje — nájdete ich na svojich dokladoch. Po zadaní IČ DPH sa DIČ doplní automaticky.</div>
+        <div style="font-size:11.5px;color:var(--ink-soft)">DIČ a IČ DPH register neposkytuje — nájdete ich na svojich dokladoch. Po zadaní IČ DPH sa DIČ doplní automaticky. Na platiteľa DPH sa spýtame v ďalšom kroku.</div>
       </div>
       ${obNav(1, !!o.nazov || true)}`;
   }
   if(k===2){
-    return `<h2>Ako vediete evidenciu?</h2>
-      <div class="ob-lead">Väčšina živnostníkov vedie <b>daňovú evidenciu</b> — je jednoduchšia a stačí pre potreby daňového priznania. Jednoduché účtovníctvo je náročnejšie a vyžaduje ho len časť podnikateľov.</div>
-      <div class="ob-opts">
-        <div class="ob-opt ${o.evidencia==='danova'?'sel':''}" onclick="obSet('evidencia','danova')">
-          <div class="ri"></div><div class="ot"><b>Daňová evidencia</b><span>Evidencia príjmov, výdavkov, majetku a pohľadávok. Odporúčané pre SZČO.</span></div>
-        </div>
-        <div class="ob-opt ${o.evidencia==='jednoduche'?'sel':''}" onclick="obSet('evidencia','jednoduche')">
-          <div class="ri"></div><div class="ot"><b>Jednoduché účtovníctvo</b><span>Peňažný denník, kniha pohľadávok a záväzkov. Ak ho vediete zo zákona alebo dobrovoľne.</span></div>
-        </div>
-      </div>
-      ${obNav(2, !!o.evidencia)}`;
-  }
-  if(k===3){
     return `<h2>Ste platiteľ DPH?</h2>
       <div class="ob-lead">Platiteľ DPH odvádza a odpočítava DPH a podáva kontrolný výkaz. Ak si nie ste istý, nájdete to na svojom osvedčení o registrácii (IČ DPH v tvare SK…).</div>
       <div class="ob-opts">
@@ -20657,14 +20654,14 @@ function obKrokObsah(k){
       </div>
       ${o.platca===true?`
         <div class="ob-field" style="margin-top:14px"><label>IČ DPH</label>
-          <input id="ob_icdph2" value="${esc(o.icdph)}" placeholder="SK0000000000" oninput="_ob.icdph=this.value">
-          <div class="ob-hint">Vaše IČ DPH z osvedčenia o registrácii. Podľa neho appka zapne DPH moduly a fakturáciu s DPH.</div>
+          <input id="ob_icdph2" value="${esc(o.icdph)}" placeholder="SK0000000000" oninput="_ob.icdph=this.value;obDphNavStav()">
+          <div class="ob-hint">Vaše IČ DPH z osvedčenia o registrácii. Podľa neho appka zapne DPH moduly a fakturáciu s DPH — bez neho by ste boli vedený ako neplatiteľ.</div>
         </div>
         <div class="ob-field"><label>Sadzba DPH</label>
           <select id="ob_sadzbaDPH"><option value="0.23" ${(o.sadzbaDPH||0.23)==0.23?'selected':''}>23 % (základná)</option><option value="0.19" ${o.sadzbaDPH==0.19?'selected':''}>19 % (znížená)</option></select></div>`:''}
-      ${obNav(3, o.platca!==null)}`;
+      ${obNav(2, o.platca===false || (o.platca===true && !!String(o.icdph||"").trim()))}`;
   }
-  if(k===4){
+  if(k===3){
     const pausalMozny = o.platca===false;   // paušál len pre neplatiteľa DPH
     const jePausal = o.vydavkyRezim==='pausal';
     return `<h2>Ako uplatňujete výdavky?</h2>
@@ -20679,9 +20676,9 @@ function obKrokObsah(k){
         </div>
       </div>
       <div class="ob-hint">Túto voľbu môžete zmeniť neskôr v Nastaveniach. Appka vám vždy ukáže, ktorá možnosť vychádza výhodnejšie.</div>
-      ${obNav(4, true)}`;
+      ${obNav(3, true)}`;
   }
-  if(k===5){
+  if(k===4){
     return `<h2>Nezdaniteľné časti a bonus</h2>
       <div class="ob-lead">Tieto úľavy znižujú vašu daň. Na seba máte nárok automaticky (${eur(KONST_2026.nezdanitCast2026)} ročne pre 2026). Doplňte, či si uplatňujete aj na manžela/manželku a deti.</div>
 
@@ -20702,9 +20699,9 @@ function obKrokObsah(k){
         <button class="ob-add" onclick="obPridajDieta()">＋ Pridať dieťa</button>
         <div class="ob-hint">2026: ${eur(KONST_2026.bonusDo15)}/mes do 15 r., ${eur(KONST_2026.bonus15az18)}/mes 15–18 r. Bonus je obmedzený percentom zo základu dane podľa počtu detí a kráti sa pri základe nad ${eur(KONST_2026.bonusKratHranica)}.</div>
       </div>
-      ${obNav(5, true)}`;
+      ${obNav(4, true)}`;
   }
-  if(k===6){
+  if(k===5){
     const imp=o.importy;
     return `<h2>Úvodné importy <span style="font-weight:400;font-size:14px;color:var(--ink-soft)">(voliteľné)</span></h2>
       <div class="ob-lead">Naplňte appku existujúcimi dátami. Môžete importovať teraz alebo kedykoľvek neskôr z jednotlivých modulov.</div>
@@ -20725,9 +20722,9 @@ function obKrokObsah(k){
         <div class="ii">🚗</div><div class="it"><b>Kniha jázd (XLSX)</b><span>Napr. export štatistiky jázd z vozidla</span></div>
         ${imp.vw?'<span class="done">✓</span>':''}
       </div>
-      ${obNav(6, true, "Preskočiť importy →")}`;
+      ${obNav(5, true, "Preskočiť importy →")}`;
   }
-  if(k===7){
+  if(k===6){
     const o2=_ob;
     const detiTxt = o2.deti.length ? o2.deti.map(d=>d.vek+" r.").join(", ") : "žiadne";
     const vydTxt = (!o2.platca && o2.vydavkyRezim==='pausal') ? 'Paušálne (60 %, max 20 000 €)' : 'Skutočné (podľa dokladov)';
@@ -20736,15 +20733,14 @@ function obKrokObsah(k){
       <div class="ob-sum">
         <div class="sr"><span>Firma</span><b>${esc(o2.nazov||'—')}</b></div>
         ${o2.ico?`<div class="sr"><span>IČO</span><b>${esc(o2.ico)}</b></div>`:''}
-        <div class="sr"><span>Evidencia</span><b>${o2.evidencia==='jednoduche'?'Jednoduché účtovníctvo':'Daňová evidencia'}</b></div>
         <div class="sr"><span>DPH</span><b>${o2.platca?'Platiteľ DPH':'Neplatiteľ'}</b></div>
         <div class="sr"><span>Výdavky</span><b>${vydTxt}</b></div>
         <div class="sr"><span>NČZD na manžela/-ku</span><b>${o2.manzel?'áno':'nie'}</b></div>
         <div class="sr"><span>Deti (bonus)</span><b>${detiTxt}</b></div>
       </div>
-      <div class="ob-lead" style="font-size:12.5px">Daňové konštanty pre rok 2026 (sadzby, NČZD, minimálne odvody, zdravotné 16 %) sú predvyplnené. Nájdete a upravíte ich v Nastaveniach.</div>
+      <div class="ob-lead" style="font-size:12.5px">Appka vedie daňovú evidenciu podľa § 6 ods. 11 zákona o dani z príjmov — pre SZČO postačuje a nič ďalšie netreba nastavovať. Daňové konštanty pre rok 2026 (sadzby, NČZD, minimálne odvody, zdravotné 16 %) sú predvyplnené. Nájdete a upravíte ich v Nastaveniach.</div>
       <div class="ob-nav">
-        <button class="back" onclick="obKrok(${6})">← Späť</button>
+        <button class="back" onclick="obKrok(${5})">← Späť</button>
         <button class="next" onclick="obDokonci()">Vytvoriť firmu a začať →</button>
       </div>`;
   }
@@ -20784,7 +20780,7 @@ function obUlozAktualne(){
     if(g("ob_dic")!==null) _ob.dic=g("ob_dic");
     if(g("ob_icdph")!==null) _ob.icdph=g("ob_icdph");
   }
-  if(_ob.krok===3){
+  if(_ob.krok===2){
     if(g("ob_sadzbaDPH")!==null) _ob.sadzbaDPH=+g("ob_sadzbaDPH");
     if(g("ob_icdph2")!==null) _ob.icdph=g("ob_icdph2");
   }
@@ -20863,15 +20859,13 @@ function obZadajIcDph(v){
     const dicPole = document.getElementById("ob_dic");
     if(dicPole && !dicPole.value) dicPole.value = d;
     _ob.platca = true;
-    const chk = document.getElementById("ob_platca");
-    if(chk) chk.checked = true;
   }
 }
-// zaškrtnutie "som platca"
-function obTogglePlatca(checked){
-  _ob.platca = checked;
-  if(!checked){ _ob.icdph = ""; }   // neplatca → vyčisti IČ DPH
-  renderOnboarding();
+// platiteľ DPH bez IČ DPH by bol v appke vedený ako neplatiteľ (jePlatcaDPH
+// stojí na meta.icdph) — preto krok DPH nepustí ďalej, kým IČ DPH nie je zadané
+function obDphNavStav(){
+  const b=document.querySelector(".ob-nav .next"); if(!b) return;
+  b.disabled = !(_ob.platca===false || (_ob.platca===true && !!String(_ob.icdph||"").trim()));
 }
 
 async function obDoplnICO(){
@@ -20915,8 +20909,6 @@ function obNovaFirma(){
   // k zákazníkovi nedostala ani novou verziou appky. Zdrojom je tabuľka SADZBY.
   const s = Object.assign({}, {
     sadzbaDPH: o.platca ? (o.sadzbaDPH||sadzbaRoka("sadzbaDPH", new Date().getFullYear())) : 0,
-    evidenciaTyp: o.evidencia,                 // "danova" | "jednoduche"
-    jePlatcaDPH: !!o.platca,
     // režim výdavkov (paušál len pre neplatiteľa DPH)
     vydavkyRezim: (!o.platca && o.vydavkyRezim==="pausal") ? "pausal" : "skutocne",
     // NČZD na manželku
@@ -20939,8 +20931,13 @@ function obDokonci(){
   if(!firmaData){ firmaData = obNovaFirma(); }
   else {
     const nf=obNovaFirma();
-    firmaData.meta = Object.assign({}, nf.meta, firmaData.meta, nf.meta);
-    firmaData.settings = Object.assign({}, firmaData.settings||{}, nf.settings);
+    // Import zálohy z kroku 5 vyhráva; sprievodca dopĺňa len to, čo v importe
+    // chýba. Predtým tu bol Object.assign s nf na oboch krajoch — sprievodca
+    // prepisoval importované meta prázdnymi hodnotami.
+    firmaData.meta = firmaData.meta||{};
+    Object.keys(nf.meta).forEach(k=>{ if(!firmaData.meta[k]) firmaData.meta[k]=nf.meta[k]; });
+    firmaData.settings = firmaData.settings||{};
+    Object.keys(nf.settings).forEach(k=>{ if(firmaData.settings[k]===undefined) firmaData.settings[k]=nf.settings[k]; });
     // dopĺň prázdne polia, neprepisuj importované
     ["faktury","vydavky","jazdy","vypis","vykazy","majetok","pohladavky","zavazky","dokumenty","dovolenka"]
       .forEach(p=>{ if(!Array.isArray(firmaData[p])) firmaData[p]=[]; });
