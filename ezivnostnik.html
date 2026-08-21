@@ -946,7 +946,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.21-GG";  // KV DPH: cesta k súboru sa už nedostane do čísla faktúry
+const APP_VERZIA = "2026.08.21-GH";  // podania: PSČ bez medzery, dátum DD.MM.RRRR (validácia portálu FS)
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -11734,7 +11734,15 @@ function pbKrokObsah(krok, v, S){
 }
 function pbExportXml(){
   if(!strazZapis("priznania")) return;
-  const v=pbVypocet(pbRok), m=firmaData.meta||{}, S=firmaData.settings||{};
+  const v=pbVypocet(pbRok), S=firmaData.settings||{};
+  // Adresa sa v `meta` drží ako jeden reťazec; rozobratá polia (ulica, číslo,
+  // PSČ, obec) sú v nej len vtedy, keď ich niekto doplnil ručne. Bez fallbacku
+  // na tú istú funkciu, akú používa DPH, išlo priznanie s prázdnou adresou.
+  const _mA=firmaData.meta||{}, _mD=(typeof dphMeta==="function")?dphMeta():{};
+  const m=Object.assign({}, _mA, {
+    ulica:_mA.ulica||_mD.ulica||"", cislo:_mA.cislo||_mD.cislo||"",
+    psc:(_mA.psc||_mD.psc||"").replace(/\s/g,""), obec:_mA.obec||_mD.obec||"",
+  });
   const typ=(firmaData.danovePriznania&&firmaData.danovePriznania[pbRok]&&firmaData.danovePriznania[pbRok].typDP)||"riadne";
   const n=x=>{const q=(+x||0);return q?q.toFixed(2):"";};
   const b=x=>x?"1":"0";
@@ -15255,7 +15263,12 @@ function dphSumare(doklady){
 
 function dphMeta(){
   const m=firmaData.meta||{}; const adr=(m.adresa||"");
-  const psc=(adr.match(/\d{3}\s?\d{2}/)||[""])[0];
+  // PSČ BEZ MEDZERY: portál FS meria dĺžku položky a pripúšťa najviac 5 znakov
+  // („Maximálna dĺžka položky 'PSČ' musí byť: 5"). V adrese ho ľudia píšu
+  // s medzerou (tvar „010 01"), do XML patrí päť číslic za sebou. XSD samo
+  // dĺžku neobmedzuje — kontroluje to až validácia portálu, takže sa chyba
+  // prejaví až pri podaní.
+  const psc=((adr.match(/\d{3}\s?\d{2}/)||[""])[0]).replace(/\s/g,"");
   const obec=(adr.split(",").pop()||"").replace(/\d{3}\s?\d{2}/,"").trim();
   const ulicaCast=(adr.split(",")[0]||"").trim();
   const cislo=(ulicaCast.match(/\d+[\/\d]*$/)||[""])[0];
@@ -17185,8 +17198,12 @@ function dphGenerujDP(mk){
   // Dátum v hlavičke musí sedieť na tvar D.M.RRRR, ktorý predpisuje schéma.
   // Skladáme ho ručne — toLocaleDateString sa v rôznych prehliadačoch líši
   // (medzery, vedúce nuly) a podanie by kvôli tomu mohlo neprejsť validáciou.
+  // DD.MM.RRRR s vedúcimi nulami. Schéma pripúšťa aj jednomiestny tvar
+  // (pattern má nulu voliteľnú), ale validácia portálu ho odmieta — a to sa
+  // ukáže až pri podaní, nie pri kontrole proti XSD.
   const _d=new Date();
-  const dnes=_d.getDate()+"."+(_d.getMonth()+1)+"."+_d.getFullYear();   // D.M.RRRR
+  const _dv=n=>String(n).padStart(2,"0");
+  const dnes=_dv(_d.getDate())+"."+_dv(_d.getMonth()+1)+"."+_d.getFullYear();   // DD.MM.RRRR
   // ── ŠTRUKTÚRA JE PREDPÍSANÁ SCHÉMOU FS (dph2025.xsd) ──
   // <hlavicka> aj <telo> sú <sequence> a VŠETKY elementy sú povinné — aj tie,
   // ktoré sú prázdne. Predtým appka vypisovala len vyplnené riadky, čo znamená,
