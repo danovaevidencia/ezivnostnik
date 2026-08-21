@@ -941,7 +941,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.21-FX";  // dávka 2 z kap. 45.1 — jedna daň z príjmov (efektívna sadzba)
+const APP_VERZIA = "2026.08.21-FY";  // dávka 3 z kap. 45.2 — jeden stav úhrady dokladu
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -2414,16 +2414,11 @@ function calcDanRow(mesiacIdx, rok, S){
   const faktMesPol=(firmaData.faktury||[]).filter(f=>faktObdobie(f)===mk);
   faktMesPol.forEach(f=>{ (f.polozky||[]).forEach(p=>{ const mj=(p.mj||"").toLowerCase(); if(/člov|clov|deň|den|md/.test(mj)) odprac+=Math.round(+p.mn||0); }); });
   if(odprac===0){ (firmaData.vykazy||[]).forEach(w=>{ (w.polozky||[]).forEach(p=>{ if(String(p.datum||"").slice(0,7)===mk && (+p.hodiny||0)>0) odprac++; }); }); }
-  // stav úhrady faktúr mesiaca (spárované z výpisu cez VS alebo sumu)
+  // stav úhrady faktúr mesiaca — kanonický stav (banka, ručné potvrdenie,
+  // legacy príznak), nie vlastná VS/suma heuristika (kap. 45.2)
   const faktMes=(firmaData.faktury||[]).filter(f=>faktObdobie(f)===mk);
   let uhradene=0, neuhradene=0;
-  faktMes.forEach(f=>{
-    const suma=(+f.spolu||+f.bez||0);
-    const tx=(firmaData.vypis||[]).find(t=>{ if(t.smer!=="prijem") return false;
-      if(t.vs) return String(t.vs)===String(f.cislo)||String(t.vs)===String(f.vs);
-      return Math.abs((+t.suma||0)-suma)<0.01; });
-    if(tx||f.zaplatena) uhradene++; else neuhradene++;
-  });
+  faktMes.forEach(f=>{ if(faktJeUhradena(f)) uhradene++; else neuhradene++; });
   const uhradaStav = faktMes.length===0 ? "" : (neuhradene===0 ? "zapl" : (uhradene===0 ? "platba" : "ciast"));
   return {mesiacIdx, mk, faktB, odpis, vyradenie, nahrady, ostatne, nakladySpolu, ciastkZaklad, vymZaklad, zdrav, preddavokZP, danPreddavok:danPreddMes, soc, vyslZaklad, dan, odvodyDan, odlozit, cisty, aktivny:jeAktivny, odprac, uhradaStav};
 }
@@ -3104,7 +3099,7 @@ function dashWidgetKatalog(){
     faktury: {
       nazov:"Faktúry", ic:"▤", velkost:"w-s4",
       metriky:[
-        {k:"vystavene", l:"Vystavené (rok)", val:()=>{const f=(d.faktury||[]).filter(x=>String(x.datum||x.vystavenie||"").slice(0,4)===String(rok));const uhr=f.filter(x=>x.zaplatena);const neuhr=f.filter(x=>!x.zaplatena);return {v:eur0(f.reduce((a,x)=>a+(+x.spolu||0),0)), m:f.length+" faktúr vystavených", cls:"pos", vedlajsie:[{l:"uhradené",v:eur(uhr.reduce((a,x)=>a+(+x.spolu||0),0)),cls:"pos"},{l:"neuhradené",v:eur(neuhr.reduce((a,x)=>a+(+x.spolu||0),0)),cls:neuhr.length?"neg":""}]};}},
+        {k:"vystavene", l:"Vystavené (rok)", val:()=>{const f=(d.faktury||[]).filter(x=>String(x.datum||x.vystavenie||"").slice(0,4)===String(rok));const uhr=f.filter(x=>faktJeUhradena(x));const neuhr=f.filter(x=>!faktJeUhradena(x));return {v:eur0(f.reduce((a,x)=>a+(+x.spolu||0),0)), m:f.length+" faktúr vystavených", cls:"pos", vedlajsie:[{l:"uhradené",v:eur(uhr.reduce((a,x)=>a+(+x.spolu||0),0)),cls:"pos"},{l:"neuhradené",v:eur(neuhr.reduce((a,x)=>a+(+x.spolu||0),0)),cls:neuhr.length?"neg":""}]};}},
         {k:"bezDph", l:"Bez DPH (rok)", val:()=>{const f=(d.faktury||[]).filter(x=>String(x.datum||x.vystavenie||"").slice(0,4)===String(rok));return {v:eur0(f.reduce((a,x)=>a+(+x.bez||0),0)), m:"základ dane", cls:"", vedlajsie:[{l:"s DPH",v:eur(f.reduce((a,x)=>a+(+x.spolu||0),0))},{l:"DPH",v:eur(f.reduce((a,x)=>a+(+x.dph||0),0))}]};}}
       ]
     },
@@ -3513,7 +3508,7 @@ function zbierNotifikacie(){
 
   // ── meškajúce faktúry (všetky, nielen dve) ──
   try{
-    (firmaData.faktury||[]).filter(f=>!f.zaplatena && f.splatnost && new Date(f.splatnost)<dnes)
+    (firmaData.faktury||[]).filter(f=>!faktJeUhradena(f) && f.splatnost && new Date(f.splatnost)<dnes)
       .sort((a,b)=>new Date(a.splatnost)-new Date(b.splatnost))
       .forEach(f=>{
         const po=Math.round((dnes-new Date(f.splatnost))/86400000);
@@ -3636,7 +3631,7 @@ function heroAkcie(){
   }));
   // meškajúce faktúry (po splatnosti, nezaplatené)
   const poSplat=(firmaData.faktury||[]).filter(f=>{
-    if(f.zaplatena||!f.splatnost) return false;
+    if(faktJeUhradena(f)||!f.splatnost) return false;
     return new Date(f.splatnost)<dnes;
   }).sort((a,b)=>new Date(a.splatnost)-new Date(b.splatnost));
   poSplat.slice(0,2).forEach(f=>{
@@ -4220,7 +4215,7 @@ function dashKontroly(){
   const rozp=(typeof rucneRozpory==="function")?rucneRozpory():[];
   if(rozp.length) out.push({ic:"⚠", akcia:"rozporyModal()", text:`<b>${rozp.length}</b> ${rozp.length===1?'doklad má':'dokladov má'} rozpor v úhrade — označené ako uhradené, no výpis platbu nepotvrdzuje. <span style="color:var(--brand);text-decoration:underline">Zobraziť</span>`});
   // faktúry po splatnosti
-  (d.faktury||[]).filter(f=>!f.zaplatena && f.splatnost && new Date(f.splatnost)<dnes).slice(0,4).forEach(f=>{
+  (d.faktury||[]).filter(f=>!faktJeUhradena(f) && f.splatnost && new Date(f.splatnost)<dnes).slice(0,4).forEach(f=>{
     out.push({ic:"⏰", text:`Faktúra <b>${esc(f.cislo||"?")}</b> je po splatnosti (${fmtDatum(f.splatnost)}).`});
   });
   // doklady bez dátumu
@@ -6002,7 +5997,7 @@ function feModal(idx, nova){
     <div id="fePolozky" data-scroll="fePolozky" style="max-height:none">${fePolozkyHtml()}</div>
     <button type="button" class="aabtn" style="margin-top:8px" onclick="fePridajPolozku()">＋ Pridať položku</button>
     <div id="feSumy" style="background:var(--bg);border-radius:9px;padding:11px 13px;margin-top:14px;font-size:13px">${feSumyHtml()}</div>
-    <div class="mfield" style="margin-top:12px"><label><input type="checkbox" id="m_zapl" ${f.zaplatena?'checked':''} style="width:auto;margin-right:7px">Uhradená</label></div>
+    <div class="mfield" style="margin-top:12px"><label><input type="checkbox" id="m_zapl" ${faktJeUhradena(f)?'checked':''} style="width:auto;margin-right:7px">Uhradená</label></div>
     </div>
    </div>
   `,
@@ -6028,10 +6023,15 @@ function feModal(idx, nova){
     f.druhPlnenia=val("m_plnenie")||"tuzemsko";
     f.tovarKod=val("m_tovarKod")||""; f.tovarDruh=val("m_tovarDruh")||"";
     f.tovarMn=val("m_tovarMn")||"";   f.tovarMJ=val("m_tovarMJ")||"";
-    f.zaplatena=document.getElementById("m_zapl").checked;
     const s=faktSumy(f); f.bez=s.bez; f.dph=s.dph; f.spolu=s.spolu;
     if(!firmaData.faktury) firmaData.faktury=[];
     if(nova) firmaData.faktury.push(f); else firmaData.faktury[idx]=f;
+    // Checkbox „Uhradená" ide cez tie isté funkcie ako zoznam — žiadny priamy
+    // zápis príznaku (kap. 45.2). Odškrtnutie ruší len ručné tvrdenie; úhradu
+    // potvrdenú bankovým výpisom checkbox neprebije.
+    const _chceZapl=chk("m_zapl"), _kluc=dokladKluc(f);
+    if(_chceZapl && !dokladJeUhradeny("faktura", _kluc)) oznacDokladUhradeny("faktura", _kluc);
+    else if(!_chceZapl && dokladJeUhradeny("faktura", _kluc)) zrusDokladUhradu("faktura", _kluc);
     poZmene(); appFaktury();
   },
   nova?null:()=>{
@@ -6577,7 +6577,7 @@ function vydHromadneZrusit(){
   let n=0; vydVybrane.forEach(c=>{ const s=uhradaStav("vydavok",c); if(s.zdroj==="rucne"||s.zdroj==="legacy"){ zrusDokladUhradu("vydavok",c); n++; } });
   vydVybrane.clear(); appVydavky(); if(n) setTimeout(()=>alert("Úhrada zrušená pri "+n+" výdavkoch."),50);
 }
-function vydJeUhradeny(x){ return x && x.cislo && dokladJeUhradeny("vydavok", x.cislo); }
+function vydJeUhradeny(x){ return !!(x && dokladJeUhradeny("vydavok", dokladKluc(x))); }
 function appVydavky(){
   const d=firmaData, c=APPS.vydavky.c;
   const vsetky=(d.vydavky||[]).slice().sort((a,b)=>String(b.datum||"").localeCompare(String(a.datum||"")));
@@ -9365,7 +9365,7 @@ function kjwVytvorVydavokNabijanie(){
     cislo, datum:_kjW.doD, partner:"Domáca elektrina (vlastný výpočet)",
     druh:"Interný doklad", popis, kategoria:"prevadzka",
     bez:D.suma, dph:0, spolu:D.suma,
-    uhradaRucne:{datum:_kjW.doD, sposob:"ine"}, zaplatena:true
+    uhradaRucne:{datum:_kjW.doD, sposob:"ine"}
   });
   poZmene();
   _kjW.hotovo.nabijanie=D.suma;
@@ -10905,20 +10905,9 @@ function nacitajPodpis(e){
 
 // ── POHĽADÁVKY A ZÁVÄZKY ──
 let pzRok="", pzTab="pohl";
-function pzUhradena(f){
-  // faktúra uhradená: príznak zaplatena, alebo nájdená platba vo výpise (VS/suma)
-  if(f.zaplatena) return true;
-  const suma=(+f.spolu||+f.bez||0);
-  return (firmaData.vypis||[]).some(t=>{ if(t.smer!=="prijem") return false;
-    if(t.vs) return String(t.vs)===String(f.cislo)||String(t.vs)===String(f.vs);
-    return Math.abs((+t.suma||0)-suma)<0.01; });
-}
-function pzZavUhradeny(x){
-  if(x.zaplateny||x.uhradeny) return true;
-  const suma=(+x.spolu||+x.bez||0);
-  return (firmaData.vypis||[]).some(t=>{ if(t.smer!=="vydaj") return false;
-    return Math.abs((+t.suma||0)-suma)<0.01; });
-}
+// Stav úhrady číta kanonický dokladJeUhradeny — Pohľadávky mali dovtedy
+// vlastnú heuristiku (zhoda VS alebo LEN sumy s ľubovoľným pohybom), takže
+// tvrdili iné než zoznam faktúr a Banka (kap. 45.2).
 function dniPoSplatnosti(splat){ if(!splat) return 0; const d=new Date(splat); if(isNaN(d)) return 0; return Math.floor((Date.now()-d)/86400000); }
 function appPohladavky(){
   const d=firmaData, c=APPS.pohladavky.c;
@@ -10926,12 +10915,12 @@ function appPohladavky(){
   if(!pzRok) pzRok=roky[0]||String(new Date().getFullYear());
   // pohľadávky = vystavené faktúry roka
   const pohl=(d.faktury||[]).filter(f=>String(f.datum||f.vystavenie||"").slice(0,4)===pzRok).map(f=>{
-    const uhr=pzUhradena(f); const dni=uhr?0:dniPoSplatnosti(f.splatnost);
+    const uhr=faktJeUhradena(f); const dni=uhr?0:dniPoSplatnosti(f.splatnost);
     return {cislo:f.cislo,partner:f.odberatel,vznik:f.datum||f.vystavenie,splatnost:f.splatnost,suma:(+f.spolu||+f.bez||0),uhradena:uhr,poSplat:!uhr&&dni>0,dni};
   });
   // záväzky = došlé faktúry roka
   const zav=(d.vydavky||[]).filter(x=>x.druh==="Došlá faktúra"&&String(x.datum||"").slice(0,4)===pzRok).map(x=>{
-    const uhr=pzZavUhradeny(x);
+    const uhr=vydJeUhradeny(x);
     return {partner:x.partner,vznik:x.datum,suma:(+x.spolu||+x.bez||0),uhradeny:uhr};
   });
   const otvPohl=pohl.filter(p=>!p.uhradena), otvZav=zav.filter(z=>!z.uhradeny);
@@ -12950,7 +12939,7 @@ function xkBuild(X){
     D.faktury.slice().sort((a,b)=>String(a.datum||"").localeCompare(String(b.datum||""))).forEach((f,i)=>{ const z=i%2===1, sc=z?S.cellZ:S.cell, sn=z?S.numZ:S.num, se=z?S.eurZ:S.eur;
       const cd=(f.polozky||[]).reduce((a,p)=>{const mj=(p.mj||"").toLowerCase();return a+(/člov|clov|deň|den|md/.test(mj)?(+p.mn||0):0);},0);
       const odb=typeof f.odberatel==="string"?f.odberatel:(f.odberatel&&f.odberatel.nazov)||"";
-      aoa.push([xkCell(f.cislo,sc),xkCell(odb,sc),xkCell(fmtSk(f.datum||f.vystavenie),sc),xkCell(fmtSk(f.splatnost),sc),xkCell(+cd||0,sn),xkCell(r2(f.bez),se),xkCell(r2(f.dph),se),xkCell(r2(f.spolu),se),xkCell(f.zaplatena?"Zaplatená":"Nezaplatená",sc)]); tb+=+f.bez||0;td+=+f.dph||0;ts+=+f.spolu||0; });
+      aoa.push([xkCell(f.cislo,sc),xkCell(odb,sc),xkCell(fmtSk(f.datum||f.vystavenie),sc),xkCell(fmtSk(f.splatnost),sc),xkCell(+cd||0,sn),xkCell(r2(f.bez),se),xkCell(r2(f.dph),se),xkCell(r2(f.spolu),se),xkCell(faktJeUhradena(f)?"Zaplatená":"Nezaplatená",sc)]); tb+=+f.bez||0;td+=+f.dph||0;ts+=+f.spolu||0; });
     aoa.push([xkCell("Spolu",S.foot),xkCell("",S.foot),xkCell("",S.foot),xkCell("",S.foot),xkCell("",S.foot),xkCell(r2(tb),S.footE),xkCell(r2(td),S.footE),xkCell(r2(ts),S.footE),xkCell("",S.foot)]);
     const ws=X.utils.aoa_to_sheet(aoa); ws['!cols']=[{wch:12},{wch:28},{wch:14},{wch:12},{wch:11},{wch:13},{wch:12},{wch:13},{wch:13}];
     ws['!merges']=[{s:{r:0,c:0},e:{r:0,c:4}}]; ws['!freeze']={xSplit:0,ySplit:3}; ws['!rows']=[{hpt:22},{hpt:6},{hpt:24}];
@@ -19157,12 +19146,27 @@ function dokladSuma(typ, cislo){
   return r2(+d.spolu || +d.bez || 0);
 }
 // koľko už bolo na doklad zaplatené (naprieč všetkými pohybmi)
+//
+// Index namiesto skenu celého výpisu pri každom volaní — stav úhrady číta
+// každý riadok zoznamu faktúr, dlaždice aj zvonček, takže bez indexu by bol
+// zoznam O(doklady × výpis). Zneplatňuje sa cez firmaDataVerzia (bumpajú ju
+// poZmene, zobrazFirmu a pridajUhradu/odoberUhradu) a pre istotu aj pri
+// výmene samotného poľa výpisu (testy si firmaData nahrádzajú celé).
+let _uhrIdx={v:-1, fd:null, vyp:null, len:-1, mapa:null};
+function _uhradyIndex(){
+  const vyp=(firmaData&&firmaData.vypis)||[];
+  if(_uhrIdx.v!==firmaDataVerzia || _uhrIdx.fd!==firmaData || _uhrIdx.vyp!==vyp || _uhrIdx.len!==vyp.length || !_uhrIdx.mapa){
+    const m=new Map();
+    vyp.forEach(t=>(t.uhrady||[]).forEach(u=>{
+      const k=u.typ+"|"+String(u.cislo);
+      m.set(k, (m.get(k)||0)+(+u.suma||0));
+    }));
+    _uhrIdx={v:firmaDataVerzia, fd:firmaData, vyp, len:vyp.length, mapa:m};
+  }
+  return _uhrIdx.mapa;
+}
 function dokladUhradene(typ, cislo){
-  let s=0;
-  (firmaData.vypis||[]).forEach(t=>(t.uhrady||[]).forEach(u=>{
-    if(u.typ===typ && String(u.cislo)===String(cislo)) s+=(+u.suma||0);
-  }));
-  return r2(s);
+  return r2(_uhradyIndex().get(typ+"|"+String(cislo))||0);
 }
 function dokladZostava(typ, cislo){ return r2(dokladSuma(typ,cislo)-dokladUhradene(typ,cislo)); }
 
@@ -19230,7 +19234,7 @@ function dokladJeUhradeny(typ, cislo){
   const s=uhradaStav(typ, cislo);
   return s.stav==="overene"||s.stav==="rucne"||s.stav==="uhradene"||s.stav==="zaplatene";
 }
-function faktJeUhradena(f){ return f && dokladJeUhradeny("faktura", f.cislo); }
+function faktJeUhradena(f){ return !!(f && dokladJeUhradeny("faktura", dokladKluc(f))); }
 // Bod 3 – akcia „označiť ako uhradené" zo zoznamu (drží aj starý príznak v sync).
 // Spôsob úhrady sa pýta PRED označením — doklad zaplatený kartou sa vo výpise
 // objaví pod iným názvom (CardPay) než prevod, a hotovosť sa neobjaví nikdy.
@@ -19405,6 +19409,7 @@ function pridajUhradu(tx, typ, cislo, suma){
   // starý formát držíme synchronizovaný, aby fungovali existujúce prehľady
   tx.potvrdenaZhoda={typ, cislo:String(cislo)};
   delete tx.odmietnutaZhoda;
+  firmaDataVerzia++;   // zneplatni index úhrad
   return s;
 }
 // Priradenia, ktoré ukazujú na doklad, čo neexistuje. Vznikali dvoma cestami:
@@ -19493,6 +19498,7 @@ function odoberUhradu(tx, typ, cislo){
   tx.uhrady=(tx.uhrady||[]).filter(u=>!(u.typ===typ && String(u.cislo)===String(cislo)));
   if(!tx.uhrady.length) delete tx.potvrdenaZhoda;
   else tx.potvrdenaZhoda={typ:tx.uhrady[0].typ, cislo:tx.uhrady[0].cislo};
+  firmaDataVerzia++;   // zneplatni index úhrad
 }
 
 // ═══ ISTÉ PLATBY FAKTÚR SA PRIRADIA SAMY ═══════════════════════════════
@@ -19729,7 +19735,8 @@ function splitNahlad(modulId){
     const f=(d.faktury||[]).slice().sort((a,b)=>String(b.datum||b.vystavenie||"").localeCompare(String(a.datum||a.vystavenie||"")));
     return wrap(H(f.length), (f.length?f.map(x=>{
       const odb=typeof x.odberatel==="string"?x.odberatel:(x.odberatel&&x.odberatel.nazov)||"";
-      return `<div class="sp-item"><div class="sp-r1"><span>${esc(x.cislo||"—")} ${odb?'· '+esc(odb):''}</span><span class="sp-amt">${eur0(+x.spolu||0)}</span></div><div class="sp-r2">${fmtDatum(x.datum||x.vystavenie)} <span class="sp-tag ${x.zaplatena?'done':'open'}">${x.zaplatena?'uhradená':'neuhradená'}</span></div></div>`;
+      const uhr=faktJeUhradena(x);
+      return `<div class="sp-item"><div class="sp-r1"><span>${esc(x.cislo||"—")} ${odb?'· '+esc(odb):''}</span><span class="sp-amt">${eur0(+x.spolu||0)}</span></div><div class="sp-r2">${fmtDatum(x.datum||x.vystavenie)} <span class="sp-tag ${uhr?'done':'open'}">${uhr?'uhradená':'neuhradená'}</span></div></div>`;
     }).join(""):'<div class="aempty">Žiadne faktúry.</div>')+openBtn);
   }
   if(modulId==="vydavky"){
@@ -19739,7 +19746,7 @@ function splitNahlad(modulId){
     ).join(""):'<div class="aempty">Žiadne výdavky.</div>')+openBtn);
   }
   if(modulId==="pohladavky"){
-    const neuhr=(d.faktury||[]).filter(f=>!f.zaplatena);
+    const neuhr=(d.faktury||[]).filter(f=>!faktJeUhradena(f));
     return wrap(H(neuhr.length), (neuhr.length?neuhr.map(f=>{
       const odb=typeof f.odberatel==="string"?f.odberatel:(f.odberatel&&f.odberatel.nazov)||"";
       const poSplat=f.splatnost&&new Date(f.splatnost)<new Date();
