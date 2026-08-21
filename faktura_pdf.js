@@ -485,3 +485,157 @@ export function modelSaasFaktury(f, dodavatel) {
     poznamka: "Faktúra bola uhradená platobnou kartou. Neuhrádzajte ju znova.",
   };
 }
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  UPOMIENKA (kap. 45.7) — rovnaká hlavička, font a paleta ako faktúra.
+//  Jedna upomienka NA ODBERATEĽA so zoznamom neuhradených faktúr — tri PDF
+//  za tri faktúry by boli obťažovanie. QR sa podáva hotový (opts.qrDataUrl)
+//  a patrí len k JEDINEJ faktúre — pri viacerých má každá vlastný VS a jeden
+//  QR kód by zaplatil zle, preto sa vtedy nevkladá.
+//  Úrok z omeškania sa zámerne nepočíta: sadzba ECB by bola ďalšia položka
+//  údržby sadzieb — doplní sa, až keď si ju niekto vypýta.
+// ═══════════════════════════════════════════════════════════════════════════
+export function modelUpomienky(faktury, meta, dnes) {
+  const prva = faktury[0] || {};
+  const odbNazov = (typeof prva.odberatel === "string")
+    ? prva.odberatel : ((prva.odberatel && prva.odberatel.nazov) || "");
+  const den = d => { const a = new Date(String(dnes)), b = new Date(String(d)); return Math.max(0, Math.floor((a - b) / 86400000)); };
+  const riadky = faktury.map(f => ({
+    cislo: f.cislo || "—", vs: f.vs || f.cislo || "",
+    vystavenie: f.datum || f.vystavenie || "", splatnost: f.splatnost || "",
+    dniPo: f.splatnost ? den(f.splatnost) : 0,
+    zostatok: r2(+(f.zostatok != null ? f.zostatok : (f.spolu || f.bez || 0)) || 0),
+    spolu: r2(+f.spolu || +f.bez || 0),
+  }));
+  return {
+    datum: dnes,
+    dodavatel: { nazov: meta.nazov, adresa: meta.adresa, ico: meta.ico, dic: meta.dic,
+      icdph: meta.icdph, tel: meta.tel, email: meta.email, iban: meta.iban, swift: meta.swift },
+    odberatel: { nazov: odbNazov, adresa: prva.adresa || (prva.odberatel && prva.odberatel.adresa) || "",
+      ico: prva.ico, dic: prva.dic, icdph: prva.icdph },
+    faktury: riadky,
+    spolu: r2(riadky.reduce((a, r) => a + r.zostatok, 0)),
+  };
+}
+
+export function vykresliUpomienku(jsPDF, model, opts = {}) {
+  const doc = chranFont(new jsPDF({ unit: "mm", format: "a4" }));
+  const FONT = registrujFont(doc) ? "LibSans" : "helvetica";
+  const { INK, SOFT, MUTED, LINE, BRAND, BGSOFT, BIELA, AKCENT, LOGO2 } = PALETA;
+  const W = 210, L = 18, R = W - 18;
+  const setC = c => doc.setTextColor(c[0], c[1], c[2]);
+  const setF = c => doc.setFillColor(c[0], c[1], c[2]);
+  const setD = c => doc.setDrawColor(c[0], c[1], c[2]);
+  const m = model.dodavatel || {}, odb = model.odberatel || {};
+  let y = 20;
+
+  // ── HLAVIČKA: logo ako na faktúre, nadpis UPOMIENKA + dátum ──
+  const lsz = 11, lx = L, ly = y - 6;
+  setF(BRAND); doc.roundedRect(lx, ly, lsz, lsz, 2.5, 2.5, "F");
+  doc.setFont(FONT, "bold"); doc.setFontSize(14); setC(BIELA);
+  doc.text("e", lx + lsz / 2 - 0.5, y + 1, { align: "center" });
+  setF(AKCENT); doc.roundedRect(lx + lsz - 3.7, ly + 1.8, 1.7, 1.7, 0.4, 0.4, "F");
+  setF(LOGO2);  doc.roundedRect(lx + lsz - 1.7, ly + 1.8, 1.7, 1.7, 0.4, 0.4, "F");
+  doc.roundedRect(lx + lsz - 3.7, ly + 3.8, 1.7, 1.7, 0.4, 0.4, "F");
+  doc.setFont(FONT, "bold"); doc.setFontSize(20); setC(INK);
+  doc.text("UPOMIENKA", R, y, { align: "right" });
+  doc.setFont(FONT, "normal"); doc.setFontSize(9.5); setC(SOFT);
+  doc.text("zo dňa " + (fmtDatum(model.datum) || ""), R, y + 7, { align: "right" });
+  y += 22;
+
+  // ── VERITEĽ / ODBERATEĽ — rovnaké bloky ako na faktúre ──
+  const colR = L + (R - L) / 2 + 8, halfW = (R - L) / 2 - 6;
+  doc.setFont(FONT, "bold"); doc.setFontSize(9); setC(MUTED);
+  doc.text("DODÁVATEĽ", L, y); doc.text("ODBERATEĽ", colR, y);
+  y += 6;
+  doc.setFont(FONT, "bold"); doc.setFontSize(10.5); setC(INK);
+  const dNazL = doc.splitTextToSize((m.nazov || "—").replace(/\s+/g, " "), halfW);
+  doc.text(dNazL, L, y);
+  const oNazL = doc.splitTextToSize(odb.nazov || "—", halfW);
+  doc.text(oNazL, colR, y);
+  let yd = y + dNazL.length * 5 + 1, yo = y + oNazL.length * 5 + 1;
+  doc.setFont(FONT, "normal"); doc.setFontSize(9); setC(SOFT);
+  if (m.adresa)   { const a = doc.splitTextToSize(m.adresa, halfW);   doc.text(a, L, yd);    yd += a.length * 4.5 + 1; }
+  if (odb.adresa) { const a = doc.splitTextToSize(odb.adresa, halfW); doc.text(a, colR, yo); yo += a.length * 4.5 + 1; }
+  yd += 2; yo += 2;
+  doc.setFontSize(8.7);
+  const idLine = (ico, dic, icdph) => [ico && ("IČO: " + ico), dic && ("DIČ: " + dic), icdph && ("IČ DPH: " + icdph)].filter(Boolean).join("   ");
+  doc.text(idLine(m.ico, m.dic, m.icdph), L, yd); yd += 6;
+  doc.text(idLine(odb.ico, odb.dic, odb.icdph), colR, yo); yo += 6;
+  y = Math.max(yd, yo) + 8;
+
+  // ── ZDVORILÝ ÚVOD ──
+  doc.setFont(FONT, "normal"); doc.setFontSize(9.5); setC(INK);
+  const uvod = "Dovoľujeme si Vás upozorniť, že ku dňu " + (fmtDatum(model.datum) || "") +
+    " neevidujeme úhradu nižšie uvedených faktúr. Prosíme o ich uhradenie v najbližších dňoch. " +
+    "Ak ste úhradu medzičasom vykonali, považujte túto upomienku za bezpredmetnú — ďakujeme.";
+  const uvodL = doc.splitTextToSize(uvod, R - L);
+  doc.text(uvodL, L, y); y += uvodL.length * 4.8 + 8;
+
+  // ── TABUĽKA NEUHRADENÝCH FAKTÚR ──
+  const cC = L, cVys = L + (R - L) * 0.30, cSpl = L + (R - L) * 0.48,
+        cDni = L + (R - L) * 0.66, cZos = R;
+  doc.setFont(FONT, "bold"); doc.setFontSize(7.8); setC(INK);
+  doc.text("FAKTÚRA Č.", cC, y);
+  doc.text("VYSTAVENÁ", cVys, y, { align: "right" });
+  doc.text("SPLATNOSŤ", cSpl, y, { align: "right" });
+  doc.text("PO SPLATNOSTI", cDni, y, { align: "right" });
+  doc.text("NEUHRADENÉ", cZos, y, { align: "right" });
+  y += 2.5; setD(INK); doc.setLineWidth(0.4); doc.line(L, y, R, y); y += 6;
+  (model.faktury || []).forEach(f => {
+    doc.setFont(FONT, "normal"); doc.setFontSize(9.3); setC(INK);
+    doc.text(String(f.cislo), cC, y);
+    doc.text(fmtDatum(f.vystavenie) || "—", cVys, y, { align: "right" });
+    doc.text(fmtDatum(f.splatnost) || "—", cSpl, y, { align: "right" });
+    setC(f.dniPo > 0 ? INK : SOFT);
+    doc.text(f.dniPo > 0 ? (f.dniPo + " dní") : "—", cDni, y, { align: "right" });
+    setC(INK); doc.setFont(FONT, "bold");
+    doc.text(money(f.zostatok) + (f.zostatok < f.spolu ? " *" : ""), cZos, y, { align: "right" });
+    y += 6.5; setD(LINE); doc.setLineWidth(0.3); doc.line(L, y - 2, R, y - 2);
+  });
+  if ((model.faktury || []).some(f => f.zostatok < f.spolu)) {
+    doc.setFont(FONT, "normal"); doc.setFontSize(7.5); setC(MUTED);
+    doc.text("* faktúra je uhradená čiastočne — uvedený je zostatok", L, y + 1); y += 5;
+  }
+  y += 4;
+
+  // ── SPOLU ──
+  setF(BGSOFT); doc.roundedRect(L, y, R - L, 11, 2, 2, "F");
+  doc.setFont(FONT, "bold"); doc.setFontSize(11); setC(INK); doc.text("Spolu neuhradené", L + 5, y + 7);
+  doc.setFontSize(14); setC(BRAND); doc.text(eur(model.spolu), R - 5, y + 7.5, { align: "right" });
+  y += 20;
+
+  // ── PLATOBNÉ ÚDAJE ──
+  doc.setFont(FONT, "bold"); doc.setFontSize(9); setC(MUTED);
+  doc.text("PLATOBNÉ ÚDAJE", L, y); y += 5.5;
+  doc.setFont(FONT, "normal"); doc.setFontSize(9.3); setC(INK);
+  if (m.iban)  { doc.text("IBAN: " + m.iban, L, y); y += 5; }
+  if (m.swift) { doc.text("SWIFT/BIC: " + m.swift, L, y); y += 5; }
+  const jedna = (model.faktury || []).length === 1 ? model.faktury[0] : null;
+  if (jedna && jedna.vs) { doc.text("Variabilný symbol: " + jedna.vs, L, y); y += 5; }
+  else if ((model.faktury || []).length > 1) {
+    doc.setFontSize(8.5); setC(SOFT);
+    doc.text("Pri úhrade uvádzajte, prosím, variabilný symbol príslušnej faktúry.", L, y); y += 5;
+  }
+  if (opts.qrDataUrl && jedna) {
+    const qsz = 26; doc.addImage(opts.qrDataUrl, "PNG", L, y + 2, qsz, qsz);
+    doc.setFont(FONT, "normal"); doc.setFontSize(6.8); setC(MUTED);
+    doc.text("PAY by square — naskenujte a zaplaťte", L + qsz / 2, y + qsz + 5, { align: "center" });
+    y += qsz + 8;
+  }
+
+  // ── PÄTIČKA — rovnaká ako na faktúre ──
+  const fy = 286;
+  setD(LINE); doc.setLineWidth(0.3); doc.line(L, fy - 4, R, fy - 4);
+  doc.setFont(FONT, "normal"); doc.setFontSize(7.3); setC(MUTED);
+  doc.text("Upomienka — " + (odb.nazov || ""), L, fy);
+  {
+    const label = "Vytvorené v ", url = "ezivnostnik.eu";
+    const wLabel = doc.getTextWidth(label), wUrl = doc.getTextWidth(url);
+    const xStart = R - wLabel - wUrl;
+    setC(MUTED); doc.text(label, xStart, fy);
+    setC(BRAND); doc.text(url, xStart + wLabel, fy);
+  }
+  return doc;
+}

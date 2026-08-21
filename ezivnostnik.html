@@ -939,7 +939,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.21-GB";  // dávka 6 z kap. 45.6 — vyhľadávanie a priznané orezanie
+const APP_VERZIA = "2026.08.21-GC";  // dávka 7 z kap. 45.7 — pohľadávky s akciami a PDF upomienka
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -10968,20 +10968,55 @@ let pzRok="", pzTab="pohl";
 // Stav úhrady číta kanonický dokladJeUhradeny — Pohľadávky mali dovtedy
 // vlastnú heuristiku (zhoda VS alebo LEN sumy s ľubovoľným pohybom), takže
 // tvrdili iné než zoznam faktúr a Banka (kap. 45.2).
+
+// Upomienka (kap. 45.7): JEDNO PDF na odberateľa so zoznamom všetkých jeho
+// neuhradených faktúr po splatnosti — tri PDF za tri faktúry by boli
+// obťažovanie. Šablóna žije vo faktura_pdf.js (rovnaká paleta ako faktúra).
+function upomienkaKandidati(odberatel, dnes){
+  const cielN=normTxt(odberatel);
+  return (firmaData.faktury||[]).filter(f=>{
+    const n=(typeof f.odberatel==="string")?f.odberatel:((f.odberatel&&f.odberatel.nazov)||"");
+    if(normTxt(n)!==cielN) return false;
+    if(!f.splatnost || String(f.splatnost)>=dnes) return false;
+    return dokladZostava("faktura", dokladKluc(f))>0.02;
+  }).map(f=>Object.assign({}, f, {zostatok:dokladZostava("faktura", dokladKluc(f))}))
+    .sort((a,b)=>String(a.splatnost).localeCompare(String(b.splatnost)));
+}
+async function upomienkaPDF(odberatel){
+  const m=firmaData.meta||{};
+  const dnes=new Date().toISOString().slice(0,10);
+  const zoz=upomienkaKandidati(odberatel, dnes);
+  if(!zoz.length){ alert("Tento odberateľ nemá žiadnu neuhradenú faktúru po splatnosti."); return; }
+  const FP=await fakturaPdfModul();
+  await ensureJsPDF();
+  const { jsPDF }=window.jspdf;
+  // QR len pri jedinej, celej neuhradenej faktúre — QR nesie plnú sumu a VS;
+  // pri čiastočnej úhrade alebo viacerých faktúrach by zaplatil zle
+  let qrDataUrl=null;
+  if(zoz.length===1 && Math.abs(zoz[0].zostatok-(+zoz[0].spolu||0))<0.005){
+    try{ qrDataUrl=await generujPayBySquareQR(zoz[0], m); }catch(e){ console.error("QR do upomienky:", e); }
+  }
+  const doc=FP.vykresliUpomienku(jsPDF, FP.modelUpomienky(zoz, m, dnes), { qrDataUrl });
+  doc.save("upomienka_"+String(odberatel).replace(/[^\w-]+/g,"_").slice(0,40)+"_"+dnes+".pdf");
+}
 function dniPoSplatnosti(splat){ if(!splat) return 0; const d=new Date(splat); if(isNaN(d)) return 0; return Math.floor((Date.now()-d)/86400000); }
 function appPohladavky(){
   const d=firmaData, c=APPS.pohladavky.c;
   const roky=[...new Set([...(d.faktury||[]).map(f=>String(f.datum||f.vystavenie||"").slice(0,4)),...(d.vydavky||[]).filter(x=>x.druh==="Došlá faktúra").map(x=>String(x.datum||"").slice(0,4))].filter(r=>/^\d{4}$/.test(r)))].sort().reverse();
   if(!pzRok) pzRok=roky[0]||String(new Date().getFullYear());
-  // pohľadávky = vystavené faktúry roka
+  // pohľadávky = vystavené faktúry roka; riadok nesie index a kľúč, aby sa
+  // dal otvoriť, označiť uhradený a upomienkovať (kap. 45.7)
+  const _pfIdx=new Map((d.faktury||[]).map((x,i)=>[x,i]));
+  const _pvIdx=new Map((d.vydavky||[]).map((x,i)=>[x,i]));
   const pohl=(d.faktury||[]).filter(f=>String(f.datum||f.vystavenie||"").slice(0,4)===pzRok).map(f=>{
     const uhr=faktJeUhradena(f); const dni=uhr?0:dniPoSplatnosti(f.splatnost);
-    return {cislo:f.cislo,partner:f.odberatel,vznik:f.datum||f.vystavenie,splatnost:f.splatnost,suma:(+f.spolu||+f.bez||0),uhradena:uhr,poSplat:!uhr&&dni>0,dni};
+    const partner=(typeof f.odberatel==="string")?f.odberatel:((f.odberatel&&f.odberatel.nazov)||"");
+    return {idx:_pfIdx.get(f),kluc:dokladKluc(f),cislo:f.cislo,partner,vznik:f.datum||f.vystavenie,splatnost:f.splatnost,suma:(+f.spolu||+f.bez||0),uhradena:uhr,poSplat:!uhr&&dni>0,dni};
   });
   // záväzky = došlé faktúry roka
   const zav=(d.vydavky||[]).filter(x=>x.druh==="Došlá faktúra"&&String(x.datum||"").slice(0,4)===pzRok).map(x=>{
     const uhr=vydJeUhradeny(x);
-    return {partner:x.partner,vznik:x.datum,suma:(+x.spolu||+x.bez||0),uhradeny:uhr};
+    return {idx:_pvIdx.get(x),partner:x.partner,vznik:x.datum,suma:(+x.spolu||+x.bez||0),uhradeny:uhr};
   });
   if((_hladaj.pohladavky||"").trim()){
     const q=_hladaj.pohladavky;
@@ -11011,14 +11046,15 @@ function appPohladavky(){
       <span class="achip ${pzTab==='zav'?'on':''}" onclick="pzTab='zav';appPohladavky()">Záväzky (${zav.length})</span>
       ${hladatkoHtml('pohladavky','appPohladavky','🔍 Partner, číslo, suma…')}
     </div>
-    <div class="csub" style="margin:0 2px 12px">${pzTab==='pohl'?'Vystavené faktúry — komu a koľko dlhujú vám. Úhrada sa páruje z bankového výpisu.':'Došlé faktúry — komu dlhujete vy.'}</div>
+    <div class="csub" style="margin:0 2px 12px">${pzTab==='pohl'?'Vystavené faktúry — komu a koľko dlhujú vám. Klik otvorí faktúru; pri faktúre po splatnosti viete vygenerovať PDF upomienku.':'Došlé faktúry — komu dlhujete vy. Klik otvorí výdavok.'}</div>
     <div class="alist">
       ${pzTab==='pohl'
-        ? (pohlZobraz.length?pohlZobraz.map(p=>`<div class="arow" style="grid-template-columns:1.6fr 1fr auto;cursor:default;${p.poSplat?'background:var(--sfc-neg)':p.uhradena?'opacity:.6':''}">
+        ? (pohlZobraz.length?pohlZobraz.map(p=>`<div class="arow" style="grid-template-columns:1.6fr 1fr auto auto;cursor:pointer;${p.poSplat?'background:var(--sfc-neg)':p.uhradena?'opacity:.6':''}" onclick="editFaktura(${p.idx})" title="Otvoriť faktúru">
             <div><div class="acol-strong">${esc(p.partner||"—")}</div><div class="acol-muted">${esc(p.cislo||"")} · splatnosť ${fmtDatum(p.splatnost)}</div></div>
             <div class="acol-muted" style="text-align:right">${p.uhradena?'<span class="apill ok">uhradená</span>':p.poSplat?'<span class="apill neg">po splatnosti '+p.dni+' dní</span>':'<span class="apill warn">otvorená</span>'}</div>
-            <div class="acol-sum">${eur(p.suma)}</div></div>`).join(''):'<div class="aempty">Žiadne pohľadávky v tomto roku.</div>')
-        : (zavZobraz.length?zavZobraz.map(z=>`<div class="arow" style="grid-template-columns:1.6fr 1fr auto;cursor:default;${z.uhradeny?'opacity:.6':''}">
+            <div class="acol-sum">${eur(p.suma)}</div>
+            <div style="display:flex;gap:5px;align-items:center">${p.uhradena?'':`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vyberSposobUhrady(null,_s=>{oznacDokladUhradeny('faktura','${esc(p.kluc)}',_s);appPohladavky();})" title="Označiť ako uhradenú">✓</button>`}${p.poSplat?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();upomienkaPDF('${esc(p.partner)}')" title="Vygenerovať PDF upomienku — jedna na odberateľa, so všetkými faktúrami po splatnosti">📄 Upomienka</button>`:''}</div></div>`).join(''):'<div class="aempty">Žiadne pohľadávky v tomto roku.</div>')
+        : (zavZobraz.length?zavZobraz.map(z=>`<div class="arow" style="grid-template-columns:1.6fr 1fr auto;cursor:pointer;${z.uhradeny?'opacity:.6':''}" onclick="editVydavok(${z.idx})" title="Otvoriť výdavok">
             <div><div class="acol-strong">${esc(z.partner||"—")}</div><div class="acol-muted">${fmtDatum(z.vznik)}</div></div>
             <div class="acol-muted" style="text-align:right">${z.uhradeny?'<span class="apill ok">uhradený</span>':'<span class="apill warn">neuhradený</span>'}</div>
             <div class="acol-sum">${eur(z.suma)}</div></div>`).join(''):'<div class="aempty">Žiadne záväzky v tomto roku.</div>')}
