@@ -946,7 +946,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.21-GF";  // KV DPH: dátum dodania namiesto vystavenia (chyba v XML pre FS)
+const APP_VERZIA = "2026.08.21-GG";  // KV DPH: cesta k súboru sa už nedostane do čísla faktúry
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -15138,7 +15138,13 @@ function dphZberMesiac(mk){
       if(oddielR==="X") return;
       doklady.push({
         id:"vy_"+(x.cislo||i)+"_"+i+(viac?"_"+ri:""), zdrojId:x.id, typ:"vstup", smer:"vstup", oddiel:oddielR,
-        cislo:x.cislo||x.doklad||"", datum:(x.datum||"").slice(0,10), partner:x.partner||x.dodavatel||x.nazov||"", icDph,
+        // `x.doklad` je CESTA K SÚBORU v úložisku, nie číslo faktúry — ako
+        // fallback tu dostávala doklad bez čísla do KV reťazec
+        // „74a4ef0f-…/vydavok_1785401689752.jpg". Schéma predpisuje `\S{1,32}`,
+        // takže výkaz portál odmietne; navyše sa tým do dokumentu pre štát
+        // dostávalo interné ID úložiska. Prázdne číslo je správnejšie: nájde ho
+        // kontrola pred podaním a schéma ho odmietne nahlas.
+        cislo:x.cislo||"", datum:(x.datum||"").slice(0,10), partner:x.partner||x.dodavatel||x.nazov||"", icDph,
         sadzba:r.sadzba||Math.round(sadzbaDef*100), zaklad:r2(r.bez), dan:r2(r.dph),
         zahranicny:zahr, kodKrajiny:kraj, samozdanenieTyp:samozdDruh(x), opravujeDoklad:x.opravujeDoklad||"",
         autoDoklad:!!x.autoDoklad, odpocetPct:odpocetPercent(x), danOdpocet:danNaOdpocet(r.dph, x),
@@ -15611,6 +15617,15 @@ function kontrolaPredPodanim(mk, typ){
     if(dk.datum && !P.mesiace.includes(dk.datum.slice(0,7))) podozrenia.push({text:`Doklad „${dk.cislo||dk.partner||"—"}" má dátum ${fmtDatum(dk.datum)}, ale je v období ${mk}.`, detail:"Skontroluj, či patrí do tohto obdobia."});
     // základ 0 pri nenulovej DPH
     if((+dk.dan)>0 && (+dk.zaklad)<=0) chyby.push({text:`Doklad „${dk.cislo||dk.partner||"—"}" má DPH ${eur(dk.dan)}, ale nulový/záporný základ.`, detail:"Základ dane musí byť kladný."});
+    // ── ČÍSLO FAKTÚRY: schéma predpisuje `\S{1,32}` a atribút je povinný ──
+    // Súhrnné oddiely (B.3.1 bločky, D.1/D.2 tržby) číslo nemajú a nepotrebujú.
+    if(!["B31","D1","D2"].includes(dk.oddiel)){
+      const c=String(dk.cislo||"").trim();
+      if(!c) chyby.push({text:`Doklad „${dk.partner||"—"}" (${eur(dk.zaklad)}) nemá číslo faktúry.`,
+        detail:"V oddiele "+dk.oddiel+" je poradové číslo faktúry povinné — bez neho výkaz neprejde validáciou a FS ho nespáruje s dokladom protistrany.", zdrojId:dk.zdrojId||""});
+      else if(c.length>32 || /\s/.test(c)) chyby.push({text:`Doklad „${dk.partner||c}" má číslo, ktoré schéma nepripúšťa: ${c.length>40?c.slice(0,40)+"…":c}`,
+        detail:"Poradové číslo faktúry smie mať najviac 32 znakov a nesmie obsahovať medzery (\\S{1,32}). Portál FS taký výkaz odmietne.", zdrojId:dk.zdrojId||""});
+    }
   });
 
   // (chýbajúce číslo opravovanej faktúry rieši blokujúca kontrola nižšie)
