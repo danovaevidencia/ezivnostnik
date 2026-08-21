@@ -912,8 +912,6 @@ a.clWeb{display:inline-block;margin-top:12px;font-size:12.5px;color:#7a5cc4;text
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="sadzby.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 // knižnice načítavané na požiadanie (OCR, pdf.js) — aby sa appka rýchlo spustila
 let _tesseract=null, _pdfjs=null;
@@ -941,7 +939,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.21-FY";  // dávka 3 z kap. 45.2 — jeden stav úhrady dokladu
+const APP_VERZIA = "2026.08.21-FZ";  // dávka 4 z kap. 45.8 — lenivé knižnice, memoizácia, indexy
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -2201,13 +2199,24 @@ function danZoZakladu(zaklad, rok, prijmy, S){
 //  pre bežný rok sa oproti starému výpočtu nič nemení.
 // ═══════════════════════════════════════════════════════════════
 let firmaDataVerzia=0;   // rastie pri každej zmene dát (poZmene) — kľúč cache
+// Memoizácia drahých ročných výpočtov per (kľúč, verzia dát, firma). Jedno
+// počítadlo namiesto ručných invalidácií po moduloch — invalidácia, na ktorú
+// treba myslieť, je invalidácia, ktorá sa raz zabudne (kap. 45.8).
+const _memoRok={};
+function memoRok(kluc, vypocet){
+  const c=_memoRok[kluc];
+  if(c && c.v===firmaDataVerzia && c.fd===firmaData) return c.hod;
+  const hod=vypocet();
+  _memoRok[kluc]={v:firmaDataVerzia, fd:firmaData, hod};
+  return hod;
+}
 let _dsEfCache={kl:null, v:0};
 function danSadzbaEfektivna(rok){
   const S=(firmaData&&firmaData.settings)||{};
   const plocha=sadzbaFirmy("danPrijem", +rok, S);
   if(!firmaData) return plocha;
   const kl=rok+"·"+firmaDataVerzia;
-  if(_dsEfCache.kl===kl) return _dsEfCache.v;
+  if(_dsEfCache.kl===kl && _dsEfCache.fd===firmaData) return _dsEfCache.v;
   let v=plocha;
   try{
     const P=dePrognoza(+rok);
@@ -2216,7 +2225,7 @@ function danSadzbaEfektivna(rok){
       if(DZ && DZ.sadzba>0) v=DZ.sadzba;
     }
   }catch(e){ console.error("danSadzbaEfektivna:", e); }
-  _dsEfCache={kl, v};
+  _dsEfCache={kl, fd:firmaData, v};
   return v;
 }
 // sadzba ako text do popiskov — „15 %", pri progresii napr. „18,3 %"
@@ -2277,6 +2286,9 @@ function deDanovyVypocet(rok, variant){
 
 // DPH saldo za rok
 function dphSaldoRok(rok){
+  return memoRok("dphSaldo·"+rok, ()=>_dphSaldoRokVypocet(rok));
+}
+function _dphSaldoRokVypocet(rok){
   // konzistentne cez mesačný zber (zahŕňa samozdanenie, oddiely, sadzby)
   let out=0, inp=0;
   for(let m=1;m<=12;m++){
@@ -2448,6 +2460,13 @@ function heroRozpis(t){
 }
 
 function danTotals(rok, S){
+  // hero aj dlaždica volajú danTotals pri každom prekreslení — bez cache bežal
+  // celý 12-mesačný výpočet dvakrát na jedno zobrazenie plochy (kap. 45.8).
+  // Vlastné S (čo-ak scenár) cache obchádza.
+  if(S && firmaData && firmaData.settings && S!==firmaData.settings) return _danTotalsVypocet(rok, S);
+  return memoRok("danTotals·"+rok, ()=>_danTotalsVypocet(rok, S));
+}
+function _danTotalsVypocet(rok, S){
   const t={faktB:0,odpis:0,vyradenie:0,ostatne:0,nakladySpolu:0,ciastkZaklad:0,zdrav:0,preddavokZP:0,dan:0,danPreddavok:0,soc:0,odvodyDan:0,odlozit:0,cisty:0};
   const rows=[];  for(let mi=0;mi<12;mi++){ const c=calcDanRow(mi,rok,S); rows.push(c);
     if(!c.aktivny) continue;
@@ -2834,6 +2853,12 @@ function aktivneMesiaceRoka(rok){
   return n;
 }
 function odpisDaneRok(rok, S){
+  // volá sa z calcDanRow (12× na render) aj prognóz — vnútri prechádza celú
+  // evidenciu majetku a aktívne mesiace; bez cache O(mesiace × doklady)
+  if(S && firmaData && firmaData.settings && S!==firmaData.settings) return _odpisDaneRokVypocet(rok, S);
+  return memoRok("odpisRok·"+rok, ()=>_odpisDaneRokVypocet(rok, S));
+}
+function _odpisDaneRokVypocet(rok, S){
   const nast=r2((+((S||firmaData.settings||{}).odpisAutoMes)||0)*12);
   const zEvidencie=r2(odpisRokCelkom(rok));
   if(zEvidencie>0){
@@ -3053,6 +3078,11 @@ function vydavokDoMajetku(idx){
 // ═══════════════════════════════════════════════════
 // katalóg widgetov: každý má metriky, medzi ktorými sa dá prepínať
 function dashWidgetKatalog(){
+  // katalóg sa stavia ~20× na jedno vykreslenie plochy (widget, menu, kľúče);
+  // hodnoty sú lenivé (data/val closures), takže objekt sa dá bezpečne cacheovať
+  return memoRok("dashKatalog", _dashWidgetKatalogVypocet);
+}
+function _dashWidgetKatalogVypocet(){
   const d=firmaData, rok=new Date().getFullYear();
   const kat = {
     graf: {
@@ -5459,6 +5489,7 @@ function appFaktury(){
   // sa inak vybrala spolu so všetkými ostatnými bez čísla.
   fakPoslednyList=list.map(dokladKluc).filter(Boolean);
   const vsetkyVybrane=fakPoslednyList.length>0 && fakPoslednyList.every(c=>fakVybrane.has(c));
+  const _fIdx=new Map((d.faktury||[]).map((x,i)=>[x,i]));   // index riadku bez O(n²) indexOf (45.8)
   document.getElementById("appScreen").innerHTML=appHlavicka("faktury",`<button class="aabtn" style="--_c:${c}" onclick="faktImport()">📥 Import (XLSX/XML/ISDOC/PDF)</button><button class="aabtn pri" style="--_c:${c}" onclick="editFaktura()">＋ Nová faktúra</button>`)+`
     <div class="amini">
       <div class="aminbox"><div class="al">Fakturované</div><div class="av pos">${eur(spolu)}</div></div>
@@ -5478,7 +5509,7 @@ function appFaktury(){
     </div>`:''}
     <div class="alist">
       <div class="arow head rdok rf"><div class="c-cb"><input type="checkbox" ${vsetkyVybrane?'checked':''} onclick="fakVyberVsetky(this.checked)" title="Vybrať všetky" style="cursor:pointer"></div><div class="c-sub">Číslo</div><div class="c-main">Odberateľ</div><div class="c-date">Dátum</div><div class="c-sum" style="text-align:right">Suma</div><div class="c-stav">Stav</div><div class="c-act"></div></div>
-      ${list.length?list.map(f=>{const idx=(d.faktury||[]).indexOf(f);const fk=dokladKluc(f);const st=uhradaStav("faktura", fk);const fb=UHRADA_FARBY[st.stav]||UHRADA_FARBY.neznamy;const uhradena=faktJeUhradena(f);return `<div class="arow rdok rf"><div class="c-cb"><input type="checkbox" ${fakVybrane.has(fk)?'checked':''} onclick="event.stopPropagation();fakToggleVyber('${esc(fk)}',this.checked)" style="cursor:pointer"></div><div class="acol-strong c-sub" style="color:${c}" onclick="editFaktura(${idx})">${esc(f.cislo||"—")}</div><div class="c-main" onclick="editFaktura(${idx})">${esc(f.odberatel||"—")}</div><div class="acol-muted c-date" onclick="editFaktura(${idx})">${fmtDatum(f.datum||f.vystavenie)}</div><div class="acol-sum c-sum" onclick="editFaktura(${idx})">${eur(+f.spolu||0)}</div><div class="c-stav" onclick="editFaktura(${idx})" title="${esc(st.text||'')}"><span style="display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:600;color:${fb.f}">${fb.ic} ${fb.n}</span></div><div class="c-act" style="display:flex;gap:5px;align-items:center">${!uhradena?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vyberSposobUhrady(null,_s=>{oznacDokladUhradeny('faktura','${esc(fk)}',_s);appFaktury();})" title="Označiť ako uhradené">✓</button>`:((st.zdroj==='rucne'||st.zdroj==='legacy')?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();zrusDokladUhradu('faktura','${esc(fk)}');appFaktury()" title="Zrušiť potvrdenie úhrady">✕</button>`:'')}<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();exportFakturaPDF(${idx})" title="${f.originalSubor?'Stiahnuť pôvodný PDF':'Vygenerovať PDF faktúry'}">${f.originalSubor?'📎':'PDF'}</button><button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();exportEFakturaUBL(${idx})" title="E-faktúra UBL 2.1 / Peppol (povinné od 2027)">e-fa</button><button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();kopirujFakturu(${idx})" title="Vytvoriť kópiu — nové číslo a dátum, ostatné prevzaté">⧉</button></div></div>`;}).join(''):'<div class="aempty">Žiadne faktúry v tomto filtri.</div>'}
+      ${list.length?list.map(f=>{const idx=_fIdx.get(f);const fk=dokladKluc(f);const st=uhradaStav("faktura", fk);const fb=UHRADA_FARBY[st.stav]||UHRADA_FARBY.neznamy;const uhradena=faktJeUhradena(f);return `<div class="arow rdok rf"><div class="c-cb"><input type="checkbox" ${fakVybrane.has(fk)?'checked':''} onclick="event.stopPropagation();fakToggleVyber('${esc(fk)}',this.checked)" style="cursor:pointer"></div><div class="acol-strong c-sub" style="color:${c}" onclick="editFaktura(${idx})">${esc(f.cislo||"—")}</div><div class="c-main" onclick="editFaktura(${idx})">${esc(f.odberatel||"—")}</div><div class="acol-muted c-date" onclick="editFaktura(${idx})">${fmtDatum(f.datum||f.vystavenie)}</div><div class="acol-sum c-sum" onclick="editFaktura(${idx})">${eur(+f.spolu||0)}</div><div class="c-stav" onclick="editFaktura(${idx})" title="${esc(st.text||'')}"><span style="display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:600;color:${fb.f}">${fb.ic} ${fb.n}</span></div><div class="c-act" style="display:flex;gap:5px;align-items:center">${!uhradena?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vyberSposobUhrady(null,_s=>{oznacDokladUhradeny('faktura','${esc(fk)}',_s);appFaktury();})" title="Označiť ako uhradené">✓</button>`:((st.zdroj==='rucne'||st.zdroj==='legacy')?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();zrusDokladUhradu('faktura','${esc(fk)}');appFaktury()" title="Zrušiť potvrdenie úhrady">✕</button>`:'')}<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();exportFakturaPDF(${idx})" title="${f.originalSubor?'Stiahnuť pôvodný PDF':'Vygenerovať PDF faktúry'}">${f.originalSubor?'📎':'PDF'}</button><button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();exportEFakturaUBL(${idx})" title="E-faktúra UBL 2.1 / Peppol (povinné od 2027)">e-fa</button><button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();kopirujFakturu(${idx})" title="Vytvoriť kópiu — nové číslo a dátum, ostatné prevzaté">⧉</button></div></div>`;}).join(''):'<div class="aempty">Žiadne faktúry v tomto filtri.</div>'}
     </div>`;
   setCrumb(`${fak.length} faktúr · ${eur(spolu)}`);
 }
@@ -6601,6 +6632,7 @@ function appVydavky(){
   // — checkbox sa mu vôbec nevykreslil (rovnaká príčina ako v EX).
   vydPoslednyList=list.map(dokladKluc).filter(Boolean);
   const vsetkyVybraneV=vydPoslednyList.length>0 && vydPoslednyList.every(c=>vydVybrane.has(c));
+  const _vIdx=new Map((d.vydavky||[]).map((x,i)=>[x,i]));   // index riadku bez O(n²) indexOf (45.8)
   document.getElementById("appScreen").innerHTML=appHlavicka("vydavky",`<button class="aabtn" style="--_c:${c}" onclick="rychlyDoklad(this)">🧾 Odfotiť / načítať doklad</button><button class="aabtn" style="--_c:${c}" onclick="faktPdfImport()">📥 Import faktúr (XML/PDF)</button><button class="aabtn" style="--_c:${c}" onclick="otvorOpakovane()">🔁 Opakované${(()=>{const n=opakovaneCakajuce().length;return n?" ("+n+")":"";})()}</button><button class="aabtn pri" style="--_c:${c}" onclick="editVydavok()">＋ Nový výdavok</button>`)+`
     <div class="amini">
       <div class="aminbox"><div class="al">Výdavky bez DPH</div><div class="av">${eur(bezSpolu)}</div></div>
@@ -6629,7 +6661,7 @@ function appVydavky(){
     </div>`:''}
     <div class="alist">
       <div class="arow head rdok rv"><div class="c-cb"><input type="checkbox" ${vsetkyVybraneV?'checked':''} onclick="vydVyberVsetky(this.checked)" title="Vybrať všetky" style="cursor:pointer"></div><div class="c-main">Partner / popis</div><div class="c-date">Dátum</div><div class="c-sum" style="text-align:right">Bez DPH</div><div class="c-sub" style="text-align:right">DPH</div><div class="c-stav" style="text-align:center">Stav</div><div class="c-act"></div></div>
-      ${list.length?list.map(x=>{const idx=(d.vydavky||[]).indexOf(x);const bezDat=!x.datum||!/^\d{4}-\d{2}/.test(String(x.datum));const kl=dokladKluc(x);const st=kl?uhradaStav("vydavok",kl):null;const fb=st?(UHRADA_FARBY[st.stav]||UHRADA_FARBY.neznamy):null;const uhr=vydJeUhradeny(x);return `<div class="arow rdok rv" onclick="editVydavok(${idx})"><div class="c-cb">${kl?`<input type="checkbox" ${vydVybrane.has(kl)?'checked':''} onclick="event.stopPropagation();vydToggleVyber('${esc(kl)}',this.checked)" style="cursor:pointer">`:''}</div><div class="c-main"><div class="acol-strong" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(x.partner||"—")} ${x.doklad?'<span title="Doklad v cloude" style="cursor:pointer" onclick="event.stopPropagation();otvorDoklad(\''+esc(x.doklad)+'\')">📎</span>':''}</div><div class="acol-muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(x.popis||x.druh||"")}${(()=>{const kde=uhradyPopis("vydavok",kl,true);return kde?` <span style="color:var(--pos)">· zaplatené ${esc(kde)}</span>`:"";})()}</div></div><div class="acol-muted c-date">${bezDat?'<span class="apill neg">bez dátumu</span>':fmtDatum(x.datum)}</div><div class="acol-sum c-sum">${eur(+x.bez||0)}</div><div class="acol-sum c-sub" style="color:var(--ink-soft)">${eur(+x.dph||0)}</div><div class="c-stav" style="text-align:center">${fb?`<span title="${esc((st.n||fb.n)+(st.text?' — '+st.text:''))}" style="color:${fb.f};font-size:14px">${fb.ic}</span>`:'<span style="color:var(--ink-soft)">·</span>'}</div><div class="c-act">${kl?(!uhr?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vyberSposobUhrady(null,_s=>{oznacDokladUhradeny('vydavok','${esc(kl)}',_s);appVydavky();})" title="Označiť ako uhradené">✓</button>`:((st.zdroj==='rucne'||st.zdroj==='legacy')?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();zrusDokladUhradu('vydavok','${esc(kl)}');appVydavky()" title="Zrušiť potvrdenie úhrady">✕</button>`:'')):''}</div></div>`;}).join(''):'<div class="aempty">Žiadne výdavky v tomto filtri.</div>'}
+      ${list.length?list.map(x=>{const idx=_vIdx.get(x);const bezDat=!x.datum||!/^\d{4}-\d{2}/.test(String(x.datum));const kl=dokladKluc(x);const st=kl?uhradaStav("vydavok",kl):null;const fb=st?(UHRADA_FARBY[st.stav]||UHRADA_FARBY.neznamy):null;const uhr=vydJeUhradeny(x);return `<div class="arow rdok rv" onclick="editVydavok(${idx})"><div class="c-cb">${kl?`<input type="checkbox" ${vydVybrane.has(kl)?'checked':''} onclick="event.stopPropagation();vydToggleVyber('${esc(kl)}',this.checked)" style="cursor:pointer">`:''}</div><div class="c-main"><div class="acol-strong" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(x.partner||"—")} ${x.doklad?'<span title="Doklad v cloude" style="cursor:pointer" onclick="event.stopPropagation();otvorDoklad(\''+esc(x.doklad)+'\')">📎</span>':''}</div><div class="acol-muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(x.popis||x.druh||"")}${(()=>{const kde=uhradyPopis("vydavok",kl,true);return kde?` <span style="color:var(--pos)">· zaplatené ${esc(kde)}</span>`:"";})()}</div></div><div class="acol-muted c-date">${bezDat?'<span class="apill neg">bez dátumu</span>':fmtDatum(x.datum)}</div><div class="acol-sum c-sum">${eur(+x.bez||0)}</div><div class="acol-sum c-sub" style="color:var(--ink-soft)">${eur(+x.dph||0)}</div><div class="c-stav" style="text-align:center">${fb?`<span title="${esc((st.n||fb.n)+(st.text?' — '+st.text:''))}" style="color:${fb.f};font-size:14px">${fb.ic}</span>`:'<span style="color:var(--ink-soft)">·</span>'}</div><div class="c-act">${kl?(!uhr?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vyberSposobUhrady(null,_s=>{oznacDokladUhradeny('vydavok','${esc(kl)}',_s);appVydavky();})" title="Označiť ako uhradené">✓</button>`:((st.zdroj==='rucne'||st.zdroj==='legacy')?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();zrusDokladUhradu('vydavok','${esc(kl)}');appVydavky()" title="Zrušiť potvrdenie úhrady">✕</button>`:'')):''}</div></div>`;}).join(''):'<div class="aempty">Žiadne výdavky v tomto filtri.</div>'}
     </div>`;
   setCrumb(`${vyd.length} dokladov · ${vRok}${vMesiac?' · '+mesiacLabel(vMesiac):''} · ${eur(bezSpolu)} bez DPH`);
 }
@@ -7946,7 +7978,7 @@ function dmvHtml(rok){
     <div class="csub" style="margin-bottom:12px">Priznanie sa podáva a daň je splatná do <b>${termStr}</b>.</div>
     <div class="alist">
       <div class="arow head" style="grid-template-columns:2fr 1fr"><div>Vozidlo</div><div style="text-align:right">Daň</div></div>
-      ${(firmaData.vozidla||[]).map((v,i)=>{ const r=dmvRok(rok).riadky.find(x=>x.v===v) || dmvVozidlo(v,rok); return riadok(r,i); }).join("")}
+      ${(firmaData.vozidla||[]).map((v,i)=>{ const r=D.riadky.find(x=>x.v===v) || dmvVozidlo(v,rok); return riadok(r,i); }).join("")}
       <div class="arow" style="grid-template-columns:2fr 1fr;font-weight:700;cursor:default"><div>Spolu</div><div class="acol-sum">${eur(D.spolu)}</div></div>
     </div>
     ${D.riadky.some(r=>r.nulova)?`<div style="font-size:11.5px;color:var(--ink-soft);margin-top:9px;line-height:1.5">
@@ -8953,7 +8985,8 @@ function dovPridajRok(){
   const novy=existujuce.length?Math.max(...existujuce)+1:new Date().getFullYear();
   dovEnsure(String(novy)); dovRok=String(novy); poZmene(); appDovolenka();
 }
-function dovExportXlsx(){
+async function dovExportXlsx(){
+  await ensureXLSX();
   const d=dovEnsure(dovRok);
   const zVykazov=dovolenkaZVykazov(dovRok);
   const cerpanePoMes=MESIACE_PLNE.map((_,mi)=>{ const r=(d.mesiace||{})[mi]; return r!=null&&r!==""?(+r||0):(zVykazov[mi]||0); });
@@ -9117,7 +9150,8 @@ function appJazdy(){
         if(kjTriedenie==="km-desc") list.sort((a,b)=>(+b.km||0)-(+a.km||0));
         else if(kjTriedenie==="km-asc") list.sort((a,b)=>(+a.km||0)-(+b.km||0));
         else list.sort((a,b)=>{const da=jazdaDatum(a),db=jazdaDatum(b);return (da&&db)?(db-da):0;});
-        return list.length?list.map(j=>{const idx=(d.jazdy||[]).indexOf(j);const klik=idx>=0?`onclick="editJazda(${idx})"`:'';const sukrPill = jazdaSukromna(j) ? ' <span class="apill" style="background:#f2e6cf;color:var(--accent-deep)">súkromná</span>'
+        const _jIdx=new Map((d.jazdy||[]).map((x,i)=>[x,i]));   // index riadku bez O(n²) indexOf (45.8)
+        return list.length?list.map(j=>{const idx=_jIdx.get(j)??-1;const klik=idx>=0?`onclick="editJazda(${idx})"`:'';const sukrPill = jazdaSukromna(j) ? ' <span class="apill" style="background:#f2e6cf;color:var(--accent-deep)">súkromná</span>'
                  : ((j._zluceny && +j._sukrKm>0) ? ' <span class="apill" style="background:#f2e6cf;color:var(--accent-deep)">'+Math.round(j._sukrKm)+' km súkr.</span>' : '');
 return `<div class="arow" style="grid-template-columns:2fr 1.4fr 1fr" ${klik}><div><div class="acol-strong"${jazdaSukromna(j)?' style="color:var(--ink-soft)"':''}>${esc(j.cesta||j.trasa||"—")}${j._zluceny?' <span class="apill" style="background:var(--brand-lite);color:var(--brand)">'+j._pocet+' jázd</span>':''}${sukrPill}</div><div class="acol-muted">${esc(j.ucel||"")}</div></div><div class="acol-muted">${esc(j.datum||"")}</div><div class="acol-sum"${jazdaSukromna(j)?' style="color:var(--ink-soft)"':''}>${(+j.km||0)}</div></div>`;}).join(''):'<div class="aempty">Žiadne jazdy zodpovedajúce filtru.</div>';
       })()}
@@ -9230,7 +9264,7 @@ function kjNabijaniaTankovania(){
       <div class="csub" style="margin-bottom:10px">Litre sa pridávajú automaticky pri OCR bločku označenom ako PHM (tankovanie).</div>
       <div class="alist" style="max-height:220px;overflow:auto" data-scroll="kjTank">
         <div class="arow head" style="grid-template-columns:1fr 1.5fr 1fr 1fr"><div>Dátum</div><div>Stanica</div><div style="text-align:right">Litre</div><div style="text-align:right">Suma</div></div>
-        ${tank.slice().reverse().slice(0,50).map((t)=>{ const realIdx=firmaData.tankovania.indexOf(t); return `<div class="arow" style="grid-template-columns:1fr 1.5fr 1fr 1fr;cursor:pointer" onclick="editTankovanie(${realIdx})"><div class="acol-muted">${fmtDatum(t.datum)}</div><div class="acol-muted">${esc(t.stanica||"")}</div><div class="acol-sum">${(+t.litre||0).toFixed(2)}</div><div class="acol-sum">${eur(+t.suma||0)}</div></div>`; }).join('')}
+        ${(()=>{const _tIdx=new Map((firmaData.tankovania||[]).map((x,i)=>[x,i]));return tank.slice().reverse().slice(0,50).map((t)=>{ const realIdx=_tIdx.get(t); return `<div class="arow" style="grid-template-columns:1fr 1.5fr 1fr 1fr;cursor:pointer" onclick="editTankovanie(${realIdx})"><div class="acol-muted">${fmtDatum(t.datum)}</div><div class="acol-muted">${esc(t.stanica||"")}</div><div class="acol-sum">${(+t.litre||0).toFixed(2)}</div><div class="acol-sum">${eur(+t.suma||0)}</div></div>`; }).join('');})()}
       </div></div>`;
   }
   return html;
@@ -9807,6 +9841,7 @@ async function spracujVW(e){
   const file=e.target.files[0]; if(!file) return; e.target.value="";
   try{
     const buf=await file.arrayBuffer();
+    await ensureXLSX();
     const wb=XLSX.read(buf,{type:"array"});
     const sheet=wb.Sheets["Krátkodobé údaje"]||wb.Sheets[wb.SheetNames[0]];
     const rows=XLSX.utils.sheet_to_json(sheet,{header:1});
@@ -9936,7 +9971,8 @@ function vwSprievodca(){
       <button type="button" class="aabtn" style="flex:1" onclick="vwOznac(false)">Odznačiť všetky</button>
     </div>
     <div class="alist" style="max-height:320px;overflow:auto" data-scroll="vw">
-      ${mesiace.map(mk=>{
+      ${(()=>{const _vwIdx=new Map(_vwParsed.map((x,i)=>[x,i]));   // index bez O(n²) indexOf (45.8)
+      return mesiace.map(mk=>{
         const vMes=zoradene.filter(j=>j.mesiacKey===mk && j.km>vwFilterKm);
         if(!vMes.length) return "";
         const volne=vMes.filter(j=>!jeDupDt(j));
@@ -9947,12 +9983,12 @@ function vwSprievodca(){
           <input type="checkbox" ${stavMes} ${!volne.length?'disabled':''} style="width:auto" onclick="event.stopPropagation();vwOznacMesiac('${mk}', this.checked)">
           <b>${mesLabel(mk)}</b>
           <span class="acol-muted">${vMes.length} jázd${kmMes?` · ${kmMes} km vybraných`:''}</span>
-        </div>`+vMes.map(j=>{const gi=_vwParsed.indexOf(j);const dup=jeDupDt(j);const veden=jeDenVedeny(j);return `<div class="arow" style="grid-template-columns:auto 1fr auto;cursor:pointer${dup?';opacity:.45':(veden&&!j.vybrane?';opacity:.65':'')}" onclick="vwToggle(${gi})">
+        </div>`+vMes.map(j=>{const gi=_vwIdx.get(j);const dup=jeDupDt(j);const veden=jeDenVedeny(j);return `<div class="arow" style="grid-template-columns:auto 1fr auto;cursor:pointer${dup?';opacity:.45':(veden&&!j.vybrane?';opacity:.65':'')}" onclick="vwToggle(${gi})">
           <input type="checkbox" ${j.vybrane&&!dup?'checked':''} ${dup?'disabled':''} style="width:auto" onclick="event.stopPropagation();vwToggle(${gi})">
           <div><div class="acol-strong" style="font-size:13px">${esc(j.datum)}</div><div class="acol-muted">${j.doba} · ⌀${j.rychlost} km/h${dup?' · <b>už importovaná</b>':(veden?' · <span style="color:var(--accent-deep,#b06a1e)">deň už vedený v knihe</span>':'')}</div></div>
           <div class="acol-sum" style="font-size:13px">${j.km} km</div>
         </div>`;}).join('');
-      }).join('')}
+      }).join('');})()}
     </div>
   `, ()=>{
     const existDt2=new Set((firmaData.jazdy||[]).map(j=>j.dt));
@@ -11006,6 +11042,7 @@ function appCashflow(){
     </div>`:''}`;
   }
 
+  const _cfIdx=new Map(vypis.map((t,i)=>[t,i]));   // index riadku bez O(n²) indexOf (45.8)
   document.getElementById("appScreen").innerHTML=appHlavicka("cashflow",`<button class="aabtn" style="--_c:${c}" onclick="otvorApp('banka')">🏦 Banka</button>`)+`
     <div class="amini">
       <div class="aminbox"><div class="al">Prijaté</div><div class="av pos">${eur(sumaP)}</div></div>
@@ -11027,8 +11064,8 @@ function appCashflow(){
     <div class="csub" style="margin:0 2px 12px">Ťuknutím na riadok zobrazíte detail párovania. Príjmy sa párujú cez VS a sumu, výdaje cez sumu a klasifikáciu.</div>
     ${cfSmer==="vsetko"
       ? `<div class="split2">
-          <div class="splitcol"><div class="splittitle" style="color:var(--pos)">▼ Príjmy (${prijmy.length}) · ${eur(sumaP)}</div><div class="alist">${prijmy.length?prijmy.slice(0,150).map((t)=>riadok(t,"p"+vypis.indexOf(t))).join(''):'<div class="aempty">Žiadne príjmy.</div>'}</div></div>
-          <div class="splitcol"><div class="splittitle">▲ Výdaje (${vydaje.length}) · ${eur(sumaV)}</div><div class="alist">${vydaje.length?vydaje.slice(0,150).map((t)=>riadok(t,"v"+vypis.indexOf(t))).join(''):'<div class="aempty">Žiadne výdaje.</div>'}</div></div>
+          <div class="splitcol"><div class="splittitle" style="color:var(--pos)">▼ Príjmy (${prijmy.length}) · ${eur(sumaP)}</div><div class="alist">${prijmy.length?prijmy.slice(0,150).map((t)=>riadok(t,"p"+_cfIdx.get(t))).join(''):'<div class="aempty">Žiadne príjmy.</div>'}</div></div>
+          <div class="splitcol"><div class="splittitle">▲ Výdaje (${vydaje.length}) · ${eur(sumaV)}</div><div class="alist">${vydaje.length?vydaje.slice(0,150).map((t)=>riadok(t,"v"+_cfIdx.get(t))).join(''):'<div class="aempty">Žiadne výdaje.</div>'}</div></div>
         </div>`
       : `<div class="alist">${zoznam.length?zoznam.slice(0,200).map((t,i)=>riadok(t,i)).join(''):'<div class="aempty">Žiadne pohyby v tomto filtri.</div>'}</div>`}`;
   setCrumb(`${vypis.length} pohybov · ${cfRok}${cfMesiac?' · '+mesiacLabel(cfMesiac):''} · ${sparP+sparV} spárovaných`);
@@ -12723,6 +12760,24 @@ function appPrognoza(){
 }
 // ═══ KOMPLETNÝ XLSX EXPORT so záložkami (Release 5, verne zo starej appky) ═══
 const XK_MONTHS=["Január","Február","Marec","Apríl","Máj","Jún","Júl","August","September","Október","November","December"];
+// jsPDF a XLSX sa do FX načítavali synchrónne pri každom štarte (~1 MB),
+// hoci ich väčšina návštev nepoužije — v rozpore s pravidlom „nepridávať
+// závislosti do <head>". Odteraz lenivo, ako Tesseract a pdf.js (kap. 45.8).
+let _jspdfLoading=null, _xlsxLoading=null;
+function ensureJsPDF(){
+  if(window.jspdf && window.jspdf.jsPDF) return Promise.resolve(window.jspdf);
+  if(_jspdfLoading) return _jspdfLoading;
+  const urls=["https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js","https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js","https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js"];
+  _jspdfLoading=new Promise((resolve,reject)=>{ let i=0; const next=()=>{ if(i>=urls.length){_jspdfLoading=null;reject(new Error("jspdf"));return;} const s=document.createElement("script"); s.src=urls[i++]; s.async=true; s.onload=()=>window.jspdf&&window.jspdf.jsPDF?resolve(window.jspdf):next(); s.onerror=next; document.head.appendChild(s); }; next(); });
+  return _jspdfLoading;
+}
+function ensureXLSX(){
+  if(window.XLSX && window.XLSX.utils) return Promise.resolve(window.XLSX);
+  if(_xlsxLoading) return _xlsxLoading;
+  const urls=["https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js","https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js","https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"];
+  _xlsxLoading=new Promise((resolve,reject)=>{ let i=0; const next=()=>{ if(i>=urls.length){_xlsxLoading=null;reject(new Error("xlsx"));return;} const s=document.createElement("script"); s.src=urls[i++]; s.async=true; s.onload=()=>window.XLSX&&window.XLSX.utils?resolve(window.XLSX):next(); s.onerror=next; document.head.appendChild(s); }; next(); });
+  return _xlsxLoading;
+}
 let _xlsxStyleLoading=null, _fflateLoading=null;
 function ensureXlsxStyle(){
   if(window.XLSXStyle) return Promise.resolve(window.XLSXStyle);
@@ -13300,6 +13355,7 @@ async function fakturaPdfModul(){
 
 async function saasFakturaPDF(f){
   const FP = await fakturaPdfModul();
+  await ensureJsPDF();
   const { jsPDF } = window.jspdf;
   return FP.vykresliFakturu(jsPDF, FP.modelSaasFaktury(f, SAAS_DODAVATEL), { isdoc:false });
 }
@@ -14622,6 +14678,7 @@ async function exportFakturaPDF(idx){
   }
   const s=faktSumy(f); const S=firmaData.settings||{};
   const FP=await fakturaPdfModul();
+  await ensureJsPDF();
   const { jsPDF }=window.jspdf;
   // QR sa vyrába TU a podáva sa modulu hotový — modul zámerne nesiaha na sieť,
   // inak by ho edge funkcia nevedela použiť.
@@ -19134,11 +19191,28 @@ function kolizneCisla(typ){
     .filter(([,g])=>g.length>1 && new Set(g.map(x=>r2(+x.spolu||0))).size>1)
     .map(([c,g])=>({cislo:c, doklady:g}));
 }
+// Index dokladov podľa kľúča — najdiDoklad volá každý riadok zoznamu (cez
+// uhradaStav aj priamo) a lineárny scan robil zoznamy O(n²). Meranie na 300
+// faktúrach: 50 ms na prekreslenie, z toho väčšina tu. Invalidácia ako pri
+// indexe úhrad: verzia dát + identita firmy a poľa + počet prvkov (pridanie
+// dokladu ide cez poZmene, testy vymieňajú polia celé).
+let _dokIdx={v:-1, fd:null, faktura:null, vydavok:null, fLen:-1, vLen:-1, fArr:null, vArr:null};
+function _dokIndex(typ){
+  const fArr=(firmaData&&firmaData.faktury)||[], vArr=(firmaData&&firmaData.vydavky)||[];
+  if(_dokIdx.v!==firmaDataVerzia || _dokIdx.fd!==firmaData || _dokIdx.fArr!==fArr || _dokIdx.vArr!==vArr || _dokIdx.fLen!==fArr.length || _dokIdx.vLen!==vArr.length){
+    _dokIdx={v:firmaDataVerzia, fd:firmaData, faktura:null, vydavok:null, fLen:fArr.length, vLen:vArr.length, fArr, vArr};
+  }
+  if(!_dokIdx[typ]){
+    const m=new Map();
+    (typ==="faktura"?fArr:vArr).forEach(x=>{ const k=dokladKluc(x); if(k && !m.has(k)) m.set(k, x); });
+    _dokIdx[typ]=m;
+  }
+  return _dokIdx[typ];
+}
 function najdiDoklad(typ, kluc){
-  const zoz = typ==="faktura" ? (firmaData.faktury||[]) : (firmaData.vydavky||[]);
   const k=String(kluc||"");
   if(!k) return null;                      // bez kľúča sa nedá nič priradiť
-  return zoz.find(x=>dokladKluc(x)===k) || null;
+  return _dokIndex(typ).get(k) || null;
 }
 function dokladSuma(typ, cislo){
   const d = najdiDoklad(typ, cislo);
@@ -19175,12 +19249,19 @@ function dokladZostava(typ, cislo){ return r2(dokladSuma(typ,cislo)-dokladUhrade
 // párovanie povie „už zaplatené" a on nevie, kde priradenie odobrať.
 function uhradyDokladuPohyby(typ, cislo){
   const c=String(cislo||"").trim(); if(!c) return [];
-  const out=[];
-  (firmaData.vypis||[]).forEach(t=>(t.uhrady||[]).forEach(u=>{
-    if(u.typ===typ && String(u.cislo)===c)
-      out.push({ datum:t.datum||"", suma:r2(+u.suma||0), partner:t.partner||"", id:txId(t) });
-  }));
-  return out.sort((a,b)=>String(a.datum).localeCompare(String(b.datum)));
+  // zoznam výdavkov volá uhradyPopis pre každý riadok — bez indexu to bol
+  // sken celého výpisu na riadok (rovnaká trieda ako dokladUhradene)
+  const vsetky=memoRok("uhradyPohyby", ()=>{
+    const m=new Map();
+    (firmaData.vypis||[]).forEach(t=>(t.uhrady||[]).forEach(u=>{
+      const k=u.typ+"|"+String(u.cislo);
+      if(!m.has(k)) m.set(k, []);
+      m.get(k).push({ datum:t.datum||"", suma:r2(+u.suma||0), partner:t.partner||"", id:txId(t) });
+    }));
+    m.forEach(list=>list.sort((a,b)=>String(a.datum).localeCompare(String(b.datum))));
+    return m;
+  });
+  return vsetky.get(typ+"|"+c)||[];
 }
 // Popis úhrady. `kratky` je pre zoznam výdavkov, kde je na 390 px miesta málo —
 // tam stačí dátum. Sumu si človek pozrie v editore, keď ho bude zaujímať.
@@ -20113,6 +20194,7 @@ function appDokumenty(){
   const poctyTypov={}; zoznam.forEach(d=>poctyTypov[d.typ]=(poctyTypov[d.typ]||0)+1);
   // dokumenty expirujúce do 60 dní
   const expirujuce=zoznam.map(d=>({d,dni:dokExpiracia(d)})).filter(x=>x.dni!=null && x.dni>=0 && x.dni<=60).sort((a,b)=>a.dni-b.dni);
+  const _dIdx=new Map(zoznam.map((x,i)=>[x,i]));   // index riadku bez O(n²) indexOf (45.8)
   document.getElementById("appScreen").innerHTML=appHlavicka("dokumenty",`<button class="aabtn pri" style="--_c:${c}" onclick="dokPridaj()">＋ Dokument</button>`)+`
     <div class="csub" style="margin:0 2px 14px">Evidencia zmlúv a dôležitých firemných dokumentov — zmluvy, poistky, certifikáty, GDPR. Súbory sa bezpečne uložia do cloudu.${localMode?' <b>(V lokálnom režime sa súbory neukladajú — prihláste sa pre cloud.)</b>':''}</div>
     ${expirujuce.length?`<div style="background:var(--sfc-warn);border-left:3px solid var(--warn);border-radius:8px;padding:10px 13px;margin:0 2px 14px;font-size:12.5px">
@@ -20124,7 +20206,7 @@ function appDokumenty(){
     </div>`:''}
     ${zoradene.length?`<div class="alist">
       ${zoradene.map(d=>{
-        const idx=zoznam.indexOf(d);
+        const idx=_dIdx.get(d);
         const exp=dokExpiracia(d);
         const expBadge = exp==null?'' : exp<0?'<span class="apill neg" style="font-size:9px">expirovalo</span>' : exp<=30?`<span class="apill warn" style="font-size:9px">o ${exp} dní</span>`:'';
         return `<div class="arow" style="grid-template-columns:auto 1fr auto;gap:10px;align-items:center" onclick="dokDetail(${idx})">
