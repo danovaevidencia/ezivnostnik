@@ -946,7 +946,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.21-GI";  // zvonček nepripomína SaaS faktúru, ktorú používateľ zmazal
+const APP_VERZIA = "2026.08.21-GJ";  // register prepisoval meno dodávateľa z e-faktúry neplatným názvom
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -6173,7 +6173,19 @@ function feHladajFirmu(q, vstupId){
 function feMapFirmu(r){
   // RPO niekedy vracia hodnoty ako objekt {value:"..."} — bezpečne vytiahni text
   const T=v=>{ if(v==null) return ""; if(typeof v==="object") return String(v.value||v.name||v.nazov||v.number||""); return String(v); };
-  const nazov=(r.fullNames&&r.fullNames[0]&&r.fullNames[0].value)||(r.names&&r.names[0]&&r.names[0].value)||"";
+  // `fullNames` je HISTÓRIA názvov — každý so `validFrom`/`validTo`. Brať prvý
+  // znamená brať ľubovoľný, často ten najstarší: doložený prípad KROS a.s.
+  // (IČO 31635903), ktorému register vrátil dávno neplatný názov predchodcu
+  // a appka ním prepísala meno dodávateľa na faktúre.
+  const platnyNazov=(pole)=>{
+    if(!Array.isArray(pole) || !pole.length) return "";
+    const dnes=new Date().toISOString().slice(0,10);
+    const platne=pole.filter(x=>x && (!x.validTo || String(x.validTo).slice(0,10)>=dnes));
+    const kand=(platne.length?platne:pole).slice()
+      .sort((a,b)=>String(b.validFrom||"").localeCompare(String(a.validFrom||"")));
+    return T(kand[0] && (kand[0].value!=null ? kand[0].value : kand[0]));
+  };
+  const nazov=platnyNazov(r.fullNames) || platnyNazov(r.names) || "";
   const ico=(r.identifiers&&r.identifiers[0]&&r.identifiers[0].value)||r.ico||"";
   // DIČ — RPO ho môže mať vo viacerých poliach; skús ich po poradí
   let dic="";
@@ -19146,8 +19158,11 @@ function otvorOcrVysledok(R){
   });
   // eKasa doklad → dotiahni z FS hneď, bez čakania na klik
   if(R.ekasaId) setTimeout(()=>ekasaAutoDoplnenie(R.ekasaId), 60);
-  // názov firmy over v registri podľa IČO — OCR sa v názve mýli častejšie než v čísle
-  setTimeout(ocrNazovZRegistra, 200);
+  // Názov firmy over v registri podľa IČO — OCR sa v názve mýli častejšie než
+  // v čísle. NIE pri e-faktúre: tam meno napísal sám dodávateľ do ISDOC/UBL
+  // a register ho má čím prebiť len ťažko — doložene ho prepísal neplatným
+  // historickým názvom, hoci v prílohe bolo správne.
+  if(!R._efaktura) setTimeout(ocrNazovZRegistra, 200);
   if(typeof mAktualizujOddiel==="function") setTimeout(mAktualizujOddiel, 40);
   // Formulár je od zjednotenia ten istý ako v editore, takže sa musí rovnako
   // aj inicializovať — inak by box vozidla ostal skrytý aj pri zaškrtnutom
