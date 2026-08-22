@@ -946,7 +946,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.21-GJ";  // register prepisoval meno dodávateľa z e-faktúry neplatným názvom
+const APP_VERZIA = "2026.08.22-GK";  // archív podaní uchováva všetky vygenerované verzie, nie len poslednú
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -8380,10 +8380,28 @@ function dphPodaniaHtml(){
     const zmena=dphZmeneneOdExportu(mk);
     const p=z.podanie||null;
     const tlacidlo=(typ,popis)=>{
-      const s=sub[typ];
-      if(!s) return `<span style="font-size:11.5px;color:var(--ink-soft)">${popis}: —</span>`;
-      const kedy=new Date(s.kedy).toLocaleDateString("sk-SK");
-      return `<button class="aabtn" style="padding:5px 11px;font-size:12px" onclick="dphStiahniArchiv('${mk}','${typ}')">⬇ ${popis} · ${kedy}</button>`;
+      const zoznam=dphSuboryZoznam(mk, typ);
+      if(!zoznam.length) return `<span style="font-size:11.5px;color:var(--ink-soft)">${popis}: —</span>`;
+      const cas=z=>new Date(z.kedy).toLocaleDateString("sk-SK");
+      const posledna=zoznam[0];
+      return `<button class="aabtn" style="padding:5px 11px;font-size:12px" onclick="dphStiahniArchiv('${mk}','${typ}',0)">⬇ ${popis} · ${cas(posledna)}</button>`;
+    };
+    // Staršie verzie sa zbaľujú — na 390 px by zoznam piatich generovaní
+    // odtlačil to podstatné (poslednú verziu) mimo obrazovku.
+    const starsie=(typ,popis)=>{
+      const zoznam=dphSuboryZoznam(mk, typ);
+      if(zoznam.length<2) return "";
+      return `<details style="margin-top:7px"><summary style="cursor:pointer;font-size:11.5px;color:var(--ink-soft)">${popis} — staršie verzie (${zoznam.length-1})</summary>
+        <div style="display:flex;flex-direction:column;gap:5px;margin-top:6px">
+          ${zoznam.slice(1).map((z,i)=>{
+            const kedy=new Date(z.kedy).toLocaleString("sk-SK");
+            const nedostupna=z.zahodene && !z.xml && !z.cesta;
+            return `<div style="display:flex;gap:8px;align-items:center;font-size:11.5px">
+              <button class="aabtn" style="padding:3px 9px;font-size:11px${nedostupna?';opacity:.55':''}" onclick="dphStiahniArchiv('${mk}','${typ}',${i+1})">⬇ ${kedy}</button>
+              <span style="color:var(--ink-soft)">${dphDruhNazov(z.druh||"R")}${nedostupna?" · súbor už nie je k dispozícii":(z.velkost?" · "+Math.round(z.velkost/1024*10)/10+" kB":"")}</span>
+            </div>`;
+          }).join("")}
+        </div></details>`;
     };
     return `<div style="border:1px solid var(--line);border-radius:11px;padding:12px 14px;margin-bottom:9px;background:var(--paper)">
       <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap">
@@ -8394,6 +8412,8 @@ function dphPodaniaHtml(){
         ${tlacidlo("kv","Kontrolný výkaz")}
         ${tlacidlo("dp","Priznanie")}
       </div>
+      ${starsie("kv","Kontrolný výkaz")}
+      ${starsie("dp","Priznanie")}
       ${zmena?`<div style="margin-top:9px;background:var(--sfc-warn);border-left:3px solid #c77d3e;border-radius:0 8px 8px 0;padding:7px 10px;font-size:12px">
         ⚠ Od odoslania ste v tomto období menili doklady. Ak je zmena podstatná, treba podať opravné alebo dodatočné podanie.</div>`:""}
     </div>`;
@@ -8401,7 +8421,7 @@ function dphPodaniaHtml(){
 
   return `<div class="card">
     <h2 style="font-size:16px;margin-bottom:6px">Odoslané podania</h2>
-    <div class="csub" style="margin-bottom:13px">Kópie súborov, ktoré ste stiahli na podanie. Uchovávajú sa v presnom znení, v akom odišli — aj keď ste doklady neskôr upravili.</div>
+    <div class="csub" style="margin-bottom:13px">Kópie súborov, ktoré ste stiahli na podanie — v presnom znení, v akom odišli, aj keď ste doklady neskôr upravili. Pri opakovanom generovaní sa <b>uchová každá verzia</b>; hore je posledná.</div>
     ${obdobia.map(riadok).join("")}
     <div style="font-size:11.5px;color:var(--ink-soft);margin-top:4px;padding-top:10px;border-top:1px solid var(--line-soft)">
       Toto je vaša kópia, nie potvrdenie o podaní. Potvrdenie nájdete v schránke na portáli Finančnej správy.
@@ -16821,12 +16841,35 @@ function overDopadNaPodanie(datum, akcia){
 //  doklady sa medzitým mohli zmeniť. Preto sa uchováva presne to, čo odišlo.
 //  V cloude ide súbor do úložiska, v lokálnom režime priamo k dátam firmy.
 // ═══════════════════════════════════════════════════════════════
+// Archív drží VŠETKY vygenerované verzie, nie len poslednú. Kým to bola jedna,
+// druhé generovanie prepísalo to, čo naozaj odišlo na portál — presne v situácii,
+// na ktorú archív slúži. Súbory v úložisku pritom ostávali, len sa na ne stratil
+// odkaz. Najnovšia verzia je prvá v poli; starý tvar (jeden objekt) číta
+// `dphSuboryZoznam`, takže existujúce dáta netreba migrovať.
+const DPH_ARCHIV_MAX=30;        // strop metadát na typ a obdobie
+const DPH_ARCHIV_XML_MAX=5;     // koľko verzií si drží XML pri dátach (lokálny režim)
+function dphSuboryZoznam(mk, typ){
+  const s=(((firmaData.dph||{})[mk]||{}).subory||{})[typ];
+  if(!s) return [];
+  return Array.isArray(s) ? s : [s];   // starý tvar = jediná verzia
+}
 async function dphUlozSubor(mk, typ, xml){
   if(!mozemPisat("dph")) return;   // vedľajší zápis po exporte — volajúci už bol odmietnutý
   if(!firmaData.dph) firmaData.dph={};
   if(!firmaData.dph[mk]) firmaData.dph[mk]={};
   const subory=firmaData.dph[mk].subory||(firmaData.dph[mk].subory={});
   const zaznam={ kedy:new Date().toISOString(), druh:dphDruhPodania(mk), velkost:(xml||"").length };
+  const uloz=()=>{
+    const doterajsie=dphSuboryZoznam(mk, typ);
+    const zoznam=[zaznam, ...doterajsie].slice(0, DPH_ARCHIV_MAX);
+    // XML uložené priamo pri dátach firmy by pri desiatkach generovaní nafúklo
+    // synchronizovaný JSON. Staršie preto stratia obsah, ale záznam o nich
+    // ostane — nech je vidieť, že verzia existovala, aj keď sa už nedá stiahnuť.
+    let sXml=0;
+    zoznam.forEach(z=>{ if(z && z.xml){ sXml++; if(sXml>DPH_ARCHIV_XML_MAX){ delete z.xml; z.zahodene=true; } } });
+    subory[typ]=zoznam;
+    poZmene();
+  };
   try{
     if(!localMode && sb){
       const { data:{ user } }=await sb.auth.getUser();
@@ -16834,21 +16877,29 @@ async function dphUlozSubor(mk, typ, xml){
         const cesta=`${user.id}/podania/${typ}_${mk}_${Date.now()}.xml`;
         const blob=new Blob([xml],{type:"application/xml"});
         const { error }=await sb.storage.from("dokumenty").upload(cesta, blob, {upsert:false, contentType:"application/xml"});
-        if(!error){ subory[typ]=Object.assign(zaznam,{cesta}); poZmene(); return; }
+        if(!error){ zaznam.cesta=cesta; uloz(); return; }
         console.error("uloženie podania do úložiska:", error);
       }
     }
   }catch(e){ console.error("uloženie podania:", e); }
   // záloha: keď úložisko nie je k dispozícii, XML ostane aspoň pri dátach firmy
-  subory[typ]=Object.assign(zaznam,{xml});
-  poZmene();
+  zaznam.xml=xml;
+  uloz();
 }
 
 // znovu stiahnutie už odoslaného podania
-async function dphStiahniArchiv(mk, typ){
-  const z=(((firmaData.dph||{})[mk]||{}).subory||{})[typ];
+async function dphStiahniArchiv(mk, typ, idx){
+  const zoznam=dphSuboryZoznam(mk, typ);
+  const z=zoznam[+idx||0];
   if(!z){ alert("Tento súbor sa v archíve nenašiel."); return; }
-  const nazov=(typ==="kv"?"kv_dph_":"dp_dph_")+mk+".xml";
+  if(z.zahodene && !z.xml && !z.cesta){
+    alert("Z tejto verzie sa uchoval len záznam, že vznikla — samotný súbor už k dispozícii nie je.\n\nVygenerovaná: "+
+      new Date(z.kedy).toLocaleString("sk-SK"));
+    return;
+  }
+  // viac verzií toho istého obdobia → dátum v názve, nech sa navzájom neprepíšu
+  const cas=String(z.kedy||"").slice(0,10);
+  const nazov=(typ==="kv"?"kv_dph_":"dp_dph_")+mk+(zoznam.length>1?"_"+cas:"")+".xml";
   if(z.xml){ stiahniBlob(new Blob([z.xml],{type:"application/xml"}), nazov); return; }
   const url=await dokladUrl(z.cesta);
   if(url) window.open(url,"_blank");
