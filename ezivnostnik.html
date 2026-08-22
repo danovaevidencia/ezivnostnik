@@ -946,7 +946,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.22-GS";  // párovanie v3, etapa 6a: evidencia výpisov a presné pokrytie období
+const APP_VERZIA = "2026.08.22-GT";  // párovanie v3, etapa 6b: originál výpisu sa uchováva
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -7263,9 +7263,10 @@ function appBanka(){
       const zoznam=ev.length
         ? `<details><summary style="cursor:pointer;font-size:12.5px;color:var(--ink-soft)">Nahraté výpisy (${ev.length})</summary>
             <div style="display:flex;flex-direction:column;gap:5px;margin-top:7px">
-              ${ev.slice(0,20).map(z=>`<div style="display:flex;gap:8px;align-items:baseline;font-size:11.5px;flex-wrap:wrap">
+              ${ev.slice(0,20).map((z,i)=>`<div style="display:flex;gap:8px;align-items:baseline;font-size:11.5px;flex-wrap:wrap">
+                ${z.cesta?`<button class="aabtn" style="padding:3px 9px;font-size:11px" onclick="stiahniVypisOriginal(${i})" title="Otvoriť pôvodný súbor výpisu">⬇</button>`:""}
                 <b>${z.mesiace&&z.mesiace.length?z.mesiace.map(mesiacLabel).join(", "):"bez pohybov"}</b>
-                <span style="color:var(--ink-soft)">${z.pohybov} pohybov${z.novych!=null?" · nových "+z.novych:""} · nahraté ${new Date(z.kedy).toLocaleDateString("sk-SK")}${z.nazov?" · "+esc(z.nazov):""}</span>
+                <span style="color:var(--ink-soft)">${z.pohybov} pohybov${z.novych!=null?" · nových "+z.novych:""} · nahraté ${new Date(z.kedy).toLocaleDateString("sk-SK")}${z.nazov?" · "+esc(z.nazov):""}${z.cesta?"":" · originál sa neuchoval"+(z.bezOriginalu?" ("+esc(z.bezOriginalu)+")":"")}</span>
               </div>`).join("")}
               ${ev.length>20?`<div style="font-size:11px;color:var(--ink-soft)">… a ďalších ${ev.length-20}</div>`:""}
             </div>
@@ -8367,8 +8368,61 @@ function zapisVypisDoEvidencie(text, parsed, novych, nazov){
     iban:parsed.mojIban||"", od:dni[0]||"", do:dni[dni.length-1]||"", mesiace,
     pohybov:(parsed.txns||[]).length, novych:novych, velkost:String(text||"").length,
   };
-  firmaData.vypisy=[zaznam, ...firmaData.vypisy].slice(0, VYPISY_MAX);
+  const cely=[zaznam, ...firmaData.vypisy];
+  firmaData.vypisy=cely.slice(0, VYPISY_MAX);
+  const vypadli=cely.slice(VYPISY_MAX).map(z=>z.cesta).filter(Boolean);
+  if(vypadli.length) zmazOsiroteneVypisy(vypadli);
   return zaznam;
+}
+// ── ORIGINÁL VÝPISU V ÚLOŽISKU (rozhodnutie Romana, 22. 8.) ──────────────
+//
+// Uchováva sa preto, aby sa dal výpis načítať znova po oprave parsera —
+// raz to už bolo treba a nebolo z čoho. Bucket a konvencia sú tie isté ako
+// pri archíve podaní (kap. 36.2), takže nová SQL politika netreba.
+//
+// POZOR, čo sa tým ukladá: z e-mailovej cesty prichádza výpis ako
+// zaheslovaný ZIP a appka ho lokálne rozšifruje. Do úložiska ide teda
+// ROZŠIFROVANÉ XML — citlivejší obsah než archív, ktorý sa po importe maže.
+// Je to vedomé rozhodnutie, nie prehliadnutie.
+//
+// V lokálnom režime sa originál neuchováva: XML pri dátach firmy by nafúklo
+// synchronizovaný JSON. Záznam o tom, že sa neuchoval, ostáva — ticho
+// chýbajúci súbor by bol horší než priznaný.
+async function ulozOriginalVypisu(text, zaznam){
+  try{
+    if(localMode || !sb){ zaznam.bezOriginalu="lokálny režim"; return; }
+    const { data:{ user } }=await sb.auth.getUser();
+    if(!user){ zaznam.bezOriginalu="bez prihlásenia"; return; }
+    const cesta=`${user.id}/vypisy/vypis_${Date.now()}.xml`;
+    const blob=new Blob([text],{type:"application/xml"});
+    const { error }=await sb.storage.from("dokumenty").upload(cesta, blob, {upsert:false, contentType:"application/xml"});
+    if(error){ console.error("uloženie výpisu do úložiska:", error); zaznam.bezOriginalu="úložisko odmietlo"; return; }
+    zaznam.cesta=cesta;
+  }catch(e){
+    console.error("uloženie výpisu:", e);
+    zaznam.bezOriginalu="chyba pri ukladaní";
+  }
+  poZmene();
+}
+// Záznamy, ktoré vypadli spod stropu, si berú súbor so sebou. Osirelé súbory
+// v úložisku, o ktorých appka nevie, boli nález kap. 46 — netreba ich vyrábať
+// znova na inom mieste.
+async function zmazOsiroteneVypisy(cesty){
+  if(!cesty.length || localMode || !sb) return;
+  try{ await sb.storage.from("dokumenty").remove(cesty); }
+  catch(e){ console.warn("staré výpisy sa nepodarilo zmazať:", e.message||e); }
+}
+async function stiahniVypisOriginal(idx){
+  const z=(firmaData.vypisy||[])[+idx];
+  if(!z){ alert("Tento výpis sa v evidencii nenašiel."); return; }
+  if(!z.cesta){
+    alert("Z tohto výpisu sa uchoval len záznam, že bol nahratý — originál nie je k dispozícii"
+      + (z.bezOriginalu?" ("+z.bezOriginalu+")":"")+".\n\nPohyby z neho sú v evidencii normálne.");
+    return;
+  }
+  const url=await dokladUrl(z.cesta);
+  if(url) window.open(url,"_blank");
+  else alert("Súbor sa nepodarilo načítať z úložiska. Skontrolujte pripojenie.");
 }
 function vypisUzNahraty(text){
   const h=textHash(text);
@@ -14692,6 +14746,9 @@ function importujVypisText(text, nazovSuboru){
   // a prázdny — bez nej by ho appka počítala medzi nenahraté.
   const uzBol=vypisUzNahraty(text);
   const ev=zapisVypisDoEvidencie(text, parsed, nove.length, nazovSuboru);
+  // Originál sa nahráva na pozadí — import sa naň nesmie čakať. Keď zlyhá,
+  // zapíše sa dôvod do záznamu; evidencia aj pohyby platia tak či tak.
+  ulozOriginalVypisu(text, ev);
   // Platby faktúr s variabilným symbolom sa priradia hneď pri importe. Čakať,
   // kým to človek naklikká v Párovaní, znamená, že do tej doby sú tie faktúry
   // všade inde vedené ako neuhradené.
@@ -18501,9 +18558,11 @@ async function importujCakajuciVypis(id){
     const text=await textVypisu(subor);
     if(text===null) return false;                 // zrušené alebo zlé heslo
     if(!parseVypis(String(text))) return false;   // nie je to výpis — nech to skúsi ako doklad
-    importujVypisText(text);
-    // Archív s výpisom je najcitlivejší súbor, aký nám v Storage leží. Pohyby
-    // sú v evidencii, takže ho po importe netreba držať.
+    importujVypisText(text, z.subor_nazov||"výpis z e-mailu");
+    // Zaheslovaný archív z e-mailu sa po importe maže. Od GT si appka uchováva
+    // vlastnú kópiu výpisu (`ulozOriginalVypisu`) — držať vedľa nej aj archív
+    // by bola tá istá vec dvakrát. Pozor na rozdiel: naša kópia je XML, teda
+    // ROZŠIFROVANÝ obsah; vedomé rozhodnutie, viď kap. 47.9.
     try{ await sb.storage.from("dokumenty").remove([z.subor_cesta]); }
     catch(e){ console.warn("Archív sa nepodarilo zmazať:", e.message||e); }
     await sb.from("cakajuce_doklady")
