@@ -946,7 +946,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.22-GM";  // editor dokladu: príloha a väzby na platby s možnosťou odobrať
+const APP_VERZIA = "2026.08.22-GN";  // číslo dokladu z PDF: glyf bez ToUnicode už nezreže „FXLY6UUY-0009" na „FXLY6UUY"
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -10250,7 +10250,23 @@ function poskladajPdfRiadky(items){
       }
       out += k.s;
     }
-    return out.replace(/\s{2,}/g," ").trim();
+    // pdf.js vráti U+0000 za glyf, ktorý v písme nemá záznam v ToUnicode.
+    // Chrome (Skia) taký glyf obalí značkou /ActualText so skutočným znakom,
+    // ale getTextContent() ju nečíta — do textu príde NUL, ktorý nie je
+    // biely znak, takže ho žiadne `\s` nezmyje a ticho prilepí dva údaje.
+    //
+    // Na faktúre od Anthropicu je takto zapísaná pomlčka v čísle
+    // „FXLY6UUY-0009" (aj v PSČ „91189-4477" a v pomlčke „Aug 13 – Sep 13").
+    // Vzor na číslo dokladu sa na NUL zastavil a uložil len „FXLY6UUY" —
+    // a to je u Anthropicu zákaznícke ID rovnaké na všetkých faktúrach,
+    // takže si navzájom prepisovali stav úhrady.
+    //
+    // Medzi dvoma alfanumerickými znakmi je taký glyf prakticky vždy
+    // spojovník (číslo dokladu, PSČ, rozsah); inde je to oddeľovač
+    // (dvojbodka, zátvorka, zalomenie) a stačí medzera.
+    return out.replace(/([A-Za-z0-9])\u0000(?=[A-Za-z0-9])/g,"$1-")
+              .replace(/\u0000/g," ")
+              .replace(/\s{2,}/g," ").trim();
   }).join("\n");
   return opravDiakritiku(vysledok);
 }
