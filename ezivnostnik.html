@@ -946,7 +946,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.22-GY";  // modul si prekreslením mazal rámec super apky; odkrytie platieb v splite
+const APP_VERZIA = "2026.08.22-GZ";  // väzba na neexistujúci doklad sa už netvári ako spárovaná
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -19666,6 +19666,10 @@ const POHYB_STAVY={
   ciastocny:    {text:"čiastočne",   cls:"warn", spar:false},
   navrh:        {text:"návrh",       cls:"warn", spar:false},
   nesparovany:  {text:"nespárované", cls:"warn", spar:false},
+  // Väzba ukazuje na doklad, ktorý neexistuje. Pohyb sa DOVTEDY tváril
+  // spárovaný, hoci doklad bol vedený ako neuhradený — appka si protirečila
+  // presne tam, kde to má povedať (kap. 47.18).
+  sirota:       {text:"neplatné priradenie", cls:"warn", spar:false},
 };
 // Názvy klasifikácií boli natvrdo na dvoch miestach (Banka, Cashflow) —
 // tá istá mapa dvakrát je presne to, čo sa vždy rozíde.
@@ -19678,6 +19682,15 @@ function pohybStav(tx){
   // ── FAKT: zapísané väzby ──
   const u=tx.uhrady||[];
   if(u.length){
+    // Väzba na doklad, ktorý neexistuje (zmazaný doklad, zmenené číslo, úhrada
+    // zapísaná na prázdnu identitu). Suma je rozdelená len na papieri: doklad
+    // ostáva neuhradený, pohyb sa tváril vybavený. Stav to musí povedať skôr,
+    // než si to všimne ročná kontrola — a povie to aj vtedy, keď je neplatná
+    // len ČASŤ väzieb, lebo aj potom je ďalší postup ten istý: odobrať ju.
+    const siroty=u.filter(x=>!najdiDoklad(x.typ, x.cislo)).length;
+    if(siroty) return stav("sirota", {siroty, pocet:u.length,
+      text: siroty===u.length ? "neplatné priradenie"
+                              : "neplatné priradenie ("+siroty+" z "+u.length+")"});
     const zost=txZostava(tx);
     if(zost>0.005) return stav("ciastocny", {ciastocne:true, zostava:zost, pocet:u.length,
                                              text:"zostáva "+eur(zost)});
@@ -21002,10 +21015,16 @@ function pohybKartaHtml(tx){
           return `<div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:10px">${akcie.join("")}</div>`;
         })()}
         ${(()=>{ const u=tx.uhrady||[]; if(!u.length) return "";
+          const zlych=u.filter(x=>!najdiDoklad(x.typ, x.cislo)).length;
           return `<div style="background:var(--bg);border-radius:9px;padding:9px 11px;margin-bottom:10px;font-size:12px">
             <div style="color:var(--ink-soft);margin-bottom:5px">Touto platbou máte zaplatené:</div>
+            ${zlych?`<div style="background:var(--sfc-warn);border-radius:7px;padding:7px 9px;margin-bottom:6px;color:var(--ink-warn)">
+              <b>Neplatné priradenie.</b> ${zlych===u.length?"Doklad, na ktorý táto platba ukazuje, už neexistuje."
+                :zlych+" z "+u.length+" priradení ukazuje na doklad, ktorý už neexistuje."}
+              Odoberte ho a platba sa vráti medzi nespárované — príslušný doklad je totiž vedený ako neuhradený.
+            </div>`:""}
             ${u.map(x=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0">
-              <span>${esc(String(x.cislo))} · <b>${eur(x.suma)}</b>${zaokrPopis(x)}${autoPopis(x)}</span>
+              <span>${najdiDoklad(x.typ,x.cislo)?"":'<span style="color:var(--neg)" title="Doklad s touto identitou neexistuje">⚠ </span>'}${esc(String(x.cislo)||"(bez čísla)")} · <b>${eur(x.suma)}</b>${zaokrPopis(x)}${autoPopis(x)}</span>
               <button class="aabtn" style="padding:2px 8px;font-size:11px" onclick="splitOdoberUhradu('${txId(tx)}','${esc(x.typ)}','${esc(String(x.cislo))}')"${zam("banka")}>odobrať</button>
             </div>`).join("")}
           </div>`; })()}
