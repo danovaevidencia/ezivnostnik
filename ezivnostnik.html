@@ -946,7 +946,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.22-GN";  // číslo dokladu z PDF: glyf bez ToUnicode už nezreže „FXLY6UUY-0009" na „FXLY6UUY"
+const APP_VERZIA = "2026.08.22-GO";  // párovanie v3, etapy 1–2: centová tolerancia a jeden slovník stavov pohybu
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -3153,7 +3153,7 @@ function _dashWidgetKatalogVypocet(){
       nazov:"Výdavky", ic:"€", velkost:"w-s4",
       metriky:[
         {k:"spolu", l:"Výdavky (rok)", val:()=>{const v=(d.vydavky||[]).filter(x=>String(x.datum||"").slice(0,4)===String(rok));const fa=v.filter(x=>x.druh==="Došlá faktúra").length,bl=v.filter(x=>x.druh==="Bloček").length;return {v:eur0(v.reduce((a,x)=>a+(+x.bez||0),0)), m:v.length+" dokladov", cls:"", vedlajsie:[{l:"DPH na odpočet",v:eur(v.reduce((a,x)=>a+(+x.dph||0),0)),cls:"pos"},{l:"faktúry / bločky",v:fa+" / "+bl}]};}},
-        {k:"parovanie", l:"Párovanie", val:()=>{const vp=(d.vypis||[]).filter(t=>t.smer==="vydaj"&&String(t.datum||"").slice(0,4)===String(rok));let spar=0;vp.forEach(t=>{const s=vypisSparuj(t);if(s&&(s.istota==="ista"||s.typ==="klasifikacia"))spar++;});return {v:spar+" / "+vp.length, m:"spárovaných výdajov", cls:"", vedlajsie:[{l:"nespárované",v:(vp.length-spar)+"",cls:vp.length-spar?"warn":""}]};}}
+        {k:"parovanie", l:"Párovanie", val:()=>{const vp=(d.vypis||[]).filter(t=>t.smer==="vydaj"&&String(t.datum||"").slice(0,4)===String(rok));let spar=0;vp.forEach(t=>{if(pohybStav(t).spar)spar++;});return {v:spar+" / "+vp.length, m:"spárovaných výdajov", cls:"", vedlajsie:[{l:"nespárované",v:(vp.length-spar)+"",cls:vp.length-spar?"warn":""}]};}}
       ]
     },
     dph: {
@@ -6785,7 +6785,7 @@ function uhradyBoxHtml(typ, x){
     <div style="font-weight:700">Doklad a úhrada</div>
     ${priloha?riadok(`<span style="color:var(--ink-soft)">📎 Priložený doklad</span>`+
       btn("Otvoriť","Zobraziť naskenovaný doklad","otvorDoklad('"+esc(priloha)+"')")):""}
-    ${pohyby.map(u=>riadok(`<span style="color:var(--pos)">✓ ${fmtDatum(u.datum)} · ${eur(u.suma)}${u.partner?" · "+esc(u.partner):""}</span>`+
+    ${pohyby.map(u=>riadok(`<span style="color:var(--pos)">✓ ${fmtDatum(u.datum)} · ${eur(u.suma)}${zaokrPopis(u)}${u.partner?" · "+esc(u.partner):""}</span>`+
       btn("✕ odobrať","Zrušiť priradenie tejto platby k dokladu","dokladOdoberVazbu('"+typ+"','"+esc(kluc)+"','"+esc(u.id)+"')"))).join("")}
     ${rucne?riadok(`<span style="color:var(--warn)">◐ Potvrdené ručne ${fmtDatum(rucne.datum)}${rucne.poznamka?" · "+esc(rucne.poznamka):""}</span>`+
       btn("✕ zrušiť","Zrušiť ručné potvrdenie úhrady","dokladZrusRucnu('"+typ+"','"+esc(kluc)+"')")):""}
@@ -7178,20 +7178,17 @@ function appBanka(){
     <div class="alist">
       ${(()=>{
         let filtered=list;
-        if(bFilter==="nespar") filtered=vypis.filter(t=>{const s=vypisSparuj(t); const uzMaZaznam=s&&(s.typ==="vydavok"||s.typ==="faktura"||s.typ==="klasifikacia"); return !(s&&s.ignoruj)&&!uzMaZaznam;});
+        // Stav pohybu hovorí `pohybStav` — jedna definícia pre Banku, Cashflow
+        // aj Párovanie (kap. 47.4). Predtým si tu Banka počítala vlastnú.
+        if(bFilter==="nespar") filtered=vypis.filter(t=>!pohybStav(t).spar);
         if((_hladaj.banka||"").trim()) filtered=filtered.filter(t=>hladajZhoda(_hladaj.banka, t.proti, t.partner, t.vs, t.popis, t.suma, t.ibanProti));
         return filtered.length?filtered.slice(0, limitPre('banka',200)).map(t=>{
-          const inc=t.smer==="prijem"; const s=vypisSparuj(t);
-          const ignor=s&&s.ignoruj;
-          let stavTxt,stavCls;
-          if(t.skryty){stavTxt="skryté";stavCls="";}
-          else if(ignor){stavTxt="ignorované";stavCls="";}
-          else if(!s){stavTxt="nespárované";stavCls="warn";}
-          else if(s.typ==="klasifikacia"){stavTxt={dph:"DPH",danPrijem:"daň",odvodZP:"odvody ZP",odvodSP:"odvody SP",poistenie:"poistenie"}[s.klasifikacia.druh]||"klasifikované";stavCls="ok";}
-          else if(s.typ==="faktura"){stavTxt="faktúra";stavCls=s.istota==="ista"?"ok":"warn";}
-          else {stavTxt=s.istota==="ista"?"výdavok":"možný výdavok";stavCls=s.istota==="ista"?"ok":"warn";}
-          // "+ Výdavok" ponúkni LEN ak transakcia nie je spárovaná so žiadnym existujúcim
-          // záznamom (výdavok/faktúra) ani klasifikovaná — inak by vznikla duplicita
+          const inc=t.smer==="prijem"; const s=vypisSparujMemo(t);
+          const st=pohybStav(t);
+          const ignor=st.kod==="ignorovany";
+          const stavTxt=st.text, stavCls=st.cls;
+          // "+ Výdavok" ponúkni LEN ak pohyb nie je spárovaný ani navrhnutý na
+          // existujúci záznam — inak by vznikla duplicita
           const uzMaZaznam = s && (s.typ==="vydavok" || s.typ==="faktura" || s.typ==="klasifikacia");
           const nespar=!ignor && !uzMaZaznam;
           const txId=t.id||t.datum+t.suma;
@@ -7201,10 +7198,15 @@ function appBanka(){
           let akcie="";
           if(nespar&&t.smer==="vydaj"){
             akcie=`<div style="display:flex;gap:5px;margin-top:5px"><button class="aabtn" style="padding:2px 8px;font-size:10.5px;border-color:var(--pos);color:var(--pos)" onclick="event.stopPropagation();vypisPridajVydavok('${esc(txId)}')"${zam("banka")}>+ Výdavok</button><button class="aabtn" style="padding:2px 8px;font-size:10.5px" onclick="event.stopPropagation();vypisIgnoruj('${esc(txId)}')" title="Vždy ignorovať takéto pohyby (pravidlo)"${zam("banka")}>⊘</button><button class="aabtn" style="padding:2px 8px;font-size:10.5px" onclick="event.stopPropagation();skryPohyb('${esc(txId)}');appBanka()" title="Skryť len tento pohyb"${zam("banka")}>🗄</button></div>`;
-          } else if(maKand){
-            // výber správneho dokladu žije v PÁROVANÍ — jedno miesto, nie tri.
+          } else if(maKand || !st.spar){
+            // Výber správneho dokladu žije v PÁROVANÍ — jedno miesto, nie tri.
             // Tu sa len presmeruje s predvybraným pohybom.
-            akcie=`<div style="display:flex;gap:5px;margin-top:5px"><button class="aabtn" style="padding:2px 8px;font-size:10.5px;border-color:var(--accent);color:var(--accent-deep)" onclick="event.stopPropagation();splitVybranyPohyb='${esc(txId)}';splitStavFilter='vsetky';otvorSplit()" title="Vybrať správny doklad v Párovaní">⇄ spárovať (${s.kandidati.length} kandidátov)</button></div>`;
+            //
+            // Ponúka sa pri KAŽDOM nespárovanom pohybe, nielen keď má viac
+            // kandidátov: pohyb s jediným návrhom bol dovtedy zvýraznený ako
+            // „vyžaduje pozornosť" a neponúkal k tomu nič. Slepá ulička
+            // v zozname je horšia než chýbajúci návrh.
+            akcie=`<div style="display:flex;gap:5px;margin-top:5px"><button class="aabtn" style="padding:2px 8px;font-size:10.5px;border-color:var(--accent);color:var(--accent-deep)" onclick="event.stopPropagation();splitVybranyPohyb='${esc(txId)}';splitStavFilter='vsetky';otvorSplit()" title="Vybrať doklad v Párovaní">⇄ spárovať${maKand?" ("+s.kandidati.length+" kandidátov)":""}</button></div>`;
           } else if(potvrdena){
             akcie=`<div style="margin-top:4px"><span onclick="event.stopPropagation();vypisZrusZhodu('${esc(txId)}')" style="cursor:pointer;font-size:10px;color:var(--ink-soft)" title="Zrušiť ručné priradenie"${zam("banka")}>✓ priradené ručne · zrušiť</span></div>`;
           }
@@ -7224,7 +7226,7 @@ function appBanka(){
               }).join("")}
             </div>`;
           }
-          return `<div class="arow" style="grid-template-columns:auto 2fr 1fr auto;align-items:start;${ignor?'opacity:.5':nespar?'background:var(--sfc-warn)':''}"><div style="width:30px;height:30px;border-radius:8px;display:grid;place-items:center;font-weight:700;background:${inc?'var(--sfc-pos)':'#f2f4f7'};color:${inc?'var(--pos)':'var(--ink-soft)'}">${inc?'↓':'↑'}</div><div style="min-width:0"><div class="acol-strong" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(t.proti||"—")}</div><div class="acol-muted">${t.vs?'VS '+esc(t.vs)+' · ':''}<span class="apill ${stavCls}" style="font-size:9.5px">${stavTxt}</span></div>${akcie}</div><div class="acol-muted">${fmtDatum(t.datum)}</div><div class="acol-sum" style="color:${inc?'var(--pos)':'var(--ink)'}">${inc?'+':'−'}${eur(+t.suma||0)}</div>${kandHtml}</div>`;
+          return `<div class="arow" style="grid-template-columns:auto 2fr 1fr auto;align-items:start;${ignor?'opacity:.5':!st.spar?'background:var(--sfc-warn)':''}"><div style="width:30px;height:30px;border-radius:8px;display:grid;place-items:center;font-weight:700;background:${inc?'var(--sfc-pos)':'#f2f4f7'};color:${inc?'var(--pos)':'var(--ink-soft)'}">${inc?'↓':'↑'}</div><div style="min-width:0"><div class="acol-strong" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(t.proti||"—")}</div><div class="acol-muted">${t.vs?'VS '+esc(t.vs)+' · ':''}<span class="apill ${stavCls}" style="font-size:9.5px">${stavTxt}</span></div>${akcie}</div><div class="acol-muted">${fmtDatum(t.datum)}</div><div class="acol-sum" style="color:${inc?'var(--pos)':'var(--ink)'}">${inc?'+':'−'}${eur(+t.suma||0)}</div>${kandHtml}</div>`;
         }).join('')+orezInfo('banka', Math.min(filtered.length, limitPre('banka',200)), filtered.length, 'appBanka'):'<div class="aempty">Žiadne pohyby.</div>';
       })()}
     </div>
@@ -11189,8 +11191,10 @@ function appCashflow(){
   const prijmy=vypis.filter(t=>t.smer==="prijem");
   const vydaje=vypis.filter(t=>t.smer==="vydaj");
   let sparP=0, sparV=0;
-  prijmy.forEach(t=>{ const s=vypisSparuj(t); if(s&&s.istota==="ista") sparP++; });
-  vydaje.forEach(t=>{ const s=vypisSparuj(t); if(s&&(s.istota==="ista"||s.typ==="klasifikacia")) sparV++; });
+  // Rovnaká definícia „spárované" ako v Banke a v Párovaní (kap. 47.4).
+  // Dovtedy si Cashflow počítal vlastnú a hlásil iné číslo než Banka.
+  prijmy.forEach(t=>{ if(pohybStav(t).spar) sparP++; });
+  vydaje.forEach(t=>{ if(pohybStav(t).spar) sparV++; });
   const sumaP=prijmy.reduce((a,t)=>a+(+t.suma||0),0);
   const sumaV=vydaje.reduce((a,t)=>a+(+t.suma||0),0);
 
@@ -11199,12 +11203,8 @@ function appCashflow(){
   else if(cfSmer==="vydaje") zoznam=vydaje;
 
   function riadok(t, gi){
-    const s=vypisSparuj(t);
-    let stav, farba;
-    if(!s){ stav="nespárované"; farba="warn"; }
-    else if(s.typ==="klasifikacia"){ stav={dph:"DPH",danPrijem:"daň",odvodZP:"odvody ZP",odvodSP:"odvody SP",poistenie:"poistenie"}[s.klasifikacia.druh]||"iné"; farba="ok"; }
-    else if(s.typ==="faktura"){ stav="faktúra "+esc(s.zaznam.cislo||""); farba=s.istota==="ista"?"ok":"warn"; }
-    else { stav="výdavok"; farba=s.istota==="ista"?"ok":"warn"; }
+    const st=pohybStav(t), s=st.navrh||null;
+    const stav=esc(st.text), farba=st.cls;
     const inc=t.smer==="prijem";
     const otvor=String(cfOtvoreny)===String(gi);
     return `<div class="arow" style="grid-template-columns:1fr auto;cursor:pointer;align-items:center" onclick="cfOtvoreny=${otvor?'-1':JSON.stringify(String(gi))};appCashflow()">
@@ -11217,7 +11217,11 @@ function appCashflow(){
     ${otvor?`<div style="padding:8px 14px 12px;background:var(--bg);font-size:12.5px;color:var(--ink-soft);border-bottom:1px solid var(--line)">
       ${t.vs?'Variabilný symbol: <b>'+esc(t.vs)+'</b><br>':''}
       ${t.ibanProti?'Protiúčet: '+esc(t.ibanProti)+'<br>':''}
-      ${s?'Spárované: <b>'+esc(s.preco||stav)+'</b>':'Zatiaľ nespárované — appka nenašla jednoznačnú zhodu.'}
+      ${(t.uhrady||[]).length
+        ? 'Zaplatené doklady: <b>'+(t.uhrady||[]).map(u=>esc(String(u.cislo))+" · "+eur(uhrNaDoklad(u))).join(", ")+'</b>'
+          +(st.kod==="ciastocny"?'<br><span style="color:var(--warn)">'+esc(st.text)+'</span>':'')
+        : s ? (st.kod==="navrh" ? 'Návrh (nepotvrdený): <b>' : 'Spárované: <b>')+esc(s.preco||stav)+'</b>'
+            : 'Zatiaľ nespárované — appka nenašla jednoznačnú zhodu.'}
       ${t.popis?'<br>Popis: '+esc(t.popis):''}
     </div>`:''}`;
   }
@@ -16776,8 +16780,8 @@ function uzavierkaKontroly(mk){
 
   // ── banka: len ak za mesiac existujú pohyby ──
   const pohyby=(d.vypis||[]).filter(t=>vMesiaci(t.datum) && !t.skryty);
-  if(pohyby.length && typeof splitPohybStav==="function"){
-    const nesparovane=pohyby.filter(t=>{ try{ return !splitPohybStav(t).spar; }catch(_){ return false; } });
+  if(pohyby.length && typeof pohybStav==="function"){
+    const nesparovane=pohyby.filter(t=>{ try{ return !pohybStav(t).spar; }catch(_){ return false; } });
     if(nesparovane.length)
       out.push({typ:"pozor", k:"nesparovane", t:nesparovane.length+" nespárovaných pohybov na účte",
         d:"Platba bez dokladu môže znamenať chýbajúci výdavok alebo neúčtovanú tržbu."});
@@ -19427,21 +19431,65 @@ function obnovPoEditacii(modul){
   if(otvorene==="cashflow"){ appCashflow(); return; }
   if(modul==="faktury") appFaktury(); else appVydavky();
 }
-function splitPohybStav(tx){
-  if(tx.skryty) return {spar:true, skryty:true};
-  if(tx.vratenie) return {spar:true, vratenie:true};
+// ═══ STAV POHYBU — jediný slovník pre celú appku (kap. 47.4) ═══════════
+//
+// Banka a Cashflow kreslili stav pohybu z ODHADU (`vypisSparuj`), Párovanie
+// a doklady z FAKTU (`tx.uhrady`). Tá istá platba tak mala na piatich
+// obrazovkách rôzny stav a používateľ nemal z čoho pochopiť, ktorý platí —
+// nebola to chyba zobrazenia, ale dve definície pravdy.
+//
+// Odteraz stav pohybu hovorí táto funkcia a nikto iný. Poradie je
+// podstatné: FAKT prebíja ODHAD. Odhad sa vracia ako `navrh` a UI ho musí
+// zobraziť odlíšene — návrh nie je spárovanie.
+const POHYB_STAVY={
+  skryty:       {text:"skryté",      cls:"",     spar:true},
+  vratenie:     {text:"vrátenie",    cls:"ok",   spar:true},
+  ignorovany:   {text:"ignorované",  cls:"",     spar:true},
+  vybaveny:     {text:"spárované",   cls:"ok",   spar:true},
+  klasifikovany:{text:"klasifikované",cls:"ok",  spar:true},
+  ciastocny:    {text:"čiastočne",   cls:"warn", spar:false},
+  navrh:        {text:"návrh",       cls:"warn", spar:false},
+  nesparovany:  {text:"nespárované", cls:"warn", spar:false},
+};
+// Názvy klasifikácií boli natvrdo na dvoch miestach (Banka, Cashflow) —
+// tá istá mapa dvakrát je presne to, čo sa vždy rozíde.
+const KLAS_NAZVY={dph:"DPH", danPrijem:"daň", odvodZP:"odvody ZP",
+                  odvodSP:"odvody SP", poistenie:"poistenie"};
+function pohybStav(tx){
+  const stav=(kod,extra)=>Object.assign({kod}, POHYB_STAVY[kod], extra||{});
+  if(tx.skryty)   return stav("skryty",   {skryty:true});
+  if(tx.vratenie) return stav("vratenie", {vratenie:true});
+  // ── FAKT: zapísané väzby ──
   const u=tx.uhrady||[];
   if(u.length){
     const zost=txZostava(tx);
-    if(zost>0.005) return {spar:false, ciastocne:true, zostava:zost, pocet:u.length};
-    return {spar:true, potvrdene:true, pocet:u.length};
+    if(zost>0.005) return stav("ciastocny", {ciastocne:true, zostava:zost, pocet:u.length,
+                                             text:"zostáva "+eur(zost)});
+    return stav("vybaveny", {potvrdene:true, pocet:u.length});
   }
-  if(tx.potvrdenaZhoda) return {spar:true, potvrdene:true};
-  const s=vypisSparuj(tx);
-  if(s && s.ignoruj) return {spar:true, ignor:true};
-  if(s && s.istota==="ista") return {spar:true};
-  if(s && s.zaznam) return {spar:false, navrh:s};
-  return {spar:false};
+  if(tx.potvrdenaZhoda) return stav("vybaveny", {potvrdene:true});
+  // ── ODHAD: návrh, ktorý čaká na potvrdenie ──
+  const s=vypisSparujMemo(tx);
+  if(s && s.ignoruj) return stav("ignorovany", {ignor:true});
+  if(s && s.typ==="klasifikacia")
+    return stav("klasifikovany", {klas:s.klasifikacia, navrh:s, spar:s.istota==="ista",
+                                  text:KLAS_NAZVY[s.klasifikacia.druh]||"klasifikované"});
+  if(s && s.istota==="ista") return stav("vybaveny", {navrh:s});
+  if(s && s.zaznam) return stav("navrh", {navrh:s,
+                                text:"návrh: "+(s.zaznam.cislo||s.preco||"doklad")});
+  return stav("nesparovany");
+}
+// Odhad je drahý — prehľadá všetky doklady. Zoznam 200 pohybov ho volal
+// 200-krát pri každom prekreslení. Platnosť viaže na `firmaDataVerzia`
+// rovnako ako index úhrad (vzor 45.8).
+let _sparCache=new WeakMap(), _sparVerzia=-1;
+function vypisSparujMemo(tx){
+  if(_sparVerzia!==firmaDataVerzia){ _sparCache=new WeakMap(); _sparVerzia=firmaDataVerzia; }
+  if(_sparCache.has(tx)) return _sparCache.get(tx);
+  let s=null;
+  try{ s=vypisSparuj(tx); }catch(e){ console.error("vypisSparuj pri stave pohybu:", e); }
+  _sparCache.set(tx, s);
+  return s;
 }
 // ═══════════════════════════════════════════════════════════════
 //  ÚHRADY — jeden pohyb môže uhradiť viac dokladov a naopak
@@ -19483,6 +19531,19 @@ function migrujUhrady(){
     const pz=t.potvrdenaZhoda;
     if(!pz || !pz.cislo || (t.uhrady||[]).length) return;
     if(pridajUhradu(t, pz.typ||"vydavok", String(pz.cislo)) > 0) n++;
+  });
+
+  // ── centové rozdiely na už zapísaných väzbách (kap. 47.8) ──
+  // Tolerancia sama o sebe platí len pre nové priradenia. Bez tohto kroku by
+  // pohyby spárované predtým ostali visieť ako „zostáva 0,01 €" navždy —
+  // oprava, ktorá sa neprejaví na dátach, čo problém odhalili, nie je oprava.
+  (firmaData.vypis||[]).forEach(t=>{
+    (t.uhrady||[]).forEach(u=>{
+      if(u.zaokruhlenie) return;
+      const pred=r2(+u.zaokruhlenie||0);
+      zaokruhliVazbu(t, u, u.typ, u.cislo);
+      if(r2(+u.zaokruhlenie||0)!==pred) n++;
+    });
   });
 
   // ── Pravidlá ignorovania zo starého poľa `vypisPravidla` ──
@@ -19545,14 +19606,40 @@ function obnovPohyb(txIdVal){
 }
 // ignorovaný pravidlom? (odvodené — pravidlá sa dajú meniť a stav sa má meniť s nimi)
 function jePohybIgnorovany(tx){
-  const s=vypisSparuj(tx); return !!(s && s.ignoruj);
+  const s=vypisSparujMemo(tx); return !!(s && s.ignoruj);
 }
 
 // koľko z pohybu je už rozdelené na doklady
 function txRozdelene(tx){
-  return r2((tx.uhrady||[]).reduce((a,u)=>a+(+u.suma||0),0));
+  return r2((tx.uhrady||[]).reduce((a,u)=>a+uhrNaPohyb(u),0));
 }
 function txZostava(tx){ return r2(txSuma(tx)-txRozdelene(tx)); }
+
+// ═══ ZAOKRÚHĽOVACIA TOLERANCIA (kap. 47.8) ═════════════════════════════
+//
+// Pohyb 21,06 € na doklad 21,05 € (KROS COMFPAY, ostré dáta 22. 8.) visel
+// navždy ako „rozdelené sčasti · zostáva 0,01 €": `pridajUhradu` má strop
+// na zostatok dokladu, takže cent nemal kam ísť. Opačne to bolo rovnaké —
+// platba 89,99 € nechala doklad za 90,00 € „čiastočne uhradený".
+//
+// Cent sa NEPRIPISUJE ani k jednej strane. Zapíše sa na väzbu ako
+// `u.zaokruhlenie` a uzatvára len tú stranu, kde chýbal:
+//   kladné  = pohyb bol väčší než doklad  → dojedá zvyšok POHYBU
+//   záporné = pohyb bol menší než doklad  → dopláca zvyšok DOKLADU
+// Do výdavku ani do DPH tým nevstupuje nič navyše — doklad ostáva dokladom.
+const TOL_ZAOKR = 0.05;
+function uhrNaPohyb(u){ const z=+u.zaokruhlenie||0; return r2((+u.suma||0)+Math.max(0, z)); }
+function uhrNaDoklad(u){ const z=+u.zaokruhlenie||0; return r2((+u.suma||0)+Math.max(0,-z)); }
+// Rozdiel sa PRIZNÁVA, nemizne. Ticho zhltnutý cent by bol to isté ako
+// ticho zhltnutá chyba: sedelo by to a nikto by nevedel prečo.
+function zaokrPopis(u){
+  const z=r2(+(u.zaokruhlenie!=null?u.zaokruhlenie:u.zaokr)||0);
+  if(!z) return "";
+  return ` <span style="color:var(--ink-soft);font-size:11px" title="${
+    z>0 ? "Platba bola o toľko vyššia než doklad — rozdiel je zaokrúhlenie, do výdavku nevstupuje."
+        : "Platba bola o toľko nižšia než doklad — rozdiel je zaokrúhlenie, doklad je uhradený."
+  }">${z>0?"+":"−"}${eur(Math.abs(z))} zaokr.</span>`;
+}
 
 // celková suma dokladu
 // ── IDENTITA DOKLADU ───────────────────────────────────────────────────────
@@ -19646,7 +19733,7 @@ function _uhradyIndex(){
     const m=new Map();
     vyp.forEach(t=>(t.uhrady||[]).forEach(u=>{
       const k=u.typ+"|"+String(u.cislo);
-      m.set(k, (m.get(k)||0)+(+u.suma||0));
+      m.set(k, (m.get(k)||0)+uhrNaDoklad(u));
     }));
     _uhrIdx={v:firmaDataVerzia, fd:firmaData, vyp, len:vyp.length, mapa:m};
   }
@@ -19669,7 +19756,8 @@ function uhradyDokladuPohyby(typ, cislo){
     (firmaData.vypis||[]).forEach(t=>(t.uhrady||[]).forEach(u=>{
       const k=u.typ+"|"+String(u.cislo);
       if(!m.has(k)) m.set(k, []);
-      m.get(k).push({ datum:t.datum||"", suma:r2(+u.suma||0), partner:t.partner||"", id:txId(t) });
+      m.get(k).push({ datum:t.datum||"", suma:uhrNaDoklad(u), zaokr:r2(+u.zaokruhlenie||0),
+                      partner:t.partner||"", id:txId(t) });
     }));
     m.forEach(list=>list.sort((a,b)=>String(a.datum).localeCompare(String(b.datum))));
     return m;
@@ -19904,7 +19992,25 @@ function pridajUhradu(tx, typ, cislo, suma){
   tx.potvrdenaZhoda={typ, cislo:String(cislo)};
   delete tx.odmietnutaZhoda;
   firmaDataVerzia++;   // zneplatni index úhrad
+  zaokruhliVazbu(tx, uz || tx.uhrady[tx.uhrady.length-1], typ, cislo);
   return s;
+}
+// Uzavrie centový rozdiel medzi pohybom a dokladom (kap. 47.8). Volá sa
+// VÝHRADNE z `pridajUhradu` — zápis do `uhrady` má jedného vlastníka
+// a stráži to kontrola v run_testy.js.
+function zaokruhliVazbu(tx, u, typ, cislo){
+  if(!u || u.zaokruhlenie) return;                 // už uzavreté
+  const s=r2(+u.suma||0);
+  const zvysokPohyb=txZostava(tx);                 // nerozdelený zvyšok platby
+  const zvysokDoklad=dokladZostava(typ, cislo);    // nedoplatok dokladu
+  // Zaokrúhlenie je CHVOST platby, nie jej polovica. Bez tejto podmienky
+  // by sa doklad za 0,03 € „doplatil" centom a tolerancia by z drobných
+  // súm robila nezmysly.
+  const drobne=z=>z>0.005 && z<=TOL_ZAOKR && r2(z*10)<=s;
+  if(zvysokDoklad<=0.005 && drobne(zvysokPohyb)) u.zaokruhlenie=zvysokPohyb;
+  else if(zvysokPohyb<=0.005 && drobne(zvysokDoklad)) u.zaokruhlenie=r2(-zvysokDoklad);
+  else return;
+  firmaDataVerzia++;
 }
 // Priradenia, ktoré ukazujú na doklad, čo neexistuje. Vznikali dvoma cestami:
 // úhrada zapísaná na prázdnu identitu (doklad bez čísla, pred zavedením kľúča)
@@ -20153,7 +20259,7 @@ function parJednoznacny(tx){
 // spáruje všetky jednoznačné pohyby naraz
 function parSparujJednoznacne(){
   if(!strazZapis("banka")) return;
-  const pohyby=(firmaData.vypis||[]).filter(t=>!splitPohybStav(t).spar);
+  const pohyby=(firmaData.vypis||[]).filter(t=>!pohybStav(t).spar);
   const navrhy=[];
   pohyby.forEach(t=>{ const k=parJednoznacny(t); if(k) navrhy.push({t,k}); });
   if(!navrhy.length){ alert("Nenašli sme žiadne jednoznačné páry.\n\nZvyšné pohyby majú viac možností — vyberte ich ručne."); return; }
@@ -20174,7 +20280,7 @@ function parSparujJednoznacne(){
 
 // koľko pohybov sa dá spárovať automaticky
 function parPocetJednoznacnych(){
-  return (firmaData.vypis||[]).filter(t=>!splitPohybStav(t).spar && parJednoznacny(t)).length;
+  return (firmaData.vypis||[]).filter(t=>!pohybStav(t).spar && parJednoznacny(t)).length;
 }
 
 // Kandidáti v dvoch úrovniach. Pôvodne sa vracali VŠETKY doklady zoradené len
@@ -20298,7 +20404,7 @@ function renderSplit(){
     else if(splitStavFilter==="ignor")  pohyby=pohyby.filter(t=>!t.skryty && jePohybIgnorovany(t));
     else {
       pohyby=pohyby.filter(t=>!t.skryty && !jePohybIgnorovany(t));
-      if(splitStavFilter==="nespar") pohyby=pohyby.filter(t=>{const st=splitPohybStav(t); return !st.spar||st.ciastocne;});
+      if(splitStavFilter==="nespar") pohyby=pohyby.filter(t=>{const st=pohybStav(t); return !st.spar||st.ciastocne;});
     }
     if((_hladaj.splitBanka||"").trim()) pohyby=pohyby.filter(t=>hladajZhoda(_hladaj.splitBanka, t.proti, t.popis, t.vs, t.suma, t.ibanProti));
     const vybrany = splitVybranyPohyb ? vsetkyPohyby.find(t=>txId(t)===splitVybranyPohyb) : null;
@@ -20306,7 +20412,7 @@ function renderSplit(){
     const vratMapa={}; vratenia.filter(v=>!v.iste).forEach(v=>{ vratMapa[txId(v.vratenie)]=v; vratMapa[txId(v.platba)]=v; });
     const kandInfo = vybrany ? splitKandidati(vybrany, splitVsetciKand || splitDokladyFilterAktivny()) : {rel:[],zvysok:0,vsetky:[]};
     const kand = kandInfo.vsetky;
-    const nespar = pohyby.filter(t=>!splitPohybStav(t).spar).length;
+    const nespar = pohyby.filter(t=>!pohybStav(t).spar).length;
     const pocetAuto=parPocetJednoznacnych();
     const chip=(k,l,cnt)=>`<span class="achip ${splitStavFilter===k?'on':''}" style="font-size:11px;padding:3px 9px" onclick="splitNastavStav('${k}')">${l}${cnt!=null?' ('+cnt+')':''}</span>`;
     lavy=`<div class="sp-head" style="--_c:#0f7d8c"><div class="sp-ic">🏦</div><div class="sp-tt">Banka — pohyby</div><span class="sp-badge">${nespar} nespár.</span></div>
@@ -20322,7 +20428,7 @@ function renderSplit(){
         <button class="aabtn pri" style="width:100%;font-size:12.5px;padding:7px 12px" onclick="parSparujJednoznacne()"${zam("banka")}>✨ Spárovať jednoznačné (${pocetAuto})</button>
       </div>`:''}
       <div class="sp-body" data-scroll="lavy">${pohyby.length?pohyby.map(t=>{
-        const st=splitPohybStav(t), sel=splitVybranyPohyb===txId(t);
+        const st=pohybStav(t), sel=splitVybranyPohyb===txId(t);
         const cls=sel?"sel":(st.spar?"done":(st.ciastocne?"cast":"")), znak=t.smer==="prijem"?"+":"−", farba=t.smer==="prijem"?"var(--pos)":"var(--neg)";
         const vr=vratMapa[txId(t)];
         return `<div class="sp-item ${cls}" data-tx="${txId(t)}" onclick="splitVyberPohyb('${txId(t)}')">
@@ -20382,7 +20488,7 @@ function renderSplit(){
           return `<div style="background:var(--bg);border-radius:9px;padding:9px 11px;margin-bottom:10px;font-size:12px">
             <div style="color:var(--ink-soft);margin-bottom:5px">Touto platbou máte zaplatené:</div>
             ${u.map(x=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0">
-              <span>${esc(String(x.cislo))} · <b>${eur(x.suma)}</b></span>
+              <span>${esc(String(x.cislo))} · <b>${eur(x.suma)}</b>${zaokrPopis(x)}</span>
               <button class="aabtn" style="padding:2px 8px;font-size:11px" onclick="splitOdoberUhradu('${txId(vybrany)}','${esc(x.typ)}','${esc(String(x.cislo))}')"${zam("banka")}>odobrať</button>
             </div>`).join("")}
           </div>`; })()}
