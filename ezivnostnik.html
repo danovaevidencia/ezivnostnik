@@ -946,7 +946,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.22-GL";  // hľadanie: pole rovno v pruhu, bez kliku na ikonu
+const APP_VERZIA = "2026.08.22-GM";  // editor dokladu: príloha a väzby na platby s možnosťou odobrať
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -6068,6 +6068,7 @@ function feModal(idx, nova){
     <button type="button" class="aabtn" style="margin-top:8px" onclick="fePridajPolozku()">＋ Pridať položku</button>
     <div id="feSumy" style="background:var(--bg);border-radius:9px;padding:11px 13px;margin-top:14px;font-size:13px">${feSumyHtml()}</div>
     <div class="mfield" style="margin-top:12px"><label><input type="checkbox" id="m_zapl" ${faktJeUhradena(f)?'checked':''} style="width:auto;margin-right:7px">Uhradená</label></div>
+    <div id="m_uhradyBox">${nova?"":uhradyBoxHtml("faktura", f)}</div>
     </div>
    </div>
   `,
@@ -6764,18 +6765,57 @@ function vydavokDoplnkovePolia(obj){
   return obj;
 }
 
+// ═══ DOKLAD A ÚHRADA V EDITORE ════════════════════════════════════════════
+// Kde je doklad zaplatený, čím, a ako sa na neho pozrieť — priamo v editore.
+// Dovtedy tu bola len veta „Priradenie zmeníte v Banke → Párovanie": kto zle
+// spáruje, uvidí to na doklade, ale opravovať to musel inde. Cesta, ktorá
+// vedie preč od miesta nálezu, sa nepoužije.
+function uhradyBoxHtml(typ, x){
+  if(!x) return "";
+  const kluc=dokladKluc(x);
+  if(!kluc) return "";
+  const pohyby=uhradyDokladuPohyby(typ, kluc);
+  const st=uhradaStav(typ, kluc);
+  const rucne=x.uhradaRucne||null;
+  const priloha=x.doklad||x.originalSubor||"";
+  if(!pohyby.length && !rucne && !priloha) return "";
+  const riadok=(vnutro)=>`<div style="display:flex;align-items:center;gap:8px;margin-top:5px;font-size:11.5px">${vnutro}</div>`;
+  const btn=(popis,titulok,akcia)=>`<button type="button" class="aabtn" style="padding:3px 9px;font-size:11px;margin-left:auto" title="${esc(titulok)}" onclick="${akcia}">${popis}</button>`;
+  return `<div style="background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:12.5px">
+    <div style="font-weight:700">Doklad a úhrada</div>
+    ${priloha?riadok(`<span style="color:var(--ink-soft)">📎 Priložený doklad</span>`+
+      btn("Otvoriť","Zobraziť naskenovaný doklad","otvorDoklad('"+esc(priloha)+"')")):""}
+    ${pohyby.map(u=>riadok(`<span style="color:var(--pos)">✓ ${fmtDatum(u.datum)} · ${eur(u.suma)}${u.partner?" · "+esc(u.partner):""}</span>`+
+      btn("✕ odobrať","Zrušiť priradenie tejto platby k dokladu","dokladOdoberVazbu('"+typ+"','"+esc(kluc)+"','"+esc(u.id)+"')"))).join("")}
+    ${rucne?riadok(`<span style="color:var(--warn)">◐ Potvrdené ručne ${fmtDatum(rucne.datum)}${rucne.poznamka?" · "+esc(rucne.poznamka):""}</span>`+
+      btn("✕ zrušiť","Zrušiť ručné potvrdenie úhrady","dokladZrusRucnu('"+typ+"','"+esc(kluc)+"')")):""}
+    ${pohyby.length>1?`<div style="margin-top:5px;font-size:11.5px;color:var(--ink-soft)">Spolu ${eur(r2(pohyby.reduce((a,u)=>a+u.suma,0)))}</div>`:""}
+    ${st.stav==="ciastocne"?`<div style="margin-top:5px;font-size:11.5px;color:var(--warn)">${esc(st.text)}</div>`:""}
+    ${(pohyby.length||rucne)?`<div style="font-size:11px;color:var(--ink-soft);margin-top:6px">Odobratie väzby nezmaže pohyb v banke — vráti ho medzi nespárované.</div>`:""}
+  </div>`;
+}
+function prekresliUhradyBox(typ, kluc){
+  const el=document.getElementById("m_uhradyBox");
+  if(el) el.innerHTML=uhradyBoxHtml(typ, najdiDoklad(typ, kluc));
+}
+// Väzba doklad ↔ pohyb patrí do banky, preto sa stráži rovnakou rolou ako
+// párovanie. Prekresľuje sa len box, nie celý modál — inak by sa stratili
+// rozpísané zmeny vo formulári.
+function dokladOdoberVazbu(typ, kluc, txIdVal){
+  if(!strazZapis("banka")) return;
+  const tx=(firmaData.vypis||[]).find(t=>txId(t)===txIdVal);
+  if(!tx){ alert("Pohyb sa v bankovom výpise nenašiel — možno bol medzičasom odstránený."); return; }
+  odoberUhradu(tx, typ, kluc);
+  poZmene();
+  prekresliUhradyBox(typ, kluc);
+}
+function dokladZrusRucnu(typ, kluc){
+  if(!strazZapis(typ==="faktura"?"faktury":"vydavky")) return;
+  zrusDokladUhradu(typ, kluc);
+  prekresliUhradyBox(typ, kluc);
+}
 function vydavokFormHtml(x, nova, idx){
-  // Kde je doklad zaplatený — priamo v editore, nie až v Párovaní. Kto opravuje
-  // sumu, má vidieť, že na doklad už niečo prišlo: zmena sumy tam mení aj to,
-  // koľko zostáva doplatiť.
-  const _uhr = nova ? [] : uhradyDokladuPohyby("vydavok", dokladKluc(x));
-  const _uhrHtml = _uhr.length ? `<div style="background:var(--sfc-pos);border-left:3px solid var(--pos);border-radius:0 9px 9px 0;
-      padding:9px 12px;margin-bottom:12px;font-size:12.5px;line-height:1.5">
-      <b>Zaplatené z účtu</b>
-      ${_uhr.map(u=>`<div style="color:var(--ink-soft);font-size:11.5px">${fmtDatum(u.datum)} · ${eur(u.suma)}${u.partner?" · "+esc(u.partner):""}</div>`).join("")}
-      ${_uhr.length>1?`<div style="font-size:11.5px;margin-top:3px">Spolu ${eur(r2(_uhr.reduce((a,u)=>a+u.suma,0)))}</div>`:""}
-      <div style="font-size:11px;color:var(--ink-soft);margin-top:4px">Priradenie zmeníte v Banke → Párovanie.</div>
-    </div>` : "";
+  const _uhrHtml = nova ? "" : `<div id="m_uhradyBox">${uhradyBoxHtml("vydavok", x)}</div>`;
   return `    ${_uhrHtml}<div class="mfield"><label>Druh dokladu</label><select id="m_druh" onchange="mAktualizujOddiel();const b=document.getElementById('m_phmBox');if(b)b.style.display=(this.value==='PHM (tankovanie)')?'block':(document.getElementById('m_litre')&&document.getElementById('m_litre').value?'block':'none')"><option ${x.druh==="Došlá faktúra"?"selected":""}>Došlá faktúra</option><option ${x.druh==="Bloček"?"selected":""}>Bloček</option><option ${x.druh==="PHM (tankovanie)"?"selected":""}>PHM (tankovanie)</option><option ${x.druh==="Interný doklad"?"selected":""}>Interný doklad</option></select></div>
     <div class="mfield" style="position:relative"><label>Partner</label>
       <input id="m_partner" value="${esc(x.partner)}" autocomplete="off" oninput="feHladajFirmu(this.value,'m_partner')" placeholder="Začnite písať názov alebo IČO dodávateľa…">
