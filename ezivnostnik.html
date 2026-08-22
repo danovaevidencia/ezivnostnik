@@ -946,7 +946,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.22-GP";  // párovanie v3, etapa 3: karta pohybu — rozklik v Banke aj Cashflowe
+const APP_VERZIA = "2026.08.22-GQ";  // párovanie v3, etapa 4: automatika páruje sama, oboma smermi
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -1856,7 +1856,7 @@ function zobrazFirmu(){
   // priradilo, čiže po aktualizácii raz a potom takmer nikdy. Odklad je kvôli
   // tomu, aby sa najprv vykreslila obrazovka a človek videl, čoho sa to týka.
   try{
-    const _sp=autoParujIstePrijmy();
+    const _sp=autoParujPohyby();
     if(_sp){
       poZmene();
       setTimeout(()=>alert("Appka za vás priradila "+_sp+" "+(_sp===1?"platbu":_sp<5?"platby":"platieb")+
@@ -1864,7 +1864,7 @@ function zobrazFirmu(){
         "Ak niektoré priradenie nesedí, odoberiete ho v Banka → Párovanie.\n\n"+
         "Záznam ostáva v zvončeku."), 400);
     }
-  }catch(e){ console.error("autoParujIstePrijmy pri zobrazení firmy:", e); }
+  }catch(e){ console.error("autoParujPohyby pri zobrazení firmy:", e); }
   // faktúry za predplatné rovno do výdavkov (raz za session, na pozadí)
   if(!_saasAutoDone && firmaData && !localMode){ _saasAutoDone=true; autoZaevidujSaasFaktury(); }
   // pozastavený účet (admin nastavil aktivny=false) → zablokuj appku
@@ -6103,7 +6103,11 @@ function feModal(idx, nova){
     const _chceZapl=chk("m_zapl"), _kluc=dokladKluc(f);
     if(_chceZapl && !dokladJeUhradeny("faktura", _kluc)) oznacDokladUhradeny("faktura", _kluc);
     else if(!_chceZapl && dokladJeUhradeny("faktura", _kluc)) zrusDokladUhradu("faktura", _kluc);
-    poZmene(); obnovPoEditacii("faktury");
+    poZmene();
+    // Nová faktúra si hľadá svoju platbu (kap. 47.7) — pri fakturácii spätne
+    // býva príjem vo výpise skôr než doklad v appke.
+    if(nova) oznamAutoUhradu(autoParujDoklad("faktura", _kluc), "faktura", _kluc);
+    obnovPoEditacii("faktury");
   },
   nova?null:()=>{
     const _f=firmaData.faktury[idx]||{};
@@ -6785,7 +6789,7 @@ function uhradyBoxHtml(typ, x){
     <div style="font-weight:700">Doklad a úhrada</div>
     ${priloha?riadok(`<span style="color:var(--ink-soft)">📎 Priložený doklad</span>`+
       btn("Otvoriť","Zobraziť naskenovaný doklad","otvorDoklad('"+esc(priloha)+"')")):""}
-    ${pohyby.map(u=>riadok(`<span style="color:var(--pos)">✓ ${fmtDatum(u.datum)} · ${eur(u.suma)}${zaokrPopis(u)}${u.partner?" · "+esc(u.partner):""}</span>`+
+    ${pohyby.map(u=>riadok(`<span style="color:var(--pos)">✓ ${fmtDatum(u.datum)} · ${eur(u.suma)}${zaokrPopis(u)}${autoPopis(u)}${u.partner?" · "+esc(u.partner):""}</span>`+
       btn("✕ odobrať","Zrušiť priradenie tejto platby k dokladu","dokladOdoberVazbu('"+typ+"','"+esc(kluc)+"','"+esc(u.id)+"')"))).join("")}
     ${rucne?riadok(`<span style="color:var(--warn)">◐ Potvrdené ručne ${fmtDatum(rucne.datum)}${rucne.poznamka?" · "+esc(rucne.poznamka):""}</span>`+
       btn("✕ zrušiť","Zrušiť ručné potvrdenie úhrady","dokladZrusRucnu('"+typ+"','"+esc(kluc)+"')")):""}
@@ -7052,7 +7056,11 @@ function editVydavok(idx){
       if(tIdx>=0){ d.tankovania[tIdx]=Object.assign(d.tankovania[tIdx],tankObj); }
       else { tankObj.id="t"+Date.now()+Math.random().toString(36).slice(2,7); d.tankovania.push(tankObj); }
     } else if(tIdx>=0){ d.tankovania.splice(tIdx,1); }  // litre zmazané → zmaž tankovanie
-    poZmene(); obnovPoEditacii("vydavky");},
+    poZmene();
+    // Nový doklad si hľadá svoju platbu (kap. 47.7). Až po `poZmene`, aby
+    // automatika videla doklad, ktorý práve vznikol.
+    if(nova) oznamAutoUhradu(autoParujDoklad("vydavok", dokladKluc(obj)), "vydavok", dokladKluc(obj));
+    obnovPoEditacii("vydavky");},
   nova?null:()=>{
     const vyd=d.vydavky[idx];
     // zmaž aj prepojené tankovanie (PHM doklad vytvára výdavok + tankovanie)
@@ -14577,7 +14585,7 @@ function importujVypisText(text){
   // Platby faktúr s variabilným symbolom sa priradia hneď pri importe. Čakať,
   // kým to človek naklikká v Párovaní, znamená, že do tej doby sú tie faktúry
   // všade inde vedené ako neuhradené.
-  let sparene=0; try{ sparene=autoParujIstePrijmy(); }catch(_){}
+  let sparene=0; try{ sparene=autoParujPohyby(); }catch(_){}
   poZmene();
   if(aktualnaApp==="banka") appBanka();
   alert(nove.length
@@ -19627,6 +19635,12 @@ function txZostava(tx){ return r2(txSuma(tx)-txRozdelene(tx)); }
 const TOL_ZAOKR = 0.05;
 function uhrNaPohyb(u){ const z=+u.zaokruhlenie||0; return r2((+u.suma||0)+Math.max(0, z)); }
 function uhrNaDoklad(u){ const z=+u.zaokruhlenie||0; return r2((+u.suma||0)+Math.max(0,-z)); }
+// Automaticky vzniknutá väzba to má priznať. Človek musí vedieť rozlíšiť, čo
+// spároval sám a čo appka — inak nevie, čomu má veriť pri kontrole.
+function autoPopis(u){
+  if(!u || !u.auto) return "";
+  return ` <span style="color:var(--ink-soft);font-size:11px" title="Priradila automatika podľa sumy, dátumu a partnera. Odobratím jej poviete, že sa mýlila — sama to už nezopakuje.">· automaticky</span>`;
+}
 // Rozdiel sa PRIZNÁVA, nemizne. Ticho zhltnutý cent by bol to isté ako
 // ticho zhltnutá chyba: sedelo by to a nikto by nevedel prečo.
 function zaokrPopis(u){
@@ -19754,7 +19768,7 @@ function uhradyDokladuPohyby(typ, cislo){
       const k=u.typ+"|"+String(u.cislo);
       if(!m.has(k)) m.set(k, []);
       m.get(k).push({ datum:t.datum||"", suma:uhrNaDoklad(u), zaokr:r2(+u.zaokruhlenie||0),
-                      partner:t.partner||"", id:txId(t) });
+                      auto:u.auto?1:0, partner:t.partner||"", id:txId(t) });
     }));
     m.forEach(list=>list.sort((a,b)=>String(a.datum).localeCompare(String(b.datum))));
     return m;
@@ -19971,7 +19985,10 @@ function rucnePotvrdene(){
 //    a vtedy priradil celý pohyb.
 // Preplatenie nie je kozmetika: doklad ďalej hlási „uhradené", ale zostatok pohybu
 // sa minie a skutočná faktúra, ku ktorej platba patrila, ostane visieť neuhradená.
-function pridajUhradu(tx, typ, cislo, suma){
+// `auto` označí väzbu, ktorú vytvorila automatika (kap. 47.6). Príznak nie je
+// kozmetika: podľa neho vie `odoberUhradu` rozlíšiť, či človek ruší SVOJE
+// rozhodnutie, alebo opravuje appku — a v druhom prípade si to zapamätá.
+function pridajUhradu(tx, typ, cislo, suma, auto){
   if(!Array.isArray(tx.uhrady)) tx.uhrady=[];
   const maxPohyb=txZostava(tx);
   const zname=dokladSuma(typ,cislo)>0;              // poznáme celkovú sumu dokladu?
@@ -19983,8 +20000,9 @@ function pridajUhradu(tx, typ, cislo, suma){
   if(s>strop) s=r2(strop);
   if(s<=0) return 0;
   const uz=tx.uhrady.find(u=>u.typ===typ && String(u.cislo)===String(cislo));
-  if(uz) uz.suma=r2((+uz.suma||0)+s);
-  else tx.uhrady.push({typ, cislo:String(cislo), suma:s, datum:tx.datum||""});
+  if(uz){ uz.suma=r2((+uz.suma||0)+s); if(!auto) delete uz.auto; }
+  else tx.uhrady.push(Object.assign({typ, cislo:String(cislo), suma:s, datum:tx.datum||""},
+                                    auto?{auto:1}:{}));
   // starý formát držíme synchronizovaný, aby fungovali existujúce prehľady
   tx.potvrdenaZhoda={typ, cislo:String(cislo)};
   delete tx.odmietnutaZhoda;
@@ -20092,6 +20110,12 @@ function odoberSiroteUhrady(){
 }
 
 function odoberUhradu(tx, typ, cislo){
+  // Keď človek ruší väzbu, ktorú vytvorila automatika, opravuje appku — a to
+  // si treba zapamätať. Bez toho by ju najbližší beh automatiky (načítanie
+  // firmy, import výpisu, uloženie dokladu) ticho vrátil a človek by ju rušil
+  // dokola. Automatika, ktorá prebíja rozhodnutie človeka, je horšia než žiadna.
+  if((tx.uhrady||[]).some(u=>u.auto && u.typ===typ && String(u.cislo)===String(cislo)))
+    tx._autoNie=1;
   tx.uhrady=(tx.uhrady||[]).filter(u=>!(u.typ===typ && String(u.cislo)===String(cislo)));
   if(!tx.uhrady.length) delete tx.potvrdenaZhoda;
   else tx.potvrdenaZhoda={typ:tx.uhrady[0].typ, cislo:tx.uhrady[0].cislo};
@@ -20108,28 +20132,87 @@ function odoberUhradu(tx, typ, cislo){
 // a v ročnej kontrole červený, faktúra k nemu neuhradená — a používateľ nemal
 // z čoho pochopiť, prečo si appka protirečí.
 //
-// `_autoPar` je príznak „tento pohyb už automatika videla". Bez neho by sa
-// priradenie, ktoré si používateľ odobral, pri najbližšom načítaní vrátilo.
-// Automatika, ktorá prebíja rozhodnutie človeka, je horšia než žiadna.
-function autoParujIstePrijmy(){
+// ROZŠÍRENIE (GQ, kap. 47.6): automatika pokrývala LEN príjmy s variabilným
+// symbolom. Výdaje — v reálnych dátach väčšina práce — sa nespárovali nikdy
+// samy, hoci `parJednoznacny` (skóre ≥ 90 a odstup ≥ 25) vedel jednoznačnú
+// zhodu určiť od 19. 7.; bolo to však ručné tlačidlo zakopané v Párovaní.
+//
+// PRÍZNAK, KTORÝ CHRÁNI ROZHODNUTIE ČLOVEKA, sa zmenil zo „videné" na
+// „zamietnuté". Pôvodný `_autoPar` sa zapisoval každému pohybu, na ktorý sa
+// automatika čo i len pozrela — po prvom behu už teda nemohla spárovať nič,
+// ani doklad, ktorý pribudol o mesiac. To bolo v poriadku, kým automatika
+// bežala raz pri načítaní; pri párovaní z oboch strán je to slepota.
+// `_autoNie` sa zapisuje až vtedy, keď človek AUTOMATICKÚ väzbu odoberie
+// (`odoberUhradu`) — to je jediný okamih, ktorý naozaj nesie jeho rozhodnutie.
+function autoParujPohyby(pohyby){
   if(!firmaData || typeof vypisSparuj!=="function") return 0;
   let n=0;
-  (firmaData.vypis||[]).forEach(t=>{
-    if(t._autoPar || t.smer!=="prijem" || t.skryty) return;
-    t._autoPar=1;                                   // videné — druhýkrát už nie
-    if((t.uhrady||[]).length || t.odmietnutaZhoda) return;
+  (pohyby || firmaData.vypis || []).forEach(t=>{
+    if(t.skryty || t.vratenie || t._autoNie || t.odmietnutaZhoda) return;
+    if((t.uhrady||[]).length) return;
+    // 1) istá zhoda príjmu podľa VS — najsilnejší znak, bodovanie netreba
     let s=null; try{ s=vypisSparuj(t); }catch(e){ console.error("vypisSparuj pri automatike:", e); return; }
-    if(!s || s.typ!=="faktura" || s.istota!=="ista" || !s.zaznam) return;
-    const c=String(s.zaznam.cislo||"").trim(); if(!c) return;
-    // `pridajUhradu` má strop na zostatok dokladu, takže druhá platba s tým
-    // istým VS sa nepriradí a ostane v kontrole vidieť. To je zámer: preplatok
-    // je nález, nie šum, a nemá sa stratiť tým, že ho automatika ticho zhltne.
-    if(pridajUhradu(t, "faktura", dokladKluc(s.zaznam)) > 0) n++;
+    if(s && s.typ==="faktura" && s.istota==="ista" && s.zaznam && String(s.zaznam.cislo||"").trim()){
+      // `pridajUhradu` má strop na zostatok dokladu, takže druhá platba s tým
+      // istým VS sa nepriradí a ostane v kontrole vidieť. To je zámer: preplatok
+      // je nález, nie šum, a nemá sa stratiť tým, že ho automatika ticho zhltne.
+      if(pridajUhradu(t, "faktura", dokladKluc(s.zaznam), null, true) > 0) n++;
+      return;
+    }
+    // 2) jednoznačný kandidát podľa skóre — platí pre príjmy aj výdaje
+    const k=parJednoznacny(t);
+    if(k && pridajUhradu(t, k.typ, String(k.kluc||k.cislo), null, true) > 0) n++;
   });
-  // Denník sa píše tu, nie u volajúceho — automatiku spúšťajú tri cesty
-  // (načítanie firmy, import výpisu, prekreslenie) a jedna by sa zabudla.
+  // Denník sa píše tu, nie u volajúceho — automatiku spúšťajú štyri cesty
+  // (načítanie firmy, import výpisu, uloženie dokladu, prekreslenie).
   if(n) zapisAutomat("parovanie", n);
   return n;
+}
+// OPAČNÝ SMER: nový doklad hľadá svoju platbu (kap. 47.7).
+//
+// Doteraz viedla cesta len od pohybu k dokladu. Doklad z OCR pritom nesie
+// všetko, čo bodovanie potrebuje — sumu, dátum, partnera aj IBAN — a platba
+// zaň je vo výpise často už mesiac. Vracia väzbu, aby volajúci vedel povedať,
+// čo sa stalo; ticho spárovaný doklad by bol prekvapenie, nie pomoc.
+function autoParujDoklad(typ, kluc){
+  if(!firmaData || typeof parSkore!=="function") return null;
+  const dok=najdiDoklad(typ, kluc);
+  if(!dok || dokladZostava(typ, kluc) <= 0.005) return null;
+  const nazov = typ==="faktura"
+    ? (typeof dok.odberatel==="string" ? dok.odberatel : (dok.odberatel&&dok.odberatel.nazov)||"")
+    : (dok.partner||dok.popis||"");
+  const k={typ, z:dok, kluc:String(kluc), cislo:dok.cislo, nazov, suma:+dok.spolu||+dok.bez||0};
+  const smer = typ==="faktura" ? "prijem" : "vydaj";
+  const kand=(firmaData.vypis||[])
+    .filter(t=>t.smer===smer && !t.skryty && !t.vratenie && !t._autoNie
+               && !t.odmietnutaZhoda && !(t.uhrady||[]).length)
+    .map(t=>({t, ...parSkore(t, k)}))
+    .sort((a,b)=>b.skore-a.skore);
+  if(!kand.length) return null;
+  // Rovnaký prah ako v druhom smere — jedno pravidlo, nie dve podobné.
+  if(kand[0].skore<90) return null;
+  if(kand[1] && kand[0].skore-kand[1].skore<25) return null;
+  const tx=kand[0].t;
+  if(pridajUhradu(tx, typ, String(kluc), null, true) <= 0) return null;
+  zapisAutomat("parovanie", 1);
+  return tx;
+}
+
+// Automatika, ktorá zapíše väzbu a nepovie to, je prekvapenie, nie pomoc.
+// Ponúka sa aj zrušenie — bez neho by človek musel hľadať, kde sa to odoberá,
+// a to je presne trieda chyby, ktorú appka rieši inde (kap. 47.5).
+function oznamAutoUhradu(tx, typ, kluc){
+  if(!tx) return;
+  setTimeout(()=>{
+    if(confirm("✓ Automaticky priradená platba z banky\n\n"
+      + fmtDatum(tx.datum)+" · "+eur(Math.abs(+tx.suma||0))+(tx.proti?" · "+tx.proti:"")+"\n\n"
+      + "Doklad je tým vedený ako uhradený. Sedí to?\n\n"
+      + "OK = ponechať · Zrušiť = odobrať priradenie")) return;
+    odoberUhradu(tx, typ, String(kluc));
+    poZmene();
+    alert("Priradenie odobraté. Pohyb nájdete v Banke medzi nespárovanými "
+        + "a automatika ho už sama nepriradí.");
+  }, 120);
 }
 
 // ═══ DOPLNENIE ÚDAJOV DODÁVATEĽA DO UŽ ZAPÍSANÝCH DOKLADOV ═════════════
@@ -20227,13 +20310,26 @@ function parSkore(tx, k){
   }
   // názov protistrany
   if(parNazvySedia(tx.proti||tx.popis, k.nazov)){ skore+=25; dovody.push({t:"partner sedí", ok:true}); }
-  // blízkosť dátumu
+  // ── VZDIALENOSŤ DÁTUMU (prepracované v GQ, kap. 47.6) ──
+  //
+  // Pôvodné pásma (+20 / +12 / +4 / 0) dávali kandidátovi vzdialenému
+  // 123 dní rovnakých 0 bodov ako tomu vzdialenému 46 dní. Pri mesačne sa
+  // opakujúcich nákladoch — odvody, predplatné, nájom — sedí suma aj partner
+  // KAŽDÝ mesiac, takže o poradí rozhodoval jedine dátum. Rozdiel medzi
+  // platbou v ten istý deň (95 b) a platbou spred 40 dní (79 b) bol 16 bodov,
+  // teda menej než požadovaných 25 — a automatika mlčala aj tam, kde by
+  // človek nezaváhal ani sekundu. Toto je príčina hlásenia „automatické
+  // párovanie často zlyháva".
+  //
+  // Vzdialenosť je informácia, nie chýbajúci bonus: platba tri mesiace od
+  // dokladu je dôkaz PROTI. Lineárny pokles 0,7 bodu na deň s dnom −25
+  // dvoch kandidátov odlíši a pritom NIKOMU nezvýši skóre oproti pôvodnému
+  // stavu — čo neprešlo prahom predtým, neprejde ani teraz.
   const dni=parDniMedzi(tx.datum, k.z&&k.z.datum);
   if(dni!==null){
-    if(dni<=3){ skore+=20; dovody.push({t:dni===0?"ten istý deň":dni+" dni rozdiel", ok:true}); }
-    else if(dni<=10){ skore+=12; dovody.push({t:dni+" dní rozdiel", ok:true}); }
-    else if(dni<=45){ skore+=4; dovody.push({t:dni+" dní rozdiel", ok:false}); }
-    else dovody.push({t:dni+" dní rozdiel", ok:false});
+    skore += Math.max(-25, Math.round(20 - dni*0.7));
+    const popis = dni===0 ? "ten istý deň" : dni+(dni<=4?" dni":" dní")+" rozdiel";
+    dovody.push({t:popis, ok:dni<=10});
   }
   if(parUzSparovany(k, txId(tx))){ skore-=60; dovody.push({t:"už spárované s iným pohybom", ok:false}); }
   return {skore, dovody, sedi};
@@ -20471,7 +20567,7 @@ function pohybKartaHtml(tx){
           return `<div style="background:var(--bg);border-radius:9px;padding:9px 11px;margin-bottom:10px;font-size:12px">
             <div style="color:var(--ink-soft);margin-bottom:5px">Touto platbou máte zaplatené:</div>
             ${u.map(x=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0">
-              <span>${esc(String(x.cislo))} · <b>${eur(x.suma)}</b>${zaokrPopis(x)}</span>
+              <span>${esc(String(x.cislo))} · <b>${eur(x.suma)}</b>${zaokrPopis(x)}${autoPopis(x)}</span>
               <button class="aabtn" style="padding:2px 8px;font-size:11px" onclick="splitOdoberUhradu('${txId(tx)}','${esc(x.typ)}','${esc(String(x.cislo))}')"${zam("banka")}>odobrať</button>
             </div>`).join("")}
           </div>`; })()}
