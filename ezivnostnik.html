@@ -946,7 +946,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.22-GU";  // párovanie v3, etapa 7: Cashflow zlúčený do Banky
+const APP_VERZIA = "2026.08.22-GV";  // porovnanie názvov: značka + naučené dvojice; automatika beží v kolách
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -20292,7 +20292,25 @@ function odoberUhradu(tx, typ, cislo){
 // bežala raz pri načítaní; pri párovaní z oboch strán je to slepota.
 // `_autoNie` sa zapisuje až vtedy, keď človek AUTOMATICKÚ väzbu odoberie
 // (`odoberUhradu`) — to je jediný okamih, ktorý naozaj nesie jeho rozhodnutie.
+// Beží v kolách, kým niečo pribúda (najviac 10). Priradenie totiž mení, čo je
+// jednoznačné: kým sú na jeden doklad dvaja kandidáti, automatika mlčí — ale
+// keď jedného z nich medzitým obsadí iný doklad, druhý sa stane jednoznačným.
+// Na ostrých dátach pribudlo v druhom kole ďalšie priradenie. Bez slučky by
+// človek musel appku otvoriť dvakrát, aby dostal to isté.
 function autoParujPohyby(pohyby){
+  let spolu=0;
+  for(let kolo=0; kolo<10; kolo++){
+    const n=autoParujKolo(pohyby);
+    if(!n) break;
+    spolu+=n;
+  }
+  // Denník sa píše tu, nie v kole a nie u volajúceho: kolo je vnútorná vec
+  // slučky a volajúcich je päť (načítanie firmy, import výpisu, uloženie
+  // dokladu, prekreslenie, ručné tlačidlo) — jeden by sa zabudol.
+  if(spolu) zapisAutomat("parovanie", spolu);
+  return spolu;
+}
+function autoParujKolo(pohyby){
   if(!firmaData || typeof vypisSparuj!=="function") return 0;
   let n=0;
   (pohyby || firmaData.vypis || []).forEach(t=>{
@@ -20311,9 +20329,6 @@ function autoParujPohyby(pohyby){
     const k=parJednoznacny(t);
     if(k && pridajUhradu(t, k.typ, String(k.kluc||k.cislo), null, true) > 0) n++;
   });
-  // Denník sa píše tu, nie u volajúceho — automatiku spúšťajú štyri cesty
-  // (načítanie firmy, import výpisu, uloženie dokladu, prekreslenie).
-  if(n) zapisAutomat("parovanie", n);
   return n;
 }
 // OPAČNÝ SMER: nový doklad hľadá svoju platbu (kap. 47.7).
@@ -20504,11 +20519,80 @@ function parNazovKluc(n){
     .replace(/\b(s\.?\s?r\.?\s?o|a\.?\s?s|k\.?\s?s|spol|sro|pbc|inc|ltd|gmbh)\b/g,"")
     .replace(/[^a-z0-9]/g,"");
 }
-// zhoda názvov: jeden je začiatkom druhého (banka skracuje protistranu)
+// Slová, ktoré o firme nehovoria nič — doména, platobná brána, terminál.
+// Bez nich by „WWW.KROS.SK COMFPAY" a „KROS a.s." nemali spoločné nič, hoci
+// jediné podstatné slovo je v oboch to isté.
+const PAR_VYPLN=new Set(["www","com","sk","cz","eu","net","org","info","shop","eshop",
+  "cardpay","comfpay","pay","payment","platba","pos","ap","pfs","sluzby","services"]);
+function parNazovTokeny(n){
+  return String(n||"").toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g,"")
+    .replace(/\b(s\.?\s?r\.?\s?o|a\.?\s?s|k\.?\s?s|spol|sro|pbc|inc|ltd|gmbh)\b/g," ")
+    .split(/[^a-z0-9]+/).filter(w=>w.length>=3 && !PAR_VYPLN.has(w));
+}
+// Zhoda názvov. Tri pravidlá, každé doložené reálnymi dvojicami z výpisu:
+//   1. jeden je začiatkom druhého — banka meno skracuje
+//      („Danube Facility Ser" × „Danube Facility Services")
+//   2. ZHODNÁ ZNAČKA, teda prvé podstatné slovo oboch názvov — banka pridáva
+//      doménu a platobnú bránu („WWW.KROS.SK COMFPAY" × „KROS a.s.",
+//      „Alza.cz" × „Alza.sk", „ZSE DRIVE - CARDPAY" × „ZSE Energetické služby")
+//   3. tú dvojicu už raz spároval človek — na mená, ktoré si nie sú podobné
+//      vôbec („CS SHELL BERNOLAKOVO" × „J & J PROPERTY INVEST")
+//
+// Prečo len PRVÉ slovo, a nie ktorékoľvek spoločné: prvá verzia brala každé
+// spoločné slovo dlhšie ako tri znaky a na ostrých dátach hneď spojila platbu
+// pre „Danube Facility Ser" s dokladom „J&T FACILITY MANAGEMENT" — cez slovo
+// „facility". Odborové slovo (facility, services, invest, property) je spoločné
+// desiatkam nesúvisiacich firiem; značka stojí na začiatku.
+//
+// Dvojice, ktoré tým prestali sedieť reťazcovo („IMOZ.KROS.SK" × „KROS a.s.",
+// „audio tuning" × „Andrej Siváček Audio Tuning"), pokrýva pravidlo 3 — sú to
+// presne tie, ktoré človek raz spároval ručne.
 function parNazvySedia(a,b){
   const x=parNazovKluc(a), y=parNazovKluc(b);
-  if(x.length<4 || y.length<4) return false;
-  return x===y || x.startsWith(y) || y.startsWith(x);
+  if(x.length>=4 && y.length>=4 && (x===y || x.startsWith(y) || y.startsWith(x))) return true;
+  const ta=parNazovTokeny(a), tb=parNazovTokeny(b);
+  if(ta.length && tb.length && ta[0]===tb[0]) return true;
+  return parNaucenaZhoda(a,b);
+}
+// ── NAUČENÉ DVOJICE ────────────────────────────────────────────────────
+//
+// Banka píše prevádzkovateľa, doklad vystaviteľa, a nemusia mať spoločné
+// ani písmeno: čerpačku „CS SHELL BERNOLAKOVO" fakturuje „J & J PROPERTY
+// INVEST", parkovanie „GARAZ MAMUT, BA" fakturuje „Saba Parking SK".
+// Žiadne pravidlo nad reťazcami to nespojí — ale používateľ tú dvojicu raz
+// spároval, a to je znalosť, ktorú appka má.
+//
+// Učí sa VÝHRADNE z väzieb, ktoré urobil človek (`u.auto` chýba). Učiť sa
+// z vlastných automatických priradení by znamenalo utvrdzovať sa vo vlastnom
+// omyle — jedno zlé priradenie by si vyrobilo pravidlo na ďalšie.
+//
+// Mapa sa NEUKLADÁ, odvodzuje sa z úhrad (kap. 16: odvodenie je bezpečnejšie
+// než prenos). Keď väzbu odoberieš, pravidlo zmizne s ňou.
+let _naucIdx={v:-1, fd:null, mapa:null};
+function parNaucenaMapa(){
+  if(_naucIdx.v!==firmaDataVerzia || _naucIdx.fd!==firmaData || !_naucIdx.mapa){
+    const m=new Map();
+    (firmaData&&firmaData.vypis||[]).forEach(t=>(t.uhrady||[]).forEach(u=>{
+      if(u.auto) return;                                   // len rozhodnutia človeka
+      const d=najdiDoklad(u.typ, u.cislo); if(!d) return;
+      const nazov = u.typ==="faktura"
+        ? (typeof d.odberatel==="string" ? d.odberatel : (d.odberatel&&d.odberatel.nazov)||"")
+        : (d.partner||d.popis||"");
+      const kb=parNazovKluc(t.proti||t.popis), kd=parNazovKluc(nazov);
+      if(kb.length<4 || kd.length<4 || kb===kd) return;
+      if(!m.has(kb)) m.set(kb, new Set());
+      m.get(kb).add(kd);
+    }));
+    _naucIdx={v:firmaDataVerzia, fd:firmaData, mapa:m};
+  }
+  return _naucIdx.mapa;
+}
+function parNaucenaZhoda(a,b){
+  const kb=parNazovKluc(a), kd=parNazovKluc(b);
+  if(kb.length<4 || kd.length<4) return false;
+  const s=parNaucenaMapa().get(kb);
+  return !!(s && s.has(kd));
 }
 function parDniMedzi(d1,d2){
   const a=new Date(String(d1||"").slice(0,10)), b=new Date(String(d2||"").slice(0,10));
