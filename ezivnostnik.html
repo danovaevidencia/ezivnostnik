@@ -946,7 +946,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.22-GW";  // Párovanie zmizlo z menu Banky po zlúčení Cashflowu — vrátené
+const APP_VERZIA = "2026.08.22-GX";  // Párovanie sa dá otočiť: vyberiem doklad a hľadám platbu
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -20452,14 +20452,20 @@ function dokladPridajPlatbu(typ, kluc, txIdVal){
   }
   poZmene();
   const zost=dokladZostava(typ, kluc);
+  // Výber platieb žije na dvoch miestach: v modáli od dokladu a v pravom paneli
+  // Párovania v smere „od dokladu" (GX). Prekresliť treba ten, ktorý je otvorený.
+  const vSplite = !!(document.getElementById("splitScreen") &&
+                     !document.getElementById("splitScreen").classList.contains("hidden"));
   if(zost>0.005){
     // doklad ešte nie je celý — nechaj výber otvorený, nech sa dá pridať ďalšia
-    const telo=document.getElementById("modalBody");
-    if(telo) prekresliSoScrollom(()=>{ telo.innerHTML=vyberPlatbyHtml(typ, kluc); });
+    if(vSplite) renderSplit();
+    else { const telo=document.getElementById("modalBody");
+           if(telo) prekresliSoScrollom(()=>{ telo.innerHTML=vyberPlatbyHtml(typ, kluc); }); }
     setTimeout(()=>alert("Priradené "+eur(pridane)+".\n\nDokladu ešte zostáva "+eur(zost)
       +" — vyberte ďalšiu platbu, ktorou bol uhradený."),60);
     return;
   }
+  if(vSplite){ splitVybranyDoklad=null; renderSplit(); return; }
   closeModal();
   prekresliUhradyBox(typ, kluc);
   if(aktualnaApp==="vydavky" && typeof appVydavky==="function") appVydavky();
@@ -20763,6 +20769,30 @@ function splitDokladyFilterAktivny(){ return !!(splitDokladyMesiac || (_hladaj.s
 function txId(tx){ return tx.id||String(tx.datum)+String(tx.suma); }
 // je aktuálna kombinácia párovací režim? (banka + doklady)
 function splitJeParovanie(){ return (splitLavy==="banka" && splitPravy==="doklady") || (splitLavy==="doklady" && splitPravy==="banka"); }
+// SMER PÁROVANIA (GX). Kombinácia „doklady ↔ banka" sa dovtedy tvárila ako
+// platná, ale vykreslila presne to isté ako opačná — otočenie panelov nikdy
+// nebolo napísané, takže to bola mŕtva voľba v dialógu.
+//
+// Odteraz sú to dva skutočné smery nad tými istými dátami:
+//   od platby  — vyberiem pohyb a hľadám doklad, ktorý ním bol zaplatený
+//   od dokladu — vyberiem doklad a hľadám platbu, ktorou bol uhradený
+// Druhý smer nepotreboval novú logiku: pravý panel je `vyberPlatbyHtml`,
+// ktorý vznikol pre editor dokladu v etape 5 (kap. 47.7).
+function splitOdDokladu(){ return splitLavy==="doklady"; }
+function splitOtoc(){
+  const l=splitLavy; splitLavy=splitPravy; splitPravy=l;
+  splitVybranyPohyb=null; splitVybranyDoklad=null; splitVsetciKand=false; _vyberPlatbyVsetky=false;
+  renderSplit();
+}
+let splitVybranyDoklad=null;      // {typ, kluc} — vybraný doklad v smere „od dokladu"
+let splitDokStavFilter="neuhr";   // neuhr | vsetky
+function splitVyberDoklad(typ, kluc){
+  const rovnaky = splitVybranyDoklad && splitVybranyDoklad.typ===typ && splitVybranyDoklad.kluc===String(kluc);
+  splitVybranyDoklad = rovnaky ? null : {typ, kluc:String(kluc)};
+  _vyberPlatbyVsetky=false;
+  renderSplit();
+}
+function splitNastavDokStav(v){ splitDokStavFilter=v; renderSplit(); }
 // generický náhľad modulu do panela
 function splitNahlad(modulId){
   const d=firmaData;
@@ -20950,7 +20980,60 @@ function pohybKartaHtml(tx){
 function renderSplit(){
   const d=firmaData;
   let lavy, pravy;
-  if(splitJeParovanie()){
+  if(splitJeParovanie() && splitOdDokladu()){
+    // ═══ SMER „OD DOKLADU" (GX) ═══
+    // Vľavo doklady, vpravo platby, ktoré k vybranému dokladu sedia. Zoznam
+    // aj ponuka platieb sú tie isté funkcie ako inde — `platbyPreDoklad`
+    // a `vyberPlatbyHtml` z etapy 5; pribudol len ľavý zoznam.
+    const dokl=[
+      ...(d.vydavky||[]).map(x=>({typ:"vydavok", z:x})),
+      ...(d.faktury||[]).map(x=>({typ:"faktura", z:x})),
+    ].filter(k=>dokladKluc(k.z))
+     .map(k=>({...k, kluc:dokladKluc(k.z), datum:String(k.z.datum||k.z.vystavenie||""),
+               suma:+k.z.spolu||+k.z.bez||0,
+               nazov: k.typ==="faktura"
+                 ? (typeof k.z.odberatel==="string"?k.z.odberatel:(k.z.odberatel&&k.z.odberatel.nazov)||"")
+                 : (k.z.partner||k.z.popis||"")}))
+     .sort((a,b)=>b.datum.localeCompare(a.datum));
+    const mesiace=[...new Set(dokl.map(k=>k.datum.slice(0,7)).filter(m=>/^\d{4}-\d{2}$/.test(m)))].sort().reverse();
+    if(splitMesiac && !mesiace.includes(splitMesiac)) splitMesiac="";
+    let zozn=dokl;
+    if(splitMesiac) zozn=zozn.filter(k=>k.datum.slice(0,7)===splitMesiac);
+    const stav=k=>dokladStavUhrady(k.typ, k.kluc);
+    const neuhr=zozn.filter(k=>{ const s=stav(k); return s.stav==="neuhradene"||s.stav==="ciastocne"; });
+    if(splitDokStavFilter==="neuhr") zozn=neuhr;
+    if((_hladaj.splitBanka||"").trim())
+      zozn=zozn.filter(k=>hladajZhoda(_hladaj.splitBanka, k.z.cislo, k.nazov, k.suma, k.z.popis, k.z.variabilny));
+    const chip=(v,l,cnt)=>`<span class="achip ${splitDokStavFilter===v?'on':''}" style="font-size:11px;padding:3px 9px" onclick="splitNastavDokStav('${v}')">${l}${cnt!=null?' ('+cnt+')':''}</span>`;
+    lavy=`<div class="sp-head" style="--_c:#c0562e"><div class="sp-ic">🧾</div><div class="sp-tt">Doklady</div><span class="sp-badge">${neuhr.length} neuhr.</span></div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:8px 10px;border-bottom:1px solid var(--line);background:var(--paper)">
+        <select onchange="splitNastavMesiac(this.value)" style="background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:4px 7px;font-size:12px">
+          <option value="">celé obdobie</option>
+          ${mesiace.map(m=>`<option value="${m}" ${splitMesiac===m?'selected':''}>${m.slice(5)}/${m.slice(0,4)}</option>`).join("")}
+        </select>
+        ${chip("neuhr","neuhradené")}${chip("vsetky","všetky")}
+        ${hladatkoHtml('splitBanka','renderSplit','🔍 Číslo, partner, suma…')}
+      </div>
+      <div class="sp-body" data-scroll="lavy">${zozn.length?zozn.slice(0,300).map(k=>{
+        const s=stav(k), sel=splitVybranyDoklad && splitVybranyDoklad.typ===k.typ && splitVybranyDoklad.kluc===k.kluc;
+        const cls=sel?"sel":(s.stav==="uhradene"?"done":(s.stav==="ciastocne"?"cast":""));
+        return `<div class="sp-item ${cls}" onclick="splitVyberDoklad('${k.typ}','${esc(k.kluc)}')">
+          <div class="sp-r1"><span>${esc(k.z.cislo||"—")}${k.nazov?" · "+esc(k.nazov):""}</span><span class="sp-amt">${eur(k.suma)}</span></div>
+          <div class="sp-r2">${fmtDatum(k.datum)} · ${k.typ==="faktura"?"faktúra":"výdavok"} ${
+            s.stav==="uhradene" ? '<span class="sp-tag done">✓ uhradené</span>'
+            : s.stav==="ciastocne" ? '<span class="sp-tag cast">'+esc(s.text)+'</span>'
+            : '<span class="sp-tag open">neuhradené</span>'}</div>
+        </div>`;
+      }).join(""):'<div class="aempty">Žiadne doklady v tomto filtri.</div>'}</div>`;
+    if(!splitVybranyDoklad || !najdiDoklad(splitVybranyDoklad.typ, splitVybranyDoklad.kluc)){
+      pravy=`<div class="sp-head" style="--_c:#0f7d8c"><div class="sp-ic">🏦</div><div class="sp-tt">Platby</div></div>
+        <div class="sp-body"><div class="aempty" style="padding:30px 16px">Vyberte doklad a zobrazia sa platby, ktoré k nemu sedia.</div></div>`;
+    } else {
+      const dk=najdiDoklad(splitVybranyDoklad.typ, splitVybranyDoklad.kluc);
+      pravy=`<div class="sp-head" style="--_c:#0f7d8c"><div class="sp-ic">🏦</div><div class="sp-tt">Platby</div><span class="sp-badge">${eur0(+dk.spolu||+dk.bez||0)}</span></div>
+        <div class="sp-body" data-scroll="pravy">${vyberPlatbyHtml(splitVybranyDoklad.typ, splitVybranyDoklad.kluc)}</div>`;
+    }
+  } else if(splitJeParovanie()){
     // ŠPECIÁL: banka ↔ doklady s párovaním
     const vsetkyPohyby=(d.vypis||[]).slice().sort((a,b)=>String(b.datum||"").localeCompare(String(a.datum||"")));
     // filtre ľavého panela: mesiac + stav. Ignorované a skryté sa štandardne
@@ -21020,8 +21103,13 @@ function renderSplit(){
   document.querySelectorAll("#splitScreen .sp-body[data-scroll]").forEach(el=>{ _scrolly[el.dataset.scroll]=el.scrollTop; });
   document.getElementById("splitScreen").innerHTML=`
     <div class="sp-bar"><button class="appback" onclick="zavriSplit()">‹</button>
-      <div class="sp-title"><b>${parRezim?'Párovanie':'Rozdelená obrazovka'}</b><span>${parRezim?'banka ↔ doklady':(SPLIT_MODULY[splitLavy]?.n||splitLavy)+' ↔ '+(SPLIT_MODULY[splitPravy]?.n||splitPravy)}</span></div>
-      <button class="aabtn" style="--_c:#1f5fa8;margin-left:auto" onclick="splitVyberModuly()">⇄ Zmeniť</button>
+      <div class="sp-title"><b>${parRezim?'Párovanie':'Rozdelená obrazovka'}</b><span>${
+        parRezim ? (splitOdDokladu()?'od dokladu — hľadám platbu':'od platby — hľadám doklad')
+                 : (SPLIT_MODULY[splitLavy]?.n||splitLavy)+' ↔ '+(SPLIT_MODULY[splitPravy]?.n||splitPravy)}</span></div>
+      ${parRezim
+        ? `<button class="aabtn" style="--_c:#1f5fa8;margin-left:auto" onclick="splitOtoc()" title="Prehodiť panely — vyberať doklad a hľadať k nemu platbu, alebo naopak">⇄ Otočiť</button>
+           <button class="aabtn" style="padding:5px 9px" onclick="splitVyberModuly()" title="Zvoliť iné dva moduly">⊟</button>`
+        : `<button class="aabtn" style="--_c:#1f5fa8;margin-left:auto" onclick="splitVyberModuly()">⇄ Zmeniť</button>`}
     </div>
     <div class="sp-wrap">
       <div class="sp-pane">${lavy}</div>
