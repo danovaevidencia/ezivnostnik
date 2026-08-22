@@ -946,7 +946,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.22-GR";  // párovanie v3, etapa 5: platba sa priradí aj od dokladu
+const APP_VERZIA = "2026.08.22-GS";  // párovanie v3, etapa 6a: evidencia výpisov a presné pokrytie období
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -7249,6 +7249,36 @@ function appBanka(){
         }).join('')+orezInfo('banka', Math.min(filtered.length, limitPre('banka',200)), filtered.length, 'appBanka'):'<div class="aempty">Žiadne pohyby.</div>';
       })()}
     </div>
+    ${(()=>{
+      // Trvalý prvok, ktorý väčšinou hlási „nič", miesto nezaberá (CLAUDE.md):
+      // zoznam je zbalený a chýbajúce mesiace sa hlásia len keď naozaj chýbajú.
+      const P=vypisPokrytie();
+      const ev=(d.vypisy||[]);
+      if(!ev.length && !P.mesiace.length) return "";
+      const medzery=P.medzery.length
+        ? `<div style="background:var(--sfc-warn);border:1px solid var(--accent,#e8a13a);border-radius:9px;padding:9px 11px;margin-bottom:9px;font-size:12.5px">
+            <b>⚠ Chýbajú výpisy za ${P.medzery.map(mesiacLabel).join(", ")}</b><br>
+            <span style="color:var(--ink-soft)">Platby z tohto obdobia appka nemá, takže doklady z neho ostanú nespárované a ručné potvrdenie úhrady sa nemá proti čomu overiť.</span>
+          </div>` : "";
+      const zoznam=ev.length
+        ? `<details><summary style="cursor:pointer;font-size:12.5px;color:var(--ink-soft)">Nahraté výpisy (${ev.length})</summary>
+            <div style="display:flex;flex-direction:column;gap:5px;margin-top:7px">
+              ${ev.slice(0,20).map(z=>`<div style="display:flex;gap:8px;align-items:baseline;font-size:11.5px;flex-wrap:wrap">
+                <b>${z.mesiace&&z.mesiace.length?z.mesiace.map(mesiacLabel).join(", "):"bez pohybov"}</b>
+                <span style="color:var(--ink-soft)">${z.pohybov} pohybov${z.novych!=null?" · nových "+z.novych:""} · nahraté ${new Date(z.kedy).toLocaleDateString("sk-SK")}${z.nazov?" · "+esc(z.nazov):""}</span>
+              </div>`).join("")}
+              ${ev.length>20?`<div style="font-size:11px;color:var(--ink-soft)">… a ďalších ${ev.length-20}</div>`:""}
+            </div>
+          </details>`
+        : `<div style="font-size:12px;color:var(--ink-soft)">Pokrytie je odvodené z pohybov — evidencia výpisov vzniká až pri ďalšom importe.</div>`;
+      return `<div class="card" style="margin-top:14px">
+        <h2 style="font-size:15px;margin-bottom:4px">Pokrytie výpismi</h2>
+        <div class="csub" style="margin-bottom:9px">${P.mesiace.length
+          ? "Appka má pohyby za "+mesiacLabel(P.mesiace[0])+" – "+mesiacLabel(P.mesiace[P.mesiace.length-1])+" ("+P.mesiace.length+" mesiacov)."
+          : "Zatiaľ nie je nahratý žiadny výpis."}</div>
+        ${medzery}${zoznam}
+      </div>`;
+    })()}
     <div class="card" style="margin-top:14px">
       <h2 style="font-size:15px;margin-bottom:4px">Pravidlá ignorovania</h2>
       <div class="csub" style="margin-bottom:10px">Pohyby zodpovedajúce týmto pravidlám sa automaticky vynechajú (napr. súkromný účet, vlastné vklady).</div>
@@ -8300,11 +8330,75 @@ function rozpoznajOdvod(tx){
 // Dokedy máme bankové dáta. Rozlišuje „platba nie je" od „výpis ešte nemám" —
 // bez toho appka kričí na faktúru sedem dní po splatnosti, hoci o tom mesiaci
 // nemôže nič vedieť, a naopak mlčí, keď platba naozaj chýba.
+// ═══ EVIDENCIA NAHRATÝCH VÝPISOV (kap. 47.9) ═══════════════════════════
+//
+// Pokrytie sa doteraz ODVODZOVALO z pohybov: mesiac platil za nahratý, keď
+// v ňom bol aspoň jeden pohyb. To je odhad s dvoma dierami:
+//   • mesiac BEZ pohybov (dovolenka, nový účet) vyzeral ako nenahratý,
+//     takže sa ručné tvrdenie o úhrade nikdy neoverilo proti výpisu;
+//   • medzeru v strede radu — chýbajúci máj medzi aprílom a júnom — nemal
+//     kto pomenovať, hoci je to presne ten údaj, ktorý vysvetľuje,
+//     prečo doklad ostáva nespárovaný.
+// Evidencia hovorí, ČO bolo naozaj nahraté, nezávisle od toho, čo v tom bolo.
+const VYPISY_MAX=60;
+// Nie je to kryptografický odtlačok a nemá ním byť — slúži na rozoznanie
+// toho istého súboru, nie na dôkaz. Kolízia znamená len to, že sa import
+// označí ako opakovaný; pohyby aj tak dedupuje `id`.
+function textHash(s){
+  let h=0x811c9dc5;
+  const t=String(s||"");
+  for(let i=0;i<t.length;i++){ h^=t.charCodeAt(i); h=Math.imul(h,0x01000193)>>>0; }
+  return h.toString(16)+"-"+t.length;
+}
+// Mesiace, ktoré výpis pokrýva. Rozsah sa berie z dátumov pohybov, a keď ich
+// výpis neobsahuje (prázdny mesiac), z rozsahu hlásených dátumov.
+function vypisMesiaceZo(parsed){
+  const dni=(parsed.txns||[]).map(t=>String(t.datum||"").slice(0,10)).filter(Boolean).sort();
+  if(!dni.length) return [];
+  const m={}; dni.forEach(d=>{ m[d.slice(0,7)]=1; });
+  return Object.keys(m).sort();
+}
+function zapisVypisDoEvidencie(text, parsed, novych, nazov){
+  if(!Array.isArray(firmaData.vypisy)) firmaData.vypisy=[];
+  const mesiace=vypisMesiaceZo(parsed);
+  const dni=(parsed.txns||[]).map(t=>String(t.datum||"").slice(0,10)).filter(Boolean).sort();
+  const zaznam={
+    kedy:new Date().toISOString(), hash:textHash(text), nazov:String(nazov||"").slice(0,80),
+    iban:parsed.mojIban||"", od:dni[0]||"", do:dni[dni.length-1]||"", mesiace,
+    pohybov:(parsed.txns||[]).length, novych:novych, velkost:String(text||"").length,
+  };
+  firmaData.vypisy=[zaznam, ...firmaData.vypisy].slice(0, VYPISY_MAX);
+  return zaznam;
+}
+function vypisUzNahraty(text){
+  const h=textHash(text);
+  return (firmaData.vypisy||[]).find(z=>z.hash===h) || null;
+}
 function vypisPokrytie(){
+  const m={};
+  // 1) z evidencie — hovorí aj o mesiacoch, v ktorých nebol žiadny pohyb
+  (firmaData.vypisy||[]).forEach(z=>(z.mesiace||[]).forEach(x=>{ m[x]=1; }));
+  // 2) z pohybov — dáta nahraté pred zavedením evidencie o nej nevedia
   const V=(firmaData.vypis||[]).map(t=>String(t.datum||"").slice(0,10)).filter(Boolean).sort();
-  if(!V.length) return {od:null, do:null, mesiace:[]};
-  const m={}; V.forEach(d=>{ m[d.slice(0,7)]=1; });
-  return {od:V[0], do:V[V.length-1], mesiace:Object.keys(m).sort()};
+  V.forEach(d=>{ m[d.slice(0,7)]=1; });
+  const mesiace=Object.keys(m).sort();
+  if(!mesiace.length) return {od:null, do:null, mesiace:[], medzery:[]};
+  return {od:V[0]||mesiace[0]+"-01", do:V[V.length-1]||mesiace[mesiace.length-1]+"-28",
+          mesiace, medzery:vypisMedzery(mesiace)};
+}
+// Chýbajúce mesiace VO VNÚTRI nahratého rozsahu. Mesiace pred prvým a po
+// poslednom výpise nie sú medzera — nikto netvrdil, že ich má appka mať.
+function vypisMedzery(mesiace){
+  if(!mesiace || mesiace.length<2) return [];
+  const out=[], mam=new Set(mesiace);
+  let [r,me]=mesiace[0].split("-").map(Number);
+  const [rK,meK]=mesiace[mesiace.length-1].split("-").map(Number);
+  while(r<rK || (r===rK && me<meK)){
+    me++; if(me>12){ me=1; r++; }
+    const k=r+"-"+String(me).padStart(2,"0");
+    if(!mam.has(k) && !(r===rK && me===meK)) out.push(k);
+  }
+  return out;
 }
 // Pokrytie sa posudzuje po MESIACOCH, nie podľa presného rozsahu dátumov.
 // Výpisy chodia po mesiacoch, takže keď je v dátach čo i len jeden marcový pohyb,
@@ -14568,12 +14662,12 @@ async function spracujVypis(e){
   e.target.value="";
   const text=await textVypisu(file);
   if(text===null) return;          // používateľ zrušil alebo sa nepodarilo
-  importujVypisText(text);
+  importujVypisText(text, file.name);
 }
 
 // Spoločné pre ručný výber aj pre doklad prijatý e-mailom — inak by sa dve
 // cesty k tomu istému importu časom rozišli (kap. 16).
-function importujVypisText(text){
+function importujVypisText(text, nazovSuboru){
   const parsed=parseVypis(String(text));
   if(!parsed || !parsed.txns.length){
     alert("Súbor sa nepodarilo prečítať. Podporovaný je bankový výpis vo formáte SEPA XML (ISO 20022, camt.053).");
@@ -14593,17 +14687,33 @@ function importujVypisText(text){
   if(nove.length) firmaData.settings.pocetImportovBanka = (+firmaData.settings.pocetImportovBanka||0) + 1;
 
   firmaData.vypis=firmaData.vypis.concat(nove);
+  // Evidencia nahratých výpisov (kap. 47.9). Zapisuje sa aj vtedy, keď import
+  // nepridal ani jeden pohyb: práve to je informácia, že mesiac JE pokrytý
+  // a prázdny — bez nej by ho appka počítala medzi nenahraté.
+  const uzBol=vypisUzNahraty(text);
+  const ev=zapisVypisDoEvidencie(text, parsed, nove.length, nazovSuboru);
   // Platby faktúr s variabilným symbolom sa priradia hneď pri importe. Čakať,
   // kým to človek naklikká v Párovaní, znamená, že do tej doby sú tie faktúry
   // všade inde vedené ako neuhradené.
   let sparene=0; try{ sparene=autoParujPohyby(); }catch(_){}
   poZmene();
   if(aktualnaApp==="banka") appBanka();
-  alert(nove.length
+  const medzery=vypisPokrytie().medzery;
+  const chybaTxt = medzery.length
+    ? "\n\n⚠ V nahratých výpisoch chýba "+(medzery.length===1?"mesiac":"mesiacov: "+medzery.length)+" — "
+      + medzery.slice(0,6).map(mesiacLabel).join(", ")+(medzery.length>6?" a ďalšie":"")
+      + ".\nDokým chýbajú, appka nevie o platbách z toho obdobia."
+    : "";
+  alert((nove.length
     ? "Import hotový: pridaných "+nove.length+" pohybov"+
       (nove.length<parsed.txns.length?" ("+(parsed.txns.length-nove.length)+" už existovalo)":"")+"."+
-      (sparene?"\n\nRovno sa priradilo "+sparene+" platieb faktúr podľa variabilného symbolu.":"")
-    : "Všetkých "+parsed.txns.length+" pohybov už evidujete — nič sa nepridalo.");
+      (sparene?"\n\nRovno sa priradilo "+sparene+" platieb podľa sumy, symbolu a partnera.":"")
+    : (uzBol
+        ? "Tento výpis už evidujete (nahratý "+new Date(uzBol.kedy).toLocaleDateString("sk-SK")+")."+
+          "\nVšetkých "+parsed.txns.length+" pohybov je v evidencii — nič sa nepridalo."
+        : "Všetkých "+parsed.txns.length+" pohybov už evidujete — nič sa nepridalo."))
+    + (ev.mesiace.length ? "\n\nVýpis pokrýva: "+ev.mesiace.map(mesiacLabel).join(", ") : "")
+    + chybaTxt);
   return nove.length;
 }
 
