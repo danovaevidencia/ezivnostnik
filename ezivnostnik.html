@@ -946,7 +946,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.22-GX";  // Párovanie sa dá otočiť: vyberiem doklad a hľadám platbu
+const APP_VERZIA = "2026.08.22-GY";  // modul si prekreslením mazal rámec super apky; odkrytie platieb v splite
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -4779,7 +4779,8 @@ function renderSuperApka(skupinaId, moduly){
   const g=SKUPINY.find(s=>s.id===skupinaId); if(!g) return;
   const akt=aktualnaZalozka;
   // 1) nechaj modul vykresliť svoj obsah do #appScreen
-  renderApp(akt);
+  _vRamci=true;
+  try{ renderApp(akt); } finally { _vRamci=false; }
   // 2) obal ho super-apka rámcom
   const appScreen=document.getElementById("appScreen");
   const obsah=appScreen.innerHTML;
@@ -4810,8 +4811,45 @@ function renderSuperApka(skupinaId, moduly){
 }
 function prepniZalozku(m){
   aktualnaZalozka=m;
-  const g=SKUPINY.find(s=>s.id===aktualnaSuperApka);
-  if(g){ let moduly=g.moduly.filter(x=>APPS[x]&&modulPovolenyPreModul(x)); if(!jePlatcaDPH()) moduly=moduly.filter(x=>x!=="dph"); renderSuperApka(aktualnaSuperApka, moduly); }
+  prekresliRamec();
+}
+// Moduly skupiny, po filtroch plánu a platiteľstva DPH. Bolo to na troch
+// miestach trikrát to isté.
+function modulySkupiny(skupinaId){
+  const g=SKUPINY.find(s=>s.id===skupinaId); if(!g) return [];
+  let m=g.moduly.filter(x=>APPS[x]&&modulPovolenyPreModul(x));
+  if(!jePlatcaDPH()) m=m.filter(x=>x!=="dph");
+  return m;
+}
+function prekresliRamec(){
+  if(!aktualnaSuperApka) return false;
+  const moduly=modulySkupiny(aktualnaSuperApka);
+  if(!moduly.length) return false;
+  renderSuperApka(aktualnaSuperApka, moduly);
+  return true;
+}
+// ═══ MODUL, KTORÝ SA PREKRESLÍ SÁM, SI ZMAZAL RÁMEC (GY) ═══════════════
+//
+// Každý modul píše svoj obsah do `#appScreen`. Super apka ho tam nechá
+// vykresliť a potom PREDSADÍ hlavičku so záložkami — lenže do toho istého
+// prvku. Keď sa modul neskôr prekreslí sám (prepnutie mesiaca v Banke, filter
+// vo Faktúrach), prepíše `#appScreen` celý a rámec zmizne: stratí sa bočné
+// menu aj obmedzenie šírky, obrazovka „vyskočí“ a používateľ nemá ako sa
+// vrátiť na susednú záložku.
+//
+// Nebolo to vidieť v Banke, lebo tá až do GW rámec vôbec nemala — ale
+// vo Faktúrach to bolo od začiatku.
+//
+// Stráž stojí na začiatku každého modulu: keď beží vnútri super apky
+// a NIE JE volaný z nej, prekreslenie prevezme rámec. `_vRamci` zabráni
+// nekonečnému zacykleniu (rámec volá modul, modul by volal rámec).
+let _vRamci=false;
+function prekresliVRamci(modulId){
+  if(_vRamci || !aktualnaSuperApka) return false;
+  const moduly=modulySkupiny(aktualnaSuperApka);
+  if(!moduly.includes(modulId)) return false;   // krížové volanie na cudzí modul
+  aktualnaZalozka=modulId;
+  return prekresliRamec();
 }
 
 // ═══════════════════════════════════════════════════
@@ -5068,6 +5106,7 @@ function vykazKontrolaFaktury(w){
   return {stav:sedi?"ok":"nesedi", dni, faktDni:+f.dni||0, cislo:f.cislo};
 }
 function appVykazy(){
+  if(prekresliVRamci("vykazy")) return;   // rámec super apky (GY)
   const d=firmaData, c=APPS.vykazy.c;
   const vyk=(d.vykazy||[]);
   document.getElementById("appScreen").innerHTML=appHlavicka("vykazy",
@@ -5528,6 +5567,7 @@ function fakHromadneZrusit(){
   if(n) setTimeout(()=>alert("Úhrada zrušená pri "+n+" faktúrach."),50);
 }
 function appFaktury(){
+  if(prekresliVRamci("faktury")) return;   // rámec super apky (GY)
   const d=firmaData, c=APPS.faktury.c;
   const fak=(d.faktury||[]).slice().sort((a,b)=>String(b.datum||b.vystavenie||"").localeCompare(String(a.datum||a.vystavenie||"")));
   const spolu=fak.reduce((a,f)=>a+(+f.spolu||0),0);
@@ -6680,6 +6720,7 @@ function vydHromadneZrusit(){
 }
 function vydJeUhradeny(x){ return !!(x && dokladJeUhradeny("vydavok", dokladKluc(x))); }
 function appVydavky(){
+  if(prekresliVRamci("vydavky")) return;   // rámec super apky (GY)
   const d=firmaData, c=APPS.vydavky.c;
   const vsetky=(d.vydavky||[]).slice().sort((a,b)=>String(b.datum||"").localeCompare(String(a.datum||"")));
   // dostupné roky
@@ -7229,6 +7270,7 @@ function bankaRiadok(t, kompakt){
           return `<div class="arow" onclick="otvorKartuPohybu('${esc(txId)}')" title="Otvoriť pohyb" style="cursor:pointer;grid-template-columns:auto 2fr 1fr auto;align-items:start;${ignor?'opacity:.5':!st.spar?'background:var(--sfc-warn)':''}"><div style="width:30px;height:30px;border-radius:8px;display:grid;place-items:center;font-weight:700;background:${inc?'var(--sfc-pos)':'#f2f4f7'};color:${inc?'var(--pos)':'var(--ink-soft)'}">${inc?'↓':'↑'}</div><div style="min-width:0"><div class="acol-strong" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(t.proti||"—")}</div><div class="acol-muted">${t.vs?'VS '+esc(t.vs)+' · ':''}<span class="apill ${stavCls}" style="font-size:9.5px">${stavTxt}</span></div>${akcie}</div><div class="acol-muted">${fmtDatum(t.datum)}</div><div class="acol-sum" style="color:${inc?'var(--pos)':'var(--ink)'}">${inc?'+':'−'}${eur(+t.suma||0)}</div>${kandHtml}</div>`;
 }
 function appBanka(){
+  if(prekresliVRamci("banka")) return;   // rámec super apky (GY)
   const d=firmaData, c=APPS.banka.c;
   const cely=(d.vypis||[]).slice().sort((a,b)=>String(b.datum||"").localeCompare(String(a.datum||"")));
   // mesačný filter — rovnaký princíp ako vo Výdavkoch; dovtedy tu chýbal úplne
@@ -8692,6 +8734,7 @@ function dphPodaniaHtml(){
 }
 
 function appDPH(){
+  if(prekresliVRamci("dph")) return;   // rámec super apky (GY)
   const rok=new Date().getFullYear();
   const S=firmaData.settings||{};
   const {t}=danTotals(rok, S);              // konzistentný výpočet (ako dashboard a prognóza)
@@ -8992,6 +9035,7 @@ let _uzRok=null;
 function uzNastavRok(r){ _uzRok=+r; appUzavierka(); }
 
 function appUzavierka(){
+  if(prekresliVRamci("uzavierka")) return;   // rámec super apky (GY)
   const c=APPS.uzavierka.c;
   const dnes=new Date();
   const roky=[...new Set([
@@ -9264,6 +9308,7 @@ function dovolenkaCerpane(rok){
   return r2(spolu);
 }
 function appDovolenka(){
+  if(prekresliVRamci("dovolenka")) return;   // rámec super apky (GY)
   const c="var(--ink-pos)";
   const roky=dovRoky();
   if(!roky.includes(dovRok)) dovRok=roky[roky.length-1];
@@ -9397,6 +9442,7 @@ function jazdyVratVsetky(mesiac){
   setTimeout(()=>alert(n?(n+" jázd vrátených na pôvodný účel."):"Žiadne jazdy na vrátenie."),100);
 }
 function appJazdy(){
+  if(prekresliVRamci("jazdy")) return;   // rámec super apky (GY)
   const d=firmaData, c=APPS.jazdy.c;
   const vsetky=(d.jazdy||[]);
   const kmAll=vsetky.reduce((a,j)=>a+(+j.km||0),0);
@@ -10697,6 +10743,7 @@ function porovnajHtml(m){
   </div>`;
 }
 function appMajetok(){
+  if(prekresliVRamci("majetok")) return;   // rámec super apky (GY)
   const d=firmaData, c=APPS.majetok.c;
   const maj=d.majetok||[];
   const majZobraz=(_hladaj.majetok||"").trim()?maj.filter(m=>hladajZhoda(_hladaj.majetok, m.nazov)):maj;
@@ -11336,6 +11383,7 @@ async function upomienkaPDF(odberatel){
 }
 function dniPoSplatnosti(splat){ if(!splat) return 0; const d=new Date(splat); if(isNaN(d)) return 0; return Math.floor((Date.now()-d)/86400000); }
 function appPohladavky(){
+  if(prekresliVRamci("pohladavky")) return;   // rámec super apky (GY)
   const d=firmaData, c=APPS.pohladavky.c;
   const roky=[...new Set([...(d.faktury||[]).map(f=>String(f.datum||f.vystavenie||"").slice(0,4)),...(d.vydavky||[]).filter(x=>x.druh==="Došlá faktúra").map(x=>String(x.datum||"").slice(0,4))].filter(r=>/^\d{4}$/.test(r)))].sort().reverse();
   if(!pzRok) pzRok=roky[0]||String(new Date().getFullYear());
@@ -11817,6 +11865,7 @@ function priznanieNahladFormular(rok){
   openModal("Priznanie "+rok+" – náhľad", html, null);
 }
 function appPriznanieB(){
+  if(prekresliVRamci("priznanieB")) return;   // rámec super apky (GY)
   const c="var(--ink-warn)";
   const S=firmaData.settings||{};
   const v=pbVypocet(pbRok);
@@ -12885,6 +12934,7 @@ function pbArchivHtml(){
   </div>`;
 }
 function appPriznania(){
+  if(prekresliVRamci("priznania")) return;   // rámec super apky (GY)
   const c=APPS.priznania.c;
   firmaData.danovePriznania=firmaData.danovePriznania||{};
   const aktualnyRok=new Date().getFullYear();
@@ -12993,6 +13043,7 @@ function odvodyPredpovedHtml(rok){
 }
 
 function appPrognoza(){
+  if(prekresliVRamci("prognoza")) return;   // rámec super apky (GY)
   const c=APPS.prognoza.c;
   const roky=[...new Set([...(firmaData.faktury||[]).map(f=>String(f.datum||f.vystavenie||"").slice(0,4)),...(firmaData.vydavky||[]).map(x=>String(x.datum||"").slice(0,4))].filter(r=>/^\d{4}$/.test(r)))].sort().reverse();
   if(!progRok) progRok=roky[0]||String(new Date().getFullYear());
@@ -20369,7 +20420,10 @@ function platbyPreDoklad(typ, kluc, ajPouzite){
   // Ponúka sa len to, čo má s dokladom niečo spoločné (`parRelevantny`).
   // Zvyšok sa dá odkryť — ale nesmie zatieniť skutočné návrhy.
   const rel=vhodne.filter(t=>parRelevantny(t, k));
-  const zdroj = (ajPouzite && !rel.length) ? vhodne : rel;
+  // Po odkrytí sa ukáže relevantné NAJPRV a zvyšok za ním — presne ako
+  // `splitKandidati` v opačnom smere. Predtým sa zvyšok zobrazil len vtedy,
+  // keď relevantné nebolo žiadne, takže sa oba smery správali inak.
+  const zdroj = ajPouzite ? [...rel, ...vhodne.filter(t=>!rel.includes(t))] : rel;
   const kand=zdroj.map(t=>({t, ...parSkore(t, k)})).sort((a,b)=>b.skore-a.skore);
   return {k, kand, zvysok: vhodne.length-rel.length};
 }
@@ -20402,10 +20456,17 @@ function otvorVyberPlatby(typ, kluc){
   _vyberPlatbyVsetky=false;
   openModal("Priradiť platbu k dokladu", vyberPlatbyHtml(typ, kluc), null, null, "siroky");
 }
+// Výber platieb žije v DVOCH kontextoch: modál od dokladu a pravý panel
+// Párovania v smere „od dokladu" (GX). Prvá verzia písala natvrdo do
+// `modalBody` — v splite ten prvok existuje, len je skrytý, takže tlačidlo
+// „zobraziť aj priradené platby" ticho nerobilo NIČ. Rovnaká trieda ako
+// `parPrekresli` (kap. 47.5): prekresliť treba to, čo je otvorené.
 function vyberPlatbyUkazVsetky(typ, kluc){
   _vyberPlatbyVsetky=true;
+  const split=document.getElementById("splitScreen");
+  if(split && !split.classList.contains("hidden")){ renderSplit(); return; }
   const telo=document.getElementById("modalBody");
-  if(telo) telo.innerHTML=vyberPlatbyHtml(typ, kluc);
+  if(telo) prekresliSoScrollom(()=>{ telo.innerHTML=vyberPlatbyHtml(typ, kluc); });
 }
 function vyberPlatbyHtml(typ, kluc){
   const dok=najdiDoklad(typ, kluc); if(!dok) return "";
@@ -21300,6 +21361,7 @@ function dokExpiracia(d){ // dni do expirácie, alebo null
 }
 let dokFilter="vsetky";
 function appDokumenty(){
+  if(prekresliVRamci("dokumenty")) return;   // rámec super apky (GY)
   const c="var(--ink-warn)";
   const zoznam=dokEnsure();
   let filtered = dokFilter==="vsetky" ? zoznam : zoznam.filter(d=>d.typ===dokFilter);
