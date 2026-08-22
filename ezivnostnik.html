@@ -946,7 +946,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.22-GO";  // párovanie v3, etapy 1–2: centová tolerancia a jeden slovník stavov pohybu
+const APP_VERZIA = "2026.08.22-GP";  // párovanie v3, etapa 3: karta pohybu — rozklik v Banke aj Cashflowe
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -7206,7 +7206,7 @@ function appBanka(){
             // kandidátov: pohyb s jediným návrhom bol dovtedy zvýraznený ako
             // „vyžaduje pozornosť" a neponúkal k tomu nič. Slepá ulička
             // v zozname je horšia než chýbajúci návrh.
-            akcie=`<div style="display:flex;gap:5px;margin-top:5px"><button class="aabtn" style="padding:2px 8px;font-size:10.5px;border-color:var(--accent);color:var(--accent-deep)" onclick="event.stopPropagation();splitVybranyPohyb='${esc(txId)}';splitStavFilter='vsetky';otvorSplit()" title="Vybrať doklad v Párovaní">⇄ spárovať${maKand?" ("+s.kandidati.length+" kandidátov)":""}</button></div>`;
+            akcie=`<div style="display:flex;gap:5px;margin-top:5px"><button class="aabtn" style="padding:2px 8px;font-size:10.5px;border-color:var(--accent);color:var(--accent-deep)" onclick="event.stopPropagation();otvorKartuPohybu('${esc(txId)}')" title="Otvoriť pohyb a vybrať doklad">⇄ spárovať${maKand?" ("+s.kandidati.length+" kandidátov)":""}</button></div>`;
           } else if(potvrdena){
             akcie=`<div style="margin-top:4px"><span onclick="event.stopPropagation();vypisZrusZhodu('${esc(txId)}')" style="cursor:pointer;font-size:10px;color:var(--ink-soft)" title="Zrušiť ručné priradenie"${zam("banka")}>✓ priradené ručne · zrušiť</span></div>`;
           }
@@ -7226,7 +7226,7 @@ function appBanka(){
               }).join("")}
             </div>`;
           }
-          return `<div class="arow" style="grid-template-columns:auto 2fr 1fr auto;align-items:start;${ignor?'opacity:.5':!st.spar?'background:var(--sfc-warn)':''}"><div style="width:30px;height:30px;border-radius:8px;display:grid;place-items:center;font-weight:700;background:${inc?'var(--sfc-pos)':'#f2f4f7'};color:${inc?'var(--pos)':'var(--ink-soft)'}">${inc?'↓':'↑'}</div><div style="min-width:0"><div class="acol-strong" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(t.proti||"—")}</div><div class="acol-muted">${t.vs?'VS '+esc(t.vs)+' · ':''}<span class="apill ${stavCls}" style="font-size:9.5px">${stavTxt}</span></div>${akcie}</div><div class="acol-muted">${fmtDatum(t.datum)}</div><div class="acol-sum" style="color:${inc?'var(--pos)':'var(--ink)'}">${inc?'+':'−'}${eur(+t.suma||0)}</div>${kandHtml}</div>`;
+          return `<div class="arow" onclick="otvorKartuPohybu('${esc(txId)}')" title="Otvoriť pohyb" style="cursor:pointer;grid-template-columns:auto 2fr 1fr auto;align-items:start;${ignor?'opacity:.5':!st.spar?'background:var(--sfc-warn)':''}"><div style="width:30px;height:30px;border-radius:8px;display:grid;place-items:center;font-weight:700;background:${inc?'var(--sfc-pos)':'#f2f4f7'};color:${inc?'var(--pos)':'var(--ink-soft)'}">${inc?'↓':'↑'}</div><div style="min-width:0"><div class="acol-strong" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(t.proti||"—")}</div><div class="acol-muted">${t.vs?'VS '+esc(t.vs)+' · ':''}<span class="apill ${stavCls}" style="font-size:9.5px">${stavTxt}</span></div>${akcie}</div><div class="acol-muted">${fmtDatum(t.datum)}</div><div class="acol-sum" style="color:${inc?'var(--pos)':'var(--ink)'}">${inc?'+':'−'}${eur(+t.suma||0)}</div>${kandHtml}</div>`;
         }).join('')+orezInfo('banka', Math.min(filtered.length, limitPre('banka',200)), filtered.length, 'appBanka'):'<div class="aempty">Žiadne pohyby.</div>';
       })()}
     </div>
@@ -11178,7 +11178,7 @@ function appPohladavky(){
 }
 
 // ── CASHFLOW (párovací stôl) ──
-let cfRok="", cfMesiac="", cfSmer="vsetko", cfOtvoreny="-1";
+let cfRok="", cfMesiac="", cfSmer="vsetko";
 function appCashflow(){
   const d=firmaData, c=APPS.cashflow.c;
   const vsetky=(d.vypis||[]).slice().sort((a,b)=>String(b.datum||"").localeCompare(String(a.datum||"")));
@@ -11202,31 +11202,23 @@ function appCashflow(){
   if(cfSmer==="prijmy") zoznam=prijmy;
   else if(cfSmer==="vydaje") zoznam=vydaje;
 
-  function riadok(t, gi){
-    const st=pohybStav(t), s=st.navrh||null;
+  // Riadok otvára KARTU POHYBU, nie vlastné rozbalenie (kap. 47.5). Dovtedy
+  // tu bol detail bez akcií — človek videl, že pohyb nie je spárovaný,
+  // a nemohol s tým urobiť nič.
+  function riadok(t){
+    const st=pohybStav(t);
     const stav=esc(st.text), farba=st.cls;
     const inc=t.smer==="prijem";
-    const otvor=String(cfOtvoreny)===String(gi);
-    return `<div class="arow" style="grid-template-columns:1fr auto;cursor:pointer;align-items:center" onclick="cfOtvoreny=${otvor?'-1':JSON.stringify(String(gi))};appCashflow()">
+    return `<div class="arow" style="grid-template-columns:1fr auto;cursor:pointer;align-items:center" onclick="otvorKartuPohybu('${esc(txId(t))}')" title="Otvoriť pohyb">
       <div style="min-width:0">
         <div class="acol-strong" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(t.proti||"—")}</div>
         <div class="acol-muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${fmtDatum(t.datum)} · <span class="apill ${farba}" style="font-size:9.5px">${stav}</span></div>
       </div>
       <div class="acol-sum" style="color:${inc?'var(--pos)':'var(--ink)'};white-space:nowrap">${inc?'+':'−'}${eur(+t.suma||0)}</div>
     </div>
-    ${otvor?`<div style="padding:8px 14px 12px;background:var(--bg);font-size:12.5px;color:var(--ink-soft);border-bottom:1px solid var(--line)">
-      ${t.vs?'Variabilný symbol: <b>'+esc(t.vs)+'</b><br>':''}
-      ${t.ibanProti?'Protiúčet: '+esc(t.ibanProti)+'<br>':''}
-      ${(t.uhrady||[]).length
-        ? 'Zaplatené doklady: <b>'+(t.uhrady||[]).map(u=>esc(String(u.cislo))+" · "+eur(uhrNaDoklad(u))).join(", ")+'</b>'
-          +(st.kod==="ciastocny"?'<br><span style="color:var(--warn)">'+esc(st.text)+'</span>':'')
-        : s ? (st.kod==="navrh" ? 'Návrh (nepotvrdený): <b>' : 'Spárované: <b>')+esc(s.preco||stav)+'</b>'
-            : 'Zatiaľ nespárované — appka nenašla jednoznačnú zhodu.'}
-      ${t.popis?'<br>Popis: '+esc(t.popis):''}
-    </div>`:''}`;
+    `;
   }
 
-  const _cfIdx=new Map(vypis.map((t,i)=>[t,i]));   // index riadku bez O(n²) indexOf (45.8)
   document.getElementById("appScreen").innerHTML=appHlavicka("cashflow",`<button class="aabtn" style="--_c:${c}" onclick="otvorApp('banka')">🏦 Banka</button>`)+`
     <div class="amini">
       <div class="aminbox"><div class="al">Prijaté</div><div class="av pos">${eur(sumaP)}</div></div>
@@ -11235,24 +11227,24 @@ function appCashflow(){
       <div class="aminbox"><div class="al">Saldo</div><div class="av ${sumaP-sumaV>=0?'pos':'neg'}">${eur(sumaP-sumaV)}</div></div>
     </div>
     <div class="atool" style="--_c:${c};flex-wrap:wrap;gap:8px">
-      <select onchange="cfRok=this.value;cfMesiac='';cfOtvoreny='-1';appCashflow()" style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:13px">
+      <select onchange="cfRok=this.value;cfMesiac='';appCashflow()" style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:13px">
         ${roky.map(r=>`<option value="${r}" ${r===cfRok?'selected':''}>${r}</option>`).join('')}
       </select>
-      <select onchange="cfMesiac=this.value;cfOtvoreny='-1';appCashflow()" style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:13px">
+      <select onchange="cfMesiac=this.value;appCashflow()" style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:13px">
         <option value="">celý rok</option>
         ${mesiace.map(m=>`<option value="${m}" ${m===cfMesiac?'selected':''}>${mesiacLabel(m)}</option>`).join('')}
       </select>
       <div style="flex-basis:100%;height:0"></div>
-      ${['vsetko|Všetko','prijmy|Príjmy','vydaje|Výdaje'].map(x=>{const[k,l]=x.split('|');return `<span class="achip ${cfSmer===k?'on':''}" onclick="cfSmer='${k}';cfOtvoreny='-1';appCashflow()">${l}</span>`}).join('')}
+      ${['vsetko|Všetko','prijmy|Príjmy','vydaje|Výdaje'].map(x=>{const[k,l]=x.split('|');return `<span class="achip ${cfSmer===k?'on':''}" onclick="cfSmer='${k}';appCashflow()">${l}</span>`}).join('')}
       ${hladatkoHtml('cashflow','appCashflow','🔍 Protistrana, VS, suma…')}
     </div>
     <div class="csub" style="margin:0 2px 12px">Ťuknutím na riadok zobrazíte detail párovania. Príjmy sa párujú cez VS a sumu, výdaje cez sumu a klasifikáciu.</div>
     ${cfSmer==="vsetko"
       ? `<div class="split2">
-          <div class="splitcol"><div class="splittitle" style="color:var(--pos)">▼ Príjmy (${prijmy.length}) · ${eur(sumaP)}</div><div class="alist">${prijmy.length?prijmy.slice(0,limitPre('cashflow',150)).map((t)=>riadok(t,"p"+_cfIdx.get(t))).join(''):'<div class="aempty">Žiadne príjmy.</div>'}</div></div>
-          <div class="splitcol"><div class="splittitle">▲ Výdaje (${vydaje.length}) · ${eur(sumaV)}</div><div class="alist">${vydaje.length?vydaje.slice(0,limitPre('cashflow',150)).map((t)=>riadok(t,"v"+_cfIdx.get(t))).join(''):'<div class="aempty">Žiadne výdaje.</div>'}</div></div>
+          <div class="splitcol"><div class="splittitle" style="color:var(--pos)">▼ Príjmy (${prijmy.length}) · ${eur(sumaP)}</div><div class="alist">${prijmy.length?prijmy.slice(0,limitPre('cashflow',150)).map(riadok).join(''):'<div class="aempty">Žiadne príjmy.</div>'}</div></div>
+          <div class="splitcol"><div class="splittitle">▲ Výdaje (${vydaje.length}) · ${eur(sumaV)}</div><div class="alist">${vydaje.length?vydaje.slice(0,limitPre('cashflow',150)).map(riadok).join(''):'<div class="aempty">Žiadne výdaje.</div>'}</div></div>
         </div>`
-      : `<div class="alist">${zoznam.length?zoznam.slice(0,limitPre('cashflow',200)).map((t,i)=>riadok(t,i)).join(''):'<div class="aempty">Žiadne pohyby v tomto filtri.</div>'}</div>`}
+      : `<div class="alist">${zoznam.length?zoznam.slice(0,limitPre('cashflow',200)).map(riadok).join(''):'<div class="aempty">Žiadne pohyby v tomto filtri.</div>'}</div>`}
     ${orezInfo('cashflow', Math.min(Math.max(prijmy.length,vydaje.length,zoznam.length), limitPre('cashflow',150)), Math.max(prijmy.length,vydaje.length,zoznam.length), 'appCashflow')}`;
   setCrumb(`${vypis.length} pohybov · ${cfRok}${cfMesiac?' · '+mesiacLabel(cfMesiac):''} · ${sparP+sparV} spárovaných`);
 }
@@ -14043,7 +14035,12 @@ function openModal(title, bodyHTML, onSave, onDelete, trieda){
   const ok=document.getElementById("modalOk"); if(ok) ok.style.display=onSave?"":"none";
   document.getElementById("modal").classList.add("on");
 }
-function closeModal(){ document.getElementById("modal").classList.remove("on"); modalSave=null; modalDelete=null; }
+function closeModal(){
+  document.getElementById("modal").classList.remove("on"); modalSave=null; modalDelete=null;
+  // Príznak karty pohybu musí padnúť tu, inak by `parPrekresli` po zavretí
+  // kreslil do neviditeľného tela namiesto obrazovky, z ktorej sa akcia spustila.
+  _kartaPohybuId=null;
+}
 
 // Nastavenie `innerHTML` zahodí potomkov, kontajner sa nakrátko zmrští a jeho
 // `scrollTop` spadne na nulu. Pri odškrtávaní položiek to znamená, že po každom
@@ -20386,6 +20383,127 @@ function splitNahlad(modulId){
   }
   return wrap(H(), '<div class="aempty">Náhľad nie je dostupný.</div>'+openBtn);
 }
+// ═══ KDE SA MÁ PO AKCII PREKRESLIŤ ═════════════════════════════════════
+//
+// Akcie párovania (priradiť, odobrať, potvrdiť vrátenie, vytvoriť výdavok)
+// volali natvrdo `renderSplit`. Odkedy tie isté akcie žijú aj v karte
+// pohybu, musí o prekreslení rozhodovať jedno miesto — inak by karta po
+// kliknutí ukazovala staré čísla a človek by netušil, či sa niečo stalo.
+let _kartaPohybuId=null;
+function parPrekresli(){
+  if(_kartaPohybuId && document.getElementById("modal") &&
+     document.getElementById("modal").classList.contains("on")){
+    const tx=(firmaData.vypis||[]).find(t=>txId(t)===_kartaPohybuId);
+    const telo=document.getElementById("modalBody");
+    if(tx && telo){ prekresliSoScrollom(()=>{ telo.innerHTML=pohybKartaHtml(tx); }); return; }
+  }
+  if(typeof renderSplit==="function") renderSplit();
+}
+// Otvorí kartu pohybu. Volá sa z Banky, z Cashflowu aj z náhľadu v splite —
+// „v module banka sa nič nedá rozkliknúť" bolo presne o tomto.
+function otvorKartuPohybu(txIdVal){
+  const tx=(firmaData.vypis||[]).find(t=>txId(t)===txIdVal); if(!tx) return;
+  _kartaPohybuId=txIdVal;
+  splitVsetciKand=false;
+  const znak=tx.smer==="prijem"?"+":"−";
+  openModal((tx.proti||tx.popis||"Pohyb")+" · "+znak+eur(tx.suma),
+            pohybKartaHtml(tx), null, null, "siroky");
+}
+// ═══ KARTA POHYBU — jeden detail pre všetky vstupy (kap. 47.5) ═════════
+//
+// Toto telo bolo doteraz zapečené v pravom paneli Párovania. Banka mala
+// akcie bez detailu, Cashflow detail bez akcií — dva polovičné pohľady na
+// ten istý pohyb. Teraz ho kreslí jedna funkcia a otvára sa z Banky,
+// z Cashflowu aj zo splitu.
+//
+// Filtre kandidátov (`splitDokladyMesiac`, `splitVsetciKand`, hľadanie)
+// ostávajú globálne — sú to nastavenia pohľadu, nie stav pohybu.
+function pohybKartaHtml(tx){
+  const d=firmaData;
+  const jePrijem=tx.smer==="prijem";
+  const vratMapa={};
+  najdiVratenia().filter(v=>!v.iste).forEach(v=>{ vratMapa[txId(v.vratenie)]=v; vratMapa[txId(v.platba)]=v; });
+  const kandInfo=splitKandidati(tx, splitVsetciKand || splitDokladyFilterAktivny());
+  const kand=kandInfo.vsetky;
+  return `<div class="sp-hint">${tx.smer==="prijem"?"Príjem":"Platba"} <b>${esc(tx.proti||tx.popis||"")}</b> · ${eur(tx.suma)}${tx.vs?" · VS "+esc(tx.vs):""} · ${fmtDatum(tx.datum)}${
+    tx.ibanProti?'<br><span style="color:var(--ink-soft)">Protiúčet '+esc(tx.ibanProti)+'</span>':''}${
+    tx.popis&&tx.popis!==tx.proti?'<br><span style="color:var(--ink-soft)">'+esc(tx.popis)+'</span>':''}
+          ${(()=>{ const z=txZostava(tx), r=txRozdelene(tx);
+            if(r<=0.005) return "<br>Ťuknite na doklad, ktorý bol touto platbou zaplatený.";
+            if(z>0.005) return `<br><b>Priradené ${eur(r)}, zostáva ${eur(z)}.</b> Vyberte ďalší doklad.`;
+            return "<br><b>Celá platba je priradená.</b>"; })()}</div>
+        ${(()=>{
+          const dokMes=[...new Set((( jePrijem?d.faktury:d.vydavky)||[]).map(x=>String(x.datum||x.vystavenie||"").slice(0,7)).filter(m=>/^\d{4}-\d{2}$/.test(m)))].sort().reverse();
+          return `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:9px">
+          <select onchange="splitNastavDokladyMesiac(this.value)" style="background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:4px 7px;font-size:12px">
+            <option value="">všetky obdobia</option>
+            ${dokMes.map(m=>`<option value="${m}" ${splitDokladyMesiac===m?'selected':''}>${m.slice(5)}/${m.slice(0,4)}</option>`).join("")}
+          </select>
+          ${hladatkoHtml('splitDoklady','renderSplit','🔍 Číslo, partner, suma…')}
+        </div>`; })()}
+        ${(()=>{
+          // NÁVRH VRÁTENIA — najdôležitejšia akcia, keď existuje protikus.
+          const vr=vratMapa[txId(tx)];
+          if(tx.vratenie){
+            return `<div style="background:var(--sfc-pos);border:1px solid var(--line);border-radius:9px;padding:9px 11px;margin-bottom:10px;font-size:12.5px">
+              ↩ Označené ako vrátenie platby. <span onclick="zrusVratenie('${txId(tx)}');parPrekresli()" style="cursor:pointer;color:var(--ink-soft);text-decoration:underline"${zam("banka")}>zrušiť</span></div>`;
+          }
+          if(vr && !vr.iste){
+            const druhy = txId(vr.vratenie)===txId(tx) ? vr.platba : vr.vratenie;
+            return `<div style="background:var(--sfc-warn);border:1px solid var(--accent,#e8a13a);border-radius:9px;padding:10px 11px;margin-bottom:10px;font-size:12.5px">
+              <b>↩ Vyzerá to na vrátenie platby</b> — ${esc(vr.preco)}:<br>
+              protikus ${fmtDatum(druhy.datum)} · ${druhy.smer==="prijem"?"+":"−"}${eur(druhy.suma)}
+              <div style="display:flex;gap:7px;margin-top:8px">
+                <button class="aabtn pri" style="padding:5px 12px;font-size:12px" onclick="potvrdVratenie('${txId(vr.platba)}','${txId(vr.vratenie)}');parPrekresli()"${zam("banka")}>✓ Áno, je to vrátenie</button>
+              </div></div>`;
+          }
+          return "";
+        })()}
+        ${(()=>{
+          // AKCIE K POHYBU — priamo tu, aby párovanie bolo jedno miesto (nie tri)
+          const akcie=[];
+          if(tx.smer==="vydaj" && !(tx.uhrady||[]).length && typeof pohybMaVydavok==="function" && !pohybMaVydavok(tx))
+            akcie.push(`<button class="aabtn" style="padding:5px 11px;font-size:12px;border-color:var(--pos);color:var(--pos)" onclick="bkVytvorVydavok('${txId(tx)}')"${zam("banka")}>+ Vytvoriť výdavok z platby</button>`);
+          akcie.push(`<button class="aabtn" style="padding:5px 11px;font-size:12px" onclick="skryPohyb('${txId(tx)}');splitVybranyPohyb=null;parPrekresli()" title="Súkromný alebo nesúvisiaci pohyb — skryje sa, dá sa obnoviť vo filtri 🗄"${zam("banka")}>🗄 Skryť pohyb</button>`);
+          return `<div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:10px">${akcie.join("")}</div>`;
+        })()}
+        ${(()=>{ const u=tx.uhrady||[]; if(!u.length) return "";
+          return `<div style="background:var(--bg);border-radius:9px;padding:9px 11px;margin-bottom:10px;font-size:12px">
+            <div style="color:var(--ink-soft);margin-bottom:5px">Touto platbou máte zaplatené:</div>
+            ${u.map(x=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0">
+              <span>${esc(String(x.cislo))} · <b>${eur(x.suma)}</b>${zaokrPopis(x)}</span>
+              <button class="aabtn" style="padding:2px 8px;font-size:11px" onclick="splitOdoberUhradu('${txId(tx)}','${esc(x.typ)}','${esc(String(x.cislo))}')"${zam("banka")}>odobrať</button>
+            </div>`).join("")}
+          </div>`; })()}
+        ${(()=>{
+          let ohodnotene=kand.map(k=>({...k, ...parSkore(tx,k)})).sort((a,b)=>b.skore-a.skore);
+          const filterAktivny=splitDokladyFilterAktivny();
+          if(splitDokladyMesiac) ohodnotene=ohodnotene.filter(k=>String((k.z&&(k.z.datum||k.z.vystavenie))||"").slice(0,7)===splitDokladyMesiac);
+          const qDok=(_hladaj.splitDoklady||"").trim();
+          if(qDok) ohodnotene=ohodnotene.filter(k=>hladajZhoda(qDok, k.cislo, k.nazov, k.suma, k.z&&k.z.popis, k.z&&(k.z.vs||k.z.variabilny)));
+          const najlepsi=ohodnotene[0], druhy=ohodnotene[1];
+          const jasny = najlepsi && najlepsi.skore>=90 && (!druhy || najlepsi.skore-druhy.skore>=25);
+          const dalsieBtn = (!splitVsetciKand && !filterAktivny && kandInfo.zvysok)
+            ? `<div style="text-align:center;padding:10px"><button class="aabtn" style="padding:6px 14px;font-size:12px" onclick="splitUkazVsetkychKand()">zobraziť ďalšie doklady (${kandInfo.zvysok})</button></div>` : "";
+          if(!ohodnotene.length) return `<div class="aempty">${filterAktivny?'Filtru nezodpovedá žiadny doklad.':'Žiadny relevantný doklad — suma, VS ani partner nesedia.'}</div>`+dalsieBtn;
+          return ohodnotene.slice(0, filterAktivny?200:30).map((k,i)=>{
+            const odporucane = jasny && i===0;
+            const znacky=k.dovody.map(d=>`<span class="sp-tag ${d.ok?'match':'open'}">${d.ok?'✓':'·'} ${esc(d.t)}</span>`).join(" ");
+            return `<div class="sp-item ${odporucane?'match':(k.sedi?'':'dim')}" onclick="splitSparuj('${txId(tx)}','${k.typ}','${esc(String(k.kluc))}')"${zam("banka")}>
+              <div class="sp-r1"><span>${odporucane?'<b>⭐ ':''}${esc(String(k.cislo||"—"))}${odporucane?'</b>':''} ${k.nazov?'· '+esc(k.nazov):''}</span><span style="display:flex;gap:6px;align-items:center"><span class="sp-amt">${eur(k.suma)}</span><button class="aabtn" style="padding:2px 7px;font-size:11px" onclick="event.stopPropagation();splitOtvorDoklad('${k.typ}','${esc(String(k.kluc))}')" title="Otvoriť a upraviť doklad">✎</button></span></div>
+              <div class="sp-r2">${k.z&&k.z.datum?fmtDatum(k.z.datum)+" · ":""}${znacky}${(()=>{
+                const st=dokladStavUhrady(k.typ,k.kluc);
+                const kde=uhradyPopis(k.typ,k.kluc);
+                if(st.stav==="ciastocne") return ` <span class="sp-tag cast">${esc(st.text)}</span>`+
+                  (kde?` <span class="sp-tag">${esc(kde)}</span>`:"");
+                // „už zaplatené" bez toho, ČÍM, nechávalo človeka hľadať ručne,
+                // ktorý pohyb má rozviazať.
+                if(st.stav==="uhradene")  return ` <span class="sp-tag done">zaplatené${kde?" · "+esc(kde):""}</span>`;
+                return ""; })()}</div>
+            </div>`;
+          }).join("")+dalsieBtn;
+        })()}`;
+}
 function renderSplit(){
   const d=firmaData;
   let lavy, pravy;
@@ -20444,82 +20562,7 @@ function renderSplit(){
     } else {
       const jePrijem=vybrany.smer==="prijem";
       pravy=`<div class="sp-head" style="--_c:${jePrijem?'var(--ink-pos)':'#c0562e'}"><div class="sp-ic">${jePrijem?'▤':'🧾'}</div><div class="sp-tt">${jePrijem?'Faktúry':'Výdavky'}</div><span class="sp-badge">${eur0(vybrany.suma)}</span></div>
-        <div class="sp-body"><div class="sp-hint">Platba <b>${esc(vybrany.proti||vybrany.popis||"")}</b> · ${eur(vybrany.suma)}${vybrany.vs?" · VS "+esc(vybrany.vs):""} · ${fmtDatum(vybrany.datum)}
-          ${(()=>{ const z=txZostava(vybrany), r=txRozdelene(vybrany);
-            if(r<=0.005) return "<br>Ťuknite na doklad, ktorý bol touto platbou zaplatený.";
-            if(z>0.005) return `<br><b>Priradené ${eur(r)}, zostáva ${eur(z)}.</b> Vyberte ďalší doklad.`;
-            return "<br><b>Celá platba je priradená.</b>"; })()}</div>
-        ${(()=>{
-          const dokMes=[...new Set((( jePrijem?d.faktury:d.vydavky)||[]).map(x=>String(x.datum||x.vystavenie||"").slice(0,7)).filter(m=>/^\d{4}-\d{2}$/.test(m)))].sort().reverse();
-          return `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:9px">
-          <select onchange="splitNastavDokladyMesiac(this.value)" style="background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:4px 7px;font-size:12px">
-            <option value="">všetky obdobia</option>
-            ${dokMes.map(m=>`<option value="${m}" ${splitDokladyMesiac===m?'selected':''}>${m.slice(5)}/${m.slice(0,4)}</option>`).join("")}
-          </select>
-          ${hladatkoHtml('splitDoklady','renderSplit','🔍 Číslo, partner, suma…')}
-        </div>`; })()}
-        ${(()=>{
-          // NÁVRH VRÁTENIA — najdôležitejšia akcia, keď existuje protikus.
-          const vr=vratMapa[txId(vybrany)];
-          if(vybrany.vratenie){
-            return `<div style="background:var(--sfc-pos);border:1px solid var(--line);border-radius:9px;padding:9px 11px;margin-bottom:10px;font-size:12.5px">
-              ↩ Označené ako vrátenie platby. <span onclick="zrusVratenie('${txId(vybrany)}');renderSplit()" style="cursor:pointer;color:var(--ink-soft);text-decoration:underline"${zam("banka")}>zrušiť</span></div>`;
-          }
-          if(vr && !vr.iste){
-            const druhy = txId(vr.vratenie)===txId(vybrany) ? vr.platba : vr.vratenie;
-            return `<div style="background:var(--sfc-warn);border:1px solid var(--accent,#e8a13a);border-radius:9px;padding:10px 11px;margin-bottom:10px;font-size:12.5px">
-              <b>↩ Vyzerá to na vrátenie platby</b> — ${esc(vr.preco)}:<br>
-              protikus ${fmtDatum(druhy.datum)} · ${druhy.smer==="prijem"?"+":"−"}${eur(druhy.suma)}
-              <div style="display:flex;gap:7px;margin-top:8px">
-                <button class="aabtn pri" style="padding:5px 12px;font-size:12px" onclick="potvrdVratenie('${txId(vr.platba)}','${txId(vr.vratenie)}');renderSplit()"${zam("banka")}>✓ Áno, je to vrátenie</button>
-              </div></div>`;
-          }
-          return "";
-        })()}
-        ${(()=>{
-          // AKCIE K POHYBU — priamo tu, aby párovanie bolo jedno miesto (nie tri)
-          const akcie=[];
-          if(vybrany.smer==="vydaj" && !(vybrany.uhrady||[]).length && typeof pohybMaVydavok==="function" && !pohybMaVydavok(vybrany))
-            akcie.push(`<button class="aabtn" style="padding:5px 11px;font-size:12px;border-color:var(--pos);color:var(--pos)" onclick="bkVytvorVydavok('${txId(vybrany)}')"${zam("banka")}>+ Vytvoriť výdavok z platby</button>`);
-          akcie.push(`<button class="aabtn" style="padding:5px 11px;font-size:12px" onclick="skryPohyb('${txId(vybrany)}');splitVybranyPohyb=null;renderSplit()" title="Súkromný alebo nesúvisiaci pohyb — skryje sa, dá sa obnoviť vo filtri 🗄"${zam("banka")}>🗄 Skryť pohyb</button>`);
-          return `<div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:10px">${akcie.join("")}</div>`;
-        })()}
-        ${(()=>{ const u=vybrany.uhrady||[]; if(!u.length) return "";
-          return `<div style="background:var(--bg);border-radius:9px;padding:9px 11px;margin-bottom:10px;font-size:12px">
-            <div style="color:var(--ink-soft);margin-bottom:5px">Touto platbou máte zaplatené:</div>
-            ${u.map(x=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0">
-              <span>${esc(String(x.cislo))} · <b>${eur(x.suma)}</b>${zaokrPopis(x)}</span>
-              <button class="aabtn" style="padding:2px 8px;font-size:11px" onclick="splitOdoberUhradu('${txId(vybrany)}','${esc(x.typ)}','${esc(String(x.cislo))}')"${zam("banka")}>odobrať</button>
-            </div>`).join("")}
-          </div>`; })()}
-        ${(()=>{
-          let ohodnotene=kand.map(k=>({...k, ...parSkore(vybrany,k)})).sort((a,b)=>b.skore-a.skore);
-          const filterAktivny=splitDokladyFilterAktivny();
-          if(splitDokladyMesiac) ohodnotene=ohodnotene.filter(k=>String((k.z&&(k.z.datum||k.z.vystavenie))||"").slice(0,7)===splitDokladyMesiac);
-          const qDok=(_hladaj.splitDoklady||"").trim();
-          if(qDok) ohodnotene=ohodnotene.filter(k=>hladajZhoda(qDok, k.cislo, k.nazov, k.suma, k.z&&k.z.popis, k.z&&(k.z.vs||k.z.variabilny)));
-          const najlepsi=ohodnotene[0], druhy=ohodnotene[1];
-          const jasny = najlepsi && najlepsi.skore>=90 && (!druhy || najlepsi.skore-druhy.skore>=25);
-          const dalsieBtn = (!splitVsetciKand && !filterAktivny && kandInfo.zvysok)
-            ? `<div style="text-align:center;padding:10px"><button class="aabtn" style="padding:6px 14px;font-size:12px" onclick="splitUkazVsetkychKand()">zobraziť ďalšie doklady (${kandInfo.zvysok})</button></div>` : "";
-          if(!ohodnotene.length) return `<div class="aempty">${filterAktivny?'Filtru nezodpovedá žiadny doklad.':'Žiadny relevantný doklad — suma, VS ani partner nesedia.'}</div>`+dalsieBtn;
-          return ohodnotene.slice(0, filterAktivny?200:30).map((k,i)=>{
-            const odporucane = jasny && i===0;
-            const znacky=k.dovody.map(d=>`<span class="sp-tag ${d.ok?'match':'open'}">${d.ok?'✓':'·'} ${esc(d.t)}</span>`).join(" ");
-            return `<div class="sp-item ${odporucane?'match':(k.sedi?'':'dim')}" onclick="splitSparuj('${txId(vybrany)}','${k.typ}','${esc(String(k.kluc))}')"${zam("banka")}>
-              <div class="sp-r1"><span>${odporucane?'<b>⭐ ':''}${esc(String(k.cislo||"—"))}${odporucane?'</b>':''} ${k.nazov?'· '+esc(k.nazov):''}</span><span style="display:flex;gap:6px;align-items:center"><span class="sp-amt">${eur(k.suma)}</span><button class="aabtn" style="padding:2px 7px;font-size:11px" onclick="event.stopPropagation();splitOtvorDoklad('${k.typ}','${esc(String(k.kluc))}')" title="Otvoriť a upraviť doklad">✎</button></span></div>
-              <div class="sp-r2">${k.z&&k.z.datum?fmtDatum(k.z.datum)+" · ":""}${znacky}${(()=>{
-                const st=dokladStavUhrady(k.typ,k.kluc);
-                const kde=uhradyPopis(k.typ,k.kluc);
-                if(st.stav==="ciastocne") return ` <span class="sp-tag cast">${esc(st.text)}</span>`+
-                  (kde?` <span class="sp-tag">${esc(kde)}</span>`:"");
-                // „už zaplatené" bez toho, ČÍM, nechávalo človeka hľadať ručne,
-                // ktorý pohyb má rozviazať.
-                if(st.stav==="uhradene")  return ` <span class="sp-tag done">zaplatené${kde?" · "+esc(kde):""}</span>`;
-                return ""; })()}</div>
-            </div>`;
-          }).join("")+dalsieBtn;
-        })()}</div>`;
+        <div class="sp-body">${pohybKartaHtml(vybrany)}</div>`;
     }
   } else {
     // GENERICKÝ: dva ľubovoľné moduly vedľa seba
@@ -20583,13 +20626,13 @@ function splitSparuj(txIdVal, typ, cislo){
   const poDoklade=dokladZostava(typ,cislo), poPohybe=txZostava(tx);
   // ak ostalo niečo nerozdelené, nechaj pohyb vybraný a povedz to
   if(poPohybe>0.005){
-    renderSplit();
+    parPrekresli();
     setTimeout(()=>alert("Priradené "+eur(pridane)+".\n\nZ tejto platby ostáva ešte "+eur(poPohybe)+
       " — vyberte ďalší doklad, ktorý ňou bol zaplatený."),60);
     return;
   }
   splitVybranyPohyb=null;
-  renderSplit();
+  parPrekresli();
   if(poDoklade>0.005) setTimeout(()=>alert("Priradené "+eur(pridane)+".\n\nDoklad tým nie je zaplatený celý — zostáva "+
     eur(poDoklade)+". Zvyšok priradíte, keď nájdete ďalšiu platbu."),60);
 }
@@ -20652,7 +20695,7 @@ function bkVytvorVydavok(txIdVal){
   const txt = "Vytvorený interný doklad "+n.cislo+" na "+eur(n.spolu)+"."
     + (kat ? "\n\nZaradený ako: "+kat+(n.obdobie?" ("+n.obdobie+")":"")+"\nRozpoznané podľa: "+n.rozpoznane : "\n\nDoplňte kategóriu vo výdavkoch.")
     + "\n\nBez DPH — dokladom je bankový výpis. Ak máte faktúru a chcete uplatniť odpočet, zmeňte druh dokladu.";
-  if(typeof renderSplit==="function") renderSplit();
+  parPrekresli();
   if(typeof appBanka==="function") appBanka();
   setTimeout(()=>alert(txt), 60);
 }
@@ -20662,7 +20705,7 @@ function splitOdoberUhradu(txIdVal, typ, cislo){
   if(!strazZapis("banka")) return;
   const tx=(firmaData.vypis||[]).find(t=>txId(t)===txIdVal); if(!tx) return;
   odoberUhradu(tx, typ, cislo);
-  firmaDirty=true; ulozFirmu(); renderSplit();
+  firmaDirty=true; ulozFirmu(); parPrekresli();
 }
 // dialóg výberu dvoch modulov
 function splitVyberModuly(){
