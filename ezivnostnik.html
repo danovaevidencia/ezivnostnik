@@ -966,6 +966,15 @@ h1,h2,h3,h4,.chead,.wbig,.sbox .sn,.sp-title b,.splittitle{text-wrap:balance}
 .cl-patka div{margin-bottom:5px}
 .cl-disclaimer{font-size:11.5px}
 a.clWeb{display:inline-block;margin-top:12px;font-size:12.5px;color:var(--brand);text-decoration:none}
+/* D2 — zbalená séria termínov. Rozbaľovač sedí pod prvým výskytom a tvári sa
+   ako pokračovanie riadka, nie ako nový prvok. */
+.kal-seria>details>summary{list-style:none;cursor:pointer;font-size:11.5px;color:var(--ink-soft);
+  padding:5px 15px 9px 71px;border-bottom:1px solid var(--line);user-select:none}
+.kal-seria>details>summary::-webkit-details-marker{display:none}
+.kal-seria>details>summary::before{content:"▸ "}
+.kal-seria>details[open]>summary::before{content:"▾ "}
+.kal-seria>details>summary:hover{color:var(--brand)}
+.kal-seria>.arow{border-bottom:none}
 
 /* ══ E2 — MENEJ POHYBU, KEĎ SI HO POUŽÍVATEĽ NEŽELÁ (kap. 48.4, fáza E) ═══
    Appka má 26 prechodov, 27 posunov a tri animácie; nastavenie systému
@@ -1158,7 +1167,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.23-HJ";  // appka sa dá ovládať klávesnicou a rešpektuje obmedzený pohyb
+const APP_VERZIA = "2026.08.23-HK";  // nálezy ako zoznam, zbalené série termínov, prázdne stavy s akciou
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -3131,33 +3140,70 @@ function tachometerDiery(){
   return out;
 }
 
-// strážca konzistencie knihy jázd
+
+// Jeden vykresľovač pre modul aj pre sprievodcu. Boli to dve podoby toho
+// istého — modul odsek, sprievodca zoznam — a rozdiel medzi nimi nebol zámer,
+// len to, že sa jedna z nich napísala neskôr.
+//
+// `vOkne` znamená, že zoznam je v modálnom okne: akcia ho musí najprv zavrieť,
+// inak by prepočet prekreslil obrazovku schovanú za oknom.
+function kontrolyZoznamHtml(zoznam, vOkne){
+  if(!zoznam.length)
+    return `<div style="background:var(--sfc-pos);border-radius:9px;padding:12px 14px;font-size:13px;margin-bottom:14px">✓ Kniha je konzistentná — nič na vytknutie.</div>`;
+  const riadok = n => `<div class="arow" style="grid-template-columns:auto 1fr auto;align-items:start;gap:10px;cursor:default">
+      <div style="font-size:15px;line-height:1.3;color:${n.info?"var(--ink-soft)":"var(--accent-deep)"}">${n.info?"ℹ":"⚠"}</div>
+      <div style="font-size:12.5px;line-height:1.55">${n.text}</div>
+      ${n.akcia?`<button class="aabtn" style="padding:4px 10px;font-size:11.5px" onclick="${vOkne?"closeModal();":""}${n.akcia.kod}">${n.akcia.popis}</button>`:"<span></span>"}
+    </div>`;
+  // Najprv to, čo treba opraviť, potom to, čo si stačí pozrieť. Poradie je
+  // súčasť informácie: keď je hore vec, ktorá „nemusí byť chyba", zvyšok
+  // zoznamu sa prestane brať vážne.
+  const zoradene = [...zoznam].sort((a,b)=>(a.info?1:0)-(b.info?1:0));
+  return `<div class="alist" style="margin-bottom:14px">${zoradene.map(riadok).join("")}</div>`;
+}
+// ═══ D1 — STRÁŽCA KONZISTENCIE AKO ZOZNAM (kap. 48.4, fáza D) ═════════════
+//
+// Nálezy boli reťazce a modul ich zlepil do jedného odseku cez „ · ". Osem
+// rôznych vecí s rôznou naliehavosťou tak vyzeralo ako jedna dlhá veta —
+// „jazda bez km" a „tachometer sa prekrýva" mali rovnakú váhu a rovnaký tvar.
+// Sprievodca knihou jázd to pritom už kreslil ako zoznam; dve podoby toho
+// istého, z ktorých jedna bola horšia.
+//
+// Nález je odteraz objekt:
+//   text  — čo sa našlo
+//   info  — true, keď to NEMUSÍ byť chyba (dlhé jazdy, medzery v tachometri).
+//           Rozlíšenie je dôležité: keď všetko kričí rovnako, prestane sa
+//           čítať všetko (kap. 16 — falošný poplach je drahší než žiadny).
+//   akcia — {popis, kod}, ale LEN tam, kde sa dá naozaj niečo spustiť.
+//           Tlačidlo, ktoré by len prekreslilo tú istú obrazovku, je šum.
 function jazdyKontrola(){
   const out=[]; const jazdy=(firmaData.jazdy||[]).slice();
+  const N=(text,extra)=>Object.assign({text}, extra||{});
+  const PREPOCET={popis:"↻ Prepočítať", kod:"kjPrepocitajTacho()"};
   const bezKm=jazdy.filter(j=>!(+j.km>0)).length;
-  if(bezKm) out.push(`${bezKm} ${bezKm===1?'jazda':'jázd'} bez zadaných km.`);
+  if(bezKm) out.push(N(`${bezKm} ${bezKm===1?'jazda':'jázd'} bez zadaných km.`));
   const bezDatumu=jazdy.filter(j=>!jazdaDatum(j)).length;
-  if(bezDatumu) out.push(`${bezDatumu} ${bezDatumu===1?'jazda':'jázd'} bez platného dátumu.`);
+  if(bezDatumu) out.push(N(`${bezDatumu} ${bezDatumu===1?'jazda':'jázd'} bez platného dátumu.`));
   const dlhe=jazdy.filter(j=>(+j.km||0)>500).length;
-  if(dlhe) out.push(`${dlhe} ${dlhe===1?'jazda presahuje':'jázd presahuje'} 500 km — skontrolujte, či sú reálne.`);
+  if(dlhe) out.push(N(`${dlhe} ${dlhe===1?'jazda presahuje':'jázd presahuje'} 500 km — skontrolujte, či sú reálne.`, {info:true}));
   const sukr=jazdy.filter(jazdaSukromna).length;
-  if(sukr && autoRezim()==="100") out.push(`${sukr} ${sukr===1?'jazda je označená ako súkromná':'jázd je označených ako súkromných'} — pri plnom odpočte DPH na to nemáte nárok.`);
+  if(sukr && autoRezim()==="100") out.push(N(`${sukr} ${sukr===1?'jazda je označená ako súkromná':'jázd je označených ako súkromných'} — pri plnom odpočte DPH na to nemáte nárok.`));
   const vikendBezUcelu=jazdy.filter(j=>{ const dw=dowOf(j); return (dw===0||dw===6) && !jazdaSukromna(j) && !String(j.ucel||"").trim(); }).length;
-  if(vikendBezUcelu) out.push(`${vikendBezUcelu} víkendových jázd nemá účel ani príznak súkromnej — pri kontrole sa naň pýtajú ako prvé.`);
+  if(vikendBezUcelu) out.push(N(`${vikendBezUcelu} víkendových jázd nemá účel ani príznak súkromnej — pri kontrole sa naň pýtajú ako prvé.`));
 
   // Spojitosť tachometra: `kon` jazdy musí byť `poc` nasledujúcej. Je to prvá
   // vec, ktorú kontrola pri knihe jázd overuje, a dovtedy sa nesledovala vôbec.
   const bezTacho=jazdy.filter(j=>jazdaDatum(j) && !(+j.poc>0) && !(+j.kon>0)).length;
-  if(bezTacho) out.push(`${bezTacho} ${bezTacho===1?'jazda nemá':'jázd nemá'} stav tachometra — spustite Prepočet tachometra v knihe jázd.`);
+  if(bezTacho) out.push(N(`${bezTacho} ${bezTacho===1?'jazda nemá':'jázd nemá'} stav tachometra.`, {akcia:PREPOCET}));
   const diery=tachometerDiery();
   const prekryvy=diery.filter(d=>d.prekryv), medzery=diery.filter(d=>!d.prekryv);
   if(prekryvy.length){
     const d0=prekryvy[0];
-    out.push(`Tachometer sa prekrýva na ${prekryvy.length} ${prekryvy.length===1?'mieste':'miestach'} — jazda ${fmtDatum(d0.akt.datum)} začína na ${Math.round(+d0.akt.poc)} km, hoci predošlá skončila na ${Math.round(+d0.pred.kon)} km. ${Math.abs(Math.round(d0.rozdiel))} km je započítaných dvakrát.`);
+    out.push(N(`Tachometer sa prekrýva na ${prekryvy.length} ${prekryvy.length===1?'mieste':'miestach'} — jazda ${fmtDatum(d0.akt.datum)} začína na ${Math.round(+d0.akt.poc)} km, hoci predošlá skončila na ${Math.round(+d0.pred.kon)} km. ${Math.abs(Math.round(d0.rozdiel))} km je započítaných dvakrát.`, {akcia:PREPOCET}));
   }
   if(medzery.length){
     const spolu=Math.round(medzery.reduce((a,d)=>a+d.rozdiel,0));
-    out.push(`Medzi jazdami je ${spolu} km bez záznamu (${medzery.length} ${medzery.length===1?'medzera':'medzier'}). Nemusí ísť o chybu — takto sa prejavia súkromné jazdy — ale pri kontrole to budete vysvetľovať.`);
+    out.push(N(`Medzi jazdami je ${spolu} km bez záznamu (${medzery.length} ${medzery.length===1?'medzera':'medzier'}). Nemusí ísť o chybu — takto sa prejavia súkromné jazdy — ale pri kontrole to budete vysvetľovať.`, {info:true}));
   }
   return out;
 }
@@ -5941,7 +5987,10 @@ function appFaktury(){
     </div>`:''}
     <div class="alist">
       <div class="arow head rdok rf"><div class="c-cb"><input type="checkbox" ${vsetkyVybrane?'checked':''} onclick="fakVyberVsetky(this.checked)" title="Vybrať všetky" style="cursor:pointer"></div><div class="c-sub">Číslo</div><div class="c-main">Odberateľ</div><div class="c-date">Dátum</div><div class="c-sum" style="text-align:right">Suma</div><div class="c-stav">Stav</div><div class="c-act"></div></div>
-      ${list.length?list.map(f=>{const idx=_fIdx.get(f);const fk=dokladKluc(f);const st=uhradaStav("faktura", fk);const fb=UHRADA_FARBY[st.stav]||UHRADA_FARBY.neznamy;const uhradena=faktJeUhradena(f);return `<div class="arow rdok rf"><div class="c-cb"><input type="checkbox" ${fakVybrane.has(fk)?'checked':''} onclick="event.stopPropagation();fakToggleVyber('${esc(fk)}',this.checked)" style="cursor:pointer"></div><div class="acol-strong c-sub" style="color:${c}" onclick="editFaktura(${idx})">${esc(f.cislo||"—")}</div><div class="c-main" onclick="editFaktura(${idx})">${esc(f.odberatel||"—")}</div><div class="acol-muted c-date" onclick="editFaktura(${idx})">${fmtDatum(f.datum||f.vystavenie)}</div><div class="acol-sum c-sum" onclick="editFaktura(${idx})">${eur(+f.spolu||0)}</div><div class="c-stav" ${st.stav!=="overene"?`onclick="event.stopPropagation();otvorVyberPlatby('faktura','${esc(fk)}')"`:`onclick="editFaktura(${idx})"`} style="${st.stav!=="overene"?"cursor:pointer":""}" title="${esc((st.text||'')+(st.stav!=="overene"?" · ťuknutím priradíte platbu z banky":""))}"><span style="display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:600;color:${fb.f}">${fb.ic}${fb.tichy?'':' '+fb.n}</span></div><div class="c-act" style="display:flex;gap:5px;align-items:center">${!uhradena?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vyberSposobUhrady(null,_s=>{oznacDokladUhradeny('faktura','${esc(fk)}',_s);appFaktury();})" title="Označiť ako uhradené">✓</button>`:((st.zdroj==='rucne'||st.zdroj==='legacy')?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();zrusDokladUhradu('faktura','${esc(fk)}');appFaktury()" title="Zrušiť potvrdenie úhrady">✕</button>`:'')}<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();exportFakturaPDF(${idx})" title="${f.originalSubor?'Stiahnuť pôvodný PDF':'Vygenerovať PDF faktúry'}">${f.originalSubor?'📎':'PDF'}</button><button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();exportEFakturaUBL(${idx})" title="E-faktúra UBL 2.1 / Peppol (povinné od 2027)">e-fa</button><button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();kopirujFakturu(${idx})" title="Vytvoriť kópiu — nové číslo a dátum, ostatné prevzaté">⧉</button></div></div>`;}).join(''):'<div class="aempty">Žiadne faktúry v tomto filtri.</div>'}
+      ${list.length?list.map(f=>{const idx=_fIdx.get(f);const fk=dokladKluc(f);const st=uhradaStav("faktura", fk);const fb=UHRADA_FARBY[st.stav]||UHRADA_FARBY.neznamy;const uhradena=faktJeUhradena(f);return `<div class="arow rdok rf"><div class="c-cb"><input type="checkbox" ${fakVybrane.has(fk)?'checked':''} onclick="event.stopPropagation();fakToggleVyber('${esc(fk)}',this.checked)" style="cursor:pointer"></div><div class="acol-strong c-sub" style="color:${c}" onclick="editFaktura(${idx})">${esc(f.cislo||"—")}</div><div class="c-main" onclick="editFaktura(${idx})">${esc(f.odberatel||"—")}</div><div class="acol-muted c-date" onclick="editFaktura(${idx})">${fmtDatum(f.datum||f.vystavenie)}</div><div class="acol-sum c-sum" onclick="editFaktura(${idx})">${eur(+f.spolu||0)}</div><div class="c-stav" ${st.stav!=="overene"?`onclick="event.stopPropagation();otvorVyberPlatby('faktura','${esc(fk)}')"`:`onclick="editFaktura(${idx})"`} style="${st.stav!=="overene"?"cursor:pointer":""}" title="${esc((st.text||'')+(st.stav!=="overene"?" · ťuknutím priradíte platbu z banky":""))}"><span style="display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:600;color:${fb.f}">${fb.ic}${fb.tichy?'':' '+fb.n}</span></div><div class="c-act" style="display:flex;gap:5px;align-items:center">${!uhradena?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vyberSposobUhrady(null,_s=>{oznacDokladUhradeny('faktura','${esc(fk)}',_s);appFaktury();})" title="Označiť ako uhradené">✓</button>`:((st.zdroj==='rucne'||st.zdroj==='legacy')?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();zrusDokladUhradu('faktura','${esc(fk)}');appFaktury()" title="Zrušiť potvrdenie úhrady">✕</button>`:'')}<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();exportFakturaPDF(${idx})" title="${f.originalSubor?'Stiahnuť pôvodný PDF':'Vygenerovať PDF faktúry'}">${f.originalSubor?'📎':'PDF'}</button><button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();exportEFakturaUBL(${idx})" title="E-faktúra UBL 2.1 / Peppol (povinné od 2027)">e-fa</button><button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();kopirujFakturu(${idx})" title="Vytvoriť kópiu — nové číslo a dátum, ostatné prevzaté">⧉</button></div></div>`;}).join(''):prazdnyAleboFilter(!(d.faktury||[]).length,
+        "Zatiaľ nemáte žiadnu faktúru. Vystavte prvú — číslo, dátumy aj DPH doplní appka podľa nastavení.",
+        {popis:"＋ Nová faktúra", kod:"editFaktura()"},
+        "fFilter='vsetky';_hladaj.faktury='';appFaktury()")}
     </div>`;
   setCrumb(`${fak.length} faktúr · ${eur(spolu)}`);
 }
@@ -7112,7 +7161,10 @@ function appVydavky(){
     </div>`:''}
     <div class="alist">
       <div class="arow head rdok rv"><div class="c-cb"><input type="checkbox" ${vsetkyVybraneV?'checked':''} onclick="vydVyberVsetky(this.checked)" title="Vybrať všetky" style="cursor:pointer"></div><div class="c-main">Partner / popis</div><div class="c-date">Dátum</div><div class="c-sum" style="text-align:right">Bez DPH</div><div class="c-sub" style="text-align:right">DPH</div><div class="c-stav" style="text-align:center">Stav</div><div class="c-act"></div></div>
-      ${list.length?list.map(x=>{const idx=_vIdx.get(x);const bezDat=!x.datum||!/^\d{4}-\d{2}/.test(String(x.datum));const kl=dokladKluc(x);const st=kl?uhradaStav("vydavok",kl):null;const fb=st?(UHRADA_FARBY[st.stav]||UHRADA_FARBY.neznamy):null;const uhr=vydJeUhradeny(x);return `<div class="arow rdok rv" onclick="editVydavok(${idx})"><div class="c-cb">${kl?`<input type="checkbox" ${vydVybrane.has(kl)?'checked':''} onclick="event.stopPropagation();vydToggleVyber('${esc(kl)}',this.checked)" style="cursor:pointer">`:''}</div><div class="c-main"><div class="acol-strong" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(x.partner||"—")} ${x.doklad?'<span title="Doklad v cloude" style="cursor:pointer" onclick="event.stopPropagation();otvorDoklad(\''+esc(x.doklad)+'\')">📎</span>':''}</div><div class="acol-muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(x.popis||x.druh||"")}${(()=>{const kde=uhradyPopis("vydavok",kl,true);return kde?` <span style="color:var(--pos)">· zaplatené ${esc(kde)}</span>`:"";})()}</div></div><div class="acol-muted c-date">${bezDat?'<span class="apill neg">bez dátumu</span>':fmtDatum(x.datum)}</div><div class="acol-sum c-sum">${eur(+x.bez||0)}</div><div class="acol-sum c-sub" style="color:var(--ink-soft)">${eur(+x.dph||0)}</div><div class="c-stav" style="text-align:center">${fb?`<span title="${esc((st.n||fb.n)+(st.text?' — '+st.text:'')+(st.stav!=="overene"?" · ťuknutím priradíte platbu z banky":""))}" style="color:${fb.f};font-size:14px;${st.stav!=="overene"?"cursor:pointer":""}" ${st.stav!=="overene"?`onclick="event.stopPropagation();otvorVyberPlatby('vydavok','${esc(kl)}')"`:""}>${fb.ic}</span>`:'<span style="color:var(--ink-soft)">·</span>'}</div><div class="c-act">${kl?(!uhr?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vyberSposobUhrady(null,_s=>{oznacDokladUhradeny('vydavok','${esc(kl)}',_s);appVydavky();})" title="Označiť ako uhradené">✓</button>`:((st.zdroj==='rucne'||st.zdroj==='legacy')?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();zrusDokladUhradu('vydavok','${esc(kl)}');appVydavky()" title="Zrušiť potvrdenie úhrady">✕</button>`:'')):''}</div></div>`;}).join(''):'<div class="aempty">Žiadne výdavky v tomto filtri.</div>'}
+      ${list.length?list.map(x=>{const idx=_vIdx.get(x);const bezDat=!x.datum||!/^\d{4}-\d{2}/.test(String(x.datum));const kl=dokladKluc(x);const st=kl?uhradaStav("vydavok",kl):null;const fb=st?(UHRADA_FARBY[st.stav]||UHRADA_FARBY.neznamy):null;const uhr=vydJeUhradeny(x);return `<div class="arow rdok rv" onclick="editVydavok(${idx})"><div class="c-cb">${kl?`<input type="checkbox" ${vydVybrane.has(kl)?'checked':''} onclick="event.stopPropagation();vydToggleVyber('${esc(kl)}',this.checked)" style="cursor:pointer">`:''}</div><div class="c-main"><div class="acol-strong" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(x.partner||"—")} ${x.doklad?'<span title="Doklad v cloude" style="cursor:pointer" onclick="event.stopPropagation();otvorDoklad(\''+esc(x.doklad)+'\')">📎</span>':''}</div><div class="acol-muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(x.popis||x.druh||"")}${(()=>{const kde=uhradyPopis("vydavok",kl,true);return kde?` <span style="color:var(--pos)">· zaplatené ${esc(kde)}</span>`:"";})()}</div></div><div class="acol-muted c-date">${bezDat?'<span class="apill neg">bez dátumu</span>':fmtDatum(x.datum)}</div><div class="acol-sum c-sum">${eur(+x.bez||0)}</div><div class="acol-sum c-sub" style="color:var(--ink-soft)">${eur(+x.dph||0)}</div><div class="c-stav" style="text-align:center">${fb?`<span title="${esc((st.n||fb.n)+(st.text?' — '+st.text:'')+(st.stav!=="overene"?" · ťuknutím priradíte platbu z banky":""))}" style="color:${fb.f};font-size:14px;${st.stav!=="overene"?"cursor:pointer":""}" ${st.stav!=="overene"?`onclick="event.stopPropagation();otvorVyberPlatby('vydavok','${esc(kl)}')"`:""}>${fb.ic}</span>`:'<span style="color:var(--ink-soft)">·</span>'}</div><div class="c-act">${kl?(!uhr?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vyberSposobUhrady(null,_s=>{oznacDokladUhradeny('vydavok','${esc(kl)}',_s);appVydavky();})" title="Označiť ako uhradené">✓</button>`:((st.zdroj==='rucne'||st.zdroj==='legacy')?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();zrusDokladUhradu('vydavok','${esc(kl)}');appVydavky()" title="Zrušiť potvrdenie úhrady">✕</button>`:'')):''}</div></div>`;}).join(''):prazdnyAleboFilter(!(d.vydavky||[]).length,
+        "Zatiaľ nemáte žiadny výdavok. Odfoťte bloček alebo prepošlite došlú faktúru e-mailom — appka z nej vytiahne sumu aj DPH.",
+        {popis:"＋ Nový výdavok", kod:"editVydavok()"},
+        "vFilter='vsetky';vRok='';vMesiac='';_hladaj.vydavky='';appVydavky()")}
     </div>`;
   setCrumb(`${vyd.length} dokladov · ${vRok}${vMesiac?' · '+mesiacLabel(vMesiac):''} · ${eur(bezSpolu)} bez DPH`);
 }
@@ -7658,7 +7710,10 @@ function appBanka(){
         // aj Párovanie (kap. 47.4). Predtým si tu Banka počítala vlastnú.
         if(bFilter==="nespar") filtered=vypis.filter(t=>!pohybStav(t).spar);
         if((_hladaj.banka||"").trim()) filtered=filtered.filter(t=>hladajZhoda(_hladaj.banka, t.proti, t.partner, t.vs, t.popis, t.suma, t.ibanProti));
-        return filtered.length?filtered.slice(0, limitPre('banka',200)).map(t=>bankaRiadok(t)).join('')+orezInfo('banka', Math.min(filtered.length, limitPre('banka',200)), filtered.length, 'appBanka'):'<div class="aempty">Žiadne pohyby.</div>';
+        return filtered.length?filtered.slice(0, limitPre('banka',200)).map(t=>bankaRiadok(t)).join('')+orezInfo('banka', Math.min(filtered.length, limitPre('banka',200)), filtered.length, 'appBanka'):prazdnyAleboFilter(!(d.vypis||[]).length,
+          "Zatiaľ tu nie je žiadny pohyb. Načítajte výpis z účtu — appka z neho sama ponúkne, ktorá platba patrí ku ktorému dokladu.",
+          {popis:"📥 Import výpisu", kod:"importVypis()"},
+          "bFilter='vsetky';bMesiac='';_hladaj.banka='';appBanka()");
       })()}
     </div>`}
     ${(()=>{
@@ -9783,7 +9838,7 @@ function appJazdy(){
       <div class="aminbox"><div class="al">Vozidlo</div><div class="av" style="font-size:13px">${esc((d.meta&&d.meta.vozidlo)||'—')}</div></div>
     </div>
     ${autoNezrovnalostiHtml(true)}
-    ${kontroly.length?`<div style="background:var(--sfc-warn);border:1px solid #f0c98a;border-radius:11px;padding:11px 15px;margin-bottom:14px;font-size:13px"><b style="color:var(--accent-deep)">⚠ Strážca konzistencie:</b> ${kontroly.join(" · ")}</div>`:''}
+    ${kontroly.length?`<div class="chead" style="margin:0 2px 8px">Strážca konzistencie</div>`+kontrolyZoznamHtml(kontroly):''}
     ${(()=>{ const st=jazdyStavVykaz(kjMesiac); if(!st.zhoda) return ''; return `
     <div class="card" style="margin-bottom:14px">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
@@ -9857,7 +9912,10 @@ function appJazdy(){
         const _jIdx=new Map((d.jazdy||[]).map((x,i)=>[x,i]));   // index riadku bez O(n²) indexOf (45.8)
         return list.length?list.map(j=>{const idx=_jIdx.get(j)??-1;const klik=idx>=0?`onclick="editJazda(${idx})"`:'';const sukrPill = jazdaSukromna(j) ? ' <span class="apill" style="background:#f2e6cf;color:var(--accent-deep)">súkromná</span>'
                  : ((j._zluceny && +j._sukrKm>0) ? ' <span class="apill" style="background:#f2e6cf;color:var(--accent-deep)">'+Math.round(j._sukrKm)+' km súkr.</span>' : '');
-return `<div class="arow" style="grid-template-columns:2fr 1.4fr 1fr" ${klik}><div><div class="acol-strong"${jazdaSukromna(j)?' style="color:var(--ink-soft)"':''}>${esc(j.cesta||j.trasa||"—")}${j._zluceny?' <span class="apill" style="background:var(--brand-lite);color:var(--brand)">'+j._pocet+' jázd</span>':''}${sukrPill}</div><div class="acol-muted">${esc(j.ucel||"")}</div></div><div class="acol-muted">${esc(j.datum||"")}</div><div class="acol-sum"${jazdaSukromna(j)?' style="color:var(--ink-soft)"':''}>${(+j.km||0)}</div></div>`;}).join(''):'<div class="aempty">Žiadne jazdy zodpovedajúce filtru.</div>';
+return `<div class="arow" style="grid-template-columns:2fr 1.4fr 1fr" ${klik}><div><div class="acol-strong"${jazdaSukromna(j)?' style="color:var(--ink-soft)"':''}>${esc(j.cesta||j.trasa||"—")}${j._zluceny?' <span class="apill" style="background:var(--brand-lite);color:var(--brand)">'+j._pocet+' jázd</span>':''}${sukrPill}</div><div class="acol-muted">${esc(j.ucel||"")}</div></div><div class="acol-muted">${esc(j.datum||"")}</div><div class="acol-sum"${jazdaSukromna(j)?' style="color:var(--ink-soft)"':''}>${(+j.km||0)}</div></div>`;}).join(''):prazdnyAleboFilter(!(d.jazdy||[]).length,
+        "Zatiaľ tu nie je žiadna jazda. Zadajte prvú ručne alebo naimportujte históriu z vozidla.",
+        {popis:"＋ Nová jazda", kod:"editJazda()"},
+        "kjMesiac='';_hladaj.jazdy='';appJazdy()");
       })()}
     </div>`;
   setCrumb(`${vsetky.length} jázd · ${kmAll.toLocaleString('sk')} km`);
@@ -10211,8 +10269,7 @@ function kjwRender(){
   else if(akt.k==="kontrola"){
     const ch=jazdyKontrola();
     telo=`<div class="csub" style="margin-bottom:10px">Čo by pri kontrole knihy jázd padlo do oka ako prvé.</div>
-      ${ch.length?`<div class="alist">${ch.map(x=>`<div class="arow" style="grid-template-columns:auto 1fr;cursor:default;align-items:start;gap:8px"><div>⚠</div><div style="font-size:12.5px;line-height:1.55">${esc(x)}</div></div>`).join("")}</div>`
-        :`<div style="background:var(--sfc-pos);border-radius:9px;padding:12px 14px;font-size:13px">✓ Kniha je konzistentná — nič na vytknutie.</div>`}
+      ${kontrolyZoznamHtml(ch, true)}
       <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:12px">
         <button class="aabtn" onclick="closeModal();kjPrepocitajTacho()">↻ Prepočítať tachometer</button>
       </div>`;
@@ -21532,7 +21589,8 @@ function renderSplit(){
           :(st.ciastocne?'<span class="sp-tag cast">rozdelené sčasti · zostáva '+eur(st.zostava)+'</span>'
           :(vr?'<span class="sp-tag navrh">↩ vyzerá ako vrátenie</span>':st.navrh?'<span class="sp-tag navrh">návrh</span>':'<span class="sp-tag open">nespárované</span>'))}</div>
         </div>`;
-      }).join(""):'<div class="aempty">Žiadne pohyby v tomto filtri.</div>'}</div>`;
+      }).join(""):prazdnyStav("Tomuto filtru nezodpovedá žiadny pohyb.",
+        {popis:"Zrušiť filter", kod:"splitStavFilter='vsetky';splitMesiac='';_hladaj.splitBanka='';renderSplit()"})}</div>`;
     if(!vybrany){
       pravy=`<div class="sp-head" style="--_c:var(--m-prijmy)"><div class="sp-ic">▤</div><div class="sp-tt">Doklady</div></div>
         <div class="sp-body"><div class="aempty" style="padding:30px 16px">Vyberte pohyb a zobrazia sa sediace doklady na spárovanie.</div></div>`;
@@ -21883,12 +21941,87 @@ function appKalendar(){
     ${nadchadzajuce.length?`
     <div class="chead" style="margin-bottom:8px">Nadchádzajúce</div>
     <div class="alist" style="margin-bottom:18px">
-      ${nadchadzajuce.slice(0,12).map(t=>kalRiadok(t,c)).join("")}
-    </div>`:'<div class="aempty">Žiadne nadchádzajúce termíny.</div>'}
+      ${kalZoskup(nadchadzajuce).map(g=>kalSkupinaHtml(g,c)).join("")}
+    </div>`:prazdnyStav("Žiadne nadchádzajúce termíny. Daňové a odvodové sa dopočítajú z profilu — vlastné si pridajte sami.",
+      {popis:"＋ Udalosť", kod:"kalPridajUdalost()"})}
     <div style="background:var(--bg);border-radius:10px;padding:12px 14px;font-size:12px;color:var(--ink-soft)">
       <b style="color:var(--ink)">Legenda termínov:</b> % DPH · ⚕ zdravotné · ◉ sociálne · § preddavky · ✎ priznanie · 🚗 vozidlo · ● vlastné
     </div>`;
   setCrumb(`kalendár · ${nadchadzajuce.length} nadchádzajúcich termínov`);
+}
+// ═══ D3 — PRÁZDNY STAV HOVORÍ, ČO UROBIŤ (kap. 48.4, fáza D) ══════════════
+//
+// „Žiadne pohyby." je pravdivé a zbytočné. Nepovie, či sa nič nenaimportovalo,
+// alebo či len filter nič nenašiel — a to sú dve úplne rozdielne situácie
+// s dvoma rozdielnymi ďalšími krokmi. Nový používateľ pritom vidí prázdny
+// modul ako PRVÚ vec (kap. 16 — nový účet nájde inú triedu chýb).
+//
+//   prázdny modul  → povedz, ako pribudne prvý záznam, a ponúkni to
+//   prázdny filter → povedz, že filtruje, a ponúkni ho zrušiť
+//
+// Rozlíšenie musí stáť na dátach, nie na tvare textu: preto sa odovzdáva
+// `jePrazdny`, nie hotová veta.
+function prazdnyStav(text, akcia){
+  return `<div class="aempty">${text}${akcia
+    ? `<div style="margin-top:12px"><button class="aabtn" onclick="${akcia.kod}">${akcia.popis}</button></div>`
+    : ""}</div>`;
+}
+// Prázdno preto, že sa nič nezadalo — alebo preto, že filtruje?
+function prazdnyAleboFilter(jePrazdny, prazdnyText, prazdnaAkcia, zrusFilter){
+  return jePrazdny
+    ? prazdnyStav(prazdnyText, prazdnaAkcia)
+    : prazdnyStav("Tomuto filtru nezodpovedá nič.", {popis:"Zrušiť filter", kod:zrusFilter});
+}
+// ═══ D2 — OPAKOVANÁ SÉRIA SA ZBALÍ (kap. 48.4, fáza D) ════════════════════
+//
+// Kalendár ukazuje polročný horizont, takže „Zdravotné odvody" vyšli
+// sedemkrát pod sebou a „DPH priznanie + kontrolný výkaz" tiež. Zo
+// zoznamu dvanástich riadkov bolo desať predvídateľných a to podstatné —
+// ročné priznanie, vlastná udalosť, termín z FS — sa medzi nimi stratilo.
+//
+// Séria sa zbalí na jeden riadok: najbližší výskyt, kadencia a počet
+// ďalších. Zvyšok je v `<details>`, teda dostupný, ale nezaberá miesto
+// (CLAUDE.md — zbaliť, čo netreba hneď).
+//
+// Kadencia sa NEODVODZUJE z názvu ani z typu, ale z odstupu skutočných
+// dátumov: `posunNaPracovnyDen` vie termín posunúť z 25. na 27., takže deň
+// v mesiaci nie je spoľahlivý údaj. Medián odstupu je.
+function kalKadencia(zoznam){
+  if(zoznam.length<2) return "";
+  const odstupy=[];
+  for(let i=1;i<zoznam.length;i++) odstupy.push(Math.round((zoznam[i].d-zoznam[i-1].d)/86400000));
+  odstupy.sort((a,b)=>a-b);
+  const median=odstupy[Math.floor(odstupy.length/2)];
+  // Deň v mesiaci berieme z NAJČASTEJŠIEHO, nie z prvého — prvý mohol byť
+  // práve ten posunutý cez víkend.
+  const dni={}; zoznam.forEach(t=>{ const k=t.d.getDate(); dni[k]=(dni[k]||0)+1; });
+  const den=Object.keys(dni).sort((a,b)=>dni[b]-dni[a])[0];
+  if(median<=35) return "mesačne k "+den+".";
+  if(median<=100) return "štvrťročne";
+  return "";
+}
+// Zoskupí termíny s rovnakým názvom do série. Tri a viac výskytov, lebo
+// dva riadky pod sebou ešte nie sú séria — sú to dva termíny.
+function kalZoskup(zoznam){
+  const podlaNazvu=new Map();
+  zoznam.forEach(t=>{ const k=t.typ+"|"+t.nazov; if(!podlaNazvu.has(k)) podlaNazvu.set(k,[]); podlaNazvu.get(k).push(t); });
+  const out=[];
+  for(const polozky of podlaNazvu.values()){
+    if(polozky.length>=3) out.push({prvy:polozky[0], seria:polozky, kadencia:kalKadencia(polozky)});
+    else polozky.forEach(t=>out.push({prvy:t, seria:null}));
+  }
+  // Poradie ostáva chronologické podľa najbližšieho výskytu — zbalenie
+  // nesmie zamiešať, čo príde skôr.
+  return out.sort((a,b)=>a.prvy.d-b.prvy.d);
+}
+function kalSkupinaHtml(g, c){
+  if(!g.seria) return kalRiadok(g.prvy, c);
+  const dalsie=g.seria.length-1;
+  return `<div class="kal-seria">${kalRiadok(g.prvy, c)}
+    <details>
+      <summary>${g.kadencia?esc(g.kadencia)+" · ":""}ďalších ${dalsie} v kalendári</summary>
+      ${g.seria.slice(1).map(t=>kalRiadok(t,c)).join("")}
+    </details></div>`;
 }
 function kalRiadok(t, c){
   const naliehave=t.dni<=7;
