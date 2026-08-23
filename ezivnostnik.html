@@ -1173,7 +1173,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.23-HM";  // súhrnný výkaz DPH; vzory nad formulár; režim PHL už neobíde doklad s inou kategóriou
+const APP_VERZIA = "2026.08.23-HN";  // percento osobného použitia na doklade — jedno číslo, dve krátenia
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -3375,10 +3375,16 @@ function jeOsobneAutoOdhad(m){
 // majetku si do výdavkov nedáte celý odpis, ale len časť. Zákon dovoľuje buď
 // paušál 80 %, alebo pomer podľa skutočného využitia. Odpisový plán pritom beží
 // naplno: majetok sa odpisuje celý, len sa celý neuplatní.
-function podielDane(m){
-  const p=(m && m.osobnaPotreba!=null) ? +m.osobnaPotreba : 100;
+// Podiel využitia na podnikanie. Rovnaké pravidlo pre kartu majetku aj pre
+// jednotlivý doklad — hodnota je vždy percento, ktoré SA UPLATNÍ, chýbajúca
+// hodnota znamená sto percent. Dva prístupové body, jedno pravidlo: keby si
+// každý clampoval po svojom, prvá zmena rozsahu sa niekde neprejaví.
+function pctPodielu(v){
+  const p=(v!=null && v!=="") ? +v : 100;
   return Math.max(0, Math.min(100, isNaN(p)?100:p))/100;
 }
+function podielDane(m){ return pctPodielu(m && m.osobnaPotreba); }
+function vydavokPodiel(x){ return pctPodielu(x && x.podnikPct); }
 
 function odpisRokCelkom(rok){
   let odpis=0;
@@ -7203,6 +7209,7 @@ function vydavokFormInit(){
   if(typeof mDatumPozn==="function") mDatumPozn();
   if(typeof mKontrolaLitre==="function") mKontrolaLitre();
   if(typeof mPhlPozn==="function") mPhlPozn();
+  if(typeof mPodielBox==="function") mPodielBox();
 }
 
 function vydavokDoplnkovePolia(obj){
@@ -7219,6 +7226,27 @@ function vydavokDoplnkovePolia(obj){
   // opakovaný doklad
   const op=document.getElementById("m_opakovany");
   if(op && op.checked){ obj.opakovanie={perioda:val("m_perioda")||"mesacne"}; }
+  citajPodnikPct(obj);
+  return obj;
+}
+
+// ── PERCENTO OSOBNÉHO POUŽITIA — JEDEN ČITATEĽ ─────────────────────────────
+// Formulár výdavku je síce jeden, ale ČÍTAJÚ ho dve rôzne cesty: editor si
+// objekt skladá inline vo svojej ukladacej funkcii, import z dokladu volá
+// `vydavokDoplnkovePolia`. Nové pole doplnené len do jednej z nich v druhej
+// ticho chýba — pri prvom pokuse sa to aj stalo: box sa zobrazil, percento
+// sa dalo zadať, uloženie ho zahodilo a doklad sa počítal na sto percent.
+//
+// Volá sa až vtedy, keď je objekt hotový: `vydavokMozeKratit` potrebuje
+// kategóriu aj väzbu na auto. Sto percent sa do dát nezapisuje — staré doklady
+// pole nemajú a nové bez krátenia majú vyzerať rovnako.
+function citajPodnikPct(obj){
+  const el=document.getElementById("m_podnikPct");
+  if(el && vydavokMozeKratit(obj)){
+    const pct=Math.round(pctPodielu(el.value)*100);
+    if(pct<100){ obj.podnikPct=pct; return obj; }
+  }
+  delete obj.podnikPct;
   return obj;
 }
 
@@ -7305,11 +7333,21 @@ function vydavokFormHtml(x, nova, idx){
     </div>
     <div class="mfield">
       <label>Do čoho to patrí</label>
-      <select id="m_kategoria" onchange="mKategoriaPozn()">
+      <select id="m_kategoria" onchange="mKategoriaPozn();mPodielBox()">
         ${Object.keys(KATEGORIE_VYDAVKOV).filter(k=>k!=="odpisy").map(k=>
           `<option value="${k}" ${odhadniKategoriu(x)===k?"selected":""}>${esc(KATEGORIE_VYDAVKOV[k].n)}</option>`).join("")}
       </select>
       <div class="ocr-hint" id="m_katPozn"></div>
+    </div>
+    <div id="m_podielBox" style="display:none;background:var(--bg);border-radius:9px;padding:11px 13px;margin-bottom:10px">
+      <label style="font-size:12.5px;font-weight:600;color:var(--ink-soft);display:block;margin-bottom:6px">Koľko z toho je na podnikanie</label>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input id="m_podnikPct" type="number" min="0" max="100" step="1" value="${esc(x.podnikPct!=null?x.podnikPct:100)}"
+               style="width:84px" oninput="mPodielPozn()">
+        <span style="font-size:13px;color:var(--ink-soft)">%</span>
+        ${[100,80,50].map(p=>`<span class="vzor" style="padding:5px 10px" onclick="mNastavPodiel(${p})">${p} %</span>`).join("")}
+      </div>
+      <div class="ocr-hint" id="m_podielPozn" style="margin-top:6px"></div>
     </div>
     <div class="mfield">
       <label>Dátum dodania</label>
@@ -7329,7 +7367,7 @@ function vydavokFormHtml(x, nova, idx){
     <div style="background:var(--bg);border-radius:9px;padding:11px 13px;margin-bottom:4px">
       <label style="display:flex;align-items:center;gap:9px;cursor:pointer;font-size:13.5px"><input type="checkbox" id="m_viacSadzieb" ${maRozpis(x)?"checked":""} onchange="mToggleRozpis(this.checked);mAktualizujOddiel()"> <b>Viac sadzieb DPH v doklade</b> (napr. 23% + 19%)</label>
       <div id="m_jednaSadzba" style="display:${maRozpis(x)?'none':'block'};margin-top:10px">
-        <div class="mrow2"><div class="mfield" style="margin-bottom:0"><label>Bez DPH (€)</label><input id="m_bez" type="number" step="0.01" value="${esc(x.bez)}" oninput="mDopocSpolu();mAktualizujOddiel();mOpravaBox();mAutoPozn();mZaokrPozn();mPhlPozn()"></div><div class="mfield" style="margin-bottom:0"><label>DPH (€)</label><input id="m_dph" type="number" step="0.01" value="${esc(x.dph)}" oninput="mDopocSpolu();mAktualizujOddiel();mOpravaBox();mAutoPozn();mZaokrPozn();mPhlPozn()"></div></div>
+        <div class="mrow2"><div class="mfield" style="margin-bottom:0"><label>Bez DPH (€)</label><input id="m_bez" type="number" step="0.01" value="${esc(x.bez)}" oninput="mDopocSpolu();mAktualizujOddiel();mOpravaBox();mAutoPozn();mZaokrPozn();mPhlPozn();mPodielPozn()"></div><div class="mfield" style="margin-bottom:0"><label>DPH (€)</label><input id="m_dph" type="number" step="0.01" value="${esc(x.dph)}" oninput="mDopocSpolu();mAktualizujOddiel();mOpravaBox();mAutoPozn();mZaokrPozn();mPhlPozn();mPodielPozn()"></div></div>
         <div class="mfield" style="margin-top:8px;margin-bottom:0"><label>Spolu (€)</label><input id="m_spolu" type="number" step="0.01" value="${esc(x.spolu)}"></div>
       </div>
       <div id="m_rozpisBox" style="display:${maRozpis(x)?'block':'none'};margin-top:10px">
@@ -7357,12 +7395,12 @@ function vydavokFormHtml(x, nova, idx){
     </div>
     <div style="background:var(--bg);border-radius:9px;padding:11px 13px;margin-bottom:10px">
       <label style="display:flex;align-items:center;gap:9px;cursor:pointer;font-size:13.5px">
-        <input type="checkbox" id="m_autoDoklad" ${x.autoDoklad?"checked":""} onchange="mAutoPozn();mAktualizujOddiel();mAutoDruhBox()">
+        <input type="checkbox" id="m_autoDoklad" ${x.autoDoklad?"checked":""} onchange="mAutoPozn();mAktualizujOddiel();mAutoDruhBox();mPodielBox()">
         <b>Súvisí s osobným autom</b></label>
       <div class="ocr-hint" id="m_autoPozn" style="margin-top:5px"></div>
       <div id="m_autoDruhBox" style="display:${x.autoDoklad?'block':'none'};margin-top:9px">
         <label style="font-size:12px;color:var(--ink-soft);font-weight:600;display:block;margin-bottom:4px">O čo presne ide</label>
-        <select id="m_autoDruh" style="width:100%" onchange="mPhlPozn()">
+        <select id="m_autoDruh" style="width:100%" onchange="mPhlPozn();mPodielBox()">
           ${Object.keys(AUTO_DRUHY).map(k=>`<option value="${k}" ${autoDruh(x)===k?"selected":""}>${esc(AUTO_DRUHY[k])}</option>`).join("")}
         </select>
         <div style="font-size:11.5px;color:var(--ink-soft);margin-top:5px;line-height:1.5">
@@ -7508,11 +7546,14 @@ function editVydavok(idx){
       // Pamäť partnerov sa musí aj čítať, nielen plniť — inak doklad od dávno
       // známeho dodávateľa ostane bez IČ DPH a vyplaví sa až v ročnej kontrole.
       // Dopĺňa výhradne prázdne polia, takže ručne zadané prepísať nemôže.
+      citajPodnikPct(obj);
       d.vydavky.push(obj);
       zapamatajPartnera(obj);
     } else {
       if(!d.vydavky[idx].id) d.vydavky[idx].id="v"+Date.now()+Math.random().toString(36).slice(2,7);
       obj.id=d.vydavky[idx].id;
+      citajPodnikPct(obj);
+      if(obj.podnikPct==null) delete d.vydavky[idx].podnikPct;   // Object.assign staré pole neodstráni
       d.vydavky[idx]=Object.assign(d.vydavky[idx],obj);
       zapamatajPartnera(d.vydavky[idx]);
     }
@@ -8159,7 +8200,12 @@ function autoEvidenciaHtml(rok){
 }
 
 function odpocetPercent(x){
-  if(!x || !x.autoDoklad) return 100;
+  // § 49 ods. 5 zákona o DPH: pri tovare a službe použitých aj na iný účel než
+  // podnikanie sa odpočíta len pomerná časť dane. Rovnaké percento ako v dani
+  // z príjmov — dve krátenia z jedného čísla, nie dve nezávislé nastavenia.
+  if(!x || !x.autoDoklad){
+    return vydavokMozeKratit(x) ? r2(vydavokPodiel(x)*100) : 100;
+  }
   // Vlastné auto mimo obchodného majetku: pri tankovaní vystupujete ako súkromná
   // osoba, nie ako platiteľ dane — nárok na odpočet z pohonných hmôt nevzniká vôbec.
   // `jePHL` už zahŕňa aj `autoDruh`, ktorý sa tu kedysi kontroloval zvlášť
@@ -8316,6 +8362,22 @@ function kategoriaOvplyvnujeZaklad(x){
   if(!k || !KATEGORIE_VYDAVKOV[k]) return true;
   return kategoriaUcinok(k) === "zaklad";
 }
+// ── KDE SA PERCENTO OSOBNÉHO POUŽITIA VÔBEC UPLATNÍ ───────────────────────
+// Auto má vlastné pravidlá podľa dvoch paragrafov (kap. 24 špecifikácie)
+// a štvrté percento by sa s nimi násobilo — presne tá zámena, pred ktorou
+// tá kapitola varuje. Odvody, preddavky a odvod DPH sa podľa miery využitia
+// nekrátia vôbec.
+//
+// Tú istú funkciu používa formulár aj výpočet. Ovládací prvok ponúknutý tam,
+// kde by nič nezmenil, je horší než žiadny — človek ho raz vyplní, nič sa
+// nestane, a nabudúce neverí ani tomu, ktorý funguje.
+function vydavokMozeKratit(x){
+  if(!x) return false;
+  if(kategoriaUcinok(x.kategoria) !== "zaklad") return false;
+  if((KATEGORIE_VYDAVKOV[x.kategoria]||{}).odvod) return false;
+  if(jePHL(x) || x.autoDoklad) return false;
+  return true;
+}
 function vydavokDoZakladu(x){
   if(!kategoriaOvplyvnujeZaklad(x)) return 0;
   // hotovostné zaokrúhlenie na 5 centov je súčasť daňového výdavku (kladné)
@@ -8323,6 +8385,7 @@ function vydavokDoZakladu(x){
   const suma=r2((+((x&&x.bez))||0)+(+((x&&x.zaokruhlenie))||0));
   if(jePHL(x)) return r2(suma*phlPercent()/100);              // písmeno l) alebo e)
   if(x && x.autoDoklad) return r2(suma*autoVydavkyPercent()/100);   // písmeno t)
+  if(vydavokMozeKratit(x)) return r2(suma*vydavokPodiel(x));  // § 19 ods. 2 písm. i) — pomerná časť
   return suma;
 }
 
@@ -14535,6 +14598,43 @@ function mDruhZmeneny(){
   mAktualizujOddiel();
   mAutoPozn();
   mPhlPozn();
+  mPodielBox();
+}
+
+// ── PERCENTO OSOBNÉHO POUŽITIA ─────────────────────────────────────────────
+// Notebook, telefón, internet — veci, ktoré živnostník používa na podnikanie
+// aj doma. Doteraz mala appka len dve polohy: celý doklad (kategória s vplyvom
+// na základ), alebo vôbec nič (kategória „Neovplyvňuje základ dane"). Kto to
+// vedel, delil doklady ručne; kto nie, dal si 100 % a klamal.
+//
+// Jedno číslo od človeka — a appka z neho odvodí OBE krátenia: pomernú časť
+// výdavku v dani z príjmov aj pomernú časť odpočtu DPH (§ 49 ods. 5).
+function mPodielBox(){
+  const b=document.getElementById("m_podielBox"); if(!b) return;
+  const x={ kategoria:val("m_kategoria"), druh:val("m_druh"),
+            autoDruh:val("m_autoDruh"), autoDoklad:chk("m_autoDoklad") };
+  b.style.display = vydavokMozeKratit(x) ? "block" : "none";
+  mPodielPozn();
+}
+function mNastavPodiel(p){
+  const e=document.getElementById("m_podnikPct"); if(!e) return;
+  e.value=String(p); mPodielPozn();
+}
+function mPodielPozn(){
+  const p=document.getElementById("m_podielPozn"); if(!p) return;
+  const pct=Math.round(pctPodielu(val("m_podnikPct"))*100);
+  const bez=parseFloat(String(val("m_bez")).replace(",","."))||0;
+  const dph=parseFloat(String(val("m_dph")).replace(",","."))||0;
+  if(pct>=100){
+    p.innerHTML="Celý doklad je podnikateľský výdavok. Ak vec používate aj súkromne, znížte percento — "
+      +"uplatní sa pomerná časť výdavku aj pomerná časť odpočtu DPH.";
+    return;
+  }
+  const ideV=r2(bez*pct/100), ideD=r2(dph*pct/100);
+  p.innerHTML=(bez>0
+      ? `Do výdavkov pôjde <b>${eur(ideV)}</b> z ${eur(bez)}${dph>0?`, odpočet DPH <b>${eur(ideD)}</b> z ${eur(dph)}`:""}. `
+      : `Uplatní sa <b>${pct} %</b> zo sumy bez DPH${dph>0?" aj z DPH":""}. `)
+    +`Zvyšok je súkromná spotreba a daň neznižuje.`;
 }
 
 // ── ČO SA S TANKOVACÍM DOKLADOM STANE V DANI Z PRÍJMOV ─────────────────────
