@@ -1068,7 +1068,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.23-HG";  // nadpisy sa lámu vyvážene, článok má 68 znakov na riadok
+const APP_VERZIA = "2026.08.23-HH";  // split už nemá vlastnú kópiu palety modulov
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -19716,17 +19716,26 @@ let kalMesiacOffset=0;
 // ═══ FÁZA 4+5: SPLIT SCREEN — ľubovoľné 2 moduly vedľa seba (banka↔doklady s párovaním) ═══
 let splitVybranyPohyb=null;
 let splitLavy="banka", splitPravy="doklady"; // doklady = kontextové (faktúry/výdavky podľa pohybu)
-// moduly dostupné v splite (náhľadové zoznamy)
-const SPLIT_MODULY={
-  banka:    {n:"Banka",      ic:"🏦", c:"#0f7d8c"},
-  faktury:  {n:"Faktúry",    ic:"▤",  c:"#1f5fa8"},
-  vydavky:  {n:"Výdavky",    ic:"🧾", c:"#c0562e"},
-  pohladavky:{n:"Pohľadávky",ic:"⇌",  c:"#b8557a"},
-  jazdy:    {n:"Kniha jázd", ic:"🚗", c:"#2e9e6b"},
-  vykazy:   {n:"Výkazy",     ic:"🗓", c:"#c0562e"},
-  dokumenty:{n:"Dokumenty",  ic:"📄", c:"var(--ink-warn)"},
-  kalendar: {n:"Kalendár",   ic:"📅", c:"var(--ink-pos)"},
-};
+// ═══ B0 — JEDNA PALETA, NIE DVE (kap. 48.4, fáza B) ═══════════════════════
+//
+// Split mal vlastnú kópiu názvov, ikon A FARIEB ôsmich modulov. Kópia sa
+// stihla rozísť skôr, než sa k nej niekto vrátil:
+//   Výdavky  — APPS #f08a24 (oranžová), split #c0562e (hrdzavá)
+//   Výdavky  — APPS ikona „€", split „🧾"
+// Tá istá appka mala teda v dvoch pohľadoch dve rôzne identity. B1 by
+// znamenal opraviť to na dvoch miestach a dúfať, že sa to nezopakuje.
+//
+// Zoznam podporovaných modulov bol navyše zapísaný ešte raz v
+// `splitVyberModuly` ako `PODPOROVANE` — tretia kópia toho istého.
+// Ostal jeden zoznam a jedna funkcia; farba, ikona a názov idú z APPS.
+const SPLIT_MODULY_IDS=["banka","faktury","vydavky","pohladavky","jazdy","vykazy","dokumenty","kalendar"];
+// Jediné, čo je v úzkom paneli naozaj iné: kratší názov. Plný názov by sa
+// do hlavičky panela nezmestil.
+const SPLIT_KRATKY={ vykazy:"Výkazy", dokumenty:"Dokumenty" };
+function splitModulInfo(id){
+  const a=APPS[id]; if(!a) return null;
+  return { n:SPLIT_KRATKY[id]||a.n, ic:a.ic, c:a.c };
+}
 let _splitNavrat=null;   // odkiaľ sa split otvoril — ‹ sa vracia tam, nie na plochu
 function otvorSplit(lavy, pravy){
   _splitNavrat=(typeof aktualnaSuperApka!=="undefined" && aktualnaSuperApka) ? aktualnaSuperApka : null;
@@ -21012,7 +21021,7 @@ function splitNastavDokStav(v){ splitDokStavFilter=v; renderSplit(); }
 // generický náhľad modulu do panela
 function splitNahlad(modulId){
   const d=firmaData;
-  const m=SPLIT_MODULY[modulId]||{n:modulId, ic:"▤", c:"#5b6779"};
+  const m=splitModulInfo(modulId)||{n:modulId, ic:"▤", c:"#5b6779"};
   const H=(cnt)=>`<div class="sp-head" style="--_c:${m.c}"><div class="sp-ic">${m.ic}</div><div class="sp-tt">${m.n}</div>${cnt!=null?`<span class="sp-badge">${cnt}</span>`:''}</div>`;
   const wrap=(head,body)=>head+`<div class="sp-body">${body}</div>`;
   const openBtn=`<div class="sp-open" onclick="otvorApp('${modulId}')">otvoriť plný modul ›</div>`;
@@ -21351,7 +21360,7 @@ function renderSplit(){
     <div class="sp-bar"><button class="appback" onclick="zavriSplit()">‹</button>
       <div class="sp-title"><b>${parRezim?'Párovanie':'Rozdelená obrazovka'}</b><span>${
         parRezim ? (splitOdDokladu()?'od dokladu — hľadám platbu':'od platby — hľadám doklad')
-                 : (SPLIT_MODULY[splitLavy]?.n||splitLavy)+' ↔ '+(SPLIT_MODULY[splitPravy]?.n||splitPravy)}</span></div>
+                 : (splitModulInfo(splitLavy)?.n||splitLavy)+' ↔ '+(splitModulInfo(splitPravy)?.n||splitPravy)}</span></div>
       ${parRezim
         ? `<button class="aabtn" style="--_c:#1f5fa8;margin-left:auto" onclick="splitOtoc()" title="Prehodiť panely — vyberať doklad a hľadať k nemu platbu, alebo naopak">⇄ Otočiť</button>
            <button class="aabtn" style="padding:5px 9px" onclick="splitVyberModuly()" title="Zvoliť iné dva moduly">⊟</button>`
@@ -21487,9 +21496,9 @@ function splitOdoberUhradu(txIdVal, typ, cislo){
 // dialóg výberu dvoch modulov
 function splitVyberModuly(){
   // moduly, ktoré split vie vykresliť ako náhľad (zoznamové)
-  const PODPOROVANE=["banka","faktury","vydavky","pohladavky","jazdy","vykazy","dokumenty","kalendar"];
+  const PODPOROVANE=SPLIT_MODULY_IDS;
   const modulChip=(strana, id, aktualny)=>{
-    const m=SPLIT_MODULY[id]||APPS[id]; if(!m) return "";
+    const m=splitModulInfo(id); if(!m) return "";
     return `<span class="achip ${aktualny===id?'on':''}" style="--_c:${m.c}" onclick="splitPickTmp('${strana}','${id}')">${m.ic} ${m.n}</span>`;
   };
   const skupinaBlok=(strana, aktualny)=>{
