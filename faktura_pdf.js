@@ -515,6 +515,9 @@ export function modelUpomienky(faktury, meta, dnes) {
     odberatel: { nazov: odbNazov, adresa: prva.adresa || (prva.odberatel && prva.odberatel.adresa) || "",
       ico: prva.ico, dic: prva.dic, icdph: prva.icdph },
     faktury: riadky,
+    // Predvolene prvá. Volajúci ho prepíše podľa denníka odoslaných upomienok —
+    // model o histórii vymáhania nevie a vedieť nemá.
+    stupen: 1,
     spolu: r2(riadky.reduce((a, r) => a + r.zostatok, 0)),
   };
 }
@@ -538,8 +541,12 @@ export function vykresliUpomienku(jsPDF, model, opts = {}) {
   setF(AKCENT); doc.roundedRect(lx + lsz - 3.7, ly + 1.8, 1.7, 1.7, 0.4, 0.4, "F");
   setF(LOGO2);  doc.roundedRect(lx + lsz - 1.7, ly + 1.8, 1.7, 1.7, 0.4, 0.4, "F");
   doc.roundedRect(lx + lsz - 3.7, ly + 3.8, 1.7, 1.7, 0.4, 0.4, "F");
-  doc.setFont(FONT, "bold"); doc.setFontSize(20); setC(INK);
-  doc.text("UPOMIENKA", R, y, { align: "right" });
+  // Stupeň je súčasť nadpisu, nie drobné písmo dole. Kto dostane tretiu
+  // upomienku, má to vidieť skôr než čokoľvek iné na tej strane.
+  const stupen = Math.min(3, Math.max(1, +model.stupen || 1));
+  const NADPIS = { 1: "UPOMIENKA", 2: "DRUHÁ UPOMIENKA", 3: "TRETIA UPOMIENKA" };
+  doc.setFont(FONT, "bold"); doc.setFontSize(stupen === 1 ? 20 : 17); setC(stupen === 3 ? [176, 42, 34] : INK);
+  doc.text(NADPIS[stupen], R, y, { align: "right" });
   doc.setFont(FONT, "normal"); doc.setFontSize(9.5); setC(SOFT);
   doc.text("zo dňa " + (fmtDatum(model.datum) || ""), R, y + 7, { align: "right" });
   y += 22;
@@ -567,9 +574,22 @@ export function vykresliUpomienku(jsPDF, model, opts = {}) {
 
   // ── ZDVORILÝ ÚVOD ──
   doc.setFont(FONT, "normal"); doc.setFontSize(9.5); setC(INK);
-  const uvod = "Dovoľujeme si Vás upozorniť, že ku dňu " + (fmtDatum(model.datum) || "") +
-    " neevidujeme úhradu nižšie uvedených faktúr. Prosíme o ich uhradenie v najbližších dňoch. " +
-    "Ak ste úhradu medzičasom vykonali, považujte túto upomienku za bezpredmetnú — ďakujeme.";
+  // Tón rastie so stupňom. Prvá upomienka predpokladá prehliadnutie, tretia
+  // už nie — ale ani jedna sa nevyhráža niečím, čo appka nevie podložiť.
+  const den = fmtDatum(model.datum) || "";
+  const UVOD = {
+    1: "Dovoľujeme si Vás upozorniť, že ku dňu " + den +
+       " neevidujeme úhradu nižšie uvedených faktúr. Prosíme o ich uhradenie v najbližších dňoch. " +
+       "Ak ste úhradu medzičasom vykonali, považujte túto upomienku za bezpredmetnú — ďakujeme.",
+    2: "Napriek našej predchádzajúcej upomienke ku dňu " + den +
+       " naďalej neevidujeme úhradu nižšie uvedených faktúr. Žiadame Vás o ich bezodkladné uhradenie. " +
+       "Ak úhrade bráni prekážka, na ktorú sme neprišli, ozvite sa nám, prosím — dohoda je pre obe strany lacnejšia než ďalšie kroky.",
+    3: "Ide o poslednú upomienku pred ďalšími krokmi. Ku dňu " + den +
+       " neevidujeme úhradu nižšie uvedených faktúr napriek dvom predchádzajúcim výzvam. " +
+       "Žiadame o úhradu celej dlžnej sumy. Ak k nej nedôjde, budeme nútení pristúpiť k vymáhaniu pohľadávky, " +
+       "vrátane úroku z omeškania a paušálnej náhrady nákladov spojených s uplatnením pohľadávky.",
+  };
+  const uvod = UVOD[stupen];
   const uvodL = doc.splitTextToSize(uvod, R - L);
   doc.text(uvodL, L, y); y += uvodL.length * 4.8 + 8;
 
@@ -629,7 +649,7 @@ export function vykresliUpomienku(jsPDF, model, opts = {}) {
   const fy = 286;
   setD(LINE); doc.setLineWidth(0.3); doc.line(L, fy - 4, R, fy - 4);
   doc.setFont(FONT, "normal"); doc.setFontSize(7.3); setC(MUTED);
-  doc.text("Upomienka — " + (odb.nazov || ""), L, fy);
+  doc.text(NADPIS[stupen].charAt(0) + NADPIS[stupen].slice(1).toLowerCase() + " — " + (odb.nazov || ""), L, fy);
   {
     const label = "Vytvorené v ", url = "ezivnostnik.eu";
     const wLabel = doc.getTextWidth(label), wUrl = doc.getTextWidth(url);

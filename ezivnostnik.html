@@ -1173,7 +1173,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.23-HN";  // percento osobného použitia na doklade — jedno číslo, dve krátenia
+const APP_VERZIA = "2026.08.23-HO";  // skrytie nálezu kontroly; upomienky v stupňoch a vylúčenie faktúry
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -9500,10 +9500,79 @@ function sadzbyDopadHtml(){
 // Predletová kontrola pred podaním priznania. Zbalená, kým sa na ňu človek
 // nechce pozrieť — nálezy sú takmer vždy vysvetliteľné a rozbaliť ich na plnú
 // obrazovku by z nich urobilo šum, ktorý sa naučí preskakovať.
+// ═══ SKRYTÉ NÁLEZY ════════════════════════════════════════════════════════
+// Kontrola, ktorá sa vracia každé obdobie a je zakaždým správne zodpovedaná,
+// naučí preskakovať celý zoznam — aj tie nálezy, ktoré správne nie sú.
+// „Falošný poplach je drahší než žiadny" (kap. 16) neplatí len o chybných
+// pravidlách: pravé pravidlo na nesprávnej firme je falošný poplach tiež.
+//
+// Tri poistky, aby sa z toho nestal vypínač celej kontroly:
+//  · umlčať sa dá len nález typu „pozor". Chyba je definovaná ako údaj, ktorý
+//    je preukázateľne zlý — tá sa opravuje, nie skrýva.
+//  · pravidlo, ktorého kontrola SPADLA, sa skryť nedá. Inak by sa dala umlčať
+//    správa „toto sme neoverili", čo je presne tá zelená bez overenia.
+//  · skryté pravidlá majú svoje miesto, kde ich vidno a dajú sa vrátiť.
+//    Nezvratné skrytie bez zoznamu je to „najmenšie písmo" z kap. 16.
+const KONTROLY_ZDROJE={rocna:"Ročná kontrola", mesiac:"Uzávierka mesiaca"};
+function kontrolyIgnor(){ return (firmaData && firmaData.kontrolyIgnor) || {}; }
+function nalezMozeSkryt(zavaznost, k){
+  if(zavaznost==="chyba") return false;
+  return !/^kontrolaZlyhala/.test(String(k||""));
+}
+function nalezSkryty(zdroj, k){ return !!kontrolyIgnor()[zdroj+":"+k]; }
+function skryNalez(zdroj, k, popis){
+  if(!strazZapis("uzavierka")) return;
+  if(!confirm("Skryť nález „"+popis+"“?\n\n"
+    + "Appka ho v tejto kontrole prestane hlásiť — natrvalo, nie len teraz.\n\n"
+    + "Použite to vtedy, keď je vo vašom prípade v poriadku a vracia sa zbytočne. "
+    + "Skryté nálezy nájdete v Uzávierke pod zoznamom mesiacov a viete ich kedykoľvek vrátiť.")) return;
+  if(!firmaData.kontrolyIgnor) firmaData.kontrolyIgnor={};
+  firmaData.kontrolyIgnor[zdroj+":"+k]={kedy:new Date().toISOString(), t:popis, zdroj};
+  poZmene();
+  if(typeof appUzavierka==="function" && aktualnaApp==="uzavierka") appUzavierka();
+  else if(typeof appPriznanieB==="function" && aktualnaApp==="priznanieB") appPriznanieB();
+}
+function odkryNalez(zdroj, k){
+  if(!strazZapis("uzavierka")) return;
+  if(firmaData.kontrolyIgnor) delete firmaData.kontrolyIgnor[zdroj+":"+k];
+  poZmene();
+  if(typeof appUzavierka==="function" && aktualnaApp==="uzavierka") appUzavierka();
+}
+// Tlačidlo na skrytie — vracia prázdny reťazec tam, kde sa skrývať nesmie.
+function skryTlacidloHtml(zdroj, zavaznost, k, popis){
+  if(!nalezMozeSkryt(zavaznost, k)) return "";
+  return `<button class="aabtn" style="padding:5px 10px;font-size:11.5px" title="Appka tento nález prestane hlásiť"
+    onclick="skryNalez('${esc(zdroj)}','${esc(k)}','${esc(String(popis||"").replace(/'/g,"").slice(0,90))}')"${zam("uzavierka")}>🔕 Skryť nález</button>`;
+}
+function skryteNalezyHtml(){
+  const I=kontrolyIgnor();
+  const kluce=Object.keys(I);
+  if(!kluce.length) return "";
+  return `<details class="card" style="margin-bottom:14px;padding:0">
+    <summary style="cursor:pointer;list-style:none;padding:12px 15px;font-size:13px">
+      🔕 <b>Skryté nálezy (${kluce.length})</b>
+      <span style="color:var(--ink-soft);font-size:11.5px"> — pravidlá, ktoré ste označili za v poriadku</span>
+    </summary>
+    <div style="padding:0 15px 13px;display:flex;flex-direction:column;gap:8px">
+      ${kluce.map(kl=>{
+        const z=I[kl], zdroj=kl.slice(0, kl.indexOf(":")), k=kl.slice(kl.indexOf(":")+1);
+        return `<div style="display:flex;gap:10px;align-items:flex-start;font-size:12px;line-height:1.5">
+          <div style="flex:1">
+            <div>${esc(z.t||k)}</div>
+            <div style="color:var(--ink-soft);font-size:11px">${esc(KONTROLY_ZDROJE[zdroj]||zdroj)}${z.kedy?" · skryté "+new Date(z.kedy).toLocaleDateString("sk-SK"):""}</div>
+          </div>
+          <button class="aabtn" style="padding:4px 10px;font-size:11.5px" onclick="odkryNalez('${esc(zdroj)}','${esc(k)}')"${zam("uzavierka")}>Vrátiť</button>
+        </div>`;
+      }).join("")}
+      <div class="ob-hint">Skryté pravidlo sa neprestane týkať vašich dokladov — appka o ňom len mlčí. Chyby sa skryť nedajú.</div>
+    </div>
+  </details>`;
+}
+
 function rocnaKontrolaHtml(rok){
   let N=[];
   // Úplný pád kontroly nesmie kartu ticho zmiznúť — vyzeralo by to ako „čisté"
-  try{ N=rocnaKontrola(rok); }catch(e){ console.error("rocnaKontrola:", e);
+  try{ N=rocnaKontrola(rok).filter(x=>!nalezSkryty("rocna", x.k)); }catch(e){ console.error("rocnaKontrola:", e);
     return `<div class="card" style="margin-bottom:14px;padding:12px 15px;font-size:13px;border-left:3px solid var(--warn)">
       ⚠ <b>Ročnú kontrolu ${rok} sa nepodarilo spustiť.</b>
       <span style="color:var(--ink-soft)">Nie je to čistý výsledok — kontrola nebežala. Detail je v konzole prehliadača.</span></div>`; }
@@ -9535,9 +9604,9 @@ function rocnaKontrolaHtml(rok){
           ${x.priklady.map(p=>"· "+esc(p)).join("<br>")}
           ${x.priklady.length>=8?"<br>· …":""}
         </div>`:""}
-        ${x.akcia&&x.akcia.length?`<div style="margin-top:9px;display:flex;gap:7px;flex-wrap:wrap">${
-          x.akcia.map(a=>`<button class="aabtn" style="padding:6px 12px;font-size:12px" onclick="${esc(a.fn)}">${esc(a.l)}</button>`).join("")
-        }</div>`:""}
+        ${(x.akcia&&x.akcia.length)||nalezMozeSkryt(x.zavaznost,x.k)?`<div style="margin-top:9px;display:flex;gap:7px;flex-wrap:wrap">${
+          (x.akcia||[]).map(a=>`<button class="aabtn" style="padding:6px 12px;font-size:12px" onclick="${esc(a.fn)}">${esc(a.l)}</button>`).join("")
+        }${skryTlacidloHtml("rocna", x.zavaznost, x.k, x.t)}</div>`:""}
       </div>`).join("")}
       <div class="ob-hint">
         Nič z toho nie je automaticky chyba — väčšina nálezov má legitímne vysvetlenie.
@@ -9573,7 +9642,7 @@ function appUzavierka(){
     const mk=rok+"-"+String(m).padStart(2,"0");
     const u=uzavierkaMesiaca(mk);
     const zavrety=mesiacUzavrety(mk);
-    const nalezy=uzavierkaKontroly(mk);
+    const nalezy=uzavierkaKontroly(mk).filter(n=>!nalezSkryty("mesiac", n.k));
     const chyb=nalezy.filter(n=>n.typ==="chyba").length;
     const poz=nalezy.filter(n=>n.typ==="pozor").length;
     const zmenene=zavrety && uzavierkaZmenena(mk);
@@ -9609,7 +9678,8 @@ function appUzavierka(){
       ${!zavrety && nalezy.length?`<div style="margin-top:10px;display:flex;flex-direction:column;gap:6px">
         ${nalezy.map(n=>`<div style="display:flex;gap:8px;align-items:flex-start;font-size:12px;line-height:1.5">
           <span style="flex:0 0 auto">${n.typ==="chyba"?"⛔":"⚠"}</span>
-          <div><b>${esc(n.t)}</b><div style="color:var(--ink-soft);font-size:11.5px">${esc(n.d)}</div></div>
+          <div style="flex:1"><b>${esc(n.t)}</b><div style="color:var(--ink-soft);font-size:11.5px">${esc(n.d)}</div>
+            ${nalezMozeSkryt(n.typ,n.k)?`<div style="margin-top:6px">${skryTlacidloHtml("mesiac", n.typ, n.k, n.t)}</div>`:""}</div>
         </div>`).join("")}
       </div>`:""}
       ${u&&u.dovodOdomknutia&&!zavrety?`<div style="margin-top:9px;font-size:11.5px;color:var(--ink-soft)">
@@ -9631,7 +9701,8 @@ function appUzavierka(){
         upraviť ani zmazať, kým ho neodomknete. Nie je to zámok proti vám — je to poistka
         proti dokladu, ktorý sa omylom uloží spätne do obdobia, za ktoré ste už podali.
       </div>`
-    + riadky.join("");
+    + riadky.join("")
+    + skryteNalezyHtml();
 }
 
 function appSadzby(){
@@ -11883,16 +11954,76 @@ function upomienkaKandidati(odberatel, dnes){
   return (firmaData.faktury||[]).filter(f=>{
     const n=(typeof f.odberatel==="string")?f.odberatel:((f.odberatel&&f.odberatel.nazov)||"");
     if(normTxt(n)!==cielN) return false;
+    if(f.neupominat) return false;          // vedomé rozhodnutie človeka — odklad, spor, dohoda
     if(!f.splatnost || String(f.splatnost)>=dnes) return false;
     return dokladZostava("faktura", dokladKluc(f))>0.02;
   }).map(f=>Object.assign({}, f, {zostatok:dokladZostava("faktura", dokladKluc(f))}))
     .sort((a,b)=>String(a.splatnost).localeCompare(String(b.splatnost)));
 }
+
+// ═══ STUPEŇ UPOMIENKY ═════════════════════════════════════════════════════
+// Prvá upomienka a tretia sa nemajú čítať rovnako. ALFA to rieši úrovňami
+// podľa toho, či k dokladu už upomienka bola — appka doteraz posielala vždy
+// ten istý text, takže odberateľ, ktorý neplatí pol roka, dostával stále
+// rovnako zdvorilý list.
+//
+// Vedie sa denník odoslaných upomienok. Stupeň sa počíta z NEHO, nie z faktúry:
+// faktúra je doklad pre finančnú správu a evidencia vymáhania do nej nepatrí.
+const UPOMIENKA_MAX=3;
+function upomienkyDennik(){ return (firmaData && firmaData.upomienky) || []; }
+// Najvyšší stupeň, ktorý už bol poslaný na ktorúkoľvek z týchto faktúr.
+function upomienkaStupenPre(cisla){
+  const set=new Set((cisla||[]).map(c=>String(c||"")));
+  let max=0;
+  upomienkyDennik().forEach(u=>{
+    if(!(u.cisla||[]).some(c=>set.has(String(c||"")))) return;
+    max=Math.max(max, +u.stupen||0);
+  });
+  return Math.min(UPOMIENKA_MAX, max+1);
+}
+function upomienkaZapis(odberatel, stupen, zoz){
+  if(!mozemPisat("faktury")) return;
+  if(!firmaData.upomienky) firmaData.upomienky=[];
+  firmaData.upomienky.push({kedy:new Date().toISOString(), odberatel:String(odberatel||""),
+    stupen, cisla:zoz.map(f=>String(f.cislo||"")),
+    suma:r2(zoz.reduce((a,f)=>a+(+f.zostatok||0),0))});
+  poZmene();
+}
+function upomienkaStupenNazov(s){
+  return s>=3 ? "Tretia upomienka" : (s===2 ? "Druhá upomienka" : "Prvá upomienka");
+}
+// Krátky tvar na tlačidlo. Riadok pohľadávky má na 390 px na akcie ~150 px
+// a „Prvá upomienka" ho pretiekla — prvý stupeň sa preto nečísluje vôbec.
+function upomienkaStupenSkratka(s){ return s>=2 ? (Math.min(3,s)+". upomienka") : "Upomienka"; }
+// Prepínač „neupomínať" na konkrétnej faktúre — rozhodnutie sa robí tam, kde
+// je vidieť, ktorej faktúry sa týka.
+function faktToggleNeupominat(kluc){
+  if(!strazZapis("faktury")) return;
+  const f=(firmaData.faktury||[]).find(x=>dokladKluc(x)===kluc);
+  if(!f) return;
+  if(f.neupominat){ delete f.neupominat; }
+  else {
+    if(!confirm("Faktúru "+(f.cislo||"—")+" vylúčiť z upomienok?\n\n"
+      + "Nebude sa objavovať v žiadnej ďalšej upomienke — ani keď bude po splatnosti. "
+      + "Použite pri dohodnutom odklade alebo spore.\n\nVrátiť sa to dá tým istým tlačidlom.")) return;
+    f.neupominat=true;
+  }
+  poZmene(); appPohladavky();
+}
 async function upomienkaPDF(odberatel){
   const m=firmaData.meta||{};
   const dnes=new Date().toISOString().slice(0,10);
   const zoz=upomienkaKandidati(odberatel, dnes);
-  if(!zoz.length){ alert("Tento odberateľ nemá žiadnu neuhradenú faktúru po splatnosti."); return; }
+  if(!zoz.length){
+    const vylucene=(firmaData.faktury||[]).filter(f=>{
+      const n=(typeof f.odberatel==="string")?f.odberatel:((f.odberatel&&f.odberatel.nazov)||"");
+      return normTxt(n)===normTxt(odberatel) && f.neupominat;
+    }).length;
+    alert("Tento odberateľ nemá žiadnu neuhradenú faktúru po splatnosti."
+      + (vylucene ? "\n\n"+vylucene+(vylucene===1?" faktúra je":" faktúr je")+" vylúčená z upomienok (🔕). Zrušiť to viete v zozname pohľadávok." : ""));
+    return;
+  }
+  const stupen=upomienkaStupenPre(zoz.map(f=>f.cislo));
   const FP=await fakturaPdfModul();
   await ensureJsPDF();
   const { jsPDF }=window.jspdf;
@@ -11902,8 +12033,14 @@ async function upomienkaPDF(odberatel){
   if(zoz.length===1 && Math.abs(zoz[0].zostatok-(+zoz[0].spolu||0))<0.005){
     try{ qrDataUrl=await generujPayBySquareQR(zoz[0], m); }catch(e){ console.error("QR do upomienky:", e); }
   }
-  const doc=FP.vykresliUpomienku(jsPDF, FP.modelUpomienky(zoz, m, dnes), { qrDataUrl });
-  doc.save("upomienka_"+String(odberatel).replace(/[^\w-]+/g,"_").slice(0,40)+"_"+dnes+".pdf");
+  const model=FP.modelUpomienky(zoz, m, dnes);
+  model.stupen=stupen;
+  const doc=FP.vykresliUpomienku(jsPDF, model, { qrDataUrl });
+  doc.save("upomienka"+(stupen>1?stupen:"")+"_"+String(odberatel).replace(/[^\w-]+/g,"_").slice(0,40)+"_"+dnes+".pdf");
+  // Zápis až po vygenerovaní: keby PDF spadlo, denník by tvrdil, že upomienka
+  // odišla, a ďalšia by nastúpila o stupeň vyššie bez toho, aby prvá existovala.
+  upomienkaZapis(odberatel, stupen, zoz);
+  if(aktualnaApp==="pohladavky") appPohladavky();
 }
 function dniPoSplatnosti(splat){ if(!splat) return 0; const d=new Date(splat); if(isNaN(d)) return 0; return Math.floor((Date.now()-d)/86400000); }
 function appPohladavky(){
@@ -11918,7 +12055,7 @@ function appPohladavky(){
   const pohl=(d.faktury||[]).filter(f=>String(f.datum||f.vystavenie||"").slice(0,4)===pzRok).map(f=>{
     const uhr=faktJeUhradena(f); const dni=uhr?0:dniPoSplatnosti(f.splatnost);
     const partner=(typeof f.odberatel==="string")?f.odberatel:((f.odberatel&&f.odberatel.nazov)||"");
-    return {idx:_pfIdx.get(f),kluc:dokladKluc(f),cislo:f.cislo,partner,vznik:f.datum||f.vystavenie,splatnost:f.splatnost,suma:(+f.spolu||+f.bez||0),uhradena:uhr,poSplat:!uhr&&dni>0,dni};
+    return {idx:_pfIdx.get(f),kluc:dokladKluc(f),cislo:f.cislo,partner,vznik:f.datum||f.vystavenie,splatnost:f.splatnost,suma:(+f.spolu||+f.bez||0),uhradena:uhr,poSplat:!uhr&&dni>0,dni,neupominat:!!f.neupominat};
   });
   // záväzky = došlé faktúry roka
   const zav=(d.vydavky||[]).filter(x=>x.druh==="Došlá faktúra"&&String(x.datum||"").slice(0,4)===pzRok).map(x=>{
@@ -11960,7 +12097,7 @@ function appPohladavky(){
             <div><div class="acol-strong">${esc(p.partner||"—")}</div><div class="acol-muted">${esc(p.cislo||"")} · splatnosť ${fmtDatum(p.splatnost)}</div></div>
             <div class="acol-muted" style="text-align:right">${p.uhradena?'<span class="apill ok">uhradená</span>':p.poSplat?'<span class="apill neg">po splatnosti '+p.dni+' dní</span>':'<span class="apill warn">otvorená</span>'}</div>
             <div class="acol-sum">${eur(p.suma)}</div>
-            <div style="display:flex;gap:5px;align-items:center">${p.uhradena?'':`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vyberSposobUhrady(null,_s=>{oznacDokladUhradeny('faktura','${esc(p.kluc)}',_s);appPohladavky();})" title="Označiť ako uhradenú">✓</button>`}${p.poSplat?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();upomienkaPDF('${esc(p.partner)}')" title="Vygenerovať PDF upomienku — jedna na odberateľa, so všetkými faktúrami po splatnosti">📄 Upomienka</button>`:''}</div></div>`).join(''):'<div class="aempty">Žiadne pohľadávky v tomto roku.</div>')
+            <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;justify-content:flex-end">${p.uhradena?'':`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vyberSposobUhrady(null,_s=>{oznacDokladUhradeny('faktura','${esc(p.kluc)}',_s);appPohladavky();})" title="Označiť ako uhradenú">✓</button>`}${p.poSplat?`<button class="aabtn" style="padding:5px 8px;font-size:11px${p.neupominat?';opacity:.5':''}" onclick="event.stopPropagation();faktToggleNeupominat('${esc(p.kluc)}')" title="${p.neupominat?'Faktúra je vylúčená z upomienok — ťuknutím vrátiť':'Vylúčiť faktúru z upomienok (odklad, spor, dohoda)'}"${zam("faktury")}>${p.neupominat?'🔕':'🔔'}</button>`:''}${p.poSplat&&!p.neupominat?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();upomienkaPDF('${esc(p.partner)}')" title="Vygenerovať PDF upomienku — jedna na odberateľa, so všetkými jeho faktúrami po splatnosti">📄 ${upomienkaStupenSkratka(upomienkaStupenPre(upomienkaKandidati(p.partner, new Date().toISOString().slice(0,10)).map(x=>x.cislo)))}</button>`:''}</div></div>`).join(''):'<div class="aempty">Žiadne pohľadávky v tomto roku.</div>')
         : (zavZobraz.length?zavZobraz.map(z=>`<div class="arow" style="grid-template-columns:1.6fr 1fr auto;cursor:pointer;${z.uhradeny?'opacity:.6':''}" onclick="editVydavok(${z.idx})" title="Otvoriť výdavok">
             <div><div class="acol-strong">${esc(z.partner||"—")}</div><div class="acol-muted">${fmtDatum(z.vznik)}</div></div>
             <div class="acol-muted" style="text-align:right">${z.uhradeny?'<span class="apill ok">uhradený</span>':'<span class="apill warn">neuhradený</span>'}</div>
