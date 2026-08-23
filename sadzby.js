@@ -129,6 +129,8 @@ const SADZBY = {
     h:[{od:"2025-01-01", v:50000, zdroj:"§ 4 zákona o DPH"}]},
   obratOkamzity:  {n:"Obrat — platiteľom dňom dodania", sk:"dph", mienaSa:"zriedka", overenost:"zdroj", kontrola:"2026-07-21",
     h:[{od:"2025-01-01", v:62500, zdroj:"§ 4 zákona o DPH"}]},
+  svLimitTovar:   {n:"Súhrnný výkaz — limit pre štvrťročné podávanie", sk:"dph", mienaSa:"zriedka", overenost:"zdroj", kontrola:"2026-08-23",
+    h:[{od:"2020-01-01", v:50000, zdroj:"§ 80 ods. 2 zákona o DPH — štvrťročne len do 50 000 € hodnoty TOVARU za štvrťrok a v žiadnom zo štyroch predchádzajúcich; hodnota služieb sa do limitu nezahŕňa"}]},
   nahradaKmOsobne:{n:"Základná náhrada za km — osobné", sk:"auto", mienaSa:"opatrenim", overenost:"zdroj", kontrola:"2026-07-21",
     h:[{od:"2025-03-01", v:0.281, zdroj:"oznámenie MPSVR platné od 1. 3. 2025"},
        {od:"2025-06-01", v:0.296, zdroj:"oznámenie MPSVR platné od 1. 6. 2025"},

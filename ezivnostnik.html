@@ -1173,7 +1173,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.23-HL";  // pohyby z notifikácií internet bankingu, výpis ich nahrádza
+const APP_VERZIA = "2026.08.23-HM";  // súhrnný výkaz DPH; vzory nad formulár; režim PHL už neobíde doklad s inou kategóriou
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -7202,6 +7202,7 @@ function vydavokFormInit(){
   if(typeof mZaokrPozn==="function") mZaokrPozn();
   if(typeof mDatumPozn==="function") mDatumPozn();
   if(typeof mKontrolaLitre==="function") mKontrolaLitre();
+  if(typeof mPhlPozn==="function") mPhlPozn();
 }
 
 function vydavokDoplnkovePolia(obj){
@@ -7283,7 +7284,11 @@ function dokladZrusRucnu(typ, kluc){
 }
 function vydavokFormHtml(x, nova, idx){
   const _uhrHtml = nova ? "" : `<div id="m_uhradyBox">${uhradyBoxHtml("vydavok", x)}</div>`;
-  return `    ${_uhrHtml}<div class="mfield"><label>Druh dokladu</label><select id="m_druh" onchange="mAktualizujOddiel();const b=document.getElementById('m_phmBox');if(b)b.style.display=(this.value==='PHM (tankovanie)')?'block':(document.getElementById('m_litre')&&document.getElementById('m_litre').value?'block':'none')"><option ${x.druh==="Došlá faktúra"?"selected":""}>Došlá faktúra</option><option ${x.druh==="Bloček"?"selected":""}>Bloček</option><option ${x.druh==="PHM (tankovanie)"?"selected":""}>PHM (tankovanie)</option><option ${x.druh==="Interný doklad"?"selected":""}>Interný doklad</option></select></div>
+  // Vzory patria PRED polia, ktoré vypĺňajú. Dovtedy stáli až za popisom —
+  // 695 px v obsahu modálu, teda 109 px pod ohybom a za ôsmimi poľami, z ktorých
+  // štyri vypĺňajú samy. Skratka umiestnená za prácou, ktorú má ušetriť, nie je
+  // skratka; Roman ich v appke jednoducho nikdy nevidel.
+  return `    ${_uhrHtml}${nova?vzoryHtml():""}<div class="mfield"><label>Druh dokladu</label><select id="m_druh" onchange="mDruhZmeneny()"><option ${x.druh==="Došlá faktúra"?"selected":""}>Došlá faktúra</option><option ${x.druh==="Bloček"?"selected":""}>Bloček</option><option ${x.druh==="PHM (tankovanie)"?"selected":""}>PHM (tankovanie)</option><option ${x.druh==="Interný doklad"?"selected":""}>Interný doklad</option></select></div>
     <div class="mfield" style="position:relative"><label>Partner</label>
       <input id="m_partner" value="${esc(x.partner)}" autocomplete="off" oninput="feHladajFirmu(this.value,'m_partner')" placeholder="Začnite písať názov alebo IČO dodávateľa…">
       <div id="feNasepP" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:30;background:var(--paper);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px -8px rgba(19,28,43,.25);max-height:240px;overflow-y:auto;margin-top:2px"></div>
@@ -7293,7 +7298,6 @@ function vydavokFormHtml(x, nova, idx){
     <div id="regNavrh" style="display:none"></div>
     <div class="mrow2"><div class="mfield"><label>Číslo dokladu</label><input id="m_cislo" value="${esc(x.cislo||'')}" placeholder="napr. 5421760153"></div><div class="mfield"><label>Variabilný symbol</label><input id="m_vs" value="${esc(x.variabilny||'')}" placeholder="nepovinné"></div></div>
     <div class="mfield"><label>Popis</label><input id="m_popis" value="${esc(x.popis)}"></div>
-    ${nova?vzoryHtml():""}
     <div class="mfield" id="m_opravaBox" style="display:none">
       <label>Ktorý doklad tento dobropis opravuje</label>
       <input id="m_opravuje" value="${esc(x.opravujeDoklad||'')}" placeholder="číslo pôvodnej faktúry">
@@ -7325,7 +7329,7 @@ function vydavokFormHtml(x, nova, idx){
     <div style="background:var(--bg);border-radius:9px;padding:11px 13px;margin-bottom:4px">
       <label style="display:flex;align-items:center;gap:9px;cursor:pointer;font-size:13.5px"><input type="checkbox" id="m_viacSadzieb" ${maRozpis(x)?"checked":""} onchange="mToggleRozpis(this.checked);mAktualizujOddiel()"> <b>Viac sadzieb DPH v doklade</b> (napr. 23% + 19%)</label>
       <div id="m_jednaSadzba" style="display:${maRozpis(x)?'none':'block'};margin-top:10px">
-        <div class="mrow2"><div class="mfield" style="margin-bottom:0"><label>Bez DPH (€)</label><input id="m_bez" type="number" step="0.01" value="${esc(x.bez)}" oninput="mDopocSpolu();mAktualizujOddiel();mOpravaBox();mAutoPozn();mZaokrPozn()"></div><div class="mfield" style="margin-bottom:0"><label>DPH (€)</label><input id="m_dph" type="number" step="0.01" value="${esc(x.dph)}" oninput="mDopocSpolu();mAktualizujOddiel();mOpravaBox();mAutoPozn();mZaokrPozn()"></div></div>
+        <div class="mrow2"><div class="mfield" style="margin-bottom:0"><label>Bez DPH (€)</label><input id="m_bez" type="number" step="0.01" value="${esc(x.bez)}" oninput="mDopocSpolu();mAktualizujOddiel();mOpravaBox();mAutoPozn();mZaokrPozn();mPhlPozn()"></div><div class="mfield" style="margin-bottom:0"><label>DPH (€)</label><input id="m_dph" type="number" step="0.01" value="${esc(x.dph)}" oninput="mDopocSpolu();mAktualizujOddiel();mOpravaBox();mAutoPozn();mZaokrPozn();mPhlPozn()"></div></div>
         <div class="mfield" style="margin-top:8px;margin-bottom:0"><label>Spolu (€)</label><input id="m_spolu" type="number" step="0.01" value="${esc(x.spolu)}"></div>
       </div>
       <div id="m_rozpisBox" style="display:${maRozpis(x)?'block':'none'};margin-top:10px">
@@ -7339,6 +7343,7 @@ function vydavokFormHtml(x, nova, idx){
       <label style="font-size:12.5px;font-weight:600;color:var(--ink-soft);display:block;margin-bottom:6px">⛽ Tankovanie (PHM)</label>
       <div class="mfield" style="margin-bottom:0"><label>Litre</label><input id="m_litre" type="number" step="0.01" value="${esc(x.litre||'')}" placeholder="napr. 28,88" oninput="mKontrolaLitre()"></div>
       <div id="m_litreStav" class="ocr-hint" style="margin-top:5px"></div>
+      <div id="m_phlPozn" style="margin-top:10px"></div>
     </div>
     <div style="background:var(--bg);border-radius:9px;padding:11px 13px;margin-bottom:4px">
       <label style="display:flex;align-items:center;gap:9px;cursor:pointer;font-size:13.5px">
@@ -7357,7 +7362,7 @@ function vydavokFormHtml(x, nova, idx){
       <div class="ocr-hint" id="m_autoPozn" style="margin-top:5px"></div>
       <div id="m_autoDruhBox" style="display:${x.autoDoklad?'block':'none'};margin-top:9px">
         <label style="font-size:12px;color:var(--ink-soft);font-weight:600;display:block;margin-bottom:4px">O čo presne ide</label>
-        <select id="m_autoDruh" style="width:100%">
+        <select id="m_autoDruh" style="width:100%" onchange="mPhlPozn()">
           ${Object.keys(AUTO_DRUHY).map(k=>`<option value="${k}" ${autoDruh(x)===k?"selected":""}>${esc(AUTO_DRUHY[k])}</option>`).join("")}
         </select>
         <div style="font-size:11.5px;color:var(--ink-soft);margin-top:5px;line-height:1.5">
@@ -8022,8 +8027,20 @@ function pouziVzor(id){
   if(typeof mAktualizujOddiel==="function") mAktualizujOddiel();
   if(typeof mDopocSpolu==="function") mDopocSpolu();
   if(typeof mAutoPozn==="function") mAutoPozn();
+  // Hláška vymenúva len to, čo naozaj chýba. Vzor „Poštovné" partnera vypĺňa
+  // sám — veta „doplňte partnera" by po ňom bola nepravdivá, a text, ktorý
+  // nesedí s tým, čo je na obrazovke, sa prestane čítať celý.
   const p=document.getElementById("m_vzorStav");
-  if(p) p.innerHTML=`✓ Predvyplnené podľa vzoru <b>${esc(v.n)}</b>. Doplňte partnera, dátum a sumu.`;
+  if(p){
+    // Suma sa musí porovnávať číselne. `mDopocSpolu()` beží pár riadkov vyššie
+    // a pri nulovej dani zapíše do poľa reťazec „0" — ten je pravdivý, takže
+    // textová podmienka by sumu vyhlásila za vyplnenú.
+    const suma=(parseFloat(val("m_bez"))||0) || (parseFloat(val("m_spolu"))||0);
+    const chyba=[];
+    if(!val("m_partner")) chyba.push("partnera");
+    if(!suma) chyba.push("sumu");
+    p.innerHTML=`✓ Predvyplnené podľa vzoru <b>${esc(v.n)}</b>.`+(chyba.length?` Doplňte ${chyba.join(" a ")}.`:"");
+  }
 }
 
 function vzoryHtml(){
@@ -8145,7 +8162,8 @@ function odpocetPercent(x){
   if(!x || !x.autoDoklad) return 100;
   // Vlastné auto mimo obchodného majetku: pri tankovaní vystupujete ako súkromná
   // osoba, nie ako platiteľ dane — nárok na odpočet z pohonných hmôt nevzniká vôbec.
-  if(phlRezimJeVlastne() && (jePHL(x) || autoDruh(x)==="phm")) return 0;
+  // `jePHL` už zahŕňa aj `autoDruh`, ktorý sa tu kedysi kontroloval zvlášť
+  if(phlRezimJeVlastne() && jePHL(x)) return 0;
   return autoRezim()==="100" ? 100 : 50;
 }
 // suma dane, ktorú si naozaj možno odpočítať
@@ -8200,7 +8218,27 @@ function phlRezim(){
   return PHL_REZIMY[r] ? r : "kniha";
 }
 function phlPercent(){ return PHL_REZIMY[phlRezim()].pct; }
-function jePHL(x){ return odhadniKategoriu(x)==="phm"; }
+// ── ČI JE DOKLAD POHONNOU HMOTOU — JEDNO PRAVIDLO ──────────────────────────
+// Appka to dovtedy rozhodovala TROMA nezávislými cestami: druh dokladu
+// vo formulári („PHM (tankovanie)"), `autoDruh` v bloku o aute a odhad
+// kategórie. `odpocetPercent` sa pýtal dvoch z nich, `vydavokDoZakladu`
+// len tretej — a tú tretiu prebije výslovne zvolená kategória, ktorú formulár
+// ukladá pri každom doklade.
+//
+// Dôsledok: bloček s druhom „PHM (tankovanie)", ale kategóriou „Služby",
+// obišiel režim PHL a spadol pod pravidlo pre ostatné výdavky na auto (80 %).
+// Zo 100 € to pri režime „paušál 50 %" znamenalo 80 € namiesto 50 € a pri
+// režime „náhrady za km" 80 € namiesto nuly — teda ten istý výdavok dvakrát,
+// raz bločkom a raz náhradou za tie isté kilometre.
+//
+// Výslovný druh dokladu má prednosť pred odhadom: keď človek povie, že ide
+// o tankovanie, je to tankovanie.
+function jePHL(x){
+  if(!x) return false;
+  if(String(x.druh||"").trim()==="PHM (tankovanie)") return true;
+  if(String(x.autoDruh||"").trim()==="phm") return true;
+  return odhadniKategoriu(x)==="phm";
+}
 // ── EVIDENCIA VÝDAVKOV NA VOZIDLO (od 1. 1. 2026) ──
 // Zákon žiada, aby boli nákupy súvisiace s vozidlom evidované s uvedením, o aký
 // tovar alebo službu ide. Pri 100 % odpočte je to podmienka jeho uznania, pri
@@ -9021,9 +9059,13 @@ const DRUHY_PLNENIA = {
                p:"Predaj slovenskému odberateľovi. Účtujete DPH a odvádzate ju."},
   prenos69:   {oddiel:"A2", riadok:null,  sv:false, obrat:true,  n:"Prenos daňovej povinnosti v SR (§ 69 ods. 12)",
                p:"Stavebné práce, kovový odpad a podobne. Faktúru vystavíte bez DPH — odvedie ju odberateľ."},
-  eu_sluzba:  {oddiel:"",   riadok:null,  sv:true,  obrat:false, n:"Služba pre firmu v EÚ (§ 15 ods. 1)",
+  // `svKod` je stĺpec „Kód" v súhrnnom výkaze: prázdny = dodanie tovaru,
+  // 1 = trojstranný obchod (appka ho nemodeluje), 2 = dodanie služby.
+  // `svLimit` hovorí, či sa hodnota počíta do 50 000 € pre voľbu štvrťročného
+  // podávania — služby sa do limitu nezahŕňajú (§ 80 ods. 2).
+  eu_sluzba:  {oddiel:"",   riadok:null,  sv:true,  svKod:"2", svLimit:false, obrat:false, n:"Služba pre firmu v EÚ (§ 15 ods. 1)",
                p:"Napríklad IT alebo poradenstvo pre firmu s IČ DPH v inej krajine EÚ. Bez DPH, daň si vyrieši odberateľ."},
-  eu_tovar:   {oddiel:"",   riadok:"r14", sv:true,  obrat:true,  n:"Dodanie tovaru do EÚ (§ 43)",
+  eu_tovar:   {oddiel:"",   riadok:"r14", sv:true,  svKod:"",  svLimit:true,  obrat:true,  n:"Dodanie tovaru do EÚ (§ 43)",
                p:"Tovar odoslaný firme s IČ DPH v inej krajine EÚ. Oslobodené od dane."},
   vyvoz:      {oddiel:"",   riadok:"r15", sv:false, obrat:true,  n:"Vývoz mimo EÚ (§ 47)",
                p:"Tovar alebo služba pre odberateľa mimo Európskej únie. Oslobodené od dane."},
@@ -9066,8 +9108,13 @@ function dphNastavTab(t){ dphTab=t; appDPH(); window.scrollTo({top:0,behavior:"s
 
 // ═══ ZOZNAM ODOSLANÝCH PODANÍ ═══
 function dphPodaniaHtml(){
-  const dph=firmaData.dph||{};
-  const obdobia=Object.keys(dph).filter(k=>/^\d{4}-(\d{2}|Q[1-4])$/.test(k) && (dph[k].export||dph[k].subory)).sort().reverse();
+  const dph=firmaData.dph||{}, svd=firmaData.sv||{};
+  // Súhrnný výkaz môže mať iné obdobie než kontrolný výkaz (mesiac vs. štvrťrok),
+  // preto sa zoznam skladá zo zjednotenia oboch — nie len z `firmaData.dph`.
+  const maZaznam=o=>!!(o && (o.export||o.subory));
+  const obdobia=[...new Set([...Object.keys(dph).filter(k=>maZaznam(dph[k])),
+                             ...Object.keys(svd).filter(k=>maZaznam(svd[k]))])]
+    .filter(k=>/^\d{4}-(\d{2}|Q[1-4])$/.test(k)).sort().reverse();
   if(!obdobia.length) return `
     <div class="card">
       <h2 style="font-size:16px;margin-bottom:6px">Odoslané podania</h2>
@@ -9076,8 +9123,14 @@ function dphPodaniaHtml(){
 
   const riadok=(mk)=>{
     const z=dph[mk]||{}, e=z.export||{}, sub=z.subory||{};
+    // Obdobie sa v zozname objaví aj vtedy, keď zaň existuje len súhrnný výkaz.
+    // „Kontrolný výkaz: —" by tam potom klamal — pri mesačnom platiteľovi
+    // s štvrťročným súhrnným výkazom kontrolný výkaz za „2026-Q1" ani nikdy
+    // nevznikne, jeho miesto je pod kľúčmi jednotlivých mesiacov.
+    const maSv=maZaznam(svd[mk]);
+    const maDph=maZaznam(dph[mk]);
     const nazovObd=dphParsujObdobie(mk).nazov;
-    const zmena=dphZmeneneOdExportu(mk);
+    const zmena=(z.export && dphZmeneneOdExportu(mk)) || (svExportInfo(mk) && svZmeneneOdExportu(mk));
     const p=z.podanie||null;
     const tlacidlo=(typ,popis)=>{
       const zoznam=dphSuboryZoznam(mk, typ);
@@ -9106,14 +9159,16 @@ function dphPodaniaHtml(){
     return `<div style="border:1px solid var(--line);border-radius:11px;padding:12px 14px;margin-bottom:9px;background:var(--paper)">
       <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap">
         <div style="font-weight:700;font-size:14.5px">${nazovObd}</div>
-        <div style="font-size:12.5px;color:var(--ink-soft)">${e.druh?dphDruhNazov(e.druh):"riadne"} podanie${p?` · na úhradu <b style="color:var(--ink)">${eur(p.povinnost)}</b>`:""}</div>
+        <div style="font-size:12.5px;color:var(--ink-soft)">${dphDruhNazov(e.druh || (svExportInfo(mk)||{}).druh || "R")} podanie${p?` · na úhradu <b style="color:var(--ink)">${eur(p.povinnost)}</b>`:""}</div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:9px">
-        ${tlacidlo("kv","Kontrolný výkaz")}
-        ${tlacidlo("dp","Priznanie")}
+        ${maDph?tlacidlo("kv","Kontrolný výkaz"):""}
+        ${maDph?tlacidlo("dp","Priznanie"):""}
+        ${maSv?tlacidlo("sv","Súhrnný výkaz"):""}
       </div>
-      ${starsie("kv","Kontrolný výkaz")}
-      ${starsie("dp","Priznanie")}
+      ${maDph?starsie("kv","Kontrolný výkaz"):""}
+      ${maDph?starsie("dp","Priznanie"):""}
+      ${maSv?starsie("sv","Súhrnný výkaz"):""}
       ${zmena?`<div style="margin-top:9px;background:var(--sfc-warn);border-left:3px solid #c77d3e;border-radius:0 8px 8px 0;padding:7px 10px;font-size:12px">
         ⚠ Od odoslania ste v tomto období menili doklady. Ak je zmena podstatná, treba podať opravné alebo dodatočné podanie.</div>`:""}
     </div>`;
@@ -9148,6 +9203,9 @@ function appDPH(){
     </div>
     <div class="atool atabs" style="flex-wrap:wrap;margin-bottom:14px">
       ${[["vykaz","🧾 Kontrolný výkaz a priznanie"],
+         // Záložka pribudne až vtedy, keď je čo vykazovať — kto do EÚ nedodáva,
+         // nemá dôvod vedieť, že súhrnný výkaz existuje.
+         ...(svJeRelevantny()?[["sv","⇄ Súhrnný výkaz"]]:[]),
          ["podania","📁 Odoslané podania"],
          ["dane","💶 Dane a odvody"],
          ["uzavierka","📋 Ročná uzávierka"]]
@@ -9155,6 +9213,7 @@ function appDPH(){
     </div>
 
     ${dphTab==="vykaz" ? dphVykazHtml(rok) : ""}
+    ${dphTab==="sv" ? svVykazHtml() : ""}
     ${dphTab==="podania" ? dphPodaniaHtml() : ""}
     ${dphTab==="uzavierka" ? uzavierkaHtml(rok) : ""}
     ${dphTab!=="dane" ? "" : `
@@ -11582,6 +11641,9 @@ function appData(){
         <div class="mfield"><label>DIČ</label><input id="set_dic" value="${esc((d.meta||{}).dic||'')}"></div>
         <div class="mfield"><label>IČ DPH</label><input id="set_icdph" value="${esc((d.meta||{}).icdph||'')}"></div>
       </div>
+      ${jePlatcaDPH()?`<div class="mfield"><label>Daňový úrad</label>
+        <input id="set_danovyUrad" value="${esc((d.meta||{}).danovyUrad||'')}" placeholder="napr. Žilina">
+        <div style="font-size:11.5px;color:var(--ink-soft);margin-top:4px">Vypĺňa sa do hlavičky priznania k DPH a súhrnného výkazu. Appka si ho nedomýšľa — prázdny je lepší než cudzí.</div></div>`:''}
     </div>
 
     <div class="card">
@@ -11725,6 +11787,7 @@ async function ulozNastavenia(){
   if(document.getElementById("set_adresa")) firmaData.meta.adresa=val("set_adresa")||"";
   if(document.getElementById("set_dic")) firmaData.meta.dic=val("set_dic")||"";
   if(document.getElementById("set_icdph")) firmaData.meta.icdph=val("set_icdph")||"";
+  if(document.getElementById("set_danovyUrad")) firmaData.meta.danovyUrad=val("set_danovyUrad")||"";
   poZmene();
   const m=document.getElementById("cloudMsg2"); if(m){ m.textContent="✓ Nastavenia uložené. Výpočty sa aktualizovali."; m.className="cloudmsg ok"; }
 }
@@ -14446,6 +14509,67 @@ function mAutoDruhBox(){
   const b=document.getElementById("m_autoDruhBox");
   if(b) b.style.display=chk("m_autoDoklad") ? "block" : "none";
 }
+
+// ── ZMENA DRUHU DOKLADU NA TANKOVANIE ──────────────────────────────────────
+// Select kategórie sa za druhom dokladu nehýbal. Doklad tak mohol byť naraz
+// „PHM (tankovanie)" aj v kategórii „Služby" — a v daňovej evidencii vyzeral
+// ako služba. Odkedy `jePHL` pozerá aj na druh, výpočet už sedí tak či tak,
+// ale nesúlad na obrazovke ostáva mätúci: dve políčka o tom istom doklade
+// tvrdia niečo iné.
+//
+// Voľba „PHM (tankovanie)" je vyjadrenie človeka, že ide o palivo. Kategória,
+// väzba na auto aj druh výdavku na vozidlo sa jej preto prispôsobia. Späť sa
+// dajú prepnúť — nič sa nezamyká.
+function mDruhZmeneny(){
+  const jePhm = val("m_druh")==="PHM (tankovanie)";
+  const box=document.getElementById("m_phmBox");
+  if(box) box.style.display = (jePhm || val("m_litre")) ? "block" : "none";
+  if(jePhm){
+    const k=document.getElementById("m_kategoria");
+    if(k && k.value!=="phm"){ k.value="phm"; mKategoriaPozn(); }
+    const a=document.getElementById("m_autoDoklad");
+    if(a && !a.checked){ a.checked=true; mAutoDruhBox(); }
+    const ad=document.getElementById("m_autoDruh");
+    if(ad) ad.value="phm";
+  }
+  mAktualizujOddiel();
+  mAutoPozn();
+  mPhlPozn();
+}
+
+// ── ČO SA S TANKOVACÍM DOKLADOM STANE V DANI Z PRÍJMOV ─────────────────────
+// `mAutoPozn` hovorí len o DPH (polovičný odpočet pri osobnom aute). Druhé
+// krátenie — režim pohonných hmôt podľa § 19 ods. 2 písm. l) — bolo pritom
+// schované v Nastaveniach a na doklade sa neprejavilo ničím. Pri paušále 80 %
+// zmizne pätina dokladu, pri náhradách za km celý, a používateľ sa to z appky
+// nedozvedel na mieste, kde na to myslí.
+//
+// Zobrazuje sa LEN pri tankovacom doklade — Romanova podmienka a zároveň
+// pravidlo projektu: kontrola bez dôkazu, že sa téma týka, sa naučí prehliadať.
+function mPhlPozn(){
+  const p=document.getElementById("m_phlPozn"); if(!p) return;
+  const jePhm = val("m_druh")==="PHM (tankovanie)" || val("m_autoDruh")==="phm";
+  if(!jePhm){ p.innerHTML=""; return; }
+  const R=PHL_REZIMY[phlRezim()], pct=phlPercent();
+  const bez=parseFloat(String(val("m_bez")).replace(",","."))||0;
+  const ide=r2(bez*pct/100), stratene=r2(bez-ide);
+  const sumy = bez>0
+    ? (pct===0
+        ? `Z <b>${eur(bez)}</b> nepôjde do výdavkov <b>nič</b>.`
+        : `Z <b>${eur(bez)}</b> pôjde do výdavkov <b>${eur(ide)}</b>${stratene>0?`, zvyšných ${eur(stratene)} daň nezníži`:""}.`)
+    : (pct===0
+        ? `Do výdavkov nepôjde z tohto dokladu nič.`
+        : `Do výdavkov pôjde <b>${pct} %</b> zo sumy bez DPH${pct<100?", zvyšok daň nezníži":""}.`);
+  const zaver = pct===0
+    ? `Bločky za tankovanie do výdavkov nevstupujú — namiesto nich sa uplatní základná náhrada a náhrada za pohonné látky za prejdené kilometre.`
+    : (pct===100
+        ? `Appka počíta s celou sumou; pri kontrole ju musí pokryť kniha jázd.`
+        : `Knihu jázd pri tomto režime viesť nemusíte.`);
+  p.innerHTML=`<div style="background:var(--paper);border-left:3px solid var(--brand);border-radius:0 8px 8px 0;padding:9px 11px;font-size:12px;line-height:1.55">
+    <b>${esc(R.n)}</b><br>${sumy}
+    <div style="color:var(--ink-soft);margin-top:4px">${zaver} Režim platí na celý rok a mení sa v Nastaveniach, nie na doklade.</div>
+  </div>`;
+}
 function mAutoPozn(){
   const p=document.getElementById("m_autoPozn"); if(!p) return;
   if(!chk("m_autoDoklad")){
@@ -16356,7 +16480,16 @@ function dphMeta(){
   // autora appky — zákazník by podal výkaz s CUDZOU adresou a nemal by
   // ako to spozorovať. Prázdne pole schéma odmietne nahlas; nesprávne
   // prejde ticho. Nahlas je vždy lepšie.
-  return {icdph:m.icdph||"", nazov:m.nazov||"", obec:obec||"", psc:psc||"", ulica:ulica||"", cislo:cislo||""};
+  // DIČ, telefón, e-mail a daňový úrad sa odtiaľto dovtedy NEVRACALI, hoci ich
+  // `dphGenerujDP` číta z tohto objektu — do priznania k DPH teda odchádzalo
+  // prázdne DIČ, prázdny telefón aj e-mail a daňový úrad natvrdo „Bratislava"
+  // pre každého. Prázdne pole je horšie než vyplnené, ale cudzí daňový úrad
+  // v dokumente pre štát je horší než prázdny (viď poznámka vyššie).
+  // Telefón sa v dátach vyskytuje pod dvoma kľúčmi: nastavenia zapisujú `tel`,
+  // staršie dáta a demo majú `telefon`.
+  return {icdph:m.icdph||"", nazov:m.nazov||"", obec:obec||"", psc:psc||"", ulica:ulica||"", cislo:cislo||"",
+          dic:m.dic||"", tel:m.tel||m.telefon||"", email:m.email||"",
+          danovyUrad:m.danovyUrad||"", opravnenaOsoba:m.opravnenaOsoba||""};
 }
 
 // Čo v identifikácii daňovníka chýba — volať PRED generovaním XML.
@@ -16761,13 +16894,19 @@ function kontrolaPredPodanim(mk, typ){
     });
   });
 
-  // dodanie do EÚ zakladá povinnosť podať súhrnný výkaz — ten appka zatiaľ negeneruje
+  // Dodanie do EÚ zakladá povinnosť podať aj súhrnný výkaz. Nález sa nehlási
+  // vtedy, keď už zaň existuje export — inak by sa hlásil aj tomu, kto výkaz
+  // práve podal, a naučil by ho preskakovať aj ostatné nálezy.
   const doEu=doklady.filter(dk=>dk.plnenie && (DRUHY_PLNENIA[dk.plnenie]||{}).sv);
   if(doEu.length){
     const spolu=r2(doEu.reduce((a,d)=>a+(+d.zaklad||0),0));
-    podozrenia.push({
-      text:`${doEu.length} ${doEu.length===1?"faktúra do EÚ":"faktúry do EÚ"} v hodnote ${eur(spolu)} — nezabudnite na súhrnný výkaz.`,
-      detail:"Pri dodaní do inej krajiny EÚ sa okrem priznania podáva aj súhrnný výkaz. Ten zatiaľ appka nevie vygenerovať — vyplňte ho na portáli Finančnej správy."
+    // Obdobie súhrnného výkazu nemusí byť to isté — hľadá sa export za ktorékoľvek
+    // obdobie, do ktorého mesiace tohto obdobia spadajú.
+    const kandidati=[mk, ...P.mesiace, ...P.mesiace.map(m=>{const [r,mm]=m.split("-").map(Number); return r+"-Q"+(Math.floor((mm-1)/3)+1);})];
+    const uzPodane=kandidati.some(k=>svExportInfo(k));
+    if(!uzPodane) odsuhlasenie.push({
+      text:`${doEu.length} ${doEu.length===1?"faktúra do EÚ":"faktúry do EÚ"} v hodnote ${eur(spolu)} — treba podať aj súhrnný výkaz.`,
+      detail:"Nájdete ho v záložke „Súhrnný výkaz“ vedľa tejto. Podáva sa do 25 dní po skončení obdobia, rovnako ako kontrolný výkaz."
     });
   }
 
@@ -17146,6 +17285,42 @@ function rocnaKontrola(rok){
     }
   }catch(e){ zlyhalo("súkromné jazdy", e); }
 
+  // ── 6b. Tankovací doklad, ktorý o sebe tvrdí dve veci ──
+  // Kým `jePHL` pozeralo len na kategóriu, doklad s druhom „PHM (tankovanie)"
+  // a kategóriou „Služby" obišiel režim pohonných hmôt a počítal sa podľa
+  // pravidla pre ostatné výdavky na auto (kap. 52). Výpočet je odvtedy správny —
+  // druh dokladu má prednosť — ale kategória v starých dokladoch ostala.
+  // V daňovej evidencii preto tankovanie naďalej vyzerá ako služba.
+  try{
+    const rozchod=vydavky.filter(x=>String(x.druh||"").trim()==="PHM (tankovanie)"
+                                 && x.kategoria && x.kategoria!=="phm");
+    if(rozchod.length){
+      const p1=rozchod.length===1?"tankovací doklad má":(rozchod.length<5?"tankovacie doklady majú":"tankovacích dokladov má");
+      pridaj("pozor","phmKategoria", rozchod.length+" "+p1+" inú kategóriu než „pohonné hmoty“",
+        "Doklad má druh „PHM (tankovanie)“, ale v evidencii je vedený inde — najčastejšie preto, že sa druh "
+        +"prepol až po otvorení formulára, keď kategória už bola nastavená. "
+        +"Do výdavkov sa počítajú správne (rozhoduje druh dokladu), ide o zosúladenie evidencie. "
+        +"Zosúladenie nemení žiadnu sumu, DPH ani odtlačok uzávierky.",
+        rozchod.slice(0,8).map(x=>(x.cislo||"—")+" · "+(x.partner||"—")+" · "+fmtDatum(x.datum)
+          +" · "+((KATEGORIE_VYDAVKOV[x.kategoria]||{}).n||x.kategoria)),
+        {l:"Zosúladiť "+rozchod.length+(rozchod.length===1?" doklad":rozchod.length<5?" doklady":" dokladov"), fn:"zosuladPhmKategorie("+R+")"});
+    }
+    // Tankovanie bez väzby na auto si odpočítava DPH v plnej výške, hoci pri
+    // osobnom aute patrí polovica. Auto sa TU NEDOPĹŇA hromadne: zmena by
+    // posunula odpočet v období, ktoré už mohlo byť podané.
+    const bezAuta=vydavky.filter(x=>String(x.druh||"").trim()==="PHM (tankovanie)"
+                                 && !x.autoDoklad && r2(+x.dph||0)>0);
+    if(bezAuta.length && autoRezim()!=="100"){
+      const p2=bezAuta.length===1?"tankovací doklad nemá":(bezAuta.length<5?"tankovacie doklady nemajú":"tankovacích dokladov nemá");
+      pridaj("pozor","phmBezAuta", bezAuta.length+" "+p2+" väzbu na osobné auto",
+        "Bez nej si doklad odpočítava DPH v plnej výške, hoci pri osobnom aute sa od 1. 1. 2026 "
+        +"odpočíta polovica. Appka to neopraví hromadne — zmena posúva odpočet v období, ktoré už "
+        +"mohlo byť podané. Prejdite doklady jednotlivo a zaškrtnite „Súvisí s osobným autom“.",
+        bezAuta.slice(0,8).map(x=>(x.cislo||"—")+" · "+(x.partner||"—")+" · "+fmtDatum(x.datum)+" · DPH "+eur(x.dph)),
+        {l:"Otvoriť Výdavky", fn:"otvorApp('vydavky')"});
+    }
+  }catch(e){ zlyhalo("tankovacie doklady", e); }
+
   // ── 7. Odpočet DPH z dokladu bez IČ DPH — cez celý rok ──
   {
     // Tá istá podmienka, akú používa kontrola pri zápise — z jednej tabuľky.
@@ -17515,12 +17690,30 @@ function kvStranaHtml(od, dk){
 }
 
 // skok z náhľadu rovno do editácie dokladu
-function kvOpravDoklad(zdrojId){
+// Nález pred podaním môže ukazovať na výdavok aj na vystavenú faktúru — do
+// kontrolného výkazu vstupujú oboje a do súhrnného výkazu výhradne faktúry.
+// Kým sa hľadalo len medzi výdavkami, tlačidlo „Opraviť doklad" pri faktúre
+// odpovedalo „doklad sa nenašiel" a človek nemal ako sa k nemu dostať.
+// Nález pred podaním môže ukazovať na výdavok aj na vystavenú faktúru — do
+// kontrolného výkazu vstupujú oboje a do súhrnného výkazu výhradne faktúry.
+// Kým sa hľadalo len medzi výdavkami, tlačidlo „Opraviť doklad" pri faktúre
+// odpovedalo „doklad sa nenašiel" a človek nemal ako sa k nemu dostať.
+//
+// Číslo je druhá cesta, nie ozdoba: staršie faktúry `id` vôbec nemajú (nesie ho
+// až doklad založený novšou verziou), takže bez neho by tlačidlo pri nich
+// nefungovalo. Rovnaký dvojitý postup má `dphOtvorDoklad`.
+function kvOpravDoklad(zdrojId, cislo){
   if(!strazZapis("dph")) return;
-  const idx=(firmaData.vydavky||[]).findIndex(x=>x.id===zdrojId);
-  if(idx<0){ alert("Doklad sa nenašiel medzi výdavkami."); return; }
-  closeModal();
-  editVydavok(idx);
+  const najdi=(zoz)=>{
+    let i = zdrojId ? zoz.findIndex(x=>String(x.id||"")===String(zdrojId)) : -1;
+    if(i<0 && cislo) i = zoz.findIndex(x=>String(x.cislo||"")===String(cislo));
+    return i;
+  };
+  const iv=najdi(firmaData.vydavky||[]);
+  if(iv>=0){ closeModal(); editVydavok(iv); return; }
+  const ifa=najdi(firmaData.faktury||[]);
+  if(ifa>=0){ closeModal(); editFaktura(ifa); return; }
+  alert("Doklad sa nenašiel medzi výdavkami ani faktúrami.");
 }
 
 // ═══ Jeden náhľad pred podaním: kontrolný výkaz + priznanie ako záložky ═══
@@ -17890,17 +18083,24 @@ function overDopadNaPodanie(datum, akcia){
 // `dphSuboryZoznam`, takže existujúce dáta netreba migrovať.
 const DPH_ARCHIV_MAX=30;        // strop metadát na typ a obdobie
 const DPH_ARCHIV_XML_MAX=5;     // koľko verzií si drží XML pri dátach (lokálny režim)
+// Súhrnný výkaz má vlastné obdobie (§ 80), preto aj vlastný priečinok v dátach.
+// Keby zdieľal `firmaData.dph`, kľúč „2026-Q1" by niesol dva rôzne druhy
+// podania naraz — riadny kontrolný výkaz a napríklad opravný súhrnný.
+function podanieKluc(typ){ return typ==="sv" ? "sv" : "dph"; }
+function podanieZaznam(typ, mk){ return ((firmaData[podanieKluc(typ)]||{})[mk])||{}; }
 function dphSuboryZoznam(mk, typ){
-  const s=(((firmaData.dph||{})[mk]||{}).subory||{})[typ];
+  const s=(podanieZaznam(typ, mk).subory||{})[typ];
   if(!s) return [];
   return Array.isArray(s) ? s : [s];   // starý tvar = jediná verzia
 }
 async function dphUlozSubor(mk, typ, xml){
   if(!mozemPisat("dph")) return;   // vedľajší zápis po exporte — volajúci už bol odmietnutý
-  if(!firmaData.dph) firmaData.dph={};
-  if(!firmaData.dph[mk]) firmaData.dph[mk]={};
-  const subory=firmaData.dph[mk].subory||(firmaData.dph[mk].subory={});
-  const zaznam={ kedy:new Date().toISOString(), druh:dphDruhPodania(mk), velkost:(xml||"").length };
+  const K=podanieKluc(typ);
+  if(!firmaData[K]) firmaData[K]={};
+  if(!firmaData[K][mk]) firmaData[K][mk]={};
+  const subory=firmaData[K][mk].subory||(firmaData[K][mk].subory={});
+  const zaznam={ kedy:new Date().toISOString(),
+                 druh:(typ==="sv"?svDruhPodania(mk):dphDruhPodania(mk)), velkost:(xml||"").length };
   const uloz=()=>{
     const doterajsie=dphSuboryZoznam(mk, typ);
     const zoznam=[zaznam, ...doterajsie].slice(0, DPH_ARCHIV_MAX);
@@ -17941,7 +18141,7 @@ async function dphStiahniArchiv(mk, typ, idx){
   }
   // viac verzií toho istého obdobia → dátum v názve, nech sa navzájom neprepíšu
   const cas=String(z.kedy||"").slice(0,10);
-  const nazov=(typ==="kv"?"kv_dph_":"dp_dph_")+mk+(zoznam.length>1?"_"+cas:"")+".xml";
+  const nazov=(typ==="kv"?"kv_dph_":typ==="sv"?"sv_dph_":"dp_dph_")+mk+(zoznam.length>1?"_"+cas:"")+".xml";
   if(z.xml){ stiahniBlob(new Blob([z.xml],{type:"application/xml"}), nazov); return; }
   const url=await dokladUrl(z.cesta);
   if(url) window.open(url,"_blank");
@@ -17998,8 +18198,8 @@ function dphStiahni(typ, mk){
           "\n\nDoplňte to v Nastaveniach (údaje firmy) a skúste znova.");
     return;
   }
-  const xml = typ==="kv" ? dphGenerujKV(mk) : dphGenerujDP(mk);
-  const nazov = (typ==="kv"?"kv_dph_":"dp_dph_")+mk+".xml";
+  const xml = typ==="kv" ? dphGenerujKV(mk) : (typ==="sv" ? svGeneruj(mk) : dphGenerujDP(mk));
+  const nazov = (typ==="kv"?"kv_dph_":typ==="sv"?"sv_dph_":"dp_dph_")+mk+".xml";
   const blob=new Blob([xml],{type:"application/xml"});
   const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=nazov; a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href),1000);
@@ -18008,7 +18208,7 @@ function dphStiahni(typ, mk){
   // Bez tohto kroku appka nevie, čo už odoslala. Prestane fungovať upozornenie
   // na zmenu dokladu v podanom období aj dodatočné podanie, ktoré sa počíta
   // ako rozdiel oproti poslednému odoslanému výkazu.
-  dphZaznamExport(typ, mk);
+  if(typ==="sv") svZaznamExport(mk); else dphZaznamExport(typ, mk);
   dphUlozSubor(mk, typ, xml);        // kópia do archívu (beží na pozadí)
   if(typ==="kv" && dphDruhPodania(mk)!=="D"){
     const S=dphSumare(dphZberObdobie(mk));
@@ -18133,8 +18333,10 @@ function dphDniDoTerminu(mk){
 
 function dphExport(typ, mk){
   if(!strazZapis("dph")) return;
-  // KONTROLA PRED PODANÍM — vždy sa spustí pred generovaním
-  const n=kontrolaPredPodanim(mk, typ);
+  // KONTROLA PRED PODANÍM — vždy sa spustí pred generovaním.
+  // Súhrnný výkaz má vlastnú kontrolu: prechádza iné doklady než kontrolný
+  // výkaz a nálezy o došlých faktúrach by tam boli falošný poplach.
+  const n = typ==="sv" ? svKontrola(mk) : kontrolaPredPodanim(mk, typ);
   if(!n.chyby.length && !n.podozrenia.length && !n.odsuhlasenie.length){
     // čisté — rovno stiahni
     dphStiahni(typ, mk);
@@ -18148,7 +18350,7 @@ function dphExport(typ, mk){
       ${polozky.map(p=>`<div style="background:var(--bg);border-left:3px solid ${farba};border-radius:0 8px 8px 0;padding:8px 11px;margin-bottom:6px">
         <div style="font-size:12.5px;color:var(--ink)">${esc(p.text)}</div>
         ${p.detail?`<div style="font-size:11px;color:var(--ink-soft);margin-top:2px">${esc(p.detail)}</div>`:""}
-        ${p.zdrojId?`<button class="aabtn" style="padding:4px 10px;font-size:11.5px;margin-top:7px" onclick="kvOpravDoklad('${esc(p.zdrojId)}')">Opraviť doklad</button>`:""}
+        ${(p.zdrojId||p.cislo)?`<button class="aabtn" style="padding:4px 10px;font-size:11.5px;margin-top:7px" onclick="kvOpravDoklad('${esc(String(p.zdrojId||"").replace(/'/g,""))}','${esc(String(p.cislo||"").replace(/'/g,""))}')">Opraviť doklad</button>`:""}
       </div>`).join("")}
     </div>`;
   };
@@ -18358,11 +18560,11 @@ function dphGenerujDP(mk){
   }).join("\r\n");
 
   const D=dphDruhPodania(mk);
-  const tel=esc(m.telefon||""), mail=esc(m.email||"");
+  const tel=esc(m.tel||""), mail=esc(m.email||"");
   return `<?xml version="1.0" encoding="utf-8"?>\r\n<dokument>\r\n<hlavicka>\r\n`+
 `<identifikacneCislo>\r\n<kodStatu>SK</kodStatu>\r\n<cislo>${esc(m.icdph.replace(/^SK/,""))}</cislo>\r\n</identifikacneCislo>\r\n`+
 `<dic>${esc(m.dic||"")}</dic>\r\n`+
-`<danovyUrad>${esc(m.danovyUrad||"Bratislava")}</danovyUrad>\r\n`+
+`<danovyUrad>${esc(m.danovyUrad)}</danovyUrad>\r\n`+
 `<nevzniklaPov>0</nevzniklaPov>\r\n`+
 `<typDP>\r\n<rdp>${D==="R"?1:0}</rdp>\r\n<odp>${D==="O"?1:0}</odp>\r\n<ddp>${D==="D"?1:0}</ddp>\r\n`+
 `<datumZisteniaDdp>${D==="D"?dnes:""}</datumZisteniaDdp>\r\n</typDP>\r\n`+
@@ -18380,6 +18582,362 @@ telo+`\r\n</telo>\r\n</dokument>\r\n`;
 
 function exportKVDPH(mk){ downloadBlob(new Blob([dphGenerujKV(mk)],{type:"application/xml"}),"kv_dph_"+mk+".xml"); }
 function exportDPDPH(mk){ downloadBlob(new Blob([dphGenerujDP(mk)],{type:"application/xml"}),"dp_dph_"+mk+".xml"); }
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  SÚHRNNÝ VÝKAZ DPH (§ 80) — S3 zo špecifikácie
+//
+//  Kto dodá tovar alebo službu firme s IČ DPH v inej krajine EÚ, podáva okrem
+//  priznania aj súhrnný výkaz. Appka to dovtedy vedela len POVEDAŤ: kontrola
+//  pred podaním nález vypísala a poslala človeka na portál. Nález bez akcie je
+//  polovica funkcie — kto ho prečíta piatykrát, prestane ho čítať.
+//
+//  Tri veci, ktoré odlišujú súhrnný výkaz od kontrolného, a preto má vlastnú
+//  vetvu namiesto ďalšieho `typ` v existujúcich funkciách:
+//
+//   1. VLASTNÉ OBDOBIE. Zdaňovacie obdobie DPH a obdobie súhrnného výkazu spolu
+//      nesúvisia. Mesačný platiteľ DPH, ktorý do EÚ dodáva len služby, podáva
+//      súhrnný výkaz štvrťročne. Preto má vlastné nastavenie aj vlastný kľúč
+//      v dátach (`firmaData.sv`) — keby zdieľal `firmaData.dph`, kľúč „2026-Q1"
+//      by niesol dva rôzne druhy podania naraz.
+//   2. CELÉ EURÁ. Kontrolný výkaz aj priznanie idú na centy, súhrnný výkaz sa
+//      zaokrúhľuje na celé eurá (§ 80 ods. 5).
+//   3. RIADOK = ODBERATEĽ, NIE DOKLAD. Vykazuje sa súčet za odberateľa a kód
+//      plnenia za celé obdobie, nie jednotlivé faktúry.
+//
+//  Štruktúra XML je prevzatá zo schémy `svdph20.xsd` (SVDPHv20, platná
+//  od 1. 1. 2020) — nie odhadnutá. Dve veci z nej, ktoré sa inak nedajú uhádnuť:
+//  `<strana>` musí mať PRESNE 12 `<zaznam>` a PRESNE 12 `<zaznamCast2>` (prázdne
+//  riadky sa vypisujú tiež) a `<obchodneMeno>` má PRESNE 4 `<riadok>`. Je to tá
+//  istá vlastnosť, ktorá kedysi robila priznanie k DPH neplatným (kap. 20.1).
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Kódy štátov v IČ DPH v rámci EÚ. Nie sú to kódy krajín podľa ISO: Grécko
+// používa „EL" namiesto „GR" a Severné Írsko „XI" (dôsledok brexitu — tovar
+// z Írska severne od hranice ostáva v režime EÚ).
+const EU_KODY_DPH = ["AT","BE","BG","CY","CZ","DE","DK","EE","EL","ES","FI","FR","HR","HU",
+                     "IE","IT","LT","LU","LV","MT","NL","PL","PT","RO","SE","SI","SK","XI"];
+const SV_RIADKOV_NA_STRANE = 12;   // dané tlačivom aj schémou, nie voľba
+
+// IČ DPH sa vo výkaze uvádza rozdelené: kód štátu zvlášť, číslo zvlášť.
+function svRozlozIcDph(ic){
+  const v=String(ic||"").toUpperCase().replace(/[\s.\-]/g,"");
+  const m=v.match(/^([A-Z]{2})([0-9A-Z+*]{2,13})$/);
+  if(!m) return {stat:"", cislo:v, zname:false};
+  return {stat:m[1], cislo:m[2], zname:EU_KODY_DPH.includes(m[1])};
+}
+
+// § 80 ods. 5: „údaje sa uvádzajú v eurách a zaokrúhľujú sa na celé eurá
+// do 0,5 eura nadol a od 0,5 eura vrátane nahor." Math.round() zaokrúhľuje
+// −0,5 na −0 (teda nahor), čo pri zápornej hodnote z dobropisu smeruje k nule
+// namiesto od nej — preto sa záporná hodnota zaokrúhľuje cez absolútnu.
+function svCeleEura(v){ const x=+v||0; return x<0 ? -Math.round(-x) : Math.round(x); }
+
+// ── obdobie ────────────────────────────────────────────────────────────────
+// Predvolene štvrťročne: živnostník, ktorý do EÚ fakturuje služby, podáva
+// štvrťročne vždy, a pri tovare je pod limitom prakticky vždy. Voľbu ale
+// necháme na človeku — zákon ju dáva jemu, nie nám.
+function svJeStvrtrocny(){
+  const v=((firmaData&&firmaData.settings)||{}).svObdobie;
+  return v ? v==="stvrtrocne" : true;
+}
+function svNastavObdobieTyp(v){
+  if(!strazZapis("dph")) return;
+  firmaData.settings=firmaData.settings||{};
+  firmaData.settings.svObdobie=(v==="mesacne")?"mesacne":"stvrtrocne";
+  svVybObdobie="";
+  poZmene(); appDPH();
+}
+let svVybObdobie="";
+
+// Do súhrnného výkazu ide LEN vystavená faktúra s druhom plnenia, ktorý má
+// v číselníku `sv:true`. Zber sa neopakuje — použije sa ten istý `dphZberObdobie`
+// ako pre kontrolný výkaz, aby sa obe podania nikdy nerozišli v tom, čo vidia.
+function svZberObdobie(kod){
+  return dphZberObdobie(kod).filter(dk=>dk.smer==="vystup" && dk.plnenie && (DRUHY_PLNENIA[dk.plnenie]||{}).sv);
+}
+function svJeRelevantny(){
+  return (firmaData.faktury||[]).some(f=>(DRUHY_PLNENIA[druhPlnenia(f)]||{}).sv);
+}
+function svDostupneObdobia(){
+  const set=new Set();
+  (firmaData.faktury||[]).forEach(f=>{
+    if(!(DRUHY_PLNENIA[druhPlnenia(f)]||{}).sv) return;
+    const d=faktObdobie(f); if(/^\d{4}-\d{2}$/.test(d)) set.add(d);
+  });
+  const mes=[...set].sort().reverse();
+  if(!svJeStvrtrocny()) return mes;
+  const qs=new Set(mes.map(mk=>{const [r,m]=mk.split("-").map(Number); return r+"-Q"+(Math.floor((m-1)/3)+1);}));
+  return [...qs].sort().reverse();
+}
+
+// ── riadky výkazu ──────────────────────────────────────────────────────────
+// Riadok = odberateľ + kód plnenia. Faktúry sa zlúčia; dobropis so zápornou
+// sumou riadok zníži, čo je presne to, ako sa oprava v súhrnnom výkaze vykazuje.
+function svRiadky(kod){
+  const skupiny=new Map();
+  svZberObdobie(kod).forEach(dk=>{
+    const D=DRUHY_PLNENIA[dk.plnenie]||{};
+    const svKod=D.svKod||"";
+    const ic=svRozlozIcDph(dk.icDph);
+    const k=ic.stat+"|"+ic.cislo+"|"+svKod;
+    if(!skupiny.has(k)) skupiny.set(k,{stat:ic.stat, cislo:ic.cislo, zname:ic.zname, svKod, hodnota:0, doklady:[]});
+    const s=skupiny.get(k);
+    s.hodnota=r2(s.hodnota+(+dk.zaklad||0));
+    s.doklady.push(dk);
+  });
+  return [...skupiny.values()].sort((a,b)=>
+    a.stat!==b.stat ? (a.stat<b.stat?-1:1) : (a.cislo<b.cislo?-1:(a.cislo>b.cislo?1:(a.svKod<b.svKod?-1:1))));
+}
+// Celková hodnota v hlavičke musí sedieť so súčtom riadkov NA TLAČIVE, teda
+// so súčtom už zaokrúhlených hodnôt — nie so zaokrúhleným súčtom.
+function svSumaCelkom(kod){ return svRiadky(kod).reduce((a,r)=>a+svCeleEura(r.hodnota),0); }
+
+// ── limit 50 000 € pre štvrťročné podávanie ────────────────────────────────
+// Do limitu sa počíta len hodnota TOVARU (§ 80 ods. 2) — služby nie.
+function svHodnotaTovaru(kod){
+  return r2(svZberObdobie(kod).reduce((a,dk)=>
+    ((DRUHY_PLNENIA[dk.plnenie]||{}).svLimit ? a+(+dk.zaklad||0) : a), 0));
+}
+// Štvrťročne smie podávať ten, kto limit nepresiahol ani v tomto štvrťroku,
+// ani v žiadnom zo štyroch predchádzajúcich. Preto sa nepozeráme na jedno
+// obdobie, ale na všetky štvrťroky, o ktorých appka má dáta.
+function svPrekroceneStvrtroky(){
+  const limit=sadzbaRoka("svLimitTovar", new Date().getFullYear())||50000;
+  const qs=new Set();
+  (firmaData.faktury||[]).forEach(f=>{
+    if(!(DRUHY_PLNENIA[druhPlnenia(f)]||{}).svLimit) return;
+    const d=faktObdobie(f); if(!/^\d{4}-\d{2}$/.test(d)) return;
+    const [r,m]=d.split("-").map(Number);
+    qs.add(r+"-Q"+(Math.floor((m-1)/3)+1));
+  });
+  return [...qs].map(q=>({obdobie:q, hodnota:svHodnotaTovaru(q)}))
+                .filter(x=>x.hodnota>limit)
+                .sort((a,b)=>a.obdobie<b.obdobie?1:-1);
+}
+
+// ── druh podania a stav ────────────────────────────────────────────────────
+function svZaznam(kod){ return ((firmaData.sv||{})[kod])||{}; }
+function svDruhPodania(kod){ return svZaznam(kod).druhPodania || "R"; }
+function svNastavDruh(kod, druh){
+  if(!strazZapis("dph")) return;
+  if(!firmaData.sv) firmaData.sv={};
+  if(!firmaData.sv[kod]) firmaData.sv[kod]={};
+  firmaData.sv[kod].druhPodania=druh;
+  poZmene(); appDPH();
+}
+// Odtlačok je vlastný — zmena v došlej faktúre nemá súhrnný výkaz označiť
+// za zastaraný, lebo do neho vôbec nevstupuje.
+function svOdtlacok(kod){
+  const r=svRiadky(kod);
+  return r.length+"|"+svSumaCelkom(kod)+"|"+r.map(x=>x.stat+x.cislo+x.svKod).join(",");
+}
+function svExportInfo(kod){ return svZaznam(kod).export || null; }
+function svZmeneneOdExportu(kod){
+  const e=svExportInfo(kod);
+  if(!e || !e.odtlacok) return false;
+  return e.odtlacok !== svOdtlacok(kod);
+}
+function svZaznamExport(kod){
+  if(!mozemPisat("dph")) return;
+  if(!firmaData.sv) firmaData.sv={};
+  if(!firmaData.sv[kod]) firmaData.sv[kod]={};
+  firmaData.sv[kod].export={ sv:new Date().toISOString(), druh:svDruhPodania(kod), odtlacok:svOdtlacok(kod) };
+  poZmene();
+}
+
+// ── kontrola pred podaním ──────────────────────────────────────────────────
+// Vlastná, nie `kontrolaPredPodanim`: tá prechádza došlé faktúry, bločky
+// a oddiely kontrolného výkazu, ktoré do súhrnného výkazu nevstupujú. Nálezy
+// o nich by tu boli falošný poplach — a ten je drahší než žiadny.
+// Tvar výsledku je zámerne rovnaký, takže `dphExport` ho vie zobraziť bez zmeny.
+function svKontrola(kod){
+  const chyby=[], podozrenia=[], odsuhlasenie=[];
+  const chybaMeta=dphMetaChyba();
+  if(chybaMeta.length) chyby.push({blokuje:true,
+    text:"Chýba identifikácia daňovníka: "+chybaMeta.join(", ")+".",
+    detail:"Doplňte údaje firmy v Nastaveniach — bez nich portál Finančnej správy súbor odmietne."});
+
+  const doklady=svZberObdobie(kod);
+  if(!doklady.length) chyby.push({blokuje:true,
+    text:"Za toto obdobie nie je čo vykázať.",
+    detail:"Nulový súhrnný výkaz sa nepodáva — za obdobie bez dodania do EÚ sa jednoducho nepodáva nič."});
+
+  doklady.forEach(dk=>{
+    const kto=dk.cislo||dk.partner||"—";
+    const ic=svRozlozIcDph(dk.icDph);
+    if(!String(dk.icDph||"").trim()) chyby.push({blokuje:true,
+      text:`Faktúra „${kto}“ nemá IČ DPH odberateľa.`,
+      detail:"Dodanie do EÚ je oslobodené od dane len vtedy, keď odberateľ má platné IČ DPH v inom členskom štáte. Bez neho nie je čo do výkazu uviesť.",
+      zdrojId:dk.zdrojId||"", cislo:dk.cislo||""});
+    else if(!ic.zname) chyby.push({blokuje:true,
+      text:`Faktúra „${kto}“ má IČ DPH „${dk.icDph}“ bez rozpoznateľného kódu štátu EÚ.`,
+      detail:"IČ DPH v EÚ začína dvojpísmenovým kódom štátu (CZ, DE, AT…). Grécko používa EL, Severné Írsko XI.",
+      zdrojId:dk.zdrojId||"", cislo:dk.cislo||""});
+    else if(ic.stat==="SK") chyby.push({blokuje:true,
+      text:`Faktúra „${kto}“ je vedená ako dodanie do EÚ, ale odberateľ má slovenské IČ DPH.`,
+      detail:"Dodanie slovenskému platiteľovi do súhrnného výkazu nepatrí. Buď opravte IČ DPH odberateľa, alebo na faktúre zmeňte druh plnenia na tuzemské.",
+      zdrojId:dk.zdrojId||"", cislo:dk.cislo||""});
+    if(r2(dk.dan)>0) podozrenia.push({
+      text:`Faktúra „${kto}“ má vyčíslenú DPH ${eur(dk.dan)}, hoci dodanie do EÚ je oslobodené od dane.`,
+      detail:"Do súhrnného výkazu ide hodnota bez dane. Skontrolujte druh plnenia alebo sumu na faktúre.",
+      zdrojId:dk.zdrojId||"", cislo:dk.cislo||""});
+  });
+
+  svRiadky(kod).forEach(r=>{
+    const kto=(r.stat||"?")+r.cislo;
+    if(r.hodnota<0) podozrenia.push({
+      text:`Odberateľ ${kto} má za obdobie zápornú hodnotu ${eur(r.hodnota)}.`,
+      detail:"Vzniká, keď dobropis prevýši dodania v tom istom období. Zákon to pripúšťa, ale stojí za overenie."});
+    else if(r.hodnota>0 && svCeleEura(r.hodnota)===0) podozrenia.push({
+      text:`Odberateľ ${kto} má hodnotu ${eur(r.hodnota)} — po zaokrúhlení na celé eurá vyjde 0 €.`,
+      detail:"Údaje sa v súhrnnom výkaze uvádzajú v celých eurách (§ 80 ods. 5). Riadok sa vykáže s nulou."});
+  });
+
+  // Voľba štvrťročného podávania platí len do limitu. Nález sa ukáže len vtedy,
+  // keď appka na dátach naozaj vidí prekročenie — nie ako trvalé poučenie.
+  if(svJeStvrtrocny()){
+    const prek=svPrekroceneStvrtroky();
+    if(prek.length) chyby.push({
+      text:`Hodnota tovaru dodaného do EÚ presiahla ${eur(sadzbaRoka("svLimitTovar", new Date().getFullYear())||50000)} v období ${prek.map(p=>p.obdobie).join(", ")}.`,
+      detail:"Štvrťročne smie súhrnný výkaz podávať len ten, kto limit nepresiahol v danom štvrťroku ani v žiadnom zo štyroch predchádzajúcich. Prepnite podávanie na mesačné."});
+  }
+  return {chyby, podozrenia, odsuhlasenie};
+}
+
+// ── XML podľa schémy svdph20.xsd ───────────────────────────────────────────
+function svGeneruj(kod){
+  const P=dphParsujObdobie(kod);
+  const m=dphMeta();
+  const riadky=svRiadky(kod);
+  const D=svDruhPodania(kod);
+  const esc=x=>String(x==null?"":x).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  const b=v=>v?"1":"0";
+  const _d=new Date(), _dv=n=>String(n).padStart(2,"0");
+
+  // Strana tlačiva má presne 12 riadkov v I. časti a 12 v II. časti. Neúplná
+  // strana sa dopĺňa prázdnymi riadkami — vynechať ich znamená neplatné XML.
+  const stran=Math.max(1, Math.ceil(riadky.length/SV_RIADKOV_NA_STRANE));
+  const strany=[];
+  for(let s=0;s<stran;s++){
+    const cast1=[];
+    for(let i=0;i<SV_RIADKOV_NA_STRANE;i++){
+      const r=riadky[s*SV_RIADKOV_NA_STRANE+i];
+      cast1.push(r
+        ? `<zaznam><kodStatu>${esc(r.stat)}</kodStatu><idCislo>${esc(r.cislo)}</idCislo>`+
+          `<hodnota>${svCeleEura(r.hodnota)}</hodnota><kod>${esc(r.svKod)}</kod></zaznam>`
+        : `<zaznam><kodStatu></kodStatu><idCislo></idCislo><hodnota></hodnota><kod></kod></zaznam>`);
+    }
+    // II. časť je premiestnenie tovaru v režime call-off stock (§ 8a). Appka
+    // ho nemodeluje, riadky sú prázdne — schéma ich napriek tomu vyžaduje.
+    const cast2=[];
+    for(let i=0;i<SV_RIADKOV_NA_STRANE;i++){
+      cast2.push(`<zaznamCast2><kodStatu></kodStatu><idCislo></idCislo><idCislo2></idCislo2>`+
+                 `<vratenieTovaru></vratenieTovaru><oprava></oprava></zaznamCast2>`);
+    }
+    strany.push(`<strana>\r\n`+cast1.join("\r\n")+`\r\n`+cast2.join("\r\n")+`\r\n</strana>`);
+  }
+
+  return `<?xml version="1.0" encoding="utf-8"?>\r\n<dokument>\r\n<hlavicka>\r\n`+
+`<identifikacneCislo>\r\n<kodStatu>SK</kodStatu>\r\n<dic>${esc(String(m.icdph||"").replace(/^SK/i,""))}</dic>\r\n</identifikacneCislo>\r\n`+
+`<danovyUrad>${esc(m.danovyUrad)}</danovyUrad>\r\n`+
+`<druhSV>\r\n<riadny>${b(D==="R")}</riadny>\r\n<opravny>${b(D==="O")}</opravny>\r\n<dodatocny>${b(D==="D")}</dodatocny>\r\n</druhSV>\r\n`+
+`<obdobie>\r\n<mesiac>${P.mesiac||""}</mesiac>\r\n<stvrtrok>${P.stvrtrok||""}</stvrtrok>\r\n<rok>${P.rok}</rok>\r\n</obdobie>\r\n`+
+`<obchodneMeno>\r\n<riadok>${esc(m.nazov)}</riadok>\r\n<riadok></riadok>\r\n<riadok></riadok>\r\n<riadok></riadok>\r\n</obchodneMeno>\r\n`+
+`<adresa>\r\n<ulica>${esc(m.ulica)}</ulica>\r\n<cislo>${esc(m.cislo)}</cislo>\r\n<psc>${esc(m.psc)}</psc>\r\n`+
+`<obec>${esc(m.obec)}</obec>\r\n<tel>${esc(m.tel)}</tel>\r\n<email>${esc(m.email)}</email>\r\n</adresa>\r\n`+
+`<celkovaHodnota>${svSumaCelkom(kod)}</celkovaHodnota>\r\n`+
+`<konatel>${esc(m.opravnenaOsoba||m.nazov)}</konatel>\r\n`+
+`<konatelTel>${esc(m.tel)}</konatelTel>\r\n<konatelEmail>${esc(m.email)}</konatelEmail>\r\n`+
+`<datumVyhlasenia>\r\n<den>${_dv(_d.getDate())}</den>\r\n<mesiac>${_dv(_d.getMonth()+1)}</mesiac>\r\n<rok>${_d.getFullYear()}</rok>\r\n</datumVyhlasenia>\r\n`+
+`</hlavicka>\r\n<telo>\r\n`+strany.join("\r\n")+`\r\n</telo>\r\n</dokument>\r\n`;
+}
+
+// ── obrazovka ──────────────────────────────────────────────────────────────
+function svVykazHtml(){
+  if(!svJeRelevantny()) return `<div class="card"><h2 style="font-size:16px;margin-bottom:6px">Súhrnný výkaz</h2>
+    <div class="csub">Zatiaľ nemáte faktúru s druhom plnenia „dodanie tovaru do EÚ“ ani „služba pre firmu v EÚ“. Súhrnný výkaz sa podáva len za obdobie, v ktorom takéto dodanie bolo.</div></div>`;
+  const obdobia=svDostupneObdobia();
+  if(!svVybObdobie || !obdobia.includes(svVybObdobie)) svVybObdobie=obdobia[0];
+  const kod=svVybObdobie;
+  const P=dphParsujObdobie(kod);
+  const riadky=svRiadky(kod);
+  const nalezy=svKontrola(kod);
+  const spolu=svSumaCelkom(kod);
+  const prek=svJeStvrtrocny()?svPrekroceneStvrtroky():[];
+  const limit=sadzbaRoka("svLimitTovar", P.rok)||50000;
+
+  const kodPopis={"":"tovar","1":"trojstranný","2":"služba"};
+  const grid="grid-template-columns:44px minmax(0,1fr) 78px 92px";
+  const dniDo=(()=>{ const mm=P.mesiac||P.stvrtrok*3; return Math.ceil((new Date(P.rok, mm, 25)-new Date())/86400000); })();
+
+  return `<div class="card" style="margin-bottom:14px">
+    <h2 style="font-size:16px;margin-bottom:4px">Súhrnný výkaz DPH</h2>
+    <div class="csub" style="margin-bottom:12px">Dodania do iných krajín EÚ zoradené podľa odberateľa. Podáva sa do 25 dní po skončení obdobia; <b>za obdobie bez dodania do EÚ sa nepodáva nič</b>. Sumy sú v celých eurách (§ 80).</div>
+
+    <div class="atool" style="flex-wrap:wrap">
+      ${obdobia.map(o=>{const[oy,om]=o.split("-");const lbl=/^Q/.test(om)?om+" "+oy:MES_SK[+om-1].slice(0,3)+" "+oy;
+        return `<span class="achip ${o===kod?'on':''}" onclick="svVybObdobie='${o}';appDPH()">${lbl}</span>`}).join('')}
+      <span style="margin-left:auto"></span>
+      <select onchange="svNastavObdobieTyp(this.value)"${zam("dph")} title="Súhrnný výkaz má vlastné obdobie, nezávislé od zdaňovacieho obdobia DPH. Štvrťročne ho smie podávať ten, kto neprekročil limit hodnoty tovaru." style="background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-size:12px">
+        <option value="stvrtrocne" ${svJeStvrtrocny()?'selected':''}>štvrťročne</option>
+        <option value="mesacne" ${svJeStvrtrocny()?'':'selected'}>mesačne</option>
+      </select>
+    </div>
+
+    ${prek.length?`<div style="background:var(--sfc-warn);border-left:3px solid var(--warn);border-radius:0 9px 9px 0;padding:10px 13px;margin-top:12px;font-size:12.5px;line-height:1.55">
+      ⚠ <b>Štvrťročné podávanie už nemôžete použiť.</b> Hodnota tovaru dodaného do EÚ presiahla ${eur(limit)}
+      v ${prek.map(p=>p.obdobie).join(", ")} (${prek.map(p=>eur(p.hodnota)).join(", ")}).
+      Prepnite podávanie na mesačné. Do limitu sa počíta len tovar — služby nie.</div>`:''}
+
+    <div class="amini" style="margin-top:12px">
+      <div class="aminbox"><div class="al">Odberateľov</div><div class="av">${riadky.length}</div></div>
+      <div class="aminbox"><div class="al">Celková hodnota</div><div class="av">${spolu.toLocaleString("sk-SK")} €</div></div>
+      <div class="aminbox"><div class="al">Obdobie</div><div class="av" style="font-size:15px">${P.nazov}</div></div>
+    </div>
+
+    ${(nalezy.chyby.length||nalezy.podozrenia.length)?`<div style="background:var(--sfc-warn);border:1px solid #f0c98a;border-radius:10px;padding:11px 13px;margin-top:12px">
+      <div style="font-weight:700;font-size:13px;color:var(--accent-deep);margin-bottom:6px">⚠ Skontrolujte pred podaním (${nalezy.chyby.length+nalezy.podozrenia.length})</div>
+      ${nalezy.chyby.map(k=>`<div style="font-size:12px;padding:3px 0;color:var(--neg)">⛔ ${esc(k.text)}</div>`).join('')}
+      ${nalezy.podozrenia.map(k=>`<div style="font-size:12px;padding:3px 0">⚠ ${esc(k.text)}</div>`).join('')}
+    </div>`:`<div style="background:var(--sfc-pos);border-radius:10px;padding:10px 13px;margin-top:12px;font-size:12.5px;color:var(--pos)">✓ V dokladoch za ${P.nazov} sme nenašli žiadne problémy.</div>`}
+
+    <div style="margin-top:14px">
+      <div class="alist">
+        <div class="arow head" style="${grid};gap:8px"><div>Štát</div><div>IČ DPH odberateľa</div><div style="text-align:right">Kód</div><div style="text-align:right">Hodnota</div></div>
+        ${riadky.length?riadky.map(r=>`<div class="arow" style="${grid};gap:8px;align-items:center;font-size:12.5px">
+          <div class="acol-strong">${esc(r.stat||"—")}</div>
+          <div style="min-width:0"><div class="acol-strong" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(r.cislo||"—")}</div>
+            <div class="acol-muted">${r.doklady.length} ${r.doklady.length===1?"faktúra":r.doklady.length<5?"faktúry":"faktúr"}</div></div>
+          <div class="acol-muted" style="text-align:right">${esc(r.svKod||"—")}<div style="font-size:10.5px">${kodPopis[r.svKod]||""}</div></div>
+          <div class="acol-sum" style="white-space:nowrap">${svCeleEura(r.hodnota).toLocaleString("sk-SK")} €</div>
+        </div>`).join(''):'<div class="aempty" style="font-size:12px">Za toto obdobie nie je čo vykázať.</div>'}
+      </div>
+    </div>
+
+    <div class="atool" style="margin-top:16px">
+      <button class="aabtn pri" onclick="dphExport('sv','${kod}')"${zam("dph")}>↧ Súhrnný výkaz (XML)</button>
+      <div style="flex-basis:100%;height:0"></div>
+      ${(()=>{ const e=svExportInfo(kod); if(!e) return "";
+        const kedy=new Date(e.sv).toLocaleDateString("sk-SK");
+        const zm=svZmeneneOdExportu(kod);
+        return `<div style="flex-basis:100%;background:${zm?'var(--sfc-warn)':'var(--sfc-pos)'};border-left:3px solid ${zm?'var(--warn)':'var(--pos)'};
+          border-radius:0 9px 9px 0;padding:9px 12px;font-size:12.5px;line-height:1.55;margin-bottom:4px">
+          ${zm ? `⚠ <b>Doklady sa od posledného exportu (${kedy}) zmenili.</b> Vygenerujte výkaz znova a podajte ho ako <b>${dniDo<0?"dodatočný":"opravný"}</b>.`
+                : `✓ Export za toto obdobie bol vytvorený ${kedy}. Doklady sa odvtedy nezmenili.`}
+        </div>`; })()}
+      <span style="font-size:12.5px;color:var(--ink-soft);align-self:center">Druh podania:</span>
+      ${[["R","Riadny","Podávate prvýkrát za toto obdobie."],
+         ["O","Opravný","Už ste podali, ale ešte je pred 25. Nahradí pôvodné podanie celé."],
+         ["D","Dodatočný","Lehota už uplynula."]].map(([k,l,t])=>
+        `<span class="achip ${svDruhPodania(kod)===k?'on':''}" title="${esc(t)}" onclick="svNastavDruh('${kod}','${k}')"${zam("dph")}>${l}</span>`).join("")}
+      ${dniDo<0 ? `<span style="font-size:12px;color:var(--neg);align-self:center">termín (25.) uplynul pred ${-dniDo} dňami</span>`
+                : `<span style="font-size:12px;color:${dniDo<=5?'var(--warn)':'var(--ink-soft)'};align-self:center">do termínu ${dniDo} ${dniDo===1?'deň':dniDo<5?'dni':'dní'}</span>`}
+    </div>
+    <div style="font-size:11.5px;color:var(--ink-soft);margin-top:10px;padding-top:10px;border-top:1px solid var(--line-soft)">
+      Príjemcu služby ani odberateľa tovaru výkaz neuvádza menom — len kódom štátu a IČ DPH. Trojstranný obchod (kód 1) appka nemodeluje; ak ho robíte, riadok doplňte na portáli.
+    </div>
+  </div>`;
+}
 
 // ═══════════════════════════════════════════════════
 //  VRSTVA 4: OCR bločkov a faktúr (Tesseract.js + pdf.js)
@@ -21555,6 +22113,35 @@ function doplnPartnerovDoVydavkov(){
   poZmene();
   alert("Doplnené v "+n+" dokladoch.\n\nZáznam nájdete aj v zvončeku — keby sa niektorý dodávateľ ukázal ako neplatca DPH, opravíte to v editore dokladu.");
   if(typeof appUzavierka==="function" && aktualnaApp==="uzavierka") appUzavierka();
+}
+
+// ── ZOSÚLADENIE KATEGÓRIE TANKOVACÍCH DOKLADOV ─────────────────────────────
+// Mení sa VÝHRADNE kategória. Nie väzba na auto (posunula by odpočet DPH
+// v období, ktoré už mohlo byť podané) a nie sumy. Preto sa tu nevolá
+// `strazUzavierku`: uzávierka bráni nechcenej zmene údajov, a tu sa žiadny
+// údaj, z ktorého sa počíta, nemení — odtlačok uzávierky ani odtlačok DPH
+// kategóriu vôbec neobsahujú (rátajú počty a sumy).
+function zosuladPhmKategorie(rok){
+  if(!strazZapis("vydavky")) return;
+  const R=String(rok||new Date().getFullYear());
+  const ciel=(firmaData.vydavky||[]).filter(x=>String(x.datum||"").slice(0,4)===R
+    && String(x.druh||"").trim()==="PHM (tankovanie)" && x.kategoria && x.kategoria!=="phm");
+  if(!ciel.length){ alert("Niet čo zosúladiť — všetky tankovacie doklady za "+R+" už kategóriu „pohonné hmoty“ majú."); return; }
+  const riadok=x=>"• "+(x.cislo||"—")+" · "+(x.partner||"—")+" · "+fmtDatum(x.datum)
+    +"\n    "+((KATEGORIE_VYDAVKOV[x.kategoria]||{}).n||x.kategoria)+" → Pohonné hmoty";
+  if(!confirm("Zosúladiť kategóriu v "+ciel.length+" tankovacích dokladoch za "+R+"?\n\n"
+    + ciel.slice(0,8).map(riadok).join("\n")
+    + (ciel.length>8 ? "\n… a ďalších "+(ciel.length-8) : "")
+    + "\n\nMení sa len kategória. Sumy, DPH ani väzba na auto sa nemenia a žiadny "
+    + "výpočet sa neposunie — do výdavkov sa tieto doklady už teraz počítajú podľa "
+    + "druhu dokladu.\n\nDotkne sa aj uzavretých mesiacov; keďže sa nemení nič, "
+    + "z čoho sa počíta, uzávierka ostane platná.")) return;
+  let n=0;
+  ciel.forEach(x=>{ x.kategoria="phm"; if(!String(x.autoDruh||"").trim()) x.autoDruh="phm"; n++; });
+  poZmene();
+  alert("Zosúladené v "+n+(n===1?" doklade.":" dokladoch."));
+  if(typeof appDPH==="function" && aktualnaApp==="dph") appDPH();
+  else if(typeof appUzavierka==="function" && aktualnaApp==="uzavierka") appUzavierka();
 }
 
 // ═══════════════════════════════════════════════════════════════
