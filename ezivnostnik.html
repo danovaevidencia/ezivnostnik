@@ -528,6 +528,33 @@ button,input,select,textarea{font-variant-numeric:inherit}
   /* Bez hlavičky by pri výdavku nebolo vidieť, ktoré z dvoch čísel je DPH. */
   .rdok.rv>.c-sub::before{content:"DPH ";font-family:'Inter','Segoe UI',system-ui,sans-serif;font-weight:600;color:var(--ink-soft)}
 }
+/* ══ A4 — RIADOK POHYBU (kap. 48.4) ══════════════════════════════════════
+   Riadok mal tri riadky textu: názov, VS so stavom a pás tlačidiel. Na 390 px
+   to bolo správne, na monitore zbytočné — štyri pohyby zabrali dvanásť
+   riadkov. Akcie sú v KARTE POHYBU (kap. 47.5), ktorú riadok otvára ťuknutím;
+   riadok tým robí jednu vec: hovorí, čo sa stalo.
+
+   Rovnaký postup ako pri `.rdok`: tie isté bunky, dve podoby cez
+   `grid-template-areas`. Nič sa nekreslí druhýkrát, takže sa mobil a monitor
+   nemôžu rozísť.
+
+   Predvolená (úzka) podoba sú dva riadky. */
+.rpohyb{grid-template-columns:auto minmax(0,1fr) auto;gap:2px 10px;align-items:center;
+  grid-template-areas:"ic main sum"
+                      "ic stav date"}
+.rpohyb>.c-ic{grid-area:ic;width:30px;height:30px;border-radius:8px;display:grid;place-items:center;font-weight:700}
+.rpohyb>.c-main{grid-area:main;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rpohyb>.c-stav{grid-area:stav;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rpohyb>.c-date{grid-area:date;text-align:right;white-space:nowrap}
+.rpohyb>.c-sum{grid-area:sum;white-space:nowrap}
+/* Hlavička stĺpcov dáva zmysel len tam, kde stĺpce naozaj sú. */
+.rpohyb.head{display:none}
+@media(min-width:1000px){
+  .rpohyb{grid-template-columns:30px minmax(0,1fr) minmax(0,auto) 92px 112px;gap:12px;
+          grid-template-areas:"ic main stav date sum"}
+  .rpohyb.head{display:grid}
+  .rpohyb.head>.c-ic{background:none}
+}
 .apill{font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:20px;display:inline-block}
 /* A3 — tichý stav: v poriadku, netreba nič. Bez pozadia a bez názvu, aby
    nekonkuroval štítkom, ktoré niečo žiadajú. Názov je v `title`. */
@@ -965,7 +992,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.23-HC";  // štítok stavu len pri výnimke
+const APP_VERZIA = "2026.08.23-HD";  // riadok pohybu na jeden riadok, akcie v karte
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -7257,48 +7284,16 @@ function bankaRiadok(t, kompakt){
           const inc=t.smer==="prijem"; const s=vypisSparujMemo(t);
           const st=pohybStav(t);
           const ignor=st.kod==="ignorovany";
-          // "+ Výdavok" ponúkni LEN ak pohyb nie je spárovaný ani navrhnutý na
-          // existujúci záznam — inak by vznikla duplicita
-          const uzMaZaznam = s && (s.typ==="vydavok" || s.typ==="faktura" || s.typ==="klasifikacia");
-          const nespar=!ignor && !uzMaZaznam;
           const txId=t.id||t.datum+t.suma;
           const maKand = s && s.kandidati && s.kandidati.length>1;
-          const rozb = vypisRozbaleny===txId;
-          const potvrdena = t.potvrdenaZhoda;
-          let akcie="";
-          if(nespar&&t.smer==="vydaj"){
-            akcie=`<div style="display:flex;gap:5px;margin-top:5px"><button class="aabtn" style="padding:2px 8px;font-size:10.5px;border-color:var(--pos);color:var(--pos)" onclick="event.stopPropagation();vypisPridajVydavok('${esc(txId)}')"${zam("banka")}>+ Výdavok</button><button class="aabtn" style="padding:2px 8px;font-size:10.5px" onclick="event.stopPropagation();vypisIgnoruj('${esc(txId)}')" title="Vždy ignorovať takéto pohyby (pravidlo)"${zam("banka")}>⊘</button><button class="aabtn" style="padding:2px 8px;font-size:10.5px" onclick="event.stopPropagation();skryPohyb('${esc(txId)}');appBanka()" title="Skryť len tento pohyb"${zam("banka")}>🗄</button></div>`;
-          } else if(maKand || !st.spar){
-            // Výber správneho dokladu žije v PÁROVANÍ — jedno miesto, nie tri.
-            // Tu sa len presmeruje s predvybraným pohybom.
-            //
-            // Ponúka sa pri KAŽDOM nespárovanom pohybe, nielen keď má viac
-            // kandidátov: pohyb s jediným návrhom bol dovtedy zvýraznený ako
-            // „vyžaduje pozornosť" a neponúkal k tomu nič. Slepá ulička
-            // v zozname je horšia než chýbajúci návrh.
-            akcie=`<div style="display:flex;gap:5px;margin-top:5px"><button class="aabtn" style="padding:2px 8px;font-size:10.5px;border-color:var(--accent);color:var(--accent-deep)" onclick="event.stopPropagation();otvorKartuPohybu('${esc(txId)}')" title="Otvoriť pohyb a vybrať doklad">⇄ spárovať${maKand?" ("+s.kandidati.length+" kandidátov)":""}</button></div>`;
-          } else if(potvrdena){
-            akcie=`<div style="margin-top:4px"><span onclick="event.stopPropagation();vypisZrusZhodu('${esc(txId)}')" style="cursor:pointer;font-size:10px;color:var(--ink-soft)" title="Zrušiť ručné priradenie"${zam("banka")}>✓ priradené ručne · zrušiť</span></div>`;
-          }
-          if(t.skryty){
-            akcie=`<div style="margin-top:4px"><button class="aabtn" style="padding:2px 8px;font-size:10.5px" onclick="event.stopPropagation();obnovPohyb('${esc(txId)}');appBanka()"${zam("banka")}>↺ Obnoviť</button></div>`;
-          }
-          // rozbalený zoznam kandidátov
-          let kandHtml="";
-          if(maKand && rozb){
-            kandHtml=`<div style="grid-column:1/-1;margin-top:8px;padding:8px;background:var(--bg);border-radius:8px">
-              <div class="csub" style="margin-bottom:6px">Vyberte doklad, ktorý zodpovedá tejto platbe:</div>
-              ${s.kandidati.map(k=>{ const meno=s.typ==="faktura"?(typeof k.odberatel==="string"?k.odberatel:(k.odberatel&&k.odberatel.nazov)||""):(k.partner||k.dodavatel||k.nazov||""); const sk=k._skore||{};
-                return `<div onclick="event.stopPropagation();vypisPotvrdZhodu('${esc(txId)}','${s.typ}','${esc(String(k.cislo||''))}')"${zam("banka")} style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 9px;margin-bottom:4px;background:var(--paper);border:1px solid var(--line);border-radius:7px;cursor:pointer">
-                  <div style="min-width:0"><div class="acol-strong" style="font-size:12.5px">${esc(meno||k.cislo||'—')}</div><div class="acol-muted">${esc(String(k.cislo||''))} · ${fmtDatum(k.datum||k.vystavenie)}${sk.nazov?' · <span style="color:var(--pos)">názov sedí</span>':''}${sk.blizko?' · dátum sedí':''}</div></div>
-                  <div class="acol-sum" style="font-size:12.5px">${eur(+k.spolu||+k.bez||0)}</div>
-                </div>`;
-              }).join("")}
-            </div>`;
-          }
-          // Úzky stĺpec (pohľad „vedľa seba") nemá miesto na dátumový stĺpec
-          // ani na akcie. Dátum sa presúva k stavu, akcie sú v karte pohybu,
-          // ktorú riadok otvára — nič sa nestráca, len sa to skladá inak.
+          // Koľko dokladov prichádza do úvahy — jediné, čo z bývalého tlačidla
+          // „⇄ spárovať (3 kandidátov)" nesie informáciu. Samotné tlačidlo
+          // otváralo kartu pohybu, teda robilo presne to isté ako ťuknutie na
+          // riadok; ostal z neho počet, ktorý sa zmestí k stavu.
+          const kandHint = (maKand && !st.spar)
+            ? ` <span class="acol-muted" style="font-size:10.5px">· ${s.kandidati.length} dokladov</span>` : "";
+          // Úzky stĺpec (pohľad „vedľa seba") nemá miesto na dátumový stĺpec.
+          // Dátum sa presúva k stavu — nič sa nestráca, len sa to skladá inak.
           if(kompakt) return `<div class="arow" onclick="otvorKartuPohybu('${esc(txId)}')" title="Otvoriť pohyb" style="cursor:pointer;grid-template-columns:1fr auto;align-items:center;${ignor?'opacity:.5':!st.spar?'background:var(--sfc-warn)':''}">
             <div style="min-width:0">
               <div class="acol-strong" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(t.proti||"—")}</div>
@@ -7306,7 +7301,17 @@ function bankaRiadok(t, kompakt){
             </div>
             <div class="acol-sum" style="color:${inc?'var(--pos)':'var(--ink)'};white-space:nowrap">${inc?'+':'−'}${eur(+t.suma||0)}</div>
           </div>`;
-          return `<div class="arow" onclick="otvorKartuPohybu('${esc(txId)}')" title="Otvoriť pohyb" style="cursor:pointer;grid-template-columns:auto 2fr 1fr auto;align-items:start;${ignor?'opacity:.5':!st.spar?'background:var(--sfc-warn)':''}"><div style="width:30px;height:30px;border-radius:8px;display:grid;place-items:center;font-weight:700;background:${inc?'var(--sfc-pos)':'#f2f4f7'};color:${inc?'var(--pos)':'var(--ink-soft)'}">${inc?'↓':'↑'}</div><div style="min-width:0"><div class="acol-strong" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(t.proti||"—")}</div><div class="acol-muted">${t.vs?'VS '+esc(t.vs)+' · ':''}${stavStitok(st,"font-size:9.5px")}</div>${akcie}</div><div class="acol-muted">${fmtDatum(t.datum)}</div><div class="acol-sum" style="color:${inc?'var(--pos)':'var(--ink)'}">${inc?'+':'−'}${eur(+t.suma||0)}</div>${kandHtml}</div>`;
+          // A4 — tie isté bunky, dve podoby (kap. 48.4). Nad ~1000 px jeden
+          // riadok so zarovnanými stĺpcami, pod ním dva. Údaje sa nekreslia
+          // druhýkrát, takže sa mobilná a stolová podoba nemôžu rozísť —
+          // rovnaký postup ako pri riadku dokladu (`.rdok`).
+          return `<div class="arow rpohyb" onclick="otvorKartuPohybu('${esc(txId)}')" title="Otvoriť pohyb" style="cursor:pointer;${ignor?'opacity:.5':!st.spar?'background:var(--sfc-warn)':''}"
+            ><div class="c-ic" style="background:${inc?'var(--sfc-pos)':'#f2f4f7'};color:${inc?'var(--pos)':'var(--ink-soft)'}">${inc?'↓':'↑'}</div
+            ><div class="acol-strong c-main">${esc(t.proti||"—")}</div
+            ><div class="acol-muted c-stav">${t.vs?'VS '+esc(t.vs)+' · ':''}${stavStitok(st,"font-size:9.5px")}${kandHint}</div
+            ><div class="acol-muted c-date">${fmtDatum(t.datum)}</div
+            ><div class="acol-sum c-sum" style="color:${inc?'var(--pos)':'var(--ink)'}">${inc?'+':'−'}${eur(+t.suma||0)}</div
+          ></div>`;
 }
 function appBanka(){
   if(prekresliVRamci("banka")) return;   // rámec super apky (GY)
@@ -7354,7 +7359,7 @@ function appBanka(){
       ${hladatkoHtml('banka','appBanka','🔍 Protistrana, VS, suma…')}
       <span class="achip ${bPohlad==='vedla'?'on':''}" style="margin-left:auto" onclick="bPohlad=bPohlad==='vedla'?'zoznam':'vedla';appBanka()" title="Príjmy a výdaje vedľa seba (bývalý Cashflow)">⇄ vedľa seba</span>
     </div>
-    <div class="csub" style="margin:0 2px 12px">Ťuknutím na riadok otvoríte pohyb. Nespárované výdaje môžete zaradiť: <b>+ Výdavok</b> vytvorí výdavok z pohybu, <b>⊘</b> pridá pravidlo na ignorovanie.</div>
+    <div class="csub" style="margin:0 2px 12px">Ťuknutím na riadok otvoríte pohyb — tam sa vyberá doklad, vytvára výdavok z platby, ignoruje sa alebo skrýva.</div>
     ${bPohlad==="vedla" ? (()=>{
       // Bývalý modul Cashflow (kap. 47.10 etapa 7). Nebol to iný pohľad na iné
       // dáta — bol to druhý zoznam tých istých pohybov s vlastným výpočtom
@@ -7374,6 +7379,7 @@ function appBanka(){
       </div>`+orezInfo('banka', Math.min(Math.max(p.length,v.length), limitPre('banka',150)), Math.max(p.length,v.length), 'appBanka');
     })() : `
     <div class="alist">
+      <div class="arow head rpohyb"><div class="c-ic"></div><div class="c-main">Protistrana</div><div class="c-stav">Stav</div><div class="c-date">Dátum</div><div class="c-sum" style="text-align:right">Suma</div></div>
       ${(()=>{
         let filtered=list;
         // Stav pohybu hovorí `pohybStav` — jedna definícia pre Banku, Cashflow
@@ -21068,10 +21074,34 @@ function pohybKartaHtml(tx){
         })()}
         ${(()=>{
           // AKCIE K POHYBU — priamo tu, aby párovanie bolo jedno miesto (nie tri)
+          //
+          // A4 (kap. 48.4) zobral akcie z riadka v zozname a nechal riadok robiť
+          // jednu vec: povedať, čo sa stalo. Podmienkou bolo, aby tu bolo VŠETKO,
+          // čo riadok ponúkal — plán predpokladal, že už je, ale `⊘ ignorovať`,
+          // `↺ obnoviť` ani zrušenie ručného priradenia tu neboli. Doplnené;
+          // bez toho by sa akcia z appky ticho stratila.
           const akcie=[];
-          if(tx.smer==="vydaj" && !(tx.uhrady||[]).length && typeof pohybMaVydavok==="function" && !pohybMaVydavok(tx))
+          if(tx.smer==="vydaj" && !(tx.uhrady||[]).length && typeof pohybMaVydavok==="function" && !pohybMaVydavok(tx)){
             akcie.push(`<button class="aabtn" style="padding:5px 11px;font-size:12px;border-color:var(--pos);color:var(--pos)" onclick="bkVytvorVydavok('${txId(tx)}')"${zam("banka")}>+ Vytvoriť výdavok z platby</button>`);
-          akcie.push(`<button class="aabtn" style="padding:5px 11px;font-size:12px" onclick="skryPohyb('${txId(tx)}');splitVybranyPohyb=null;parPrekresli()" title="Súkromný alebo nesúvisiaci pohyb — skryje sa, dá sa obnoviť vo filtri 🗄"${zam("banka")}>🗄 Skryť pohyb</button>`);
+            // Dve rôzne veci, nie dve tlačidlá na to isté: hore vzniká interný
+            // doklad BEZ DPH (dokladom je výpis), tu formulár s rozpadom DPH pre
+            // prípad, že k platbe faktúra existuje a odpočet sa uplatňuje.
+            // Riadok v zozname ponúkal práve ten druhý; keby tu nebol, A4 by ho
+            // z appky odstránilo.
+            //
+            // `closeModal` musí byť pred otvorením formulára: modálne okno je
+            // jedno a bez zavretia by `_kartaPohybuId` ostal nastavený —
+            // najbližšie prekreslenie by karta pohybu prepísala formulár.
+            akcie.push(`<button class="aabtn" style="padding:5px 11px;font-size:12px" onclick="closeModal();vypisPridajVydavok('${txId(tx)}')" title="Formulár s rozpadom DPH — keď k platbe máte došlú faktúru"${zam("banka")}>✎ Výdavok s DPH…</button>`);
+          }
+          if(tx.potvrdenaZhoda)
+            akcie.push(`<button class="aabtn" style="padding:5px 11px;font-size:12px" onclick="vypisZrusZhodu('${txId(tx)}');parPrekresli()" title="Zrušiť ručné priradenie — platba sa vráti medzi nespárované"${zam("banka")}>✕ Zrušiť ručné priradenie</button>`);
+          if(!tx.skryty && !jePohybIgnorovany(tx))
+            akcie.push(`<button class="aabtn" style="padding:5px 11px;font-size:12px" onclick="vypisIgnoruj('${txId(tx)}');parPrekresli()" title="Pridá pravidlo: pohyby s touto protistranou sa budú vždy ignorovať"${zam("banka")}>⊘ Vždy ignorovať takéto pohyby</button>`);
+          if(tx.skryty)
+            akcie.push(`<button class="aabtn" style="padding:5px 11px;font-size:12px" onclick="obnovPohyb('${txId(tx)}');appBanka();parPrekresli()" title="Vrátiť pohyb medzi ostatné"${zam("banka")}>↺ Obnoviť pohyb</button>`);
+          else
+            akcie.push(`<button class="aabtn" style="padding:5px 11px;font-size:12px" onclick="skryPohyb('${txId(tx)}');splitVybranyPohyb=null;parPrekresli()" title="Súkromný alebo nesúvisiaci pohyb — skryje sa, dá sa obnoviť vo filtri 🗄"${zam("banka")}>🗄 Skryť pohyb</button>`);
           return `<div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:10px">${akcie.join("")}</div>`;
         })()}
         ${(()=>{ const u=tx.uhrady||[]; if(!u.length) return "";
