@@ -7621,6 +7621,8 @@ function bankaRiadok(t, kompakt){
           // (kap. 49). Ikona bez textu, aby to na 390 px nezabralo riadok.
           const zdrojHint = t.mimoVypisu
             ? ` <span style="color:var(--neg);font-size:10.5px" title="Vo výpise, ktorý toto obdobie pokrýva, taký pohyb nie je — banka ho mohla stornovať, alebo sa nespojil so správnym">⚠ mimo výpisu</span>`
+            : t.mozneDvojite
+              ? ` <span style="color:var(--neg);font-size:10.5px" title="Rovnakú sumu v rovnakom smere evidujete aj o pár dní vedľa — môže ísť o jednu platbu ohlásenú dvakrát (použitie karty a obrat na účte)">⚠ možno dvakrát</span>`
             : (t.zdroj==="mail"
                 ? ` <span class="acol-muted" style="font-size:10.5px" title="Z notifikácie internet bankingu — mesačný výpis ho ešte potvrdí">✉</span>` : "");
           // Úzky stĺpec (pohľad „vedľa seba") nemá miesto na dátumový stĺpec.
@@ -19219,6 +19221,22 @@ function cakajuceNotifikacie(){
   return out;
 }
 
+// Pohyb, ktorý vyzerá ako tá istá platba. O jednej transakcii môže prísť viac
+// mailov — banka hlási zvlášť použitie karty a zvlášť obrat na účte, a či to
+// tak robí, sa u každej banky ukáže až za prevádzky. Duplicitný pohyb by sa
+// inak našiel až pri ročnej kontrole; v Banke sa priznať dá hneď.
+//
+// Okno je to isté ako pri zlúčení s výpisom: autorizácia karty a jej
+// zaúčtovanie sú od seba pár dní.
+function podobnyPohyb(p){
+  if(!p || !p.datum) return null;
+  const dni=(a,b)=>Math.abs(vypisDatumMs(a)-vypisDatumMs(b))/86400000;
+  return (firmaData.vypis||[]).find(t=>t!==p && t.id!==p.id
+    && t.smer===p.smer && !t.skryty
+    && Math.abs(r2(+t.suma||0)-r2(+p.suma||0))<0.005
+    && dni(t.datum, p.datum)<=NOTIF_ZLUC_DNI) || null;
+}
+
 // Pridanie pohybu do evidencie. Vedomý jeden klik — kto pozná prijímaciu
 // adresu, vie poslať mail, ktorý vyzerá ako notifikácia z banky, a označiť
 // tým faktúru za uhradenú.
@@ -19234,6 +19252,14 @@ function prijmiNotifikaciu(id){
   if(!p || !p.pohyb){ alert("Túto notifikáciu sa nepodarilo prečítať."); return; }
   if(p.uzMam){ cloudMsg("Tento pohyb už v evidencii je.","ok"); otvorCakajuce(); return; }
   if(!Array.isArray(firmaData.vypis)) firmaData.vypis=[];
+  // Pýtame sa, nie zakazujeme: dve platby rovnakej sumy tomu istému
+  // dodávateľovi v jednom týždni sú bežné a appka nemá čím rozhodnúť.
+  const dvojmo=podobnyPohyb(p.pohyb);
+  if(dvojmo && !confirm(
+      "Podobný pohyb už evidujete:\n\n"
+      +fmtDatum(dvojmo.datum)+" · "+eur(+dvojmo.suma||0)+" · "+(dvojmo.proti||"bez názvu")+"\n\n"
+      +"Banka môže o jednej platbe poslať dva maily — pri karte zvlášť jej použitie a zvlášť obrat na účte.\n\n"
+      +"Pridať aj tento?")) return;
   firmaData.vypis.push(p.pohyb);
   // Priradenie k dokladu beží tou istou automatikou ako pri výpise. Klik
   // potvrdzuje, že sa pohyb STAL — nie ku ktorej faktúre patrí; to appka vie
@@ -19263,8 +19289,16 @@ function prijmiVsetkyNotifikacie(){
   if(!confirm("Pridať "+zoz.length+" pohybov z notifikácií do evidencie?\n\n"
     +"Appka ich rovno skúsi priradiť k faktúram a výdavkom podľa symbolu a sumy.")) return;
   if(!Array.isArray(firmaData.vypis)) firmaData.vypis=[];
-  const nove=[];
-  zoz.forEach(p=>{ if(!firmaData.vypis.some(t=>t.id===p.pohyb.id)){ firmaData.vypis.push(p.pohyb); nove.push(p); } });
+  // Pri hromadnom pridávaní sa nepýtame na každý zvlášť — to by bol presne
+  // ten rad dialógov, kvôli ktorému človek klikne „áno" bez čítania. Podozrivé
+  // sa označia a sú vidieť v Banke. Kontrola beží PRIEBEŽNE, aby zachytila aj
+  // dvojicu, ktorá prišla v tej istej dávke (použitie karty + obrat).
+  const nove=[]; let dvojmo=0;
+  zoz.forEach(p=>{
+    if(firmaData.vypis.some(t=>t.id===p.pohyb.id)) return;
+    if(podobnyPohyb(p.pohyb)){ p.pohyb.mozneDvojite=1; dvojmo++; }
+    firmaData.vypis.push(p.pohyb); nove.push(p);
+  });
   let sparene=0;
   try{ sparene=autoParujPohyby(nove.map(p=>p.pohyb)); }catch(e){ console.error("párovanie notifikácií:", e); }
   poZmene();
@@ -19276,7 +19310,8 @@ function prijmiVsetkyNotifikacie(){
       .then(({error})=>{ if(error) console.error("uzavretie notifikácií:", error.message||error); hotovo(); });
   } else hotovo();
   if(aktualnaApp==="banka") appBanka();
-  cloudMsg("Pridaných "+nove.length+" pohybov"+(sparene?", priradených "+sparene+".":"."),"ok");
+  cloudMsg("Pridaných "+nove.length+" pohybov"+(sparene?", priradených "+sparene+".":".")
+    +(dvojmo?" "+dvojmo+" vyzerá ako platba, ktorú už evidujete — v Banke sú označené.":""),"ok");
 }
 
 // ── obrazovka schránky ─────────────────────────────────────────────────────
