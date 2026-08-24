@@ -1173,7 +1173,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.24-HS";  // technické zhodnotenie majetku a preradenie z osobného užívania
+const APP_VERZIA = "2026.08.24-HT";  // overenie IČ DPH cez VIES a FS opendata; výpadok registra už neznamená „nie je platiteľ"
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -5055,29 +5055,48 @@ function platneDIC(s){
   try{ return BigInt(v) % 11n === 0n; }catch(_){ return false; }
 }
 // živá kontrola poľa IČ DPH (zelené = OK, červené = podozrivé)
+// Dva kroky, ktoré sa nesmú zliať: tvar sa overí LOKÁLNE a hneď (SK má
+// kontrolný súčet, pre KV DPH je kritický), register až potom a asynchrónne.
+// Keď register nevie, tvarová odpoveď platí ďalej — sieť nesmie zhodiť to,
+// čo appka vie aj bez nej.
 function skontrolujICDPHpole(inp){
   const stav=document.getElementById(inp.id+"Stav")||inp.parentElement.querySelector(".ocr-hint");
   const v=(inp.value||"").trim();
   if(!v){ if(stav){stav.textContent="";} inp.style.borderColor=""; return; }
-  if(platneICDPH(v)){
-    if(stav){ stav.textContent="✓ platné IČ DPH"; stav.style.color="var(--pos,#1a8a4a)"; }
-    inp.style.borderColor="var(--pos,#1a8a4a)";
-    // ak je proxy dostupná, over aj či je aktívny platiteľ (register FS) — asynchrónne
-    overPlatcuDPH(v).then(res=>{
-      if(!stav) return;
-      if(res===true){ stav.textContent="✓ platné a aktívny platiteľ DPH"; }
-      else if(res===false){ stav.textContent="⚠ formát OK, ale nie je aktívny platiteľ DPH (over doklad)"; stav.style.color="var(--neg,#d0453e)"; inp.style.borderColor="var(--neg,#d0453e)"; }
-      // Register sa nespýtal alebo neodpovedal. Nemlčíme: kontrolný súčet
-      // hovorí len o tvare čísla, nie o tom, či firma platiteľom naozaj je,
-      // a používateľ má vidieť rozdiel medzi „overené" a „neoverené".
-      else { stav.textContent="✓ platné IČ DPH · register FS neoverený"
-               + (_registerDphDovod ? " ("+_registerDphDovod+")" : "");
-             stav.style.color="var(--ink-soft)"; }
-    });
-  } else {
-    if(stav){ stav.textContent="⚠ IČ DPH nesedí (skontrolujte — dôležité pre KV DPH)"; stav.style.color="var(--neg,#d0453e)"; }
-    inp.style.borderColor="var(--neg,#d0453e)";
-  }
+  const norm=normalizujICDPH(v), kodStatu=norm.slice(0,2), jeSK=kodStatu==="SK";
+  const zle=(text)=>{ if(stav){ stav.textContent=text; stav.style.color="var(--neg,#d0453e)"; }
+                      inp.style.borderColor="var(--neg,#d0453e)"; };
+  if(jeSK && !platneICDPH(v)) return zle("⚠ IČ DPH nesedí (skontrolujte — dôležité pre KV DPH)");
+  // Cudzie IČ DPH kontrolný súčet nemá — tvar sa dá overiť len po kód štátu,
+  // zvyšok vie povedať jedine VIES. Dovtedy to nie je chyba, len neoverené.
+  if(!jeSK && !EU_KODY_DPH.includes(kodStatu)) return zle("⚠ IČ DPH nezačína kódom štátu EÚ");
+  const tvar = jeSK ? "✓ platné IČ DPH" : "✓ tvar sedí";
+  if(stav){ stav.textContent=tvar+" · overujem v registri…"; stav.style.color="var(--ink-soft)"; }
+  inp.style.borderColor="var(--pos,#1a8a4a)";
+  const poleId=inp.id;
+  overICDPH(v).then(r=>{
+    // Pole sa medzitým mohlo prepísať — neskorá odpoveď nesmie hovoriť
+    // o čísle, ktoré tam už nie je.
+    const teraz=document.getElementById(poleId);
+    if(!stav || (teraz && normalizujICDPH(teraz.value)!==norm)) return;
+    if(r.stav==="platny"){
+      // § 7 a § 7a: IČ DPH majú, ale DPH fakturovať nesmú. Toto je presne ten
+      // prípad, keď doklad s DPH od takého dodávateľa nedáva nárok na odpočet.
+      const inyParagraf = r.paragraf==="7" || r.paragraf==="7a";
+      stav.textContent = (inyParagraf?"⚠ ":"✓ ") + tvar.replace("✓ ","")
+        + (r.nazov ? " · "+r.nazov : "")
+        + (inyParagraf ? " — registrácia podľa § "+r.paragraf+", DPH fakturovať nesmie"
+                       : " · overené v registri"+(r.zdroj==="vies"?" EÚ":""));
+      stav.style.color = inyParagraf ? "var(--warn,#b26a00)" : "var(--pos,#1a8a4a)";
+      if(inyParagraf) inp.style.borderColor="var(--warn,#b26a00)";
+    } else if(r.stav==="neplatny"){
+      zle("⚠ tvar sedí, ale v registri EÚ sa toto IČ DPH nenašlo (over doklad)");
+    } else {
+      // Nemlčíme: používateľ má vidieť rozdiel medzi „overené" a „neoverené".
+      stav.textContent = tvar+" · register neoverený"+(r.dovod?" ("+r.dovod+")":"");
+      stav.style.color="var(--ink-soft)";
+    }
+  });
 }
 
 // je firma platiteľ DPH? zdroj pravdy = IČ DPH v meta (rovnako ako inde v appke)
@@ -7128,38 +7147,60 @@ async function ekasaAutoDoplnenie(receiptId){
 // odpovedať, appka to nedala najavo ničím — pole naďalej hlásilo „✓ platné
 // IČ DPH" z kontrolného súčtu a nikto netušil, že register sa nepýtal.
 // Presne to je „ticho zhltnutá chyba vyzerá ako prázdny výsledok" (kap. 16).
-let _registerDphDovod = "";      // posledný dôvod, prečo overenie neprebehlo
-async function overPlatcuDPH(icdph){
-  _registerDphDovod="";
-  const v=String(icdph||"").toUpperCase().replace(/\s/g,"");
-  if(!/^SK\d{10}$/.test(v)) return false;
-  if(!sb){ _registerDphDovod="bez pripojenia"; return null; }
-  if(_proxyFunguje===false){ _registerDphDovod="proxy nie je nasadená"; return null; }
+//
+// Vracia OBJEKT, nie boolean: {stav:"platny"|"neplatny"|"neznamy", nazov,
+// adresa, dovod, paragraf}. „Neviem" je legitímny výsledok a nesmie sa tváriť
+// ako „nie je platiteľ" — register býva nedostupný a falošné obvinenie
+// dodávateľa je horšie než mlčanie. Rovnaký dôvod, prečo sa nedostupnosť
+// necachuje: o minútu to už môže ísť.
+const _icdphCache = new Map();
+async function overICDPH(icdph){
+  const v=normalizujICDPH(icdph);
+  if(!/^[A-Z]{2}[A-Z0-9]{2,12}$/.test(v)) return {stav:"neplatny", dovod:"tvar"};
+  if(_icdphCache.has(v)) return _icdphCache.get(v);
+  const nezname=(dovod)=>({stav:"neznamy", dovod:dovod||""});
+  if(!sb) return nezname("bez pripojenia");
+  if(_proxyFunguje===false) return nezname("proxy nie je nasadená");
+  let vysl;
   try{
-    const res=await fetch(SUPABASE_URL+"/functions/v1/proxy",{
-      method:"POST", headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({akcia:"platcadph", icdph:v})
-    });
-    if(res.status===404){ _proxyFunguje=false; _registerDphDovod="proxy nie je nasadená";
-      console.error("Register DPH: proxy vrátila 404 — funkcia nie je nasadená."); return null; }
+    // Stopky aj na strane appky. Edge funkcia má vlastné, toto je poistka na
+    // sieť: čakať na register dlhšie, než človek vydrží pozerať na pole, je
+    // to isté ako neodpovedať.
+    const stop=new AbortController();
+    const cas=setTimeout(()=>stop.abort(), 12000);
+    let res;
+    try{
+      res=await fetch(SUPABASE_URL+"/functions/v1/proxy",{
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({akcia:"platcadph", icdph:v}), signal:stop.signal});
+    } finally { clearTimeout(cas); }
+    if(res.status===404){ _proxyFunguje=false;
+      console.error("Overenie IČ DPH: proxy nie je nasadená (404).");
+      return nezname("proxy nie je nasadená"); }
     if(!res.ok){
-      // Telo nesie stav, ktorý proxy dostala od Finančnej správy — bez neho sa
-      // výpadok registra nedá odlíšiť od pokazenej proxy. Číta sa ako TEXT:
-      // keď medzi appku a register vstúpi ochranná vrstva, odpovie HTML
-      // a `res.json()` by práve ten najzaujímavejší detail zahodil.
+      // Telo nesie stav, ktorý proxy dostala od registra — bez neho sa výpadok
+      // nedá odlíšiť od pokazenej proxy. Číta sa ako TEXT: keď medzi appku
+      // a register vstúpi ochranná vrstva, odpovie HTML a `res.json()` by
+      // práve ten najzaujímavejší detail zahodil.
       const telo=await res.text().catch(()=>"");
-      const m=telo.match(/"error"\s*:\s*"([^"]{0,200})"/);
+      const m=telo.match(/"(?:error|dovod)"\s*:\s*"([^"]{0,200})"/);
       const detail=m ? m[1] : telo.replace(/<[^>]*>/g," ").replace(/\s+/g," ").trim().slice(0,160);
-      _registerDphDovod="register neodpovedal";
-      console.error("Register DPH: proxy vrátila "+res.status+(detail?" — "+detail:""));
-      return null;
+      console.error("Overenie IČ DPH: proxy vrátila "+res.status+(detail?" — "+detail:""));
+      return nezname("proxy vrátila "+res.status);
     }
-    _proxyFunguje=true; const d=await res.json(); return !!d.platca;
+    _proxyFunguje=true;
+    const d=await res.json().catch(()=>null);
+    vysl = (d && (d.stav==="platny" || d.stav==="neplatny"))
+      ? {stav:d.stav, nazov:d.nazov||"", adresa:d.adresa||"", zdroj:d.zdroj||"",
+         paragraf:(d.fs&&d.fs.paragraf)||"", fsAktivny:(d.fs&&d.fs.aktivny!=null)?d.fs.aktivny:null}
+      : nezname((d&&d.dovod)||"register neodpovedal");
   }catch(e){
-    _registerDphDovod="register neodpovedal";
-    console.error("Register DPH:", e);
-    return null;
+    console.error("Overenie IČ DPH:", e);
+    return nezname((e&&e.name==="AbortError") ? "vypršal čas" : "register neodpovedal");
   }
+  // Do pamäte ide len jednoznačná odpoveď.
+  if(vysl.stav!=="neznamy") _icdphCache.set(v, vysl);
+  return vysl;
 }
 // dotiahnutie dokladu z FS eKasa podľa ID (cez proxy) — vráti {suma,dodavatel,...} alebo null
 async function ekasaDotiahni(receiptId){
