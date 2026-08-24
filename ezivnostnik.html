@@ -1173,7 +1173,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.24-HQ";  // úprava v podanom období: nájde aj štvrťrok a súhrnný výkaz, ponúkne druh podania
+const APP_VERZIA = "2026.08.24-HR";  // prerušenie odpisov, ktoré daň nezniža — Prognóza to spočíta a ponúkne
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -2629,8 +2629,156 @@ function deDanovyVypocet(rok, variant){
   const zdanitelny=r2(Math.max(0, Math.max(0,zaklad)-nczd));
   const DZ=danZoZakladu(zdanitelny, rok, rocPrijmy, S);
   const sadzba=DZ.sadzba, dan=DZ.dan;
-  return {...R, pouzitPausal:pausal, progresia:DZ.progresia, rozpisPasiem:DZ.rozpis, zaklad:r2(Math.max(0,zaklad)), zakladRocny, nczd, zdanitelny, sadzba, dan,
+  // `rocPrijmy` sa vracia zámerne: hranicu 100 000 € pre sadzbu testuje táto
+  // funkcia na EXTRAPOLOVANÝCH ročných príjmoch, nie na doterajšej skutočnosti
+  // (`R.prijmy`). Kto si chce dopočítať alternatívny scenár, musí použiť to
+  // isté číslo — inak počíta inými pásmami a výsledok sa dá porovnávať len
+  // zdanlivo. Presne to sa stalo `odpisUsporaDane`: pri príjme za jeden mesiac
+  // vyšla „úspora" záporná, lebo jedna vetva bežala na 15 % a druhá na progresii.
+  return {...R, pouzitPausal:pausal, progresia:DZ.progresia, rozpisPasiem:DZ.rozpis, zaklad:r2(Math.max(0,zaklad)), zakladRocny, rocPrijmy, nczd, zdanitelny, sadzba, dan,
     danAOdvody:r2(dan+R.odvodyRok), cistyPrijem:r2(R.prijmy-(pausal?0:R.vydavkySkutSpolu)-R.odvodyRok-dan)};
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  OPLATÍ SA TENTO ROK ODPISOVAŤ? (§ 22 ods. 9)
+//
+//  Odpis nie je úspora — je to výdavok, ktorý daň zníži LEN VTEDY, keď je
+//  z čoho ju znižovať. Pri základe pod nezdaniteľnou časťou neušetrí nič,
+//  aj keby bol akokoľvek vysoký: základ je aj tak nula. A keďže prerušenie
+//  posunie celý zvyšok plánu o rok ďalej bez straty jediného eura, odpisovať
+//  v takom roku znamená vyhodiť výdavok, ktorý by o rok neskôr daň znížil.
+//
+//  ALFA to rieši zaškrtávatkom, ktoré čaká, kým naň niekto klikne. Appka má
+//  prognózu základu dane, takže si to vie spočítať sama a povedať to.
+// ═══════════════════════════════════════════════════════════════════════════
+function odpisUsporaDane(rok){
+  const S=firmaData.settings||{};
+  let D; try{ D=deDanovyVypocet(rok); }catch(_){ return null; }
+  if(!D || D.pouzitPausal) return null;      // pri paušále sa odpisy neuplatňujú
+  const odpis=r2(odpisRokCelkom(rok));
+  if(odpis<=0) return null;
+  const rocPrijmy=(D.rocPrijmy!=null)?D.rocPrijmy:D.prijmy;
+  // Bez odpisov je základ vyšší — a s ním sa mení aj nezdaniteľná časť, ktorá
+  // sa s rastúcim základom kráti. Preto sa prepočítava, nie preberá.
+  const zakladBez=r2(D.zaklad+odpis);
+  const nczdBez=deVypocetDane(r2(D.zakladRocny+odpis), S, rok, rocPrijmy).nczd;
+  const danBez=r2(danZoZakladu(r2(Math.max(0, zakladBez-nczdBez)), rok, rocPrijmy, S).dan);
+  return {odpis, dan:r2(D.dan), danBez, uspora:r2(danBez-r2(D.dan)), zaklad:D.zaklad, nczd:D.nczd};
+}
+// Majetok, ktorý v danom roku odpisuje (a dá sa teda prerušiť).
+function odpisyKandidatiPrerusenia(rok){
+  return (firmaData.majetok||[]).filter(m=>{
+    if(m.typMajetku==="drobny") return false;
+    if(m.vyradeny && m.vyradeny.datum && +String(m.vyradeny.datum).slice(0,4)<=+rok) return false;
+    if(odpisPreruseneRoky(m).has(+rok)) return false;
+    const r=odpisPlan(m).plan.find(x=>x.rok===+rok);
+    return !!(r && r.odpis>0);
+  });
+}
+function odpisyPreruseneVRoku(rok){
+  return (firmaData.majetok||[]).filter(m=>odpisPreruseneRoky(m).has(+rok));
+}
+function prerusOdpisovanie(rok){
+  if(!strazZapis("majetok")) return;
+  const ciel=odpisyKandidatiPrerusenia(rok);
+  if(!ciel.length){ alert("Za rok "+rok+" nie je čo prerušiť."); return; }
+  const U=odpisUsporaDane(rok);
+  if(!confirm("Prerušiť odpisovanie na celý rok "+rok+"?\n\n"
+    + ciel.map(m=>"• "+(m.nazov||"—")+" — "+eur((odpisPlan(m).plan.find(x=>x.rok===+rok)||{}).odpis||0)).join("\n")
+    + "\n\nO tieto odpisy neprídete: celý zvyšok plánu sa posunie o rok ďalej "
+    + "(§ 22 ods. 9). Prerušiť sa dá len celý rok, nie jeho časť."
+    // Vetu o ušetrenej dani má zmysel písať len vtedy, keď je čo ušetriť.
+    // „Tento rok by vám ušetrili 0,00 €" znie ako chyba výpočtu, nie ako dôvod.
+    + (U && U.uspora>0.5
+        ? "\n\nPOZOR: tento rok by vám daň znížili o "+eur(U.uspora)+" — prerušením o túto úsporu tento rok prídete."
+        : "\n\nTento rok vám daň neznížia, takže prerušením nič nestrácate."))) return;
+  ciel.forEach(m=>{
+    const z=new Set(odpisPreruseneRoky(m)); z.add(+rok);
+    m.prerusene=[...z].sort((a,b)=>a-b);
+  });
+  poZmene();
+  alert("Odpisovanie prerušené v "+ciel.length+(ciel.length===1?" položke":" položkách")+" majetku.\n\nZrušiť sa to dá na karte majetku.");
+  if(typeof appPrognoza==="function" && aktualnaApp==="prognoza") appPrognoza();
+  else if(typeof appMajetok==="function" && aktualnaApp==="majetok") appMajetok();
+}
+function zrusPrerusenie(rok){
+  if(!strazZapis("majetok")) return;
+  const ciel=odpisyPreruseneVRoku(rok);
+  if(!ciel.length) return;
+  ciel.forEach(m=>{
+    m.prerusene=[...odpisPreruseneRoky(m)].filter(r=>r!==+rok).sort((a,b)=>a-b);
+    if(!m.prerusene.length) delete m.prerusene;
+  });
+  poZmene();
+  if(typeof appPrognoza==="function" && aktualnaApp==="prognoza") appPrognoza();
+  else if(typeof appMajetok==="function" && aktualnaApp==="majetok") appMajetok();
+}
+
+// Koľko by sa v tomto roku odpísalo, keby prerušené nebolo — potrebné na to,
+// aby sa dalo povedať, koľko prerušenie stojí, keď už zmysel nedáva.
+function odpisPotencialRoku(rok){
+  return r2(odpisyPreruseneVRoku(rok).reduce((a,m)=>{
+    const bez=Object.assign({}, m, {prerusene:[...odpisPreruseneRoky(m)].filter(r=>r!==+rok)});
+    const r=odpisPlan(bez).plan.find(x=>x.rok===+rok);
+    return a+((r && (r.odpisUplatneny!=null?r.odpisUplatneny:r.odpis))||0);
+  },0));
+}
+// Karta v Prognóze. Kreslí sa LEN vtedy, keď je čo povedať — trvalý prvok,
+// ktorý väčšinou hlási „nič", miesto na 390 px nezaberá.
+function odpisPrerusenieHtml(rok){
+  const S=firmaData.settings||{};
+  const prerusene=odpisyPreruseneVRoku(rok);
+
+  // ── už prerušené ──
+  if(prerusene.length){
+    const posunute=odpisPotencialRoku(rok);
+    const D=(()=>{ try{ return deDanovyVypocet(rok); }catch(_){ return null; } })();
+    const nczd=D?D.nczd:0;
+    const rocPrijmy=D?((D.rocPrijmy!=null)?D.rocPrijmy:D.prijmy):0;
+    // Keby sa obnovilo, koľko by to ušetrilo?
+    let uspora=0;
+    if(D && posunute>0){
+      const danTeraz=r2(D.dan);
+      const danSOdpismi=r2(danZoZakladu(r2(Math.max(0, r2(D.zaklad-posunute)-nczd)), rok, rocPrijmy, S).dan);
+      uspora=r2(danTeraz-danSOdpismi);
+    }
+    return `<div class="card" style="margin-bottom:14px;border-left:3px solid var(--brand)">
+      <div style="font-size:14px;font-weight:700;margin-bottom:4px">⏸ Odpisovanie je v roku ${rok} prerušené</div>
+      <div style="font-size:12.5px;color:var(--ink-soft);line-height:1.6">
+        ${prerusene.length} ${prerusene.length===1?"položka majetku":prerusene.length<5?"položky majetku":"položiek majetku"} ·
+        odpisy <b>${eur(posunute)}</b> sa posunuli na neskôr, nestratili sa.
+        ${uspora>0.5
+          ? `<br><b style="color:var(--accent-deep)">Tento rok by vám už daň znížili o ${eur(uspora)}</b> — základ dane medzitým narástol nad nezdaniteľnú časť. Zvážte obnovenie.`
+          : `<br>Základ dane je aj tak pod nezdaniteľnou časťou, takže obnovenie by tento rok nič neušetrilo.`}
+      </div>
+      <div style="margin-top:9px"><button class="aabtn${uspora>0.5?" pri":""}" style="padding:6px 12px;font-size:12px" onclick="zrusPrerusenie(${rok})"${zam("majetok")}>Obnoviť odpisovanie v roku ${rok}</button></div>
+    </div>`;
+  }
+
+  // ── neprerušené: oplatí sa to vôbec? ──
+  const U=odpisUsporaDane(rok);
+  if(!U) return "";                          // paušál alebo žiadne odpisy
+  if(U.uspora>0.5) return "";                // odpisy robia svoju prácu, netreba nič
+  const kandidati=odpisyKandidatiPrerusenia(rok);
+  if(!kandidati.length) return "";
+  return `<div class="card" style="margin-bottom:14px;border-left:3px solid var(--warn)">
+    <div style="font-size:14px;font-weight:700;margin-bottom:4px">⚠ Odpisy vám tento rok daň neznížia</div>
+    <div style="font-size:12.5px;color:var(--ink-soft);line-height:1.6">
+      Základ dane <b>${eur(U.zaklad)}</b> je pod nezdaniteľnou časťou <b>${eur(U.nczd)}</b>,
+      takže daň vychádza ${eur(U.dan)} s odpismi aj bez nich.
+      Tohtoročné odpisy <b>${eur(U.odpis)}</b> sa tak uplatnia naprázdno.
+      <br>Prerušením ich posuniete do rokov, kde daň naozaj znížia — o žiadne euro
+      neprídete, celý plán sa predĺži o rok (§ 22 ods. 9).
+    </div>
+    <div style="margin-top:9px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <button class="aabtn pri" style="padding:6px 12px;font-size:12px" onclick="prerusOdpisovanie(${rok})"${zam("majetok")}>Prerušiť odpisovanie na rok ${rok}</button>
+      <span style="font-size:11.5px;color:var(--ink-soft)">${kandidati.length} ${kandidati.length===1?"položka":kandidati.length<5?"položky":"položiek"} majetku</span>
+    </div>
+    <div style="font-size:11.5px;color:var(--ink-soft);margin-top:7px;line-height:1.5">
+      Prerušiť sa dá len celý rok, nie jeho časť. Rozhodnutie je vaše — appka ho
+      neurobí sama, lebo mení daňové priznanie.
+    </div>
+  </div>`;
 }
 
 // DPH saldo za rok
@@ -3279,6 +3427,13 @@ function odhadniSkupinu(nazov){
   if(/(nábytok|nabytok|stôl|stol|stolička|skriňa)/.test(n)) return 2;
   return 1;
 }
+// Roky, v ktorých je odpisovanie tohto majetku prerušené. Uložené ako pole
+// rokov na karte majetku — nie ako „od–do", lebo prerušiť sa dá aj nesúvisle
+// (rok vynechám, ďalší odpisujem, prespáť rok zas vynechám).
+function odpisPreruseneRoky(m){
+  const p=(m && m.prerusene) || [];
+  return new Set((Array.isArray(p)?p:[]).map(x=>+x).filter(r=>r>2000 && r<2100));
+}
 function odpisPlan(m){
   const vc=+m.vstupnaCena||0;
   const skupina=(m.odpisovaSkupina!=null)?+m.odpisovaSkupina:1;
@@ -3294,8 +3449,20 @@ function odpisPlan(m){
   const rocnyOdpisLimit=luxusne?r2(ODPIS_LUX_LIMIT/roky):rocnyOdpis;
   const plan=[]; let zostatok=vc, zostatokLimit=luxusne?ODPIS_LUX_LIMIT:vc;
   const mesiacovPrvyRok=12-mesiacZaradenia+1;
+  // § 22 ods. 9 ZDP: odpisovanie sa dá prerušiť, a to len na CELÉ zdaňovacie
+  // obdobie. Po prerušení sa pokračuje tak, akoby k nemu nedošlo — doba
+  // odpisovania sa teda predĺži presne o počet prerušených rokov a žiadna
+  // časť vstupnej ceny sa nestratí. Preto sa krok plánu v prerušenom roku
+  // NEPOSUNIE; rok sa len odloží.
+  const prerus=odpisPreruseneRoky(m);
+  let rok=rokZaradenia;
   for(let i=0;i<=roky;i++){
-    const rok=rokZaradenia+i; let odpis=0,odpisLimit=0;
+    while(prerus.has(rok)){
+      plan.push({rok, odpis:0, odpisLimit:0, odpisUplatneny:0, zostatok,
+                 poradie:null, mesiace:0, prerusene:true});
+      rok++;
+    }
+    let odpis=0,odpisLimit=0;
     if(i===0){ odpis=r2(rocnyOdpis/12*mesiacovPrvyRok); odpisLimit=r2(rocnyOdpisLimit/12*mesiacovPrvyRok); }
     else if(i<roky){ odpis=rocnyOdpis; odpisLimit=rocnyOdpisLimit; }
     else { odpis=r2(rocnyOdpis/12*(mesiacZaradenia-1)); odpisLimit=r2(rocnyOdpisLimit/12*(mesiacZaradenia-1)); }
@@ -3303,6 +3470,7 @@ function odpisPlan(m){
     odpis=Math.min(odpis,r2(zostatok)); odpisLimit=Math.min(odpisLimit,r2(zostatokLimit));
     zostatok=r2(zostatok-odpis); zostatokLimit=r2(zostatokLimit-odpisLimit);
     plan.push({rok,odpis,odpisLimit,odpisUplatneny:r2(odpis*podielDane(m)),zostatok,poradie:i+1,mesiace:i===0?mesiacovPrvyRok:(i<roky?12:(mesiacZaradenia-1))});
+    rok++;
     if(zostatok<=0&&zostatokLimit<=0) break;
   }
   return {rocnyOdpis,mesacnyOdpis,rocnyOdpisLimit,plan,luxusne,roky,skupina,luxLimit:ODPIS_LUX_LIMIT};
@@ -13762,6 +13930,8 @@ function appPrognoza(){
     </div>
 
     ${odvodyPredpovedHtml(rok)}
+
+    ${odpisPrerusenieHtml(rok)}
 
     <div class="card" style="margin-bottom:14px">
       <h2 style="font-size:16px;margin-bottom:4px">Daň po mesiacoch ${rok}</h2>
