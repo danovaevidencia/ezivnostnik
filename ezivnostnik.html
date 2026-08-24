@@ -1173,7 +1173,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.24-HV";  // účet dodávateľa proti registru FS — ručenie za daň podľa § 69 ods. 14
+const APP_VERZIA = "2026.08.24-HW";  // osobitná úprava § 68d — odpočet DPH až po zaplatení
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -5113,6 +5113,112 @@ function citajUcetFS(obj){
   else { delete obj.ucetFS; delete obj.ucetFSdatum; }
   return obj;
 }
+// ── OSOBITNÁ ÚPRAVA § 68d — ODPOČET AŽ PO ZAPLATENÍ ──────────────────────
+// Dodávateľ, ktorý uplatňuje osobitnú úpravu, odvádza daň až keď dostane
+// zaplatené. Odberateľ si ju preto smie odpočítať tiež až po zaplatení, nie
+// dňom dodania. Faktúra to má uvedené slovami „daň sa uplatňuje na základe
+// prijatia platby" — kto to prehliadne, odpočíta si daň o mesiace skôr, než
+// smie, a je to chyba, ktorú nič nezachytí.
+//
+// Register FS má necelú tisícku subjektov, takže sa to týka málokoho. Ale keď
+// áno, mení to obdobie odpočtu — teda číslo v priznaní.
+//
+// Platnosť je od–do: jeden dodávateľ mohol úpravu mať a skončiť s ňou.
+// Rozhoduje sa preto vždy k dátumu dokladu, nie k dnešku.
+function osobitnaKDatumu(icdph, datum){
+  const r=_icdphCache.get(normalizujICDPH(icdph));
+  if(!r || !Array.isArray(r.osobitna)) return null;      // neviem
+  const d=String(datum||"").slice(0,10);
+  if(!d) return null;
+  return r.osobitna.some(o=>{
+    const od=String((o&&o.od)||""), doo=String((o&&o.do)||"");
+    if(od && d<od) return false;
+    if(doo && d>doo) return false;
+    return !!od || !!doo;
+  });
+}
+// Jeden čitateľ pre všetky ukladacie cesty formulára — rovnaký dôvod ako pri
+// účte dodávateľa (kap. 60.2) a pri percente osobného použitia (kap. 53.3).
+function citajOsobitnu(obj){
+  const v=osobitnaKDatumu(val("m_dodIcDph"), obj.datum||val("m_datum"));
+  if(v===true) obj.osobitna68d=true; else delete obj.osobitna68d;
+  return obj;
+}
+// Dátum, kedy bol doklad ÚPLNE zaplatený. Čiastočná úhrada nárok na odpočet
+// zakladá len pomerne — appka to nerobí a hovorí to nahlas (viď dphKontroly).
+function vydavokDatumUplnejUhrady(x){
+  const c=String((x&&x.cislo)||"").trim();
+  if(!c) return "";
+  const celkom=r2(+((x||{}).spolu)||0);
+  if(!celkom) return "";
+  let spolu=0;
+  const pohyby=uhradyDokladuPohyby("vydavok", c);
+  for(const p of pohyby){
+    spolu=r2(spolu+(+p.suma||0)+(+p.zaokr||0));
+    if(spolu>=r2(celkom-0.01)) return String(p.datum||"").slice(0,10);
+  }
+  return "";
+}
+// JEDNO pravidlo, do ktorého obdobia DPH výdavok patrí. Bežne je to mesiac
+// dokladu; pri § 68d mesiac úplnej úhrady a bez úhrady nikam. Volajú ho zber
+// dokladov aj zoznam dostupných období — keby si každý počítal po svojom,
+// doklad by sa objavil v ponuke mesiaca, v ktorom by ho zber nenašiel.
+function vydavokObdobieDPH(x){
+  const zaklad=String((x&&x.datum)||"").slice(0,7);
+  if(!x || !x.osobitna68d) return zaklad;
+  const u=vydavokDatumUplnejUhrady(x);
+  return u ? u.slice(0,7) : "";
+}
+
+// Doklady, ktoré v tomto období NIE SÚ, lebo čakajú na zaplatenie. Práve
+// preto o nich treba povedať — inak by odpočet ticho zmizol a nikto by
+// nevedel prečo.
+function osobitna68dCakajuce(mk){
+  const P=dphParsujObdobie(mk);
+  const posledny=P.mesiace[P.mesiace.length-1];
+  return (firmaData.vydavky||[]).filter(x=>x.osobitna68d
+    && String(x.datum||"").slice(0,7)<=posledny
+    && !vydavokObdobieDPH(x)
+    && r2(+x.dph||0)>0);
+}
+// Doklady, na ktorých sa dá osobitná úprava overiť: platiteľ DPH, slovenské
+// IČ DPH dodávateľa a odpočítaná DPH. Bez toho sa téma netýka.
+function osobitnaKandidati(rok){
+  if(!jePlatcaDPH()) return [];
+  const R=String(rok);
+  return (firmaData.vydavky||[]).filter(x=>
+    String(x.datum||"").slice(0,4)===R
+    && (+x.dph||0)>0
+    && /^SK\d{10}$/.test(normalizujICDPH(x.dodavatelIcDph)));
+}
+async function overOsobitnuUpravu(rok){
+  if(!strazZapis("vydavky")) return;
+  const zoz=osobitnaKandidati(rok);
+  if(!zoz.length){ alert("Niet čo overovať — žiadny doklad tohto roka nemá naraz IČ DPH dodávateľa aj odpočítanú DPH."); return; }
+  const dodavatelia=[...new Set(zoz.map(x=>normalizujICDPH(x.dodavatelIcDph)))];
+  if(!confirm("Overiť "+dodavatelia.length+" dodávateľov v registri osobitnej úpravy (§ 68d)?\n\n"
+    +"Ak niektorý úpravu uplatňuje, DPH z jeho dokladov sa presunie do obdobia úhrady — mení to daňové priznanie.")) return;
+  let neznamych=0;
+  for(const ic of dodavatelia){
+    const r=await overICDPH(ic);
+    if(!Array.isArray(r.osobitna)) neznamych++;
+  }
+  let najdenych=0;
+  zoz.forEach(x=>{
+    const v=osobitnaKDatumu(x.dodavatelIcDph, x.datum);
+    // `null` je „register nevedel" — vtedy sa nemení nič, ani sa nemaže.
+    if(v===true){ x.osobitna68d=true; najdenych++; }
+    else if(v===false) delete x.osobitna68d;
+  });
+  poZmene();
+  alert(najdenych
+    ? "⚠ "+najdenych+" dokladov je od dodávateľa s osobitnou úpravou (§ 68d).\n\n"
+      +"DPH z nich si odpočítate až v období, keď ich zaplatíte. Appka ich do priznania zaradí sama podľa úhrady."
+    : "Žiadny z overených dodávateľov osobitnú úpravu neuplatňuje."
+    + (neznamych?"\n\nPri "+neznamych+" dodávateľoch register neodpovedal — tí ostali neoverení.":""));
+  if(aktualnaApp==="uzavierka") appUzavierka(); else if(aktualnaApp==="dph") appDPH();
+}
+
 // Doklady, na ktorých sa dá účet overiť: platiteľ DPH, slovenské IČ DPH
 // dodávateľa, číslo účtu a odpočítaná DPH. Bez ktoréhokoľvek z toho sa téma
 // používateľa netýka a nález by bol falošný poplach (kap. 16).
@@ -5216,6 +5322,12 @@ function skontrolujICDPHpole(inp){
                        : " · overené v registri"+(r.zdroj==="vies"?" EÚ":""));
       stav.style.color = inyParagraf ? "var(--warn,#b26a00)" : "var(--pos,#1a8a4a)";
       if(inyParagraf) inp.style.borderColor="var(--warn,#b26a00)";
+      // Osobitná úprava sa viaže na dátum dokladu, nie na dnešok — dodávateľ
+      // ju mohol mať a skončiť s ňou.
+      if(osobitnaKDatumu(v, val("m_datum"))===true){
+        stav.innerHTML+="<br>⚠ <b>uplatňuje osobitnú úpravu (§ 68d)</b> — DPH si odpočítate až v období, keď doklad zaplatíte.";
+        stav.style.color="var(--warn,#b26a00)";
+      }
     } else if(r.stav==="neplatny"){
       zle("⚠ tvar sedí, ale v registri EÚ sa toto IČ DPH nenašlo (over doklad)");
     } else {
@@ -7319,7 +7431,10 @@ async function overICDPH(icdph){
     const d=await res.json().catch(()=>null);
     vysl = (d && (d.stav==="platny" || d.stav==="neplatny"))
       ? {stav:d.stav, nazov:d.nazov||"", adresa:d.adresa||"", zdroj:d.zdroj||"",
-         paragraf:(d.fs&&d.fs.paragraf)||"", fsAktivny:(d.fs&&d.fs.aktivny!=null)?d.fs.aktivny:null}
+         paragraf:(d.fs&&d.fs.paragraf)||"", fsAktivny:(d.fs&&d.fs.aktivny!=null)?d.fs.aktivny:null,
+         // pole období, v ktorých dodávateľ uplatňoval § 68d; chýbajúce pole
+         // znamená „register nevedel", prázdne pole „neuplatňuje"
+         osobitna:Array.isArray(d.osobitna)?d.osobitna:null}
       : nezname((d&&d.dovod)||"register neodpovedal");
   }catch(e){
     console.error("Overenie IČ DPH:", e);
@@ -7729,6 +7844,7 @@ function vydavokDoplnkovePolia(obj){
   if(op && op.checked){ obj.opakovanie={perioda:val("m_perioda")||"mesacne"}; }
   citajPodnikPct(obj);
   citajUcetFS(obj);
+  citajOsobitnu(obj);
   return obj;
 }
 
@@ -8051,6 +8167,7 @@ function editVydavok(idx){
       // Dopĺňa výhradne prázdne polia, takže ručne zadané prepísať nemôže.
       citajPodnikPct(obj);
       citajUcetFS(obj);
+      citajOsobitnu(obj);
       d.vydavky.push(obj);
       zapamatajPartnera(obj);
     } else {
@@ -8058,6 +8175,7 @@ function editVydavok(idx){
       obj.id=d.vydavky[idx].id;
       citajPodnikPct(obj);
       citajUcetFS(obj);
+      citajOsobitnu(obj);
       if(obj.podnikPct==null) delete d.vydavky[idx].podnikPct;   // Object.assign staré pole neodstráni
       d.vydavky[idx]=Object.assign(d.vydavky[idx],obj);
       zapamatajPartnera(d.vydavky[idx]);
@@ -17188,7 +17306,7 @@ function dphZberMesiac(mk){
       plnenie:druhPlnenia(f), opravujeDoklad:f.opravujeDoklad||"", tovar:a2Tovar(f)});
   });
   // výdavky → B1/B2/B31/C2 (vstup), vrátane zahraničných bez DPH (samozdanenie)
-  (d.vydavky||[]).filter(x=>String(x.datum||"").slice(0,7)===mk).forEach((x,i)=>{
+  (d.vydavky||[]).filter(x=>vydavokObdobieDPH(x)===mk).forEach((x,i)=>{
     const oddiel=dphOddielVydavok(x);
     // Doklad s prenosom daňovej povinnosti môže mať popri ňom aj bežne zdanené
     // položky (KROS: 195,50 prenos + 64,25 s 23 % + 24,48 s 19 %). Vtedy sa oddiel
@@ -17403,7 +17521,7 @@ function dphNastavObdobieTyp(v){
 function dphDostupneObdobia(){
   const set=new Set();
   (firmaData.faktury||[]).forEach(f=>{const d=faktObdobie(f); if(/^\d{4}-\d{2}$/.test(d))set.add(d);});
-  (firmaData.vydavky||[]).forEach(x=>{const d=String(x.datum||"").slice(0,7); if(/^\d{4}-\d{2}$/.test(d))set.add(d);});
+  (firmaData.vydavky||[]).forEach(x=>{const d=vydavokObdobieDPH(x); if(/^\d{4}-\d{2}$/.test(d))set.add(d);});
   const mes=[...set].sort().reverse();
   if(!dphJeStvrtrocny()) return mes;
   const qs=new Set(mes.map(mk=>{const [r,m]=mk.split("-").map(Number); return r+"-Q"+(Math.floor((m-1)/3)+1);}));
@@ -17547,6 +17665,19 @@ function dphVykazHtml(rok){
   // je to nález o doklade, ktorý TAM NIE JE. Kontrola je mesačná — pri
   // štvrťroku beží pre každý z troch mesiacov.
   P.mesiace.forEach(m=>{ const s=saasMedzera(m); if(s) kontroly.push({typ:"warn", text:s}); });
+  // Ten istý prípad: doklad od dodávateľa s osobitnou úpravou (§ 68d), ktorý
+  // ešte nie je zaplatený, v tomto období NIE JE — a práve preto o ňom treba
+  // povedať nahlas.
+  try{
+    const caka=osobitna68dCakajuce(mk);
+    if(caka.length){
+      const dph=r2(caka.reduce((a,x)=>a+(+x.dph||0),0));
+      kontroly.push({typ:"warn", text:caka.length+" dokladov od dodávateľov s osobitnou úpravou (§ 68d) nie je zaplatených — "
+        +"DPH "+eur(dph)+" si odpočítate až v období úhrady, nie teraz. "
+        +"Doklady: "+caka.slice(0,5).map(x=>x.cislo||x.partner||"—").join(", ")+(caka.length>5?" a ďalšie":"")+". "
+        +"Pri čiastočnej úhrade zákon dovoľuje pomerný odpočet — appka ho nerozdeľuje a čaká na úplné zaplatenie."});
+    }
+  }catch(e){ console.error("osobitná úprava:", e); }
   const nazovObd=P.nazov;
   // sumár oddielov
   const oddielSum={};
@@ -18240,6 +18371,29 @@ function rocnaKontrola(rok){
           [], {l:"Overiť účty dodávateľov", fn:"overUctyDodavatelov("+R+")"});
     }
   }catch(e){ zlyhalo("účty dodávateľov", e); }
+
+  // ── 7c. Osobitná úprava dodávateľa (§ 68d) ──
+  // Odpočet DPH až po zaplatení. Register má necelú tisícku subjektov, takže
+  // sa to týka málokoho — ale koho áno, tomu to mení obdobie odpočtu.
+  try{
+    const kand=osobitnaKandidati(rok);
+    const najdene=kand.filter(x=>x.osobitna68d);
+    if(najdene.length){
+      const caka=najdene.filter(x=>!vydavokObdobieDPH(x));
+      if(caka.length)
+        pridaj("pozor","osobitnaCaka", caka.length+" dokladov čaká na zaplatenie, kým sa dá odpočítať DPH",
+          "Dodávateľ uplatňuje osobitnú úpravu podľa § 68d — daň odvádza až keď dostane zaplatené, "+
+          "takže vy si ju smiete odpočítať tiež až po úhrade. Appka ich do priznania zaradí sama podľa dátumu úhrady. "+
+          "Pri čiastočnej úhrade zákon dovoľuje pomerný odpočet; appka ho nerozdeľuje a čaká na úplné zaplatenie.",
+          caka.slice(0,8).map(x=>(x.cislo||x.partner||"—")+" · DPH "+eur(+x.dph||0)));
+    } else if(kand.length && !kand.some(x=>x.osobitna68d!==undefined))
+      pridaj("pozor","osobitnaNeoverena", "Dodávatelia nie sú overení v registri osobitnej úpravy",
+        "Kto uplatňuje osobitnú úpravu podľa § 68d, odvádza daň až pri prijatí platby — a vy si ju smiete "+
+        "odpočítať tiež až po zaplatení, nie dňom dodania. Faktúra to má uvedené slovami „daň sa uplatňuje "+
+        "na základe prijatia platby“, ale prehliadnuť sa to dá ľahko. Register má necelú tisícku subjektov, "+
+        "takže väčšine ľudí kontrola nič nenájde — a to je dobrá správa, nie stratený čas.",
+        [], {l:"Overiť dodávateľov", fn:"overOsobitnuUpravu("+R+")"});
+  }catch(e){ zlyhalo("osobitná úprava", e); }
 
   // ── 8. Pohľadávky po splatnosti dlhšie ako rok ──
   const rokDozadu=new Date(Date.now()-365*86400000).toISOString().slice(0,10);
