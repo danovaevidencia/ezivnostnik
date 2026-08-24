@@ -1173,7 +1173,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.24-HP";  // overenie platiteľa DPH už zlyhanie registra nezahadzuje
+const APP_VERZIA = "2026.08.24-HQ";  // úprava v podanom období: nájde aj štvrťrok a súhrnný výkaz, ponúkne druh podania
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -17043,7 +17043,7 @@ function dphVykazHtml(rok){
         return `<div style="flex-basis:100%;background:${zm?'var(--sfc-warn)':'var(--sfc-pos)'};border-left:3px solid ${zm?'var(--warn)':'var(--pos)'};
           border-radius:0 9px 9px 0;padding:9px 12px;font-size:12.5px;line-height:1.55;margin-bottom:4px">
           ${zm
-            ? `⚠ <b>Doklady sa od posledného exportu (${kedy}) zmenili.</b> Vygenerujte výkaz aj priznanie znova a podajte ich ako <b>${(dphDniDoTerminu(mk)??0)<0?"dodatočné":"opravné"}</b>.`
+            ? `⚠ <b>Doklady sa od posledného exportu (${kedy}) zmenili.</b> Vygenerujte výkaz aj priznanie znova a podajte ich ako <b>${dphNavrhDruhu(mk)==="D"?"dodatočné":"opravné"}</b>.`+dphPrepniDruhHtml(mk, dphDruhPodania(mk), "dphNastavDruh")
             : `✓ Export za toto obdobie bol vytvorený ${kedy}. Doklady sa odvtedy nezmenili.`}
         </div>`; })()}
       <span style="font-size:12.5px;color:var(--ink-soft);align-self:center">Druh podania:</span>
@@ -17177,6 +17177,23 @@ function kontrolaPredPodanim(mk, typ){
       text:`${doEu.length} ${doEu.length===1?"faktúra do EÚ":"faktúry do EÚ"} v hodnote ${eur(spolu)} — treba podať aj súhrnný výkaz.`,
       detail:"Nájdete ho v záložke „Súhrnný výkaz“ vedľa tejto. Podáva sa do 25 dní po skončení obdobia, rovnako ako kontrolný výkaz."
     });
+  }
+
+  // Riadne podanie za obdobie, za ktoré už XML vzniklo, pôvodné NENAHRADÍ —
+  // portál ho prijme ako ďalšie riadne. Appka ale nevie, či sa to prvé aj
+  // podalo (stiahnutie súboru nie je podanie), preto sa pýta, netvrdí.
+  {
+    const ex=dphExportInfo(mk);
+    if(ex && dphDruhPodania(mk)==="R"){
+      const kedyEx=new Date(ex.kv||ex.dp).toLocaleDateString("sk-SK");
+      const n=dphNavrhDruhu(mk);
+      podozrenia.push({
+        text:`Za toto obdobie ste už XML generovali (${kedyEx}), druh je stále „riadny".`,
+        detail:"Ak ste podanie aj odoslali, oprava musí ísť ako "
+          + (n==="D" ? "dodatočná — uvádzajú sa v nej len rozdiely oproti podanému."
+                     : "opravná — nahradí pôvodné podanie celé.")
+          + " Ak ste súbor len stiahli a neodoslali, riadny je správne. Druh prepnete pri tlačidlách na generovanie."});
+    }
   }
 
   const VIEME_ZAPISAT=["A1","A2","B1","B2","B31","C1","C2","D2"];
@@ -18316,25 +18333,53 @@ function odomkniMesiac(mk){
 
 // Upozorní, ak dátum dokladu spadá do obdobia, za ktoré už bol vytvorený export.
 // Vracia true = pokračovať, false = používateľ zrušil.
-function overDopadNaPodanie(datum, akcia){
+// ── KTORÉ PODANIA SA DOTÝKAJÚ DOKLADU S TÝMTO DÁTUMOM ─────────────────────
+// Jeden doklad môže spadať do TROCH rôznych podaní s rôznymi obdobiami:
+// kontrolný výkaz a priznanie k DPH (mesiac alebo štvrťrok podľa registrácie)
+// a súhrnný výkaz (§ 80 — vlastné obdobie, nezávislé od zdaňovacieho).
+// Kontrola sa preto pozerá na mesačný AJ štvrťročný kľúč v oboch priečinkoch.
+// Kým hľadala len pod mesiacom, štvrťročnému platiteľovi nepovedala nič —
+// jeho export leží pod „2026-Q1" a mesiac „2026-02" je prázdny.
+function podaniaZaObdobie(datum){
   const mk=String(datum||"").slice(0,7);
-  if(!/^\d{4}-\d{2}$/.test(mk)) return true;
-  const e=dphExportInfo(mk);
-  if(!e || (!e.kv && !e.dp)) return true;          // za obdobie sa ešte nič negenerovalo
+  if(!/^\d{4}-\d{2}$/.test(mk)) return [];
+  const [r,m]=mk.split("-").map(Number);
+  const kody=[mk, r+"-Q"+(Math.floor((m-1)/3)+1)];
+  const out=[];
+  kody.forEach(kod=>{
+    const eD=(((firmaData.dph||{})[kod])||{}).export;
+    if(eD && eD.kv) out.push({typ:"kv", kod, nazov:"kontrolný výkaz", kedy:eD.kv});
+    if(eD && eD.dp) out.push({typ:"dp", kod, nazov:"priznanie k DPH", kedy:eD.dp});
+    const eS=(((firmaData.sv||{})[kod])||{}).export;
+    if(eS && eS.sv) out.push({typ:"sv", kod, nazov:"súhrnný výkaz", kedy:eS.sv});
+  });
+  return out;
+}
+function overDopadNaPodanie(datum, akcia){
+  const dotknute=podaniaZaObdobie(datum);
+  if(!dotknute.length) return true;               // za obdobie sa ešte nič negenerovalo
 
-  const kedy=new Date(e.kv||e.dp).toLocaleDateString("sk-SK");
-  const dni=dphDniDoTerminu(mk);
-  const poLehote = dni!==null && dni<0;
-  const [r,m]=mk.split("-");
-  const obdobie=(MES_SK[+m-1]||m)+" "+r;
+  const den=k=>{ try{ return new Date(k).toLocaleDateString("sk-SK"); }catch(_){ return ""; } };
+  const zoznam=dotknute.map(p=>{
+    const P=dphParsujObdobie(p.kod);
+    return "  · "+p.nazov+" — "+P.nazov+(p.kedy?" (vygenerované "+den(p.kedy)+")":"");
+  }).join("\n");
+
+  // Lehota sa počíta pre KAŽDÉ dotknuté obdobie zvlášť: mesačný kontrolný výkaz
+  // môže byť po lehote, kým štvrťročný súhrnný výkaz ešte nie.
+  const poLehote=dotknute.some(p=>{ const d=dphDniDoTerminu(p.kod); return d!==null && d<0; });
+  const vLehote =dotknute.some(p=>{ const d=dphDniDoTerminu(p.kod); return d!==null && d>=0; });
+  const rada = poLehote && vLehote
+    ? "Časť z nich je po lehote (25.) a časť ešte nie — opravu treba podať ako DODATOČNÚ tam, kde lehota uplynula, a ako OPRAVNÚ tam, kde ešte beží."
+    : (poLehote
+      ? "Lehota (25.) už uplynula → opravu treba podať ako DODATOČNÚ, kde sa uvádzajú len rozdiely."
+      : "Lehota (25.) ešte neuplynula → stačí vygenerovať znova a podať ako OPRAVNÚ; pôvodné podanie sa tým nahradí celé.");
 
   return confirm(
-    "⚠ Za obdobie "+obdobie+" už bol vytvorený export pre Finančnú správu ("+kedy+").\n\n"+
-    (akcia||"Táto zmena")+" ovplyvní údaje, ktoré ste podali alebo sa chystáte podať.\n\n"+
-    (poLehote
-      ? "Lehota (25.) už uplynula → opravu bude treba podať ako DODATOČNÝ výkaz a priznanie, kde sa uvádzajú len rozdiely."
-      : "Lehota (25.) ešte neuplynula → stačí vygenerovať znova a podať ako OPRAVNÝ výkaz a priznanie, ktoré pôvodné nahradia.")+
-    "\n\nPokračovať v úprave?"
+    "⚠ Za toto obdobie ste už generovali podanie pre Finančnú správu.\n\n"+
+    "Dotknuté:\n"+zoznam+"\n\n"+
+    (akcia||"Táto zmena")+" ich zmení.\n\n"+rada+
+    "\n\nAppka vám druh podania ponúkne prepnúť v module DPH.\n\nPokračovať v úprave?"
   );
 }
 
@@ -18586,6 +18631,20 @@ function dphNastavDruh(mk, druh){
   poZmene(); appDPH();
 }
 function dphDruhNazov(d){ return d==="O" ? "opravný" : (d==="D" ? "dodatočný" : "riadny"); }
+
+// ── DRUH PODANIA, KTORÝ SITUÁCIA VYŽADUJE ─────────────────────────────────
+// Do lehoty (25.) sa oprava podáva ako OPRAVNÁ a nahradí pôvodné podanie celé.
+// Po lehote ako DODATOČNÁ, kde sa uvádzajú len rozdiely.
+function dphNavrhDruhu(kod){ return (dphDniDoTerminu(kod) ?? 0) < 0 ? "D" : "O"; }
+// Appka druh NENASTAVÍ sama: mení to, čo sa vygeneruje a odošle štátu, a to
+// je rozhodnutie človeka. Ponúkne ho ale jedným ťuknutím priamo pri náleze —
+// rada „prepnite si to inde" je cesta, ktorá vedie preč od miesta nálezu.
+function dphPrepniDruhHtml(kod, aktualny, nastavFn){
+  const n=dphNavrhDruhu(kod);
+  if(aktualny===n) return "";
+  return `<div style="margin-top:8px"><button class="aabtn pri" style="padding:5px 11px;font-size:12px"
+    onclick="${esc(nastavFn)}('${esc(kod)}','${n}')"${zam("dph")}>Prepnúť na ${n==="D"?"dodatočné":"opravné"} podanie</button></div>`;
+}
 
 // termín podania = 25. deň mesiaca nasledujúceho po období
 function dphTermin(mk){
@@ -19062,6 +19121,18 @@ function svKontrola(kod){
       detail:"Údaje sa v súhrnnom výkaze uvádzajú v celých eurách (§ 80 ods. 5). Riadok sa vykáže s nulou."});
   });
 
+  {
+    const ex=svExportInfo(kod);
+    if(ex && svDruhPodania(kod)==="R"){
+      const n=dphNavrhDruhu(kod);
+      podozrenia.push({
+        text:`Za toto obdobie ste už výkaz generovali (${new Date(ex.sv).toLocaleDateString("sk-SK")}), druh je stále „riadny".`,
+        detail:"Ak ste ho aj odoslali, oprava musí ísť ako "
+          + (n==="D" ? "dodatočná." : "opravná — nahradí pôvodný výkaz celý.")
+          + " Ak ste súbor len stiahli a neodoslali, riadny je správne."});
+    }
+  }
+
   // Voľba štvrťročného podávania platí len do limitu. Nález sa ukáže len vtedy,
   // keď appka na dátach naozaj vidí prekročenie — nie ako trvalé poučenie.
   if(svJeStvrtrocny()){
@@ -19191,7 +19262,7 @@ function svVykazHtml(){
         const zm=svZmeneneOdExportu(kod);
         return `<div style="flex-basis:100%;background:${zm?'var(--sfc-warn)':'var(--sfc-pos)'};border-left:3px solid ${zm?'var(--warn)':'var(--pos)'};
           border-radius:0 9px 9px 0;padding:9px 12px;font-size:12.5px;line-height:1.55;margin-bottom:4px">
-          ${zm ? `⚠ <b>Doklady sa od posledného exportu (${kedy}) zmenili.</b> Vygenerujte výkaz znova a podajte ho ako <b>${dniDo<0?"dodatočný":"opravný"}</b>.`
+          ${zm ? `⚠ <b>Doklady sa od posledného exportu (${kedy}) zmenili.</b> Vygenerujte výkaz znova a podajte ho ako <b>${dniDo<0?"dodatočný":"opravný"}</b>.`+dphPrepniDruhHtml(kod, svDruhPodania(kod), "svNastavDruh")
                 : `✓ Export za toto obdobie bol vytvorený ${kedy}. Doklady sa odvtedy nezmenili.`}
         </div>`; })()}
       <span style="font-size:12.5px;color:var(--ink-soft);align-self:center">Druh podania:</span>
