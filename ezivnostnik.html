@@ -1173,7 +1173,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.24-HR";  // prerušenie odpisov, ktoré daň nezniža — Prognóza to spočíta a ponúkne
+const APP_VERZIA = "2026.08.24-HS";  // technické zhodnotenie majetku a preradenie z osobného užívania
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -3434,20 +3434,64 @@ function odpisPreruseneRoky(m){
   const p=(m && m.prerusene) || [];
   return new Set((Array.isArray(p)?p:[]).map(x=>+x).filter(r=>r>2000 && r<2100));
 }
+// ── TECHNICKÉ ZHODNOTENIE (§ 29 ZDP) ──
+// Nadstavba, prístavba, rekonštrukcia alebo modernizácia už zaradeného majetku.
+// Ak v úhrne za rok presiahne hranicu (1 700 €) na jednom majetku, do výdavkov
+// naraz ísť NESMIE — zvyšuje vstupnú cenu a odpisuje sa spolu s majetkom. Pod
+// hranicou je to voľba (§ 29 ods. 2); väčšine ľudí sa oplatí výdavok hneď,
+// preto sa na kartu majetku zapisuje len to, čo sa naozaj kapitalizovalo.
+// Pri rovnomernom odpisovaní (§ 27 ods. 2) sa od roku zhodnotenia počíta ročný
+// odpis zo ZVÝŠENEJ vstupnej ceny delenej pôvodnou dobou odpisovania. Odpisuje
+// sa teda dlhšie než pôvodný horizont — kým sa zvýšená cena nevyčerpá.
+function tzHranicaRoku(rok){
+  return sadzbaRoka("tzHranica", rok||new Date().getFullYear()) || HM_HRANICA;
+}
+function tzZoznam(m){
+  const t=(m&&m.tz)||[];
+  return (Array.isArray(t)?t:[]).filter(x=>(+x.suma||0)>0);
+}
+function tzRokPolozky(t){ return +String((t&&t.rok)||String((t&&t.datum)||"").slice(0,4))||0; }
+function tzSumaRoku(m, rok){ return r2(tzZoznam(m).filter(t=>tzRokPolozky(t)===+rok).reduce((a,t)=>a+(+t.suma||0),0)); }
+function tzDoRoku(m, rok){ return r2(tzZoznam(m).filter(t=>tzRokPolozky(t)<=+rok).reduce((a,t)=>a+(+t.suma||0),0)); }
+function tzCelkom(m){ return r2(tzZoznam(m).reduce((a,t)=>a+(+t.suma||0),0)); }
+// Jedno miesto, kde sa rozhoduje „zvyšuje cenu / nezvyšuje" — pýta sa naň
+// formulár pri majetku aj ročná kontrola nad výdavkami.
+function tzMusiZvysitCenu(suma, rok){ return r2(+suma||0) > tzHranicaRoku(rok); }
+
+// ── PRERADENIE Z OSOBNÉHO UŽÍVANIA (§ 24 ods. 5 ZDP) ──
+// Vec kúpená súkromne a až neskôr vložená do podnikania sa odpisuje „ako
+// v ďalších rokoch odpisovania": doba odpisovania beží od nadobudnutia, nie od
+// zaradenia. Roky, keď bola vec súkromná, sa teda počítajú a odpis za ne si už
+// nikto neuplatní. Appka ich v pláne ukáže — inak by nebolo vidieť, kam sa
+// časť vstupnej ceny podela.
+function preradenieDatum(m){
+  const p=String((m&&m.povodneNadobudnutie)||"").slice(0,10);
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(p)) return "";
+  const z=String((m&&m.datumZaradenia)||"").slice(0,10);
+  if(z && p>=z) return "";      // nadobudnutie po zaradení nie je preradenie
+  return p;
+}
 function odpisPlan(m){
   const vc=+m.vstupnaCena||0;
   const skupina=(m.odpisovaSkupina!=null)?+m.odpisovaSkupina:1;
   const roky=(m.dobaOdpisu!=null&&+m.dobaOdpisu>0)?+m.dobaOdpisu:(ODPIS_SKUPINY[skupina]?ODPIS_SKUPINY[skupina].roky:4);
-  const datum=m.datumZaradenia||"";
+  // Plán beží od nadobudnutia. Pri bežnom majetku je to to isté ako zaradenie;
+  // pri preradení z osobného užívania je to skorší dátum kúpy.
+  const preradene=preradenieDatum(m);
+  const datum=preradene||m.datumZaradenia||"";
   const rokZaradenia=+String(datum).slice(0,4)||new Date().getFullYear();
   const mesiacZaradenia=+String(datum).slice(5,7)||1;
-  if(!vc||!roky) return {rocnyOdpis:0,plan:[],luxusne:false};
+  const rokDoPodnikania=preradene?(+String(m.datumZaradenia||"").slice(0,4)||rokZaradenia):rokZaradenia;
+  const tzSpolu=tzCelkom(m);
+  const vstupnaCenaCelkom=r2(vc+tzSpolu);
+  if(!vc||!roky) return {rocnyOdpis:0,plan:[],luxusne:false,tzSpolu:0,vstupnaCenaCelkom:vc};
   const rocnyOdpis=r2(vc/roky);
   const mesacnyOdpis=r2(rocnyOdpis/12);
   const jeAuto=skupina===0||skupina===1;
-  const luxusne=jeAuto&&vc>ODPIS_LUX_LIMIT;
+  const luxusne=jeAuto&&vstupnaCenaCelkom>ODPIS_LUX_LIMIT;
   const rocnyOdpisLimit=luxusne?r2(ODPIS_LUX_LIMIT/roky):rocnyOdpis;
-  const plan=[]; let zostatok=vc, zostatokLimit=luxusne?ODPIS_LUX_LIMIT:vc;
+  const plan=[];
+  let uplatnene=0, uplatneneLimit=0, zostatok=vc;
   const mesiacovPrvyRok=12-mesiacZaradenia+1;
   // § 22 ods. 9 ZDP: odpisovanie sa dá prerušiť, a to len na CELÉ zdaňovacie
   // obdobie. Po prerušení sa pokračuje tak, akoby k nemu nedošlo — doba
@@ -3456,24 +3500,51 @@ function odpisPlan(m){
   // NEPOSUNIE; rok sa len odloží.
   const prerus=odpisPreruseneRoky(m);
   let rok=rokZaradenia;
-  for(let i=0;i<=roky;i++){
+  const maxKrokov=roky*2+12;    // poistka: technické zhodnotenie plán predlžuje
+  for(let i=0;i<=roky||zostatok>0.5;i++){
+    if(i>maxKrokov) break;
     while(prerus.has(rok)){
+      zostatok=r2(r2(vc+tzDoRoku(m,rok))-uplatnene);
       plan.push({rok, odpis:0, odpisLimit:0, odpisUplatneny:0, zostatok,
                  poradie:null, mesiace:0, prerusene:true});
       rok++;
     }
+    // Vstupná cena roku: pôvodná + technické zhodnotenia dokončené do tohto
+    // roka vrátane. Bez zhodnotenia je to po celý čas to isté číslo.
+    const vcRok=r2(vc+tzDoRoku(m,rok));
+    const rocnyOdpisRok=r2(vcRok/roky);
+    const limitRok=luxusne?rocnyOdpisLimit:rocnyOdpisRok;
+    const zvysok=r2(vcRok-uplatnene);
+    const zvysokLimit=r2((luxusne?ODPIS_LUX_LIMIT:vcRok)-uplatneneLimit);
     let odpis=0,odpisLimit=0;
-    if(i===0){ odpis=r2(rocnyOdpis/12*mesiacovPrvyRok); odpisLimit=r2(rocnyOdpisLimit/12*mesiacovPrvyRok); }
-    else if(i<roky){ odpis=rocnyOdpis; odpisLimit=rocnyOdpisLimit; }
-    else { odpis=r2(rocnyOdpis/12*(mesiacZaradenia-1)); odpisLimit=r2(rocnyOdpisLimit/12*(mesiacZaradenia-1)); }
-    if(odpis<=0&&i>=roky) break;
-    odpis=Math.min(odpis,r2(zostatok)); odpisLimit=Math.min(odpisLimit,r2(zostatokLimit));
-    zostatok=r2(zostatok-odpis); zostatokLimit=r2(zostatokLimit-odpisLimit);
-    plan.push({rok,odpis,odpisLimit,odpisUplatneny:r2(odpis*podielDane(m)),zostatok,poradie:i+1,mesiace:i===0?mesiacovPrvyRok:(i<roky?12:(mesiacZaradenia-1))});
+    if(i===0){ odpis=r2(rocnyOdpisRok/12*mesiacovPrvyRok); odpisLimit=r2(limitRok/12*mesiacovPrvyRok); }
+    else if(i<roky){ odpis=rocnyOdpisRok; odpisLimit=limitRok; }
+    else if(i===roky){ odpis=r2(rocnyOdpisRok/12*(mesiacZaradenia-1)); odpisLimit=r2(limitRok/12*(mesiacZaradenia-1)); }
+    else { odpis=rocnyOdpisRok; odpisLimit=limitRok; }
+    if(odpis<=0&&i>=roky){
+      // Po uplynutí doby odpisovania môže zvyšok ostať len zo zhodnotenia.
+      // Doťahovací rok pri zaradení v januári vyjde nula — rok sa NEPOSUNIE,
+      // len sa naň v ďalšom kroku použije celý ročný odpis.
+      if(zvysok>0.5&&i<maxKrokov){ zostatok=zvysok; continue; }
+      break;
+    }
+    odpis=Math.min(odpis,zvysok); odpisLimit=Math.min(odpisLimit,zvysokLimit);
+    uplatnene=r2(uplatnene+odpis); uplatneneLimit=r2(uplatneneLimit+odpisLimit);
+    zostatok=r2(vcRok-uplatnene);
+    // Rok pred vložením veci do podnikania: odpis v pláne beží, ale do
+    // výdavkov sa nedostane nič — preto odpisUplatneny 0, nie krátený odpis.
+    const predZaradenim=rok<rokDoPodnikania;
+    plan.push({rok,odpis,odpisLimit,
+      odpisUplatneny:predZaradenim?0:r2(odpis*podielDane(m)),
+      zostatok, poradie:i+1, predZaradenim,
+      mesiace:i===0?mesiacovPrvyRok:(i<roky?12:(i===roky?(mesiacZaradenia-1):12))});
     rok++;
-    if(zostatok<=0&&zostatokLimit<=0) break;
+    if(zostatok<=0&&r2((luxusne?ODPIS_LUX_LIMIT:vcRok)-uplatneneLimit)<=0) break;
   }
-  return {rocnyOdpis,mesacnyOdpis,rocnyOdpisLimit,plan,luxusne,roky,skupina,luxLimit:ODPIS_LUX_LIMIT};
+  return {rocnyOdpis,mesacnyOdpis,rocnyOdpisLimit,plan,luxusne,roky,skupina,luxLimit:ODPIS_LUX_LIMIT,
+          tzSpolu, vstupnaCenaCelkom, rocnyOdpisTz:r2(vstupnaCenaCelkom/roky),
+          preradene, rokDoPodnikania,
+          stratenePredZaradenim:r2(plan.filter(p=>p.predZaradenim).reduce((a,p)=>a+p.odpis,0))};
 }
 // ═══════════════════════════════════════════════════════════════
 //  VYRADENIE MAJETKU — daňový dopad (G1)
@@ -3570,7 +3641,9 @@ function odpisRokCelkom(rok){
 function zostatkovaCena(m, datumVyradenia){
   const pl=odpisPlan(m);
   const rokVyradenia=+String(datumVyradenia||"").slice(0,4)||new Date().getFullYear();
-  const vc=+m.vstupnaCena||0;
+  // Technické zhodnotenie zvyšuje vstupnú cenu — do zostatkovej ceny sa
+  // počíta to, čo bolo dokončené do roku vyradenia vrátane.
+  const vc=r2((+m.vstupnaCena||0)+tzDoRoku(m, rokVyradenia));
   const uplatnene=pl.plan.filter(r=>r.rok<rokVyradenia).reduce((a,r)=>a+r.odpis,0);
   const zc=r2(Math.max(0, vc-uplatnene));
   const poslednyRok=pl.plan.length?pl.plan[pl.plan.length-1].rok:rokVyradenia;
@@ -3599,7 +3672,21 @@ function vydavokDoMajetku(idx){
   const cena=+vyd.bez||0;
   const jeDrobny=cena>0&&cena<HM_HRANICA;
   const skupina=odhadniSkupinu(vyd.popis||vyd.partner);
+  const rokV=+String(vyd.datum||"").slice(0,4)||new Date().getFullYear();
+  // Rekonštrukcia či modernizácia už zaradenej veci NIE JE nový majetok —
+  // zvyšuje cenu toho existujúceho (§ 29). Ponúknuť sa preto dá len majetok,
+  // ktorý sa odpisuje, nie je vyradený a v čase dokladu už bol zaradený.
+  const ciele=(firmaData.majetok||[]).filter(m=>m.typMajetku!=="drobny"
+      && !(m.vyradeny&&m.vyradeny.datum)
+      && String(m.datumZaradenia||"")<=String(vyd.datum||"9999"));
   openModal("Zaradiť do majetku", `
+    ${ciele.length?`<div class="mfield"><label>Čo s týmto výdavkom</label>
+      <select id="m_ciel" onchange="mZaradenieForma(${idx})">
+        <option value="">Je to nový majetok</option>
+        ${ciele.map(m=>`<option value="${esc(m.id)}">Zhodnotenie majetku — ${esc(m.nazov||"—")}</option>`).join("")}
+      </select></div>`:""}
+    <div id="zarTZ" style="display:none"></div>
+    <div id="zarNovy">
     <div style="background:${jeDrobny?'var(--brand-lite)':'var(--sfc-warn)'};color:${jeDrobny?'var(--brand-deep)':'var(--accent-deep)'};font-size:12.5px;padding:10px 13px;border-radius:9px;margin-bottom:14px">
       ${jeDrobny
         ? `Cena ${eur(cena)} je do ${eur(HM_HRANICA)} — <b>drobný majetok</b>. Môže ostať vo výdavkoch jednorazovo (zníži daň hneď) + vediete ho v evidencii.`
@@ -3617,7 +3704,24 @@ function vydavokDoMajetku(idx){
       <option value="odpisovany" ${!jeDrobny?'selected':''}>Odpisovaný (vyňať z výdavkov, nahradiť odpisom)</option>
       <option value="drobny" ${jeDrobny?'selected':''}>Drobný (ostáva vo výdavkoch, len evidencia)</option>
     </select></div>
+    </div>
   `, ()=>{
+    const ciel=val("m_ciel");
+    if(ciel){
+      const m=(firmaData.majetok||[]).find(x=>String(x.id)===String(ciel));
+      if(!m){ alert("Majetok sa nenašiel."); return false; }
+      if(!cena){ alert("Výdavok nemá sumu bez DPH — zhodnotenie sa z neho vyrobiť nedá."); return false; }
+      if(!Array.isArray(m.tz)) m.tz=[];
+      m.tz.push({id:"tz_"+Date.now(), datum:String(vyd.datum||"").slice(0,10), rok:rokV,
+                 suma:r2(cena), popis:vyd.popis||vyd.partner||"", zdrojVydavok:vyd.cislo});
+      vyd.zaradenyMajetokId=m.id;
+      vyd.zaradenyOdpisovany=true;      // zhodnotenie sa uplatní odpisom, nie naraz
+      delete vyd.mozeBytMajetok;
+      poZmene();
+      if(aktualnaApp==="vydavky") appVydavky();
+      alert("Zhodnotenie pridané k majetku „"+(m.nazov||"—")+"“. Výdavok sa nahradil vyšším odpisom.");
+      return;
+    }
     const nazov=val("m_nazov"), cena2=parseFloat(val("m_cena"))||0, datum=val("m_datum"), skup=+val("m_skupina"), rezim=val("m_rezim");
     if(!nazov||!cena2||!datum){ alert("Vyplňte názov, cenu a dátum."); return false; }
     const id="m"+Date.now();
@@ -3631,6 +3735,35 @@ function vydavokDoMajetku(idx){
     if(aktualnaApp==="vydavky") appVydavky();
     alert(rezim==="drobny"?"Drobný majetok zaevidovaný (výdavok ostáva).":"Majetok zaradený, výdavok nahradený odpisom.");
   });
+}
+// Prepnutie medzi „nový majetok" a „zhodnotenie existujúceho". Dopad na odpis
+// sa ukazuje hneď — rozhodnutie o hranici 1 700 € sa robí tu, nie neskôr.
+function mZaradenieForma(idx){
+  const nov=document.getElementById("zarNovy"), box=document.getElementById("zarTZ");
+  if(!nov||!box) return;
+  const ciel=val("m_ciel");
+  nov.style.display=ciel?"none":"";
+  box.style.display=ciel?"":"none";
+  if(!ciel){ box.innerHTML=""; return; }
+  const vyd=(firmaData.vydavky||[])[idx];
+  const m=(firmaData.majetok||[]).find(x=>String(x.id)===String(ciel));
+  if(!vyd||!m){ box.innerHTML=""; return; }
+  const suma=+vyd.bez||0;
+  const rok=+String(vyd.datum||"").slice(0,4)||new Date().getFullYear();
+  const spoluRok=r2(tzSumaRoku(m,rok)+suma);
+  const hranica=tzHranicaRoku(rok);
+  const musi=tzMusiZvysitCenu(spoluRok, rok);
+  const pred=odpisPlan(m);
+  const po=odpisPlan(Object.assign({}, m, {tz:tzZoznam(m).concat([{rok, suma}])}));
+  const doKedy=pl=>pl.plan.length?pl.plan[pl.plan.length-1].rok:"—";
+  box.innerHTML=`<div style="background:var(--sfc-warn);color:var(--accent-deep);font-size:12.5px;line-height:1.55;padding:10px 13px;border-radius:9px;margin-bottom:14px">
+      ${musi
+        ? `Zhodnotenia majetku <b>${esc(m.nazov||"—")}</b> za rok ${rok} sú ${eur(spoluRok)} — nad hranicou ${eur(hranica)}. Do výdavkov naraz ísť nesmú (§ 29 ods. 1): zvýšia vstupnú cenu a odpíšu sa spolu s majetkom.`
+        : `Zhodnotenia za rok ${rok} sú ${eur(spoluRok)}, teda do ${eur(hranica)}. Môžete si vybrať (§ 29 ods. 2): nechať výdavok tak, ako je — daň zníži hneď — alebo ním zvýšiť vstupnú cenu. Zaradením sem volíte druhú možnosť.`}
+    </div>
+    <div style="font-size:12.5px;padding:0 2px 4px">Vstupná cena ${eur(+m.vstupnaCena||0)} → <b>${eur(r2((+m.vstupnaCena||0)+tzCelkom(m)+suma))}</b> ·
+      ročný odpis ${eur(pred.rocnyOdpisTz||pred.rocnyOdpis||0)} → <b>${eur(po.rocnyOdpisTz||0)}</b> ·
+      odpisovanie do ${doKedy(po)}${doKedy(pred)!==doKedy(po)?` (predtým do ${doKedy(pred)})`:""}.</div>`;
 }
 
 // ═══════════════════════════════════════════════════
@@ -11568,14 +11701,15 @@ function appMajetok(){
           ${m.vyradeny?`<span class="apill neg">vyradený ${fmtDatum(m.vyradeny.datum)}</span>`:`<button class="aabtn" style="padding:4px 9px;font-size:11px" onclick="editMajetok('${m.id}')"${zam("majetok")}>Upraviť</button><button class="aabtn" style="padding:4px 9px;font-size:11px" onclick="majetokVyradenie('${m.id}')"${zam("majetok")}>Vyradiť</button>`}
         </div>
         <div class="statgrid" style="margin-bottom:${jeDrobny?'0':'12px'}">
-          <div class="sbox"><div class="sn" style="font-size:17px">${eur(+m.vstupnaCena||0)}</div><div class="sl">vstupná cena</div></div>
+          <div class="sbox"><div class="sn" style="font-size:17px">${eur(pl.tzSpolu?pl.vstupnaCenaCelkom:(+m.vstupnaCena||0))}</div><div class="sl">${pl.tzSpolu?"cena so zhodnotením":"vstupná cena"}</div></div>
           <div class="sbox"><div class="sn" style="font-size:17px">${(ODPIS_SKUPINY[m.odpisovaSkupina]||{}).roky||'—'} r.</div><div class="sl">skupina ${m.odpisovaSkupina}</div></div>
-          <div class="sbox"><div class="sn" style="font-size:17px">${jeDrobny?'—':eur(pl.rocnyOdpis)}</div><div class="sl">ročný odpis</div></div>
-          <div class="sbox"><div class="sn" style="font-size:17px">${jeDrobny?'—':eur(pl.mesacnyOdpis)}</div><div class="sl">mesačný odpis</div></div>
+          <div class="sbox"><div class="sn" style="font-size:17px">${jeDrobny?'—':eur(pl.tzSpolu?pl.rocnyOdpisTz:pl.rocnyOdpis)}</div><div class="sl">ročný odpis</div></div>
+          <div class="sbox"><div class="sn" style="font-size:17px">${jeDrobny?'—':eur(r2((pl.tzSpolu?pl.rocnyOdpisTz:pl.rocnyOdpis)/12))}</div><div class="sl">mesačný odpis</div></div>
         </div>
         ${!jeDrobny&&pl.plan.length?`<div class="alist"><div class="arow head" style="grid-template-columns:auto 1fr 1fr 1fr"><div>Rok</div><div style="text-align:right">Odpis</div><div style="text-align:right">Zostatok</div><div style="text-align:right">Mesiace</div></div>
-          ${pl.plan.map(p=>`<div class="arow" style="grid-template-columns:auto 1fr 1fr 1fr;cursor:default"><div class="acol-strong">${p.rok}</div><div class="acol-sum">${eur(p.odpis)}</div><div class="acol-sum" style="color:var(--ink-soft)">${eur(p.zostatok)}</div><div class="acol-sum" style="color:var(--ink-soft)">${p.mesiace}</div></div>`).join('')}
-        </div>${pl.luxusne?`<div style="font-size:11.5px;color:var(--accent-deep);margin-top:8px">⚠ Luxusné vozidlo (nad ${eur(ODPIS_LUX_LIMIT)}) — možná úprava základu dane. Skontrolujte s účtovníkom.</div>`:''}`:''}
+          ${pl.plan.map(p=>`<div class="arow" style="grid-template-columns:auto 1fr 1fr 1fr;cursor:default${p.predZaradenim||p.prerusene?";opacity:.55":""}"><div class="acol-strong">${p.rok}</div><div class="acol-sum">${eur(p.odpis)}</div><div class="acol-sum" style="color:var(--ink-soft)">${eur(p.zostatok)}</div><div class="acol-sum" style="color:var(--ink-soft)">${p.prerusene?"pauza":p.predZaradenim?"súkr.":p.mesiace}</div></div>`).join('')}
+        </div>${pl.stratenePredZaradenim>0?`<div style="font-size:11.5px;color:var(--ink-soft);margin-top:8px">Sivé roky bol majetok ešte súkromný. Do doby odpisovania sa počítajú (§ 24 ods. 5), takže ${eur(pl.stratenePredZaradenim)} zo vstupnej ceny do výdavkov nepôjde.</div>`:''}${pl.luxusne?`<div style="font-size:11.5px;color:var(--accent-deep);margin-top:8px">⚠ Luxusné vozidlo (nad ${eur(ODPIS_LUX_LIMIT)}) — možná úprava základu dane. Skontrolujte s účtovníkom.</div>`:''}`:''}
+        ${!jeDrobny&&!m.vyradeny?`<div style="margin-top:12px">${tzKartaHtml(m,true)}</div>`:(tzCelkom(m)?tzKartaHtml(m,false):'')}
         ${!jeDrobny&&!m.vyradeny&&jeAuto?`<button class="aabtn" style="margin-top:10px" onclick="majetokPorovnajOtvor('${m.id!=null?m.id:maj.indexOf(m)}')">⚖ Porovnať scenáre vyradenia</button>`:''}
       </div>`;
     }).join(''):'<div class="aempty">Žiadny majetok. Pridajte ho tlačidlom „＋ Pridať majetok" alebo zaraďte z výdavku.</div>'}`;
@@ -11588,6 +11722,10 @@ function editMajetok(id){
   const nova=id==null;
   const m=nova?{id:"maj_"+Date.now(),nazov:"",vstupnaCena:"",datumZaradenia:new Date().toISOString().slice(0,10),odpisovaSkupina:1,typMajetku:"odpisovany"}
     :JSON.parse(JSON.stringify((firmaData.majetok||[]).find(x=>String(x.id)===String(id))));
+  const preradene=preradenieDatum(m);
+  // Náhľad kreslí samostatná funkcia, ktorá nevidí do tejto uzávery —
+  // polia mimo formulára (zhodnotenia, prerušené roky) jej treba podať.
+  _majetokNahladZdroj=m;
   openModal(nova?"Nový majetok":"Upraviť majetok",`
     <div class="mfield"><label>Názov</label><input id="m_nazov" value="${esc(m.nazov||'')}" placeholder="napr. Notebook, osobné vozidlo" oninput="mMajetokNahlad()"></div>
     <div class="mrow2">
@@ -11615,6 +11753,14 @@ function editMajetok(id){
       </select>
       <div style="font-size:11.5px;color:var(--ink-soft);margin-top:4px">Ak majetok používate aj na súkromné účely, do výdavkov si dáte len časť odpisu. Paušál 80 % je najbežnejší — netreba k nemu nič dokladovať. Pri nehnuteľnosti sa uplatňuje pomer podľa skutočného využitia.</div>
     </div>
+    <details style="margin-bottom:12px;background:var(--bg);border-radius:10px;padding:10px 13px" ${preradene?"open":""}>
+      <summary style="cursor:pointer;font-size:12.5px;color:var(--ink-soft);font-weight:600;list-style:none">⏳ Kúpené súkromne skôr, než som to začal používať na podnikanie</summary>
+      <div class="mfield" style="margin:9px 0 0"><label>Dátum pôvodnej kúpy</label>
+        <input id="m_povodne" type="date" value="${esc(preradene)}" oninput="mMajetokNahlad()">
+        <div style="font-size:11.5px;color:var(--ink-soft);margin-top:4px">Notebook alebo auto kúpené súkromne a vložené do podnikania až neskôr sa odpisuje tak, akoby sa odpisovalo od kúpy (§ 24 ods. 5 ZDP). Roky, keď to bolo súkromné, sa do doby odpisovania <b>počítajú</b> — odpis za ne si už neuplatníte. Ak ste to kúpili priamo na firmu, nechajte prázdne.</div>
+      </div>
+    </details>
+    ${nova?"":tzKartaHtml(m,false)}
     <div id="mMajetokNahlad" style="background:var(--bg);border-radius:10px;padding:12px 14px;font-size:13px;margin-top:8px"></div>
   `,
   ()=>{
@@ -11625,6 +11771,11 @@ function editMajetok(id){
     m.odpisovaSkupina=+val("m_skupina"); m.typMajetku=val("m_rezim");
     m.jeOsobneAuto=!!(document.getElementById("m_auto")||{}).checked;
     m.osobnaPotreba=+val("m_osobna")||100;
+    // Pôvodné nadobudnutie má zmysel len PRED zaradením — inak by plán
+    // začínal v budúcnosti a odpis by ticho zmizol.
+    const pov=val("m_povodne");
+    if(pov && pov>=m.datumZaradenia){ alert("Dátum pôvodnej kúpy musí byť skôr než dátum zaradenia do podnikania."); return false; }
+    if(pov) m.povodneNadobudnutie=pov; else delete m.povodneNadobudnutie;
     if(!firmaData.majetok) firmaData.majetok=[];
     if(nova) firmaData.majetok.push(m);
     else { const i=firmaData.majetok.findIndex(x=>String(x.id)===String(id)); if(i>=0) firmaData.majetok[i]=m; }
@@ -11633,19 +11784,109 @@ function editMajetok(id){
   nova?null:()=>{ const i=firmaData.majetok.findIndex(x=>String(x.id)===String(id)); if(i>=0) firmaData.majetok.splice(i,1); poZmene(); appMajetok(); });
   setTimeout(mMajetokNahlad,50);
 }
+let _majetokNahladZdroj=null;
 function mMajetokNahlad(){
   const el=document.getElementById("mMajetokNahlad"); if(!el) return;
   const cena=parseFloat(val("m_cena"))||0;
   const rezim=val("m_rezim");
   if(rezim==="drobny"){ el.innerHTML=`Drobný majetok sa <b>jednorazovo</b> zaradí do výdavkov v roku zaradenia (${eur(cena)}). Neodpisuje sa.`; return; }
-  const m={nazov:val("m_nazov"),vstupnaCena:cena,datumZaradenia:val("m_datum"),odpisovaSkupina:+val("m_skupina"),typMajetku:"odpisovany",osobnaPotreba:+val("m_osobna")||100};
+  const z=_majetokNahladZdroj||{};
+  const m={nazov:val("m_nazov"),vstupnaCena:cena,datumZaradenia:val("m_datum"),odpisovaSkupina:+val("m_skupina"),typMajetku:"odpisovany",osobnaPotreba:+val("m_osobna")||100,
+           povodneNadobudnutie:val("m_povodne")||"", tz:z.tz, prerusene:z.prerusene, dobaOdpisu:z.dobaOdpisu};
   const pl=odpisPlan(m);
   if(!pl.plan.length){ el.innerHTML="Zadajte cenu a dátum pre náhľad odpisu."; return; }
   const p=podielDane(m), krateny=p<1;
-  el.innerHTML=`<b>Náhľad odpisového plánu</b> · ročný odpis ${eur(pl.rocnyOdpis)}${krateny?` · do výdavkov ${eur(r2(pl.rocnyOdpis*p))}`:""}
-    <div style="margin-top:8px">${pl.plan.map(x=>`<div style="display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px solid var(--line-soft)"><span>${x.rok} (${x.mesiace} mes.)</span><b>${eur(krateny?x.odpisUplatneny:x.odpis)}</b></div>`).join('')}</div>
+  const rocny=pl.tzSpolu?pl.rocnyOdpisTz:pl.rocnyOdpis;
+  el.innerHTML=`<b>Náhľad odpisového plánu</b> · ročný odpis ${eur(rocny)}${krateny?` · do výdavkov ${eur(r2(rocny*p))}`:""}
+    <div style="margin-top:8px">${pl.plan.map(x=>`<div style="display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px solid var(--line-soft);${x.predZaradenim||x.prerusene?"color:var(--ink-soft)":""}"><span>${x.rok} ${x.prerusene?"(prerušené)":x.predZaradenim?"(ešte súkromne)":`(${x.mesiace} mes.)`}</span><b>${x.predZaradenim?"—":eur(krateny?x.odpisUplatneny:x.odpis)}</b></div>`).join('')}</div>
+    ${pl.stratenePredZaradenim>0?`<div style="font-size:11.5px;color:var(--accent-deep);margin-top:7px">Roky pred vložením do podnikania sa do doby odpisovania počítajú — <b>${eur(pl.stratenePredZaradenim)}</b> zo vstupnej ceny si preto uplatniť nemôžete. Do výdavkov pôjde ${eur(r2(pl.plan.reduce((a,x)=>a+(x.odpisUplatneny||0),0)))}.</div>`:''}
+    ${pl.tzSpolu>0?`<div style="font-size:11.5px;color:var(--ink-soft);margin-top:7px">Vstupná cena je so zhodnotením ${eur(pl.vstupnaCenaCelkom)} a odpisuje sa z nej — preto sa odpisuje dlhšie než ${pl.roky} rokov.</div>`:''}
     ${krateny?`<div style="font-size:11.5px;color:var(--ink-soft);margin-top:7px">Majetok sa odpisuje celý, ale do výdavkov si dávate ${Math.round(p*100)} %. Zvyšok pripadá na súkromné využitie a daň neznižuje.</div>`:''}
     ${pl.luxusne?`<div style="font-size:11px;color:var(--accent-deep);margin-top:6px">⚠ Auto nad ${eur(ODPIS_LUX_LIMIT)} — ak v niektorom roku zarobíte málo, časť odpisu sa vráti do základu dane.</div>`:''}`;
+}
+
+// ── TECHNICKÉ ZHODNOTENIE — karta a formulár ──
+// Na karte majetku aj s akciami, vo formulári len ako vysvetlenie, prečo je
+// vstupná cena vyššia než tá, ktorá je v poli.
+function tzKartaHtml(m, sAkciami){
+  const zoz=tzZoznam(m), spolu=tzCelkom(m);
+  if(!zoz.length && !sAkciami) return "";
+  const id=(m&&m.id)||"";
+  const riadky=zoz.slice().sort((a,b)=>String(a.datum||a.rok).localeCompare(String(b.datum||b.rok))).map(t=>
+    `<div style="display:flex;gap:8px;align-items:baseline;padding:3px 0;border-bottom:1px solid var(--line-soft)">
+      <span style="font-size:11px;color:var(--ink-soft)">${esc(t.datum?fmtDatum(t.datum):String(tzRokPolozky(t)))}</span>
+      <span style="flex:1;font-size:12.5px">${esc(t.popis||"technické zhodnotenie")}</span>
+      <b style="font-size:12.5px">${eur(+t.suma||0)}</b>
+      ${sAkciami?`<button class="aabtn" style="padding:2px 8px;font-size:11px" onclick="majetokTZZmaz('${esc(id)}','${esc(t.id||"")}')"${zam("majetok")}>✕</button>`:""}
+    </div>`).join("");
+  return `<div style="background:var(--bg);border-radius:10px;padding:10px 13px;margin-bottom:12px">
+    <div style="display:flex;align-items:baseline;gap:8px">
+      <b style="font-size:12.5px">🔧 Technické zhodnotenie</b><div style="flex:1"></div>
+      ${spolu?`<b style="font-size:12.5px">${eur(spolu)}</b>`:`<span style="font-size:11.5px;color:var(--ink-soft)">žiadne</span>`}
+    </div>
+    ${riadky?`<div style="margin-top:6px">${riadky}</div>`:""}
+    ${spolu?`<div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px">Vstupná cena sa tým zvýšila na <b>${eur(r2((+m.vstupnaCena||0)+spolu))}</b>. Ročný odpis sa počíta z nej a odpisuje sa dlhšie (§ 27 ods. 2).</div>`:""}
+    ${sAkciami?`<div style="margin-top:8px"><button class="aabtn" style="padding:5px 11px;font-size:12px" onclick="majetokTZ('${esc(id)}')"${zam("majetok")}>＋ Pridať zhodnotenie</button></div>`:""}
+  </div>`;
+}
+function majetokTZ(id){
+  if(!strazZapis("majetok")) return;
+  const m=(firmaData.majetok||[]).find(x=>String(x.id)===String(id));
+  if(!m) return;
+  const dnes=new Date().toISOString().slice(0,10);
+  openModal("Technické zhodnotenie", `
+    <div style="font-size:13px;margin-bottom:12px"><b>${esc(m.nazov||"—")}</b> · vstupná cena ${eur(+m.vstupnaCena||0)}${tzCelkom(m)?` + zhodnotenia ${eur(tzCelkom(m))}`:""}</div>
+    <div class="mfield"><label>Čo sa urobilo</label><input id="m_tzpopis" placeholder="napr. klimatizácia, nadstavba, výmena motora"></div>
+    <div class="mrow2">
+      <div class="mfield"><label>Suma bez DPH (€)</label><input id="m_tzsuma" type="number" step="0.01" oninput="mTZNahlad('${esc(id)}')"></div>
+      <div class="mfield"><label>Dátum dokončenia</label><input id="m_tzdatum" type="date" value="${dnes}" onchange="mTZNahlad('${esc(id)}')"></div>
+    </div>
+    <div id="mTZNahlad" style="background:var(--bg);border-radius:10px;padding:11px 13px;font-size:12.5px;line-height:1.55"></div>
+  `, ()=>{
+    const suma=parseFloat(val("m_tzsuma"))||0;
+    const datum=val("m_tzdatum")||dnes;
+    if(!suma){ alert("Zadajte sumu zhodnotenia."); return false; }
+    // Zhodnocuje sa už zaradený majetok. Skorší dátum by znamenal, že ide
+    // o súčasť obstarávacej ceny — tá patrí do vstupnej ceny, nie sem.
+    if(String(m.datumZaradenia||"") && datum<String(m.datumZaradenia)){
+      alert("Dátum je pred zaradením majetku. Čo sa urobilo pred zaradením, patrí do vstupnej ceny, nie medzi zhodnotenia."); return false; }
+    if(!Array.isArray(m.tz)) m.tz=[];
+    m.tz.push({id:"tz_"+Date.now(), datum, rok:+datum.slice(0,4), suma:r2(suma), popis:val("m_tzpopis")||""});
+    poZmene(); appMajetok();
+  });
+  setTimeout(()=>mTZNahlad(id),50);
+}
+function mTZNahlad(id){
+  const el=document.getElementById("mTZNahlad"); if(!el) return;
+  const m=(firmaData.majetok||[]).find(x=>String(x.id)===String(id)); if(!m) return;
+  const suma=parseFloat(val("m_tzsuma"))||0;
+  if(!suma){ el.innerHTML="Zadajte sumu a appka ukáže, čo to urobí s odpisom aj s hranicou "+eur(tzHranicaRoku(new Date().getFullYear()))+"."; return; }
+  const datum=val("m_tzdatum")||new Date().toISOString().slice(0,10);
+  const rok=+String(datum).slice(0,4)||new Date().getFullYear();
+  const spoluRok=r2(tzSumaRoku(m,rok)+suma);
+  const hranica=tzHranicaRoku(rok);
+  const musi=tzMusiZvysitCenu(spoluRok, rok);
+  const pred=odpisPlan(m);
+  const po=odpisPlan(Object.assign({}, m, {tz:tzZoznam(m).concat([{rok, suma}])}));
+  const doKedy=pl=>pl.plan.length?pl.plan[pl.plan.length-1].rok:"—";
+  el.innerHTML=`${musi
+    ? `Zhodnotenia tohto majetku za rok ${rok} sú <b>${eur(spoluRok)}</b> — nad hranicou ${eur(hranica)}. Do výdavkov naraz ísť <b>nesmú</b>: zvyšujú vstupnú cenu a odpíšu sa spolu s majetkom (§ 29 ods. 1).`
+    : `Zhodnotenia za rok ${rok} sú ${eur(spoluRok)}, teda do ${eur(hranica)}. Zákon vám dáva na výber (§ 29 ods. 2): buď to necháte vo výdavkoch naraz — daň zníži hneď — alebo zvýšite vstupnú cenu. Zápisom sem <b>volíte druhú možnosť</b>.`}
+    <div style="margin-top:7px">Ročný odpis ${eur(pred.rocnyOdpisTz||pred.rocnyOdpis||0)} → <b>${eur(po.rocnyOdpisTz||0)}</b> · odpisovanie potrvá do ${doKedy(po)}${doKedy(pred)!==doKedy(po)?` (predtým do ${doKedy(pred)})`:""}.</div>
+    <div style="font-size:11.5px;color:var(--ink-soft);margin-top:7px">Ak je táto suma zapísaná aj vo Výdavkoch, treba ju odtiaľ vyňať — inak sa uplatní dvakrát. Najistejšie je pridať zhodnotenie priamo z toho výdavku tlačidlom „Zaradiť do majetku".</div>`;
+}
+function majetokTZZmaz(idMaj, idTz){
+  if(!strazZapis("majetok")) return;
+  const m=(firmaData.majetok||[]).find(x=>String(x.id)===String(idMaj)); if(!m) return;
+  const t=tzZoznam(m).find(x=>String(x.id)===String(idTz)); if(!t) return;
+  if(!confirm("Zmazať technické zhodnotenie "+eur(+t.suma||0)+"?\n\nVstupná cena aj odpisový plán sa vrátia do pôvodného stavu.")) return;
+  m.tz=(m.tz||[]).filter(x=>String(x.id)!==String(idTz));
+  // Výdavok, z ktorého zhodnotenie vzniklo, sa musí vrátiť do nákladov —
+  // inak by zmizol z evidencie úplne (raz vyňatý, teraz už nikde).
+  if(t.zdrojVydavok!=null){
+    (firmaData.vydavky||[]).forEach(v=>{ if(String(v.cislo||"")===String(t.zdrojVydavok)){ delete v.zaradenyOdpisovany; delete v.zaradenyMajetokId; } });
+  }
+  poZmene(); appMajetok();
 }
 
 // vyradenie majetku + protokol
@@ -14144,9 +14385,12 @@ function xkMajetokSheet(X, S, D, wb, fmtSk){
     const sk = (m.typMajetku==="odpisovany") ? ((ODPIS_SKUPINY[m.odpisovaSkupina]||{}).n || String(m.odpisovaSkupina)) : "—";
     const stav = (m.vyradeny&&m.vyradeny.datum) ? ("vyradený "+fmtSk(m.vyradeny.datum)) : "v evidencii";
     const op = (m.osobnaPotreba!=null && +m.osobnaPotreba<100) ? (m.osobnaPotreba+" %") : "—";
+    // So zhodnotením je vstupná cena vyššia a odpis sa počíta z nej —
+    // export nesmie tvrdiť niečo iné než karta majetku.
+    const vcx=(P.vstupnaCenaCelkom!=null?P.vstupnaCenaCelkom:(+m.vstupnaCena||0));
     aoa.push([xkCell(m.nazov||"",sc),xkCell(typ,sc),xkCell(fmtSk(m.datumZaradenia),sc),xkCell(sk,sc),
-              xkCell(r2(m.vstupnaCena),se),xkCell(r2(P.rocnyOdpis||0),se),xkCell(op,sn),xkCell(stav,sc)]);
-    tvc+=+m.vstupnaCena||0; });
+              xkCell(r2(vcx),se),xkCell(r2((P.tzSpolu?P.rocnyOdpisTz:P.rocnyOdpis)||0),se),xkCell(op,sn),xkCell(stav,sc)]);
+    tvc+=vcx; });
   aoa.push([xkCell("Spolu",S.foot),xkCell("",S.foot),xkCell("",S.foot),xkCell("",S.foot),
             xkCell(r2(tvc),S.footE),xkCell("",S.foot),xkCell("",S.foot),xkCell("",S.foot)]);
 
@@ -14156,6 +14400,8 @@ function xkMajetokSheet(X, S, D, wb, fmtSk){
     const P=odpisPlan(m);
     aoa.push([],[xkCell("Odpisový plán — "+(m.nazov||""),S.title)]);
     if(P.luxusne) aoa.push([xkCell("Vstupná cena nad "+eur(P.luxLimit)+" — pri nízkom základe dane sa časť odpisu pripočítava späť (§ 17 ods. 34 ZDP).",S.sub)]);
+    if(P.tzSpolu>0) aoa.push([xkCell("Technické zhodnotenie "+eur(P.tzSpolu)+" zvýšilo vstupnú cenu na "+eur(P.vstupnaCenaCelkom)+" (§ 29 ZDP); odpisuje sa z nej, preto dlhšie.",S.sub)]);
+    if(P.stratenePredZaradenim>0) aoa.push([xkCell("Preradené z osobného užívania — roky pred zaradením sa do doby odpisovania počítajú (§ 24 ods. 5 ZDP), "+eur(P.stratenePredZaradenim)+" sa preto neuplatní.",S.sub)]);
     aoa.push([xkCell("Rok",S.hdr),xkCell("Mesiacov",S.hdr),xkCell("Odpis",S.hdr),
               xkCell("Do výdavkov",S.hdr),xkCell("Zostatková cena",S.hdr)]);
     P.plan.forEach((r,i)=>{ const z=i%2===1, sc=z?S.cellZ:S.cell, se=z?S.eurZ:S.eur, sn=z?S.numZ:S.num;
@@ -17820,6 +18066,32 @@ function rocnaKontrola(rok){
         "Bez nich sa odpis nedá vypočítať a do výdavkov sa nedostane.",
         bezOdpisu.slice(0,8).map(m=>m.nazov||"—"));
   }catch(e){ zlyhalo("majetok bez odpisu", e); }
+
+  // ── 9c. Výdavky, ktoré vyzerajú ako technické zhodnotenie ──
+  // § 29 ZDP: rekonštrukcia či modernizácia UŽ ZARADENÉHO majetku sa nad
+  // hranicou 1 700 € za rok nesmie uplatniť naraz — zvyšuje vstupnú cenu.
+  // Nález stojí na dvojakom dôkaze: firma nejaký odpisovaný majetok naozaj má
+  // a doklady sa tak aj volajú. Bez oboch by to bol falošný poplach na každom
+  // druhom účte — a ten naučí preskakovať aj pravé nálezy (kap. 16).
+  try{
+    const maOdpisovany=(d.majetok||[]).some(m=>m.typMajetku!=="drobny" && +m.vstupnaCena>0
+      && String(m.datumZaradenia||"").slice(0,4)<=R
+      && !(m.vyradeny&&m.vyradeny.datum&&String(m.vyradeny.datum).slice(0,4)<R));
+    if(maOdpisovany){
+      const TZ_SLOVA=/rekon[sš]trukc|moderniz[aá]c|pr[ií]stavb|nadstavb|prestavb|stavebn[aáeé] [uú]prav|technick[eéaá] zhodnoten/i;
+      const kandidati=vydavky.filter(x=>!x.zaradenyOdpisovany && !x.zaradenyMajetokId
+        && TZ_SLOVA.test(String(x.popis||"")+" "+String(x.partner||"")));
+      const suma=r2(kandidati.reduce((a,x)=>a+(+x.bez||+x.spolu||0),0));
+      if(kandidati.length && tzMusiZvysitCenu(suma, rok))
+        pridaj("pozor","tzNadHranicou", "Výdavky za "+eur(suma)+" vyzerajú ako technické zhodnotenie",
+          "Ak išlo o rekonštrukciu alebo modernizáciu majetku, ktorý už odpisujete, nad "+eur(tzHranicaRoku(rok))+
+          " za rok sa do výdavkov naraz dať nesmú (§ 29 ZDP) — zvyšujú vstupnú cenu a odpisujú sa spolu s ním. "+
+          "Pridáte ich vo výdavku tlačidlom „Zaradiť do majetku“ a voľbou „Zhodnotenie majetku“. "+
+          "Ak to bola len oprava alebo údržba, je to bežný výdavok a nález sa dá skryť.",
+          kandidati.slice(0,8).map(x=>(x.cislo||x.partner||"—")+" · "+eur(+x.bez||+x.spolu||0)+(x.popis?" · "+x.popis:"")),
+          {l:"Otvoriť Výdavky", fn:"otvorApp('vydavky')"});
+    }
+  }catch(e){ zlyhalo("technické zhodnotenie", e); }
 
   // ── 9b. Mesiace bez faktúry z radu „S" ──
   // Ten istý dôkaz ako pri mesačnej kontrole: rad S už firma niekedy evidovala.

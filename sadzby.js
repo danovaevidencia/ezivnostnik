@@ -141,6 +141,8 @@ const SADZBY = {
        {od:"2026-01-01", v:0.090, zdroj:"oznámenie MPSVR č. 340/2025 Z. z."}]},
   hmHranica:      {n:"Hranica hmotného majetku", sk:"majetok", mienaSa:"zriedka", overenost:"zdroj", kontrola:"2026-07-21",
     h:[{od:null, v:1700, zdroj:"§ 22 ZDP — v znení účinnom od 1. 1. 2026 stále 1 700 €"}]},
+  tzHranica:      {n:"Hranica technického zhodnotenia", sk:"majetok", mienaSa:"zriedka", overenost:"zdroj", kontrola:"2026-08-24",
+    h:[{od:null, v:1700, zdroj:"§ 29 ods. 1 ZDP — hranica pre úhrn za zdaňovacie obdobie"}]},
   luxAutoCena:    {n:"Limitovaná vstupná cena auta", sk:"majetok", mienaSa:"zriedka", overenost:"zdroj", kontrola:"2026-07-21",
     h:[{od:null, v:48000, zdroj:"§ 17 ods. 34 ZDP"}]},
   luxAutoOdpis:   {n:"Ročný limit odpisu drahého auta", sk:"majetok", mienaSa:"zriedka", overenost:"zdroj", kontrola:"2026-07-21",
