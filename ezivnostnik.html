@@ -1173,7 +1173,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.24-HU";  // stopky na overenie IČ DPH podľa nameraného času VIES (CZ odpovedá cez 10 s)
+const APP_VERZIA = "2026.08.24-HV";  // účet dodávateľa proti registru FS — ručenie za daň podľa § 69 ods. 14
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -5054,6 +5054,133 @@ function platneDIC(s){
   if(!/^\d{10}$/.test(v)) return false;
   try{ return BigInt(v) % 11n === 0n; }catch(_){ return false; }
 }
+// ── ÚČET DODÁVATEĽA V REGISTRI FS (§ 69 ods. 14 ZDPH) ──
+// Ak zaplatíte na účet, ktorý dodávateľ Finančnej správe neoznámil, ručíte za
+// jeho neodvedenú DPH. Zoznam účtov je verejný register a appka číslo účtu
+// z dokladu aj tak už má — kontrola teda nič nepýta navyše.
+//
+// Rovnaké pravidlo ako pri IČ DPH: „neviem" je tretí stav. Register býva
+// nedostupný a označiť pritom dodávateľa za rizikového by bolo falošné
+// obvinenie, ktoré používateľ nemá ako preveriť.
+const _ucetFScache = new Map();
+async function overUcetFS(icdph){
+  const v=normalizujICDPH(icdph);
+  if(!/^SK\d{10}$/.test(v)) return {stav:"neznamy", dovod:"len slovenské IČ DPH"};
+  if(_ucetFScache.has(v)) return _ucetFScache.get(v);
+  if(!sb || _proxyFunguje===false) return {stav:"neznamy", dovod:"bez pripojenia"};
+  let vysl;
+  try{
+    const stop=new AbortController();
+    const cas=setTimeout(()=>stop.abort(), 30000);
+    let res;
+    try{
+      res=await fetch(SUPABASE_URL+"/functions/v1/proxy",{
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({akcia:"ucetdph", icdph:v}), signal:stop.signal});
+    } finally { clearTimeout(cas); }
+    if(!res.ok){
+      const telo=await res.text().catch(()=>"");
+      console.error("Účty dodávateľa: proxy vrátila "+res.status+(telo?" — "+telo.slice(0,160):""));
+      return {stav:"neznamy", dovod:"proxy vrátila "+res.status};
+    }
+    const d=await res.json().catch(()=>null);
+    vysl = (d && (d.stav==="najdene" || d.stav==="ziadne"))
+      ? {stav:d.stav, ucty:d.ucty||[], nazov:d.nazov||"", ico:d.ico||""}
+      : {stav:"neznamy", dovod:(d&&d.dovod)||"register neodpovedal"};
+  }catch(e){
+    console.error("Účty dodávateľa:", e);
+    return {stav:"neznamy", dovod:(e&&e.name==="AbortError")?"vypršal čas":"register neodpovedal"};
+  }
+  if(vysl.stav!=="neznamy") _ucetFScache.set(v, vysl);
+  return vysl;
+}
+// Synchrónne vyhodnotenie z toho, čo už appka vie. Zámerne NEVOLÁ sieť:
+// ukladanie dokladu ani ročná kontrola nesmú závisieť od toho, či je register
+// práve hore. Bez odpovede v pamäti je výsledok prázdny — teda „nekontrolované".
+function ucetFSstav(icdph, iban){
+  const r=_ucetFScache.get(normalizujICDPH(icdph));
+  const ib=String(iban||"").replace(/[^A-Za-z0-9]/g,"").toUpperCase();
+  if(!r || !ib || r.stav==="neznamy") return "";
+  if(r.stav==="ziadne") return "nezverejneny";
+  return (r.ucty||[]).includes(ib) ? "zverejneny" : "nezverejneny";
+}
+// Jeden čitateľ pre OBE ukladacie cesty formulára výdavku. Keby si každá
+// čítala po svojom, jedna by sa raz zabudla — presne to sa stalo pri
+// percente osobného použitia (kap. 53.3).
+function citajUcetFS(obj){
+  const stav=ucetFSstav(val("m_dodIcDph"), obj.iban||val("m_ibanVyd"));
+  if(stav){ obj.ucetFS=stav; obj.ucetFSdatum=new Date().toISOString().slice(0,10); }
+  else { delete obj.ucetFS; delete obj.ucetFSdatum; }
+  return obj;
+}
+// Doklady, na ktorých sa dá účet overiť: platiteľ DPH, slovenské IČ DPH
+// dodávateľa, číslo účtu a odpočítaná DPH. Bez ktoréhokoľvek z toho sa téma
+// používateľa netýka a nález by bol falošný poplach (kap. 16).
+function ucetFSkandidati(rok){
+  if(!jePlatcaDPH()) return [];
+  const R=String(rok);
+  return (firmaData.vydavky||[]).filter(x=>
+    String(x.datum||"").slice(0,4)===R
+    && (+x.dph||0)>0
+    && /^SK\d{10}$/.test(normalizujICDPH(x.dodavatelIcDph))
+    && String(x.iban||"").replace(/[^A-Za-z0-9]/g,"").length>=15);
+}
+// Hromadné overenie. Jeden dotaz na dodávateľa (odpovede sú v pamäti), takže
+// aj pri stovkách dokladov je volaní pár desiatok — limit FS je 1 000 za hodinu.
+async function overUctyDodavatelov(rok){
+  if(!strazZapis("vydavky")) return;
+  const zoz=ucetFSkandidati(rok);
+  if(!zoz.length){ alert("Niet čo overovať — žiadny doklad tohto roka nemá naraz IČ DPH dodávateľa, číslo účtu aj odpočítanú DPH."); return; }
+  const dodavatelia=[...new Set(zoz.map(x=>normalizujICDPH(x.dodavatelIcDph)))];
+  if(!confirm("Overiť účty "+dodavatelia.length+" dodávateľov v registri Finančnej správy?\n\n"
+    +zoz.length+" dokladov za rok "+rok+". Nič sa nemení v účtovníctve — len sa k dokladom doplní, či bol účet oznámený.")) return;
+  let neznamych=0;
+  for(const ic of dodavatelia){
+    const r=await overUcetFS(ic);
+    if(r.stav==="neznamy") neznamych++;
+  }
+  // Zápis až po dotazoch: čo sa nepodarilo overiť, ostane nedotknuté —
+  // „neviem" sa nesmie zapísať ako výsledok.
+  let zapisanych=0;
+  zoz.forEach(x=>{
+    const stav=ucetFSstav(x.dodavatelIcDph, x.iban);
+    if(stav){ x.ucetFS=stav; x.ucetFSdatum=new Date().toISOString().slice(0,10); zapisanych++; }
+  });
+  poZmene();
+  const zle=zoz.filter(x=>x.ucetFS==="nezverejneny").length;
+  alert("Overené: "+zapisanych+" z "+zoz.length+" dokladov."
+    +(neznamych?"\nRegister neodpovedal pri "+neznamych+" dodávateľoch — tie ostali neoverené.":"")
+    +(zle?"\n\n⚠ "+zle+" dokladov je zaplatených na účet, ktorý dodávateľ Finančnej správe neoznámil.":"\n\nVšetky overené účty sú oznámené."));
+  if(aktualnaApp==="uzavierka") appUzavierka(); else if(aktualnaApp==="vydavky") appVydavky();
+}
+
+// živý oznam pod poľom účtu
+function mUcetFS(){
+  const el=document.getElementById("m_ibanVydStav"); if(!el) return;
+  const icdph=val("m_dodIcDph"), iban=String(val("m_ibanVyd")||"").replace(/[^A-Za-z0-9]/g,"").toUpperCase();
+  // Bez oboch údajov nie je čo porovnávať — a trvalý prvok, ktorý väčšinou
+  // hlási „nič", na 390 px miesto nezaberá.
+  if(!iban || !/^SK\d{10}$/.test(normalizujICDPH(icdph))){ el.textContent=""; return; }
+  el.textContent="overujem účet v registri FS…"; el.style.color="var(--ink-soft)";
+  overUcetFS(icdph).then(r=>{
+    const teraz=document.getElementById("m_ibanVydStav"); if(!teraz) return;
+    const ibanTeraz=String(val("m_ibanVyd")||"").replace(/[^A-Za-z0-9]/g,"").toUpperCase();
+    if(ibanTeraz!==iban) return;          // pole sa medzitým zmenilo
+    if(r.stav==="najdene" && (r.ucty||[]).includes(iban)){
+      el.innerHTML="✓ účet je oznámený Finančnej správe"; el.style.color="var(--pos,#1a8a4a)";
+    } else if(r.stav==="najdene"){
+      el.innerHTML="⚠ <b>tento účet dodávateľ Finančnej správe neoznámil</b> — ak naň zaplatíte, ručíte za jeho DPH (§ 69 ods. 14). Oznámené má "
+        +(r.ucty||[]).length+(((r.ucty||[]).length===1)?" iný účet":" iných účtov")+". Pýtajte si platbu na oznámený účet.";
+      el.style.color="var(--accent-deep)";
+    } else if(r.stav==="ziadne"){
+      el.innerHTML="⚠ dodávateľ nemá vo FS oznámený <b>žiadny</b> účet — pri platbe ručíte za jeho DPH (§ 69 ods. 14).";
+      el.style.color="var(--accent-deep)";
+    } else {
+      el.textContent="účet sa nepodarilo overiť"+(r.dovod?" ("+r.dovod+")":""); el.style.color="var(--ink-soft)";
+    }
+  });
+}
+
 // živá kontrola poľa IČ DPH (zelené = OK, červené = podozrivé)
 // Dva kroky, ktoré sa nesmú zliať: tvar sa overí LOKÁLNE a hneď (SK má
 // kontrolný súčet, pre KV DPH je kritický), register až potom a asynchrónne.
@@ -7601,6 +7728,7 @@ function vydavokDoplnkovePolia(obj){
   const op=document.getElementById("m_opakovany");
   if(op && op.checked){ obj.opakovanie={perioda:val("m_perioda")||"mesacne"}; }
   citajPodnikPct(obj);
+  citajUcetFS(obj);
   return obj;
 }
 
@@ -7695,7 +7823,7 @@ function vydavokFormHtml(x, nova, idx){
       <input id="m_partner" value="${esc(x.partner)}" autocomplete="off" oninput="feHladajFirmu(this.value,'m_partner')" placeholder="Začnite písať názov alebo IČO dodávateľa…">
       <div id="feNasepP" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:30;background:var(--paper);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px -8px rgba(19,28,43,.25);max-height:240px;overflow-y:auto;margin-top:2px"></div>
     </div>
-    <div class="mrow2"><div class="mfield"><label>IČO dodávateľa</label><input id="m_dodIco" value="${esc(x.dodavatelIco||'')}" placeholder="nepovinné"></div><div class="mfield"><label>IČ DPH dodávateľa</label><input id="m_dodIcDph" value="${esc(x.dodavatelIcDph||'')}" placeholder="nepovinné" oninput="skontrolujICDPHpole(this);mAktualizujOddiel()"><div id="m_dodIcDphStav" class="ocr-hint"></div></div></div>
+    <div class="mrow2"><div class="mfield"><label>IČO dodávateľa</label><input id="m_dodIco" value="${esc(x.dodavatelIco||'')}" placeholder="nepovinné"></div><div class="mfield"><label>IČ DPH dodávateľa</label><input id="m_dodIcDph" value="${esc(x.dodavatelIcDph||'')}" placeholder="nepovinné" oninput="skontrolujICDPHpole(this);mAktualizujOddiel();mUcetFS()"><div id="m_dodIcDphStav" class="ocr-hint"></div></div></div>
     <div style="margin:-4px 0 10px"><button type="button" class="aabtn" style="font-size:12px;padding:5px 11px" onclick="doplnZRegistra()">🔎 Skontrolovať / doplniť z registra</button><span id="regStav" style="font-size:11.5px;margin-left:8px;color:var(--ink-soft)"></span></div>
     <div id="regNavrh" style="display:none"></div>
     <div class="mrow2"><div class="mfield"><label>Číslo dokladu</label><input id="m_cislo" value="${esc(x.cislo||'')}" placeholder="napr. 5421760153"></div><div class="mfield"><label>Variabilný symbol</label><input id="m_vs" value="${esc(x.variabilny||'')}" placeholder="nepovinné"></div></div>
@@ -7735,8 +7863,9 @@ function vydavokFormHtml(x, nova, idx){
         <input id="m_splatnostVyd" type="date" value="${esc((x.splatnost||'').slice(0,10))}"></div>
     </div>
     <div class="mfield"><label>Účet dodávateľa <span style="font-weight:400;color:var(--ink-soft)">(nepovinné)</span></label>
-      <input id="m_ibanVyd" value="${esc(x.iban||'')}" placeholder="SK.." style="font-family:monospace;font-size:12.5px">
+      <input id="m_ibanVyd" value="${esc(x.iban||'')}" placeholder="SK.." style="font-family:monospace;font-size:12.5px" oninput="mUcetFS()">
       <div class="ocr-hint">Pomáha pri párovaní s výpisom — číslo účtu je jednoznačné aj tam, kde banka skráti meno alebo chýba variabilný symbol.</div>
+      <div class="ocr-hint" id="m_ibanVydStav"></div>
     </div>
     <div style="background:var(--bg);border-radius:9px;padding:11px 13px;margin-bottom:4px">
       <label style="display:flex;align-items:center;gap:9px;cursor:pointer;font-size:13.5px"><input type="checkbox" id="m_viacSadzieb" ${maRozpis(x)?"checked":""} onchange="mToggleRozpis(this.checked);mAktualizujOddiel()"> <b>Viac sadzieb DPH v doklade</b> (napr. 23% + 19%)</label>
@@ -7921,12 +8050,14 @@ function editVydavok(idx){
       // známeho dodávateľa ostane bez IČ DPH a vyplaví sa až v ročnej kontrole.
       // Dopĺňa výhradne prázdne polia, takže ručne zadané prepísať nemôže.
       citajPodnikPct(obj);
+      citajUcetFS(obj);
       d.vydavky.push(obj);
       zapamatajPartnera(obj);
     } else {
       if(!d.vydavky[idx].id) d.vydavky[idx].id="v"+Date.now()+Math.random().toString(36).slice(2,7);
       obj.id=d.vydavky[idx].id;
       citajPodnikPct(obj);
+      citajUcetFS(obj);
       if(obj.podnikPct==null) delete d.vydavky[idx].podnikPct;   // Object.assign staré pole neodstráni
       d.vydavky[idx]=Object.assign(d.vydavky[idx],obj);
       zapamatajPartnera(d.vydavky[idx]);
@@ -18082,6 +18213,33 @@ function rocnaKontrola(rok){
         daSa ? {l:"Doplniť IČ DPH do "+daSa+" dokladov", fn:"doplnPartnerovDoVydavkov()"} : null);
     }
   }
+
+  // ── 7b. Účet dodávateľa neoznámený Finančnej správe (§ 69 ods. 14) ──
+  // Ručenie za daň: kto zaplatí na účet, ktorý dodávateľ FS neoznámil, ručí
+  // za jeho neodvedenú DPH. Appka číslo účtu aj IČ DPH už má, takže sa nič
+  // nepýta navyše — len sa porovná s verejným registrom.
+  //
+  // Nález má dve podoby a to je zámer: „ešte som sa nepozrel" je iná veta než
+  // „pozrel som sa a nesedí". Prvá ponúka tlačidlo, druhá menuje doklady.
+  try{
+    const kand=ucetFSkandidati(rok);
+    if(kand.length){
+      const zle=kand.filter(x=>x.ucetFS==="nezverejneny");
+      const neoverene=kand.filter(x=>!x.ucetFS);
+      if(zle.length)
+        pridaj("pozor","ucetNezverejneny", zle.length+" dokladov je zaplatených na účet, ktorý dodávateľ neoznámil FS",
+          "Podľa § 69 ods. 14 zákona o DPH ručíte za daň, ktorú dodávateľ neodviedol, ak ste zaplatili na iný než ním oznámený účet. "+
+          "Overte doklad — ak vám dodávateľ dal iné číslo účtu, než má zverejnené, pýtajte si opravu. "+
+          "Ak účet medzitým oznámil, overte znova.",
+          zle.slice(0,8).map(x=>(x.cislo||x.partner||"—")+" · "+eur(+x.spolu||0)+" · "+String(x.iban||"")),
+          {l:"Overiť znova", fn:"overUctyDodavatelov("+R+")"});
+      else if(neoverene.length)
+        pridaj("pozor","ucetNeovereny", neoverene.length+" dokladov má účet dodávateľa neoverený",
+          "Zaplatiť na účet, ktorý dodávateľ neoznámil Finančnej správe, znamená ručiť za jeho DPH (§ 69 ods. 14). "+
+          "Appka vie účty porovnať s verejným registrom — číslo účtu aj IČ DPH už na dokladoch má.",
+          [], {l:"Overiť účty dodávateľov", fn:"overUctyDodavatelov("+R+")"});
+    }
+  }catch(e){ zlyhalo("účty dodávateľov", e); }
 
   // ── 8. Pohľadávky po splatnosti dlhšie ako rok ──
   const rokDozadu=new Date(Date.now()-365*86400000).toISOString().slice(0,10);
