@@ -39,6 +39,14 @@
     if(!t) t = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "tmavy" : "svetly";
     if(t === "tmavy") document.documentElement.setAttribute("data-tema", "tmavy");
   }catch(_){}
+  // Zakryté čísla sa nastavujú TU z rovnakého dôvodu ako téma: keby sa atribút
+  // doplnil až po štarte, sumy by na okamih blikli ostré. Režim, ktorý raz za
+  // čas ukáže to, čo má skrývať, je horší než žiadny — používateľ sa naň
+  // spolieha. Voľba zariadenia, nie firmy: zakrývaš obrazovku, nie účtovníctvo.
+  try{
+    if(localStorage.getItem("eziv_zakryte") === "1")
+      document.documentElement.setAttribute("data-zakryte", "1");
+  }catch(_){}
 })();
 </script>
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -994,6 +1002,39 @@ a.clWeb{display:inline-block;margin-top:12px;font-size:12.5px;color:var(--brand)
   .w.wediting{animation:none}
   .spin,.ob-spin{animation-duration:2.4s}
 }
+
+/* ═══ ZAKRYTÉ ČÍSLA — režim pre schôdzku (kap. 49) ═══
+   Sumy sa NEROZMAZÁVAJÚ, ale nahrádzajú reťazcom pevnej dĺžky. Rozmazané
+   sedemmiestne číslo je stále vidieť ako sedemmiestne a rád veličiny je
+   presne to, čo pri cudzích ľuďoch v miestnosti nechceš dať. Blur ostáva
+   len tam, kde nie je text na nahradenie: grafy a polia formulárov. */
+.zakr{font-family:var(--sans);letter-spacing:.08em;color:var(--ink-soft);
+  background:var(--line-soft);border-radius:5px;padding:0 5px;cursor:pointer;
+  user-select:none;-webkit-user-select:none}
+.zakr.vid{background:none;padding:0;letter-spacing:0;color:inherit;font-family:inherit}
+/* Stĺpce grafu prezradia trend aj bez popiskov — zakrýva sa celý graf. */
+html[data-zakryte] .wchart{filter:blur(11px);pointer-events:none}
+/* Vo formulári sa pole odkryje pri fokuse: keď doň píšeš, pozeráš sa naň ty.
+   Zakrývajú sa všetky číselné polia, nielen sumy — falošne zakrytý počet dní
+   nikoho nestojí nič, odkryté číslo áno. */
+html[data-zakryte] input[type=number]{filter:blur(5px)}
+html[data-zakryte] input[type=number]:focus{filter:none}
+#zakrBtn .zakrskrt{display:none}
+html[data-zakryte] #zakrBtn{background:var(--brand);border-color:var(--brand);color:#fff}
+html[data-zakryte] #zakrBtn .zakrskrt{display:inline}
+/* Pruh NIE JE sticky. Topbar už sedí na top:0 a výška topbaru nie je pevná,
+   takže druhý sticky prvok by sa naň položil. Trvalý indikátor je ikona
+   v lište, ktorá sticky je; pruh len vysvetlí stav po štarte appky.
+
+   Text je `--paper`, nie `#fff`: `--ink-soft` je v tmavej téme SVETLÁ sivá
+   a biely text na nej mal kontrast 2,5 — pod čitateľnosťou. `--paper` sa
+   otáča spolu s témou, takže pár drží v oboch. Zmerané v prehliadači,
+   nie odhadnuté. */
+.zakrpruh{display:none;align-items:center;gap:10px;background:var(--ink-soft);color:var(--paper);
+  padding:8px 13px;font-size:12.5px;line-height:1.35}
+html[data-zakryte] .zakrpruh{display:flex}
+.zakrpruh button{border:none;background:var(--paper);color:var(--ink);font-weight:700;border-radius:8px;
+  padding:6px 11px;font-size:12px;cursor:pointer;font-family:inherit;flex:none}
 </style>
 </head>
 <body>
@@ -1060,11 +1101,29 @@ a.clWeb{display:inline-block;margin-top:12px;font-size:12.5px;color:var(--brand)
     <div class="syncchip" id="syncChip" onclick="syncInfo()" title="Stav ukladania do cloudu (klepnite pre detail)" style="cursor:pointer">✓ uložené</div>
     <button class="usermenu" id="quickDoklad" onclick="rychlyDoklad(this)" title="Načítať doklad (foto alebo PDF)">📷</button>
     <button class="usermenu notifbtn" id="notifBtn" onclick="otvorNotifikacie()" title="Notifikácie">🔔<span id="notifBadge" class="notifbadge" style="display:none">0</span></button>
+    <!-- Zapnúť sa to musí jedným klepnutím, práve keď ľudia vchádzajú do
+         miestnosti — nie tromi cez menu. Preto ikona v lište, nie iba položka
+         v účte. Kreslené SVG, nie emoji: prečiarknuté oko potrebuje dva stavy
+         a znak, ktorý font nemá, sa zobrazí ako prázdny obdĺžnik (kap. 43.29). -->
+    <button class="usermenu" id="zakrBtn" onclick="prepniZakrytie()" title="Zakryť čísla na obrazovke" aria-label="Zakryť čísla na obrazovke">
+      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <path d="M2.5 12S6 6.2 12 6.2 21.5 12 21.5 12 18 17.8 12 17.8 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="2.5"/>
+        <path class="zakrskrt" d="M4.5 19.5 19.5 4.5"/>
+      </svg>
+    </button>
     <button class="usermenu" id="userMenu" onclick="otvorUctoMenu(this)" title="Účet, nastavenia, odhlásenie" aria-label="Účet">
       <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
         <circle cx="12" cy="8" r="3.6"/><path d="M4.8 20c.6-3.7 3.6-5.6 7.2-5.6s6.6 1.9 7.2 5.6"/>
       </svg>
     </button>
+  </div>
+
+  <!-- Režim prežije zavretie appky — inak si nabudúce v miestnosti zase
+       odkrytý. Cenou je, že o týždeň nemusíš vedieť, prečo appka nič neukazuje;
+       preto pruh, ktorý sa nedá prehliadnuť, a nie iba drobná ikona. -->
+  <div class="zakrpruh" id="zakrPruh">
+    <span style="flex:1">Čísla sú zakryté. Podržte prstom sumu, ak ju potrebujete vidieť.</span>
+    <button onclick="prepniZakrytie()">Odkryť</button>
   </div>
 
   <div class="wrap">
@@ -1173,7 +1232,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.24-HW";  // osobitná úprava § 68d — odpočet DPH až po zaplatení
+const APP_VERZIA = "2026.08.26-HX";  // zakryté čísla — režim pre schôdzku
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -1269,7 +1328,15 @@ function spristupniNeskor(){
   // takže príznak ostal navždy zapnutý a všetky ďalšie prekreslenia sa ticho
   // preskočili — appka sa po prepnutí naspäť už nedala ovládať klávesnicou.
   // Nájdené pri overovaní v prehliadači, nie čítaním kódu.
-  setTimeout(() => { _spristupCaka = false; spristupniOvladace(); vratFocus(); }, 0);
+  // Zakrytie čísel ide tým istým prechodom — jeden pozorovateľ, jedno kolo
+  // cez strom. Vlastný try/catch preto, že výnimka v zakrývaní by inak
+  // pochovala aj prístupnosť pod ním; `console.error`, nie tichý log —
+  // Supabase v prehliadači logov ukazuje len chyby.
+  setTimeout(() => {
+    _spristupCaka = false;
+    try{ zakryStranku(); }catch(e){ console.error("zakrytie čísel:", e); }
+    spristupniOvladace(); vratFocus();
+  }, 0);
 }
 function spustiKlavesnicu(){
   // Sleduje sa LEN pribudanie a ubúdanie uzlov. Keby sa sledovali aj atribúty,
@@ -1304,6 +1371,7 @@ async function boot(){
   try { await sadzbyNacitaj(); } catch(e){ console.warn("sadzby:", e); }
   const ok = initSupabase();
   spustiKlavesnicu();   // E1 — ovládanie klávesnicou (kap. 48.4)
+  spustiZakrytie();     // zakryté čísla — režim pre schôdzku (kap. 49)
   hide("loading");
 
   // Pozvánku odlož skôr, než sa čokoľvek presmeruje alebo prepíše URL.
@@ -21391,6 +21459,168 @@ function prepniTemu(){
   cloudMsg(novy ? "Tmavý režim zapnutý." : "Svetlý režim zapnutý.", "ok");
 }
 
+// ── ZAKRYTÉ ČÍSLA (kap. 49) ───────────────────────────────────────────────
+// Situácia: v meetingovke sedia ľudia a treba niečo nájsť v účtovníctve.
+// Dashboard hodí tržby na prvú obrazovku.
+//
+// Prečo sa NEZOZNAMUJÚ triedy, ktoré sa majú zakryť (`.wbig`, `.av`, …):
+// päť riadkov CSS by to spravilo, ale prvá nová obrazovka, ktorá tie triedy
+// nepoužije, by číslo ticho pustila von — a používateľ sa už spolieha.
+// To je horšia trieda chyby než žiadny režim, rovnaká logika ako pri falošnom
+// poplachu (spec kap. 16). Pravidlo je preto viazané na OBSAH, nie na miesto:
+// zakryje sa každý text, ktorý vyzerá ako suma v eurách. `eur()` aj `eur0()`
+// vždy pripájajú „€", takže pravidlo pokrýva aj kód, ktorý ešte nikto nenapísal.
+// Upraviť render bola aj tak fikcia — `eur`/`eur0` sa volá na 405 miestach.
+//
+// Dátumy, čísla faktúr, IČO ani mená sa nezakrývajú. V miestnosti práve
+// potrebuješ nájsť faktúru podľa čísla; appka musí ostať použiteľná.
+//
+// `\s` sa v triede znakov zámerne nepoužíva — zahŕňa `\n` a suma by cez
+// koniec riadka prehltla nesúvisiaci text (spec kap. 16). Medzera a NBSP sú
+// vypísané ručne: `Intl` dáva medzi tisíce aj pred „€" NBSP (U+00A0),
+// `eur0` obyčajnú medzeru. Vedúce mínus je súčasťou zhody — či si v pluse
+// alebo v mínuse je presne to, čo nemá byť vidieť.
+//
+// Jedna kópia pravidla, s príznakom `g`: `replace` je bezstavové, kým
+// `test()` s `g` si nesie `lastIndex` a vracalo by striedavo false.
+const ZAKR_ALL = /-?\d[\d\u00A0 ]*(?:[.,]\d+)?[\u00A0 ]?€/g;
+const ZAKR_TXT = "••••• €";
+const ZAKR_PRESKOC = { SCRIPT:1, STYLE:1, TEXTAREA:1, OPTION:1, SELECT:1, svg:1 };
+
+// Kontrola schopnosti, nie zhltnutá chyba — rovnako ako `typeof MutationObserver`
+// pri klávesnici. `cloudMsg` volá `jeZakryte()` a hlášky vznikajú aj tam, kde
+// skutočný DOM nie je (testy púšťajú `boot()` nad vyrobeným `document`).
+// Bez tejto poistky by appka padla na mieste, ktoré s režimom nesúvisí —
+// a chyba by vyzerala ako chyba ukladania.
+const zakrDomVie = () => typeof document !== "undefined" && !!document.documentElement
+  && typeof document.documentElement.hasAttribute === "function"
+  && typeof document.addEventListener === "function";
+const jeZakryte = () => !!(zakrDomVie() && document.documentElement.hasAttribute("data-zakryte"));
+function zakriText(s){ return String(s == null ? "" : s).replace(ZAKR_ALL, ZAKR_TXT); }
+function maSumu(s){ return typeof s === "string" && s.indexOf("€") >= 0 && zakriText(s) !== s; }
+
+// Rekurzia cez `childNodes`, nie `createTreeWalker`: to isté, ale dá sa
+// spustiť v teste nad vyrobeným stromom bez prehliadača.
+function zakryPodstrom(el){
+  const deti = el.childNodes;
+  for(let i = 0; i < deti.length; i++){
+    const n = deti[i];
+    if(n.nodeType === 3){
+      if(!maSumu(n.nodeValue)) continue;
+      // Originál sa odkladá do atribútu, nie preč — a je to bezpečné: zo
+      // živého DOM appky sa nikde nečíta text späť (jediné čítania
+      // `textContent` sú z parsovaných XML — ISDOC, CAMT, GPX).
+      const s = document.createElement("span");
+      s.className = "zakr";
+      s.setAttribute("data-zakr", "1");
+      s.setAttribute("data-orig", n.nodeValue);
+      s.textContent = zakriText(n.nodeValue);
+      el.replaceChild(s, n);
+      continue;                      // náhrada sedí na tom istom indexe
+    }
+    if(n.nodeType !== 1) continue;
+    if(ZAKR_PRESKOC[n.tagName]) continue;
+    if(n.hasAttribute && n.hasAttribute("data-zakr")) continue;
+    zakryPodstrom(n);
+  }
+}
+
+// Blur je CSS, `title` sa vykreslí ostro. Dnes sú v appke dva tituly so sumou
+// (`title="Príjem ${eur0(...)}"`) — bez tohto prechodu by režim padol na
+// dotyku myšou.
+function zakryAtributy(){
+  document.querySelectorAll("[title],[aria-label]").forEach(el => {
+    ["title", "aria-label"].forEach(a => {
+      const v = el.getAttribute(a);
+      if(!maSumu(v)) return;
+      if(!el.hasAttribute("data-z-" + a)) el.setAttribute("data-z-" + a, v);
+      el.setAttribute(a, zakriText(v));
+    });
+  });
+}
+
+// Volá to pozorovateľ prekreslení (`spristupniNeskor`) — jeden prechod stromu
+// pre prístupnosť aj pre zakrytie, nie dva. Vlastná zmena DOM pozorovateľa
+// spustí ešte raz, ale druhé kolo už nič nenájde (span má `data-zakr`
+// a jeho text sumu neobsahuje), takže sa to zastaví.
+function zakryStranku(){
+  if(!jeZakryte()) return;
+  zakryPodstrom(document.body);
+  zakryAtributy();
+}
+
+function odkryStranku(){
+  document.querySelectorAll("span[data-zakr]").forEach(s => {
+    s.parentNode.replaceChild(document.createTextNode(s.getAttribute("data-orig")), s);
+  });
+  ["title", "aria-label"].forEach(a => {
+    document.querySelectorAll("[data-z-" + a + "]").forEach(el => {
+      el.setAttribute(a, el.getAttribute("data-z-" + a));
+      el.removeAttribute("data-z-" + a);
+    });
+  });
+}
+
+function nastavZakrytie(zap){
+  if(!zakrDomVie()) return;
+  const k = document.documentElement;
+  if(zap) k.setAttribute("data-zakryte", "1"); else k.removeAttribute("data-zakryte");
+  try{ localStorage.setItem("eziv_zakryte", zap ? "1" : "0"); }catch(_){}
+  const b = document.getElementById("zakrBtn");
+  if(b){
+    const t = zap ? "Odkryť čísla na obrazovke" : "Zakryť čísla na obrazovke";
+    b.setAttribute("title", t); b.setAttribute("aria-label", t);
+  }
+  if(zap) zakryStranku(); else odkryStranku();
+}
+
+function prepniZakrytie(){
+  const novy = !jeZakryte();
+  nastavZakrytie(novy);
+  const m = document.getElementById("uctoMenu"); if(m) m.remove();
+  // Hláška hovorí aj to, čo režim NEROBÍ. Kto si myslí, že zakrýva aj export,
+  // pošle ostré čísla v presvedčení, že sú skryté.
+  cloudMsg(novy
+    ? "Čísla sú zakryté. PDF, exporty a zálohy sa nemenia — v nich ostávajú ostré."
+    : "Čísla sú odkryté.", "ok");
+}
+
+// Podržanie odkryje jednu sumu, kým držíš prst. Až po 260 ms: keby sa odkrylo
+// hneď pri stlačení, každé klepnutie na riadok (ktoré má navigovať) by sumu
+// blislo. Keď sa odkrylo, nasledujúci klik sa zahodí — inak by podržanie
+// zároveň otvorilo detail.
+let _zakrDrzany = null, _zakrCas = null, _zakrBolo = false;
+function zakrSkry(){
+  clearTimeout(_zakrCas); _zakrCas = null;
+  const s = _zakrDrzany; _zakrDrzany = null;
+  if(!s) return;
+  s.textContent = zakriText(s.getAttribute("data-orig"));
+  s.classList.remove("vid");
+}
+function spustiZakrytie(){
+  if(!zakrDomVie()) return;
+  document.addEventListener("pointerdown", e => {
+    const s = e.target && e.target.closest && e.target.closest("span[data-zakr]");
+    if(!s) return;
+    zakrSkry();
+    _zakrCas = setTimeout(() => {
+      _zakrDrzany = s; _zakrBolo = true;
+      s.textContent = s.getAttribute("data-orig");
+      s.classList.add("vid");
+    }, 260);
+  }, true);
+  ["pointerup", "pointercancel", "pointerleave"].forEach(ev =>
+    document.addEventListener(ev, zakrSkry, true));
+  // Posun prstom po obrazovke znamená, že už nedržíš sumu, ale scrolluješ.
+  window.addEventListener("scroll", zakrSkry, true);
+  document.addEventListener("click", e => {
+    if(!_zakrBolo) return;
+    _zakrBolo = false;
+    e.stopPropagation(); e.preventDefault();
+  }, true);
+  nastavZakrytie(jeZakryte());   // atribút nastavil skript v <head>, dorob zvyšok
+}
+
 function otvorUctoMenu(btn){
   const stav=(()=>{ const c=document.getElementById("syncChip"); return c?c.textContent:""; })();
   tbMenu("uctoMenu", btn, `
@@ -21400,6 +21630,8 @@ function otvorUctoMenu(btn){
       <div style="font-size:11.5px;color:var(--ink-soft);margin-top:3px">${esc(stav)}</div>
     </div>
     <button onclick="uctoVyber('tema')" style="${TB_POLOZKA}">${jeTmavy()?"☀ Svetlý režim":"🌙 Tmavý režim"}</button>
+    ${TB_CIARA}
+    <button onclick="uctoVyber('zakryte')" style="${TB_POLOZKA}">${jeZakryte()?"◉ Odkryť čísla":"◎ Zakryť čísla"}</button>
     ${TB_CIARA}
     <button onclick="uctoVyber('nastavenia')" style="${TB_POLOZKA}">⚙ Nastavenia a dáta</button>
     ${TB_CIARA}
@@ -21420,6 +21652,7 @@ let _uctoEmail="";
 function uctoVyber(co){
   const m=document.getElementById("uctoMenu"); if(m) m.remove();
   if(co==="tema"){ prepniTemu(); return; }
+  if(co==="zakryte"){ prepniZakrytie(); return; }
   if(co==="nastavenia") otvorApp("data");
   else if(co==="zaloha") exportFirmu();
   else if(co==="odhlasit"){
@@ -24616,7 +24849,11 @@ async function otvorDoklad(cesta){
   else alert("Doklad sa nepodarilo načítať.");
 }
 
-function cloudMsg(t,type){ const m=document.getElementById("cloudMsg"); if(m){ m.textContent=t; m.className="cloudmsg "+type; } }
+// Hlášky sa píšu cez `textContent` až po prekreslení, takže cez pozorovateľa
+// nemusia prejsť skôr, než ich používateľ uvidí — a 23 z nich nesie sumu
+// („Faktúra na … uložená"). Filtruje sa priamo tu, na jedinom mieste, kadiaľ
+// všetky idú.
+function cloudMsg(t,type){ const m=document.getElementById("cloudMsg"); if(m){ m.textContent=(typeof jeZakryte==="function"&&jeZakryte())?zakriText(t):t; m.className="cloudmsg "+type; } }
 function setSync(s){
   const c=document.getElementById("syncChip");
   if(!c) return;

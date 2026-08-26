@@ -22,7 +22,7 @@
 //
 //  Pri zmene appky staci zvysit VERZIA — stary cache sa vymaze pri aktivacii.
 // ═══════════════════════════════════════════════════════════════════════════
-const VERZIA = "2026.08.24-HW";
+const VERZIA = "2026.08.26-HX";
 const CACHE  = "ezivnostnik-" + VERZIA;
 // Odkladisko pre súbor zo systémového „Zdieľať". Nemá verziu v mene — obsah je
 // dočasný a musí prežiť aj aktualizáciu workera medzi zdieľaním a vyzdvihnutím.
