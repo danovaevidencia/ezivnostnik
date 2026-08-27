@@ -1186,6 +1186,7 @@ html[data-zakryte] .zakrpruh{display:flex}
 <input type="file" id="vwInput" accept=".xlsx,.xls" style="display:none" onchange="spracujVW(event)">
 <input type="file" id="zseInput" accept=".txt,.csv,.pdf,text/plain,application/pdf" style="display:none" onchange="spracujZse(event)">
 <input type="file" id="icsInput" accept=".ics,text/calendar" style="display:none" onchange="spracujICS(event)">
+<input type="file" id="vykazImportInput" accept=".xlsx,.docx" style="display:none" onchange="vykazImportSubor(event)">
 
 <!-- MODÁL na editovanie -->
 <div class="modal" id="modal">
@@ -1232,7 +1233,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.26-HX";  // zakryté čísla — režim pre schôdzku
+const APP_VERZIA = "2026.08.26-HY";  // človekodeň podľa hodín, import upraveného výkazu
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -5913,9 +5914,71 @@ function stiahniBlob(blob, nazov){
   const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=nazov; a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href),1000);
 }
-function vykazDni(w){ return (w.polozky||[]).length; }
-function vykazHodiny(w){ return (w.polozky||[]).reduce((a,p)=>a+(+p.hodiny||0),0); }
-function vykazClovekodni(w){ const h=vykazHodiny(w); return Math.round(h/8*100)/100; }
+// ═══════════════════════════════════════════════════════════════════════════
+//  ČLOVEKODEŇ — JEDNO PRAVIDLO
+//
+//  Dovtedy sa počítal na TROCH miestach a každé inak:
+//    · karta výkazu a kontrola faktúry → počet položiek (13)
+//    · XLSX súčet a Word protokol      → hodiny/8         (17)
+//    · `vykazNaProtokol` do `protokoly`→ počet položiek    (13)
+//  Výkaz za júl 2026 mal 13 dní po 10–12 hodinách, teda 136 h = 17 čld.
+//  Appka na seba sama hlásila „Výkaz má 13 čld, ale faktúra má 17" — pritom
+//  vyfakturované bolo správne a výkaz aj protokol boli správne. Chybná bola
+//  len kontrola, ktorá porovnávala dve rôzne veličiny.
+//
+//  Sú to naozaj dve rôzne zmluvy, nie chyba v jednej z nich:
+//    · "hodiny" — 1 MD = N odpracovaných hodín (typicky 8). Kto odrobí
+//      12 hodín, má 1,5 MD. Takto sa fakturuje na hodinových zmluvách.
+//    · "dni"    — 1 MD = jeden odpracovaný deň za pevnú dennú sadzbu,
+//      bez ohľadu na to, koľko hodín v ňom bolo.
+//  Preto prepínač, nie „správna" hodnota. Nastavuje sa na výkaze; keď tam
+//  nie je, dedí sa z Nastavení, aby to nikto nemusel klikať pri každom.
+// ═══════════════════════════════════════════════════════════════════════════
+const VYKAZ_MD_HODIN_DEF = 8;
+function vykazMdRezim(w){
+  const S=firmaData.settings||{};
+  const r=(w&&w.mdRezim)||S.mdRezim||"hodiny";
+  return r==="dni" ? "dni" : "hodiny";
+}
+function vykazMdHodin(w){
+  const S=firmaData.settings||{};
+  return +((w&&w.mdHodin)||S.mdHodin||VYKAZ_MD_HODIN_DEF)||VYKAZ_MD_HODIN_DEF;
+}
+// Dovolenka nie je odpracovaný DEŇ — do počtu dní nevstupuje. Značka `znacka`
+// ju označuje a `dovolenkaZVykazov` z nej odvodzuje čerpanie.
+function vykazOdpracovane(w){ return (w&&w.polozky||[]).filter(p=>!p.znacka); }
+function vykazDni(w){ return vykazOdpracovane(w).length; }
+// HODINY sa ale sčítavajú zo VŠETKÝCH riadkov, aj tých so značkou. Deň
+// skutočnej dovolenky má nula hodín (editor ich pri zaškrtnutí nuluje), takže
+// pre dovolenku to nemení nič.
+//
+// Zmenilo by to ale výkaz, v ktorom deň so značkou hodiny MÁ — a taký
+// existuje: BELGM0124 za február 2026 má 21 dní, z toho štyri so značkou,
+// každý 8–10 h a s činnosťou („Krízové riadenie s GR", „Integračný manuál
+// NCZI"). 184 h = 23 človekodní a presne 23 je aj na faktúre 20260002.
+// Filtrovať tie hodiny preč by ticho znížilo výkaz na 19 čld — teda znížilo
+// sumu, ktorú odberateľ dostal a schválil. Príznak, ktorý si niekto zapol,
+// nesmie sám od seba prepisovať to, čo je vo výkaze zapísané ako odrobené.
+//
+// Že taký deň je rozpor (dovolenka s hodinami a činnosťou), appka POVIE —
+// viď `vykazSporneDni`. Rozhodnúť to má človek, nie tichý filter.
+function vykazHodiny(w){ return r2((w&&w.polozky||[]).reduce((a,p)=>a+(+p.hodiny||0),0)); }
+// Dni označené ako dovolenka, ktoré majú zapísané hodiny alebo činnosť.
+// Buď to nie je dovolenka, alebo tam tie hodiny nemajú čo robiť; obe možnosti
+// menia sumu na faktúre, takže sa na ne upozorňuje a nedomýšľa sa.
+function vykazSporneDni(w){
+  return (w&&w.polozky||[]).filter(p=>p.znacka &&
+    ((+p.hodiny||0)>0 || (p.aktivity&&p.aktivity.length) || p.poznamka));
+}
+function vykazClovekodni(w){
+  if(vykazMdRezim(w)==="dni") return vykazDni(w);
+  const n=vykazMdHodin(w);
+  return Math.round(vykazHodiny(w)/n*100)/100;
+}
+// Na zobrazenie a do dokumentov. `String(22.67)` dá „22.67" s bodkou —
+// v slovenskom doklade je to preklep, ktorý si všimne odberateľ. Číselné
+// bunky XLSX ostávajú číslami, formátuje si ich Excel sám.
+function cldTxt(n){ return Number(n||0).toLocaleString("sk-SK",{maximumFractionDigits:2}); }
 
 function exportVykazDocx(idx){
   const w=firmaData.vykazy[idx]; if(!w){ alert("Výkaz sa nenašiel."); return; }
@@ -5940,8 +6003,8 @@ function buildVykazXlsx(w,X){
   const toSerial=(iso)=>{ const m=String(iso).match(/(\d{4})-(\d{2})-(\d{2})/); if(!m) return iso; return Math.round(Date.UTC(+m[1],+m[2]-1,+m[3])/86400000)+25569; };
   const fmtSkDate=(iso)=>{ const m=String(iso).match(/(\d{4})-(\d{2})-(\d{2})/); return m? `${+m[3]}.${+m[2]}.${m[1]}` : String(iso); };
   const polozky=(w.polozky||[]);
-  const hodinySpolu=r2(polozky.reduce((a,p)=>a+(+p.hodiny||0),0));
-  const cd=r2(hodinySpolu/8);
+  const hodinySpolu=vykazHodiny(w);
+  const cd=vykazClovekodni(w);   // jedno pravidlo — nie druhá kópia „hodiny/8"
   const sTit={font:{name:F,sz:16,bold:true,color:{rgb:C.mossD}},alignment:{horizontal:"center",vertical:"center"}};
   const sMetaL={font:{name:F,sz:10,bold:true,color:{rgb:C.mossD}},alignment:{vertical:"center"}};
   const sMetaV={font:{name:F,sz:10,color:{rgb:C.ink}},alignment:{vertical:"center",wrapText:true}};
@@ -5974,7 +6037,7 @@ function buildVykazXlsx(w,X){
     const lines=Math.max(1,akt.length);
     rowHeights.push({hpt:Math.max(16,lines*13+4)});
   });
-  rows.push([cell("Spolu človekohodín",sFoot),cell(hodinySpolu,sFootN),cell("Spolu človekodní: "+cd,sFoot)]);
+  rows.push([cell("Spolu človekohodín",sFoot),cell(hodinySpolu,sFootN),cell("Spolu človekodní: "+cldTxt(cd),sFoot)]);
   rowHeights.push({hpt:20});
   rows.push([]);
   const rSchvalil=rows.length;
@@ -6081,10 +6144,10 @@ function buildProtokolDocx(w,D){
     new Paragraph(""),new Paragraph(""),
     new Paragraph({alignment:AlignmentType.JUSTIFIED,children:[
       new TextRun({text:"Na základe uvedeného objednávateľ potvrdzuje prevzatie a akceptáciu poskytnutých služieb v rozsahu "}),
-      new TextRun({text:dni+" človekodní",bold:true}),
+      new TextRun({text:cldTxt(dni)+" človekodní",bold:true}),
       new TextRun({text:", v"+NBSP+"celkovej hodnote "}),
       new TextRun({text:eur(suma).replace("€","Eur")+" bez DPH"}),
-      new TextRun({text:" (t. j. "+dni+" človekodní ocenených jednotkovou cenou "+tarifa+" Eur bez DPH) za obdobie "+(w.obdobie||"")+"."}),
+      new TextRun({text:" (t. j. "+cldTxt(dni)+" človekodní ocenených jednotkovou cenou "+tarifa+" Eur bez DPH) za obdobie "+(w.obdobie||"")+"."}),
     ]}),
     new Paragraph(""),new Paragraph(""),new Paragraph(""),
     new Paragraph("V"+NBSP+"Bratislave, dňa "+dnesSk),
@@ -6126,8 +6189,13 @@ function faktMesiac(f){ return faktObdobie(f); }  // alias pre kontrolu výkaz�
 // Rozdiel znamená buď nedofakturované dni, alebo výkaz, ktorý nezodpovedá tomu,
 // čo odberateľ dostal na faktúre — a to je vec, ktorú treba vidieť pred podaním,
 // nie až keď sa na ňu spýta odberateľ.
+// Porovnáva sa ČLOVEKODEŇ s človekodňom. Predtým tu stál počet položiek
+// oproti fakturovaným človekodňom — dve rôzne veličiny, takže na každom
+// výkaze s inou dĺžkou dňa než 8 h appka hlásila nezrovnalosť, ktorá
+// neexistovala. Falošný poplach je drahší než žiadny: naučí preskakovať
+// aj pravé nálezy.
 function vykazKontrolaFaktury(w){
-  const dni=(w.polozky||[]).filter(p=>!p.znacka).length;
+  const dni=vykazClovekodni(w);
   const vm=vykazMesiac(w); if(!vm) return null;
   const zhoda=(firmaData.faktury||[]).filter(f=>faktMesiac(f)===vm && +f.dni>0);
   if(!zhoda.length) return {stav:"chyba_faktura", dni, mesiac:vm};
@@ -6140,17 +6208,30 @@ function appVykazy(){
   const d=firmaData, c=APPS.vykazy.c;
   const vyk=(d.vykazy||[]);
   document.getElementById("appScreen").innerHTML=appHlavicka("vykazy",
-    `<button class="aabtn" onclick="icsImport()">📅 Import z kalendára</button><button class="aabtn pri" onclick="editVykaz()">＋ Nový výkaz</button>`)+`
-    <div class="csub" style="margin:0 2px 14px">Výkazy prác pre fakturáciu podľa odpracovaných dní. Import z kalendára (.ics) vytvorí návrh výkazu zo stretnutí.</div>
+    `<button class="aabtn" onclick="icsImport()">📅 Import z kalendára</button><button class="aabtn" onclick="vykazImport()" title="Načítať výkaz (.xlsx) alebo akceptačný protokol (.docx) upravený v Exceli či Worde">↥ Načítať upravený</button><button class="aabtn pri" onclick="editVykaz()">＋ Nový výkaz</button>`)+`
+    <div class="csub" style="margin:0 2px 14px">Výkazy prác pre fakturáciu podľa odpracovaných dní. Import z kalendára (.ics) vytvorí návrh výkazu zo stretnutí. Výkaz doladený v Exceli alebo podpísaný protokol z Wordu načítate cez „Načítať upravený“.</div>
     ${vyk.length?vyk.map((w,i)=>{
-      const dni=(w.polozky||[]).filter(p=>!p.znacka).length;
-      const hod=(w.polozky||[]).filter(p=>!p.znacka).reduce((a,p)=>a+(+p.hodiny||0),0);
+      const dni=vykazDni(w);
+      const hod=vykazHodiny(w);
+      const cld=vykazClovekodni(w);
       const kf=vykazKontrolaFaktury(w);
       const kfPas = !kf ? "" :
-        kf.stav==="ok" ? `<div style="background:var(--sfc-pos);border-radius:8px;padding:7px 11px;margin-bottom:8px;font-size:12px;color:var(--pos)">✓ ${kf.dni} človekodní sedí s faktúrou ${esc(kf.cislo)}</div>`
-      : kf.stav==="nesedi" ? `<div style="background:var(--sfc-warn);border-radius:8px;padding:7px 11px;margin-bottom:8px;font-size:12px;color:var(--neg)">⚠ Výkaz má ${kf.dni} čld, ale faktúra ${esc(kf.cislo)} za ten mesiac má ${kf.faktDni} — skontrolujte pred podaním</div>`
-      : `<div style="background:var(--bg);border-radius:8px;padding:7px 11px;margin-bottom:8px;font-size:12px;color:var(--ink-soft)">${kf.dni} človekodní · za tento mesiac zatiaľ nie je faktúra</div>`;
+        kf.stav==="ok" ? `<div style="background:var(--sfc-pos);border-radius:8px;padding:7px 11px;margin-bottom:8px;font-size:12px;color:var(--pos)">✓ ${cldTxt(kf.dni)} človekodní sedí s faktúrou ${esc(kf.cislo)}</div>`
+      // Hláška povie AJ TO, ako sa človekodeň počíta. Bez toho vyzerá rozdiel
+      // ako chyba v účtovníctve, hoci ide len o zle zvolený režim — a práve
+      // to poslalo hľadať chybu, ktorá neexistovala.
+      : kf.stav==="nesedi" ? `<div style="background:var(--sfc-warn);border-radius:8px;padding:7px 11px;margin-bottom:8px;font-size:12px;color:var(--neg)">⚠ Výkaz má ${cldTxt(kf.dni)} čld${vykazMdRezim(w)==="hodiny"?` (${vykazHodiny(w)} h ÷ ${cldTxt(vykazMdHodin(w))} h)`:" (1 deň = 1 čld)"}, ale faktúra ${esc(kf.cislo)} za ten mesiac má ${cldTxt(kf.faktDni)} — skontrolujte pred podaním</div>`
+      : `<div style="background:var(--bg);border-radius:8px;padding:7px 11px;margin-bottom:8px;font-size:12px;color:var(--ink-soft)">${cldTxt(kf.dni)} človekodní · za tento mesiac zatiaľ nie je faktúra</div>`;
+      // Deň označený ako dovolenka, ktorý má hodiny a činnosť. Nekreslí sa
+      // stále — len keď taký deň naozaj je (trvalý prvok, ktorý väčšinou
+      // hlási „nič", zaberá miesto zbytočne).
+      const sporne=vykazSporneDni(w);
+      const spornePas = sporne.length ? `<div style="background:var(--sfc-warn);border-radius:8px;padding:7px 11px;margin-bottom:8px;font-size:12px;color:var(--neg)">
+        ⚠ ${sporne.length} ${sporne.length===1?"deň je označený":(sporne.length<5?"dni sú označené":"dní je označených")} ako dovolenka, ale ${sporne.length===1?"má":"majú"} zapísané hodiny (${cldTxt(sporne.reduce((a,p)=>a+(+p.hodiny||0),0))} h) aj činnosť.
+        Hodiny sa počítajú do fakturácie — buď to nie je dovolenka, alebo tam tie hodiny nemajú byť.
+        <span style="text-decoration:underline;cursor:pointer" onclick="event.stopPropagation();vykazOpravSporne(${i})">Zrušiť značku na týchto dňoch</span></div>` : "";
       return `<div class="card" style="margin-bottom:14px">
+        ${spornePas}
         ${kfPas}
         <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:6px;cursor:pointer" onclick="editVykaz(${i})">
           <b class="chead">${esc(w.projekt||"Výkaz")}</b>
@@ -6159,8 +6240,8 @@ function appVykazy(){
           <span class="acol-muted">${esc(w.obdobie||"")}</span>
         </div>
         <div class="statgrid" style="cursor:pointer" onclick="editVykaz(${i})">
-          <div class="sbox"><div class="sn" style="font-size:18px">${dni}</div><div class="sl">dní</div></div>
-          <div class="sbox"><div class="sn" style="font-size:18px">${hod}</div><div class="sl">hodín</div></div>
+          <div class="sbox"><div class="sn" style="font-size:18px">${cldTxt(cld)}</div><div class="sl">človekodní${vykazMdRezim(w)==="hodiny"?` · ${cldTxt(vykazMdHodin(w))} h`:""}</div></div>
+          <div class="sbox"><div class="sn" style="font-size:18px">${hod}</div><div class="sl">hodín${dni!==cld?` · ${dni} dní`:""}</div></div>
           <div class="sbox"><div class="sn" style="font-size:18px">${esc(w.pracovnik||"—")}</div><div class="sl">pracovník</div></div>
         </div>
         <div class="atool" style="margin-top:12px">
@@ -6170,6 +6251,22 @@ function appVykazy(){
       </div>`;
     }).join(''):'<div class="aempty">Žiadne výkazy. Vytvorte nový alebo importujte z kalendára.</div>'}`;
   setCrumb(`${vyk.length} výkazov`);
+}
+
+// Zruší značku dovolenky na dňoch, ktoré majú zapísanú prácu. Hodiny ani
+// činnosť sa nemenia — mení sa len to, čo o tých dňoch appka tvrdí. Ide
+// o zásah do už vyfakturovaného výkazu, takže sa pýta a vypíše, čoho sa týka.
+function vykazOpravSporne(i){
+  const w=(firmaData.vykazy||[])[i]; if(!w) return;
+  const sporne=vykazSporneDni(w); if(!sporne.length) return;
+  const zoznam=sporne.map(p=>"· "+p.datum+" — "+(+p.hodiny||0)+" h").join("\n");
+  if(!confirm("Zrušiť značku dovolenky na týchto dňoch?\n\n"+zoznam+
+    "\n\nHodiny ani činnosti sa nemenia. Dni sa začnú počítať medzi odpracované "+
+    "a prestanú sa rátať do čerpanej dovolenky."+
+    "\n\nPočet človekodní na fakturáciu sa"+(vykazMdRezim(w)==="hodiny"?" NEZMENÍ":" ZMENÍ z "+cldTxt(vykazClovekodni(w))+" na "+cldTxt(vykazDni(w)+sporne.length))+".")) return;
+  sporne.forEach(p=>{ delete p.znacka; });
+  vykazPrepocitaj(w); poZmene(); appVykazy();
+  cloudMsg("Značka dovolenky zrušená na "+sporne.length+" dňoch.","ok");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -6205,9 +6302,37 @@ function vykazCasteUlohy(limit){
 }
 
 function vykazPrepocitaj(w){
-  w.dni=(w.polozky||[]).filter(p=>!p.znacka).length;   // dovolenka nie je odpracovaný deň
-  w.hodiny=(w.polozky||[]).filter(p=>!p.znacka).reduce((a,p)=>a+(+p.hodiny||0),0);
+  // `dni` = kalendárne odpracované dni (koľko riadkov výkaz má),
+  // `cld` = človekodne na fakturáciu podľa zvoleného režimu. V režime „dni"
+  // sú to tie isté čísla, v režime „hodiny" nie — a práve to rozlíšenie
+  // predtým chýbalo a rozišlo výkaz s protokolom.
+  w.dni=vykazDni(w);
+  w.hodiny=vykazHodiny(w);
+  w.cld=vykazClovekodni(w);
   return w;
+}
+
+// Rozpísaná hlavička sa pri prekreslení modálu stratí — polia sa čítajú až
+// v uzatváracom callbacku. Kto vyplnil projekt a potom siahol na prepínač,
+// prišiel o to. Zapíše sa preto do modelu pred každým prekreslením.
+function vykazUlozHlavicku(){
+  const w=_vykazEdit && _vykazEdit.w; if(!w) return;
+  if(document.getElementById("m_projekt")) w.projekt=val("m_projekt");
+  if(document.getElementById("m_zakazka")) w.zakazka=val("m_zakazka");
+  if(document.getElementById("m_pracovnik")) w.pracovnik=val("m_pracovnik");
+  if(document.getElementById("m_obdobie")) w.obdobie=val("m_obdobie");
+}
+function vykZmenMd(pole, hodnota){
+  const w=_vykazEdit && _vykazEdit.w; if(!w) return;
+  vykazUlozHlavicku();
+  if(pole==="rezim") w.mdRezim = hodnota==="dni" ? "dni" : "hodiny";
+  else {
+    const h=parseFloat(String(hodnota).replace(",","."));
+    // Nula by delila nulou a spravila z človekodní nekonečno. Prázdne pole
+    // znamená „ako v Nastaveniach", nie nula.
+    w.mdHodin = (h>0) ? h : null;
+  }
+  prekresliSoScrollom(renderVykazEditor);
 }
 
 function renderVykazEditor(){
@@ -6216,7 +6341,10 @@ function renderVykazEditor(){
   const S=firmaData.settings||{};
   const poz=w.polozky||[];
   const odprac=poz.filter(p=>!p.znacka), dovol=poz.filter(p=>p.znacka);
-  const hod=odprac.reduce((a,p)=>a+(+p.hodiny||0),0);
+  const hod=vykazHodiny(w);
+  const cld=vykazClovekodni(w);
+  const rez=vykazMdRezim(w), mdh=vykazMdHodin(w);
+  const sporne=vykazSporneDni(w);
   const caste=vykazCasteUlohy(6);
 
   openModal(nova?"Nový výkaz":"Upraviť výkaz",`
@@ -6227,10 +6355,34 @@ function renderVykazEditor(){
     </div>
     <div class="mfield"><label>Obdobie</label><input id="m_obdobie" value="${esc(w.obdobie||'')}" placeholder="1.1.2026 - 31.1.2026"></div>
 
+    <div class="mfield" style="margin-top:12px">
+      <label>Ako sa počíta človekodeň</label>
+      <div style="display:flex;gap:7px;flex-wrap:wrap;align-items:center">
+        <span class="kvf-pchip${rez==="hodiny"?" on":""}" onclick="vykZmenMd('rezim','hodiny')"
+              title="1 MD = pevný počet odpracovaných hodín. Kto odrobí 12 hodín, má 1,5 MD.">Podľa hodín</span>
+        <span class="kvf-pchip${rez==="dni"?" on":""}" onclick="vykZmenMd('rezim','dni')"
+              title="1 MD = jeden odpracovaný deň za dennú sadzbu, bez ohľadu na hodiny.">Pevná denná sadzba</span>
+        ${rez==="hodiny"?`<label style="display:flex;align-items:center;gap:6px;font-size:12.5px;white-space:nowrap">
+          <span class="acol-muted">1 MD =</span>
+          <input type="number" step="0.5" min="0.5" value="${esc(mdh)}" onchange="vykZmenMd('hodin',this.value)"
+                 style="width:62px;border:1px solid var(--line);border-radius:7px;padding:4px 6px;font-size:12.5px;text-align:right">
+          <span class="acol-muted">h</span>
+        </label>`:''}
+      </div>
+      <div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px">
+        ${rez==="hodiny"
+          ? `Do výkazu, protokolu aj kontroly faktúry ide <b>${cldTxt(cld)}</b> človekodní (${hod} h ÷ ${cldTxt(mdh)} h). Prázdne pole = predvolené z Nastavení.`
+          : `Do výkazu, protokolu aj kontroly faktúry ide <b>${cldTxt(cld)}</b> človekodní — počet odpracovaných dní. Hodiny (${hod} h) sú len informatívne.`}
+      </div>
+    </div>
+
     <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin:14px 0 8px">
       <b class="chead">Dni výkazu</b>
       <span class="acol-muted" style="font-size:12px">${odprac.length} odpracovaných · ${hod} h${dovol.length?` · ${dovol.length} dovolenka`:''}</span>
     </div>
+    ${sporne.length?`<div style="background:var(--sfc-warn);border-radius:8px;padding:8px 11px;margin-bottom:8px;font-size:12px;color:var(--neg)">
+      ⚠ Dovolenka so zapísanou prácou: ${sporne.map(p=>esc(p.datum)).join(", ")}.
+      Hodiny (${cldTxt(sporne.reduce((a,p)=>a+(+p.hodiny||0),0))} h) sa počítajú do fakturácie. Odškrtnite ° pri tých dňoch, alebo im vynulujte hodiny.</div>`:''}
 
     ${caste.length?`<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px">
       <span class="acol-muted" style="font-size:11px;align-self:center">časté:</span>
@@ -6243,14 +6395,17 @@ function renderVykazEditor(){
           <div style="display:flex;gap:6px;align-items:center;margin-bottom:5px">
             <input type="date" value="${esc((p.datum||'').slice(0,10))}" onchange="vykZmen(${i},'datum',this.value)"
                    style="flex:1;min-width:0;border:1px solid var(--line);border-radius:7px;padding:4px 6px;font-size:12.5px">
-            <input type="number" step="0.5" min="0" value="${p.znacka?'':(+p.hodiny||0)}" ${p.znacka?'disabled':''} onchange="vykZmen(${i},'hodiny',this.value)"
-                   style="width:58px;border:1px solid var(--line);border-radius:7px;padding:4px 6px;font-size:12.5px;text-align:right">
+            <!-- Pole sa zamyká len pri dni, ktorý naozaj hodiny nemá. Keď ich
+                 značkový deň má, musia byť vidieť a opraviteľné — inak sa
+                 hodiny, ktoré idú do fakturácie, nedajú ani zobraziť. -->
+            <input type="number" step="0.5" min="0" value="${p.znacka&&!(+p.hodiny)?'':(+p.hodiny||0)}" ${p.znacka&&!(+p.hodiny)?'disabled':''} onchange="vykZmen(${i},'hodiny',this.value)"
+                   style="width:58px;border:1px solid var(--line);border-radius:7px;padding:4px 6px;font-size:12.5px;text-align:right${p.znacka&&+p.hodiny?';border-color:var(--neg)':''}">
             <label style="display:flex;align-items:center;gap:3px;font-size:11.5px;white-space:nowrap;cursor:pointer" title="Deň dovolenky — nezapočíta sa do odpracovaných a prenesie sa do modulu Dovolenka">
               <input type="checkbox" ${p.znacka?'checked':''} onchange="vykZmen(${i},'znacka',this.checked)" style="width:auto">°
             </label>
             <button class="aabtn neg" style="padding:2px 7px;font-size:11px" onclick="vykZmazDen(${i})">✕</button>
           </div>
-          <input value="${esc((p.aktivity&&p.aktivity.join('; '))||p.poznamka||'')}" ${p.znacka?'disabled':''}
+          <input value="${esc((p.aktivity&&p.aktivity.join('; '))||p.poznamka||'')}" ${p.znacka&&!(p.aktivity&&p.aktivity.length)&&!p.poznamka?'disabled':''}
                  placeholder="${p.znacka?'dovolenka':'čo sa v ten deň robilo'}" onchange="vykZmen(${i},'aktivity',this.value)"
                  style="width:100%;border:1px solid var(--line);border-radius:7px;padding:5px 7px;font-size:12.5px">
         </div>`).join("")
@@ -6263,8 +6418,7 @@ function renderVykazEditor(){
     ${!nova?`<button class="aabtn" style="width:100%;justify-content:center;margin-top:8px" onclick="vykazNaProtokol()">→ Vytvoriť akceptačný protokol</button>`:''}
   `,
   ()=>{
-    w.projekt=val("m_projekt"); w.zakazka=val("m_zakazka");
-    w.pracovnik=val("m_pracovnik"); w.obdobie=val("m_obdobie");
+    vykazUlozHlavicku();
     vykazPrepocitaj(w);
     if(!firmaData.vykazy) firmaData.vykazy=[];
     if(nova) firmaData.vykazy.push(w); else firmaData.vykazy[idx]=w;
@@ -6308,7 +6462,7 @@ function vykHromadneHodiny(){
   const h=parseFloat(String(zadane).replace(",",".")); 
   if(!(h>=0)){ alert("Zadajte nezáporné číslo."); return; }
   (w.polozky||[]).forEach(p=>{ if(!p.znacka) p.hodiny=h; });
-  prekresliSoScrollom(renderVykazEditor);
+  vykazUlozHlavicku(); prekresliSoScrollom(renderVykazEditor);
 }
 function vykPridajDen(){
   const w=_vykazEdit.w; const S=firmaData.settings||{};
@@ -6320,8 +6474,8 @@ function vykPridajDen(){
   do{ base.setDate(base.getDate()+1); } while(!isPracDen(base));
   const iso=base.getFullYear()+"-"+String(base.getMonth()+1).padStart(2,"0")+"-"+String(base.getDate()).padStart(2,"0");
   if(!w.polozky) w.polozky=[];
-  w.polozky.push({datum:iso, hodiny:+S.vykazPausalHodin||8, aktivity:[], poznamka:""});
-  prekresliSoScrollom(renderVykazEditor);
+  w.polozky.push({datum:iso, hodiny:+S.vykazPausalHodin||vykazMdHodin(w), aktivity:[], poznamka:""});
+  vykazUlozHlavicku(); prekresliSoScrollom(renderVykazEditor);
 }
 function vykZmazDen(i){
   const w=_vykazEdit.w;
@@ -6350,7 +6504,11 @@ function vykazNaProtokol(){
   const p={
     cislo:"", datum:new Date().toISOString().slice(0,10),
     obdobie:w.obdobie||"", pracovnik:w.pracovnik||M.nazov||"",
-    dni:w.dni, tarifa, suma:r2(w.dni*tarifa),
+    // ČLOVEKODNE, nie počet riadkov. Word protokol počítal `vykazClovekodni`,
+    // sem sa ukladal počet dní — ten istý protokol mal v appke iné číslo než
+    // v dokumente, ktorý odišiel odberateľovi.
+    dni:w.cld, dniKal:w.dni, mdRezim:vykazMdRezim(w), mdHodin:vykazMdHodin(w),
+    tarifa, suma:r2(w.cld*tarifa),
     dodavatel:M.nazov||"", dodavatelIco:M.ico||"", dodavatelIcDph:M.icdph||"",
     dodavatelAdresa:M.adresa||"",
     objednavatel:S.odberatelNazov||"", objednavatelIco:S.odberatelIco||"",
@@ -6365,7 +6523,9 @@ function vykazNaProtokol(){
   if(!firmaData.protokoly) firmaData.protokoly=[];
   firmaData.protokoly.unshift(p);
   closeModal(); _vykazEdit=null; poZmene();
-  alert("Akceptačný protokol vytvorený: "+w.dni+" dní"+(tarifa?" · "+eur(p.suma):"")+
+  alert("Akceptačný protokol vytvorený: "+cldTxt(w.cld)+" človekodní"+
+        (w.cld!==w.dni?" ("+w.hodiny+" h / "+vykazMdHodin(w)+" h na MD, "+w.dni+" dní)":"")+
+        (tarifa?" · "+eur(p.suma):"")+
         (tarifa?"":"\n\nCenu za človekodeň doplňte v Nastaveniach."));
   appVykazy();
 }
@@ -6496,6 +6656,334 @@ function expandRecurring(events){
     });
   }
   return out;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  IMPORT RUČNE UPRAVENÉHO VÝKAZU (XLSX) A AKCEPTAČNÉHO PROTOKOLU (DOCX)
+//
+//  Výkaz sa pred podpisom takmer vždy ešte ručne dolaďuje v Exceli — doplní
+//  sa deň, prepíše hodina, upraví text činnosti. Dovtedy tá úprava v appke
+//  neexistovala: appka mala svoju verziu, odberateľ dostal inú a od toho
+//  okamihu už nesedelo nič — ani protokol, ani kontrola voči faktúre.
+//
+//  Číta sa formát, ktorý appka sama vyrába, ale NIE podľa pevných čísel
+//  riadkov: Excel riadky pribúdajú a ubúdajú. Kotva je hlavičkový riadok
+//  („Dátum" | „Počet hodín" | „Poznámka"), meta sa hľadá podľa štítku
+//  v prvom stĺpci. Vzorka, na ktorej je to overené, prešla cez MS Excel
+//  (má `customXml` aj `calcChain`) — teda presne ten prípad, o ktorý ide.
+//
+//  Súčet človekodní zo súboru sa NEPREPOČÍTAVA, ale POROVNÁVA. Keď 136 h
+//  a 17 čld, appka z toho odvodí, že 1 MD = 8 h, a nastaví režim. Keď to
+//  nevychádza na okrúhle číslo, povie to a nechá rozhodnúť človeka —
+//  domyslený režim by ticho zmenil sumu na faktúre.
+// ═══════════════════════════════════════════════════════════════════════════
+function vykazImport(){ document.getElementById("vykazImportInput").click(); }
+
+function vykazImportSubor(e){
+  const file=e.target.files&&e.target.files[0]; if(!file) return; e.target.value="";
+  const meno=String(file.name||"").toLowerCase();
+  if(meno.endsWith(".docx")) vykazImportProtokol(file);
+  else if(meno.endsWith(".xlsx")) vykazImportXlsx(file);
+  else alert("Podporovaný je výkaz .xlsx alebo akceptačný protokol .docx.");
+}
+
+// ── XLSX výkaz ──────────────────────────────────────────────────────────────
+function vykazImportXlsx(file){
+  ensureXlsxStyle().then(X=>{
+    const rd=new FileReader();
+    rd.onload=ev=>{
+      let parsed;
+      try{
+        const wb=X.read(new Uint8Array(ev.target.result),{type:"array"});
+        const ws=wb.Sheets[wb.SheetNames[0]];
+        if(!ws){ alert("Súbor nemá žiadny hárok."); return; }
+        parsed=vykazParsujXlsx(X.utils.sheet_to_json(ws,{header:1,raw:true,defval:""}));
+      }catch(err){
+        // Nahlas: prázdny výsledok po tichej chybe vyzerá ako prázdny súbor.
+        console.error("import výkazu:", err);
+        alert("Súbor sa nepodarilo prečítať: "+err.message); return;
+      }
+      if(parsed.chyba){ alert(parsed.chyba); return; }
+      vykazImportNahlad(parsed, file.name);
+    };
+    rd.readAsArrayBuffer(file);
+  }).catch(()=>alert("Knižnicu na čítanie XLSX sa nepodarilo načítať. Skontrolujte pripojenie."));
+}
+
+function vykazParsujXlsx(A){
+  const txt=(v)=>String(v==null?"":v).trim();
+  const najdi=(stitok)=>{
+    for(const r of A){ const a=txt(r[0]); if(a.toLowerCase().startsWith(stitok.toLowerCase()))
+      return txt(r[2])||txt(r[1]); }
+    return "";
+  };
+  // Kotva: riadok s hlavičkou tabuľky. Bez nej sa nedá povedať, kde začínajú dni.
+  let hi=-1;
+  for(let i=0;i<A.length;i++){
+    const a=txt(A[i][0]).toLowerCase(), b=txt(A[i][1]).toLowerCase();
+    if(a==="dátum" && b.indexOf("hod")>=0){ hi=i; break; }
+  }
+  if(hi<0) return {chyba:"Toto nevyzerá ako výkaz prác — nenašiel som riadok so stĺpcami „Dátum“ a „Počet hodín“.\n\nImportovať sa dá výkaz stiahnutý z tejto appky, aj keď ste ho medzitým upravili v Exceli."};
+
+  const polozky=[]; let sumaRiadok=null;
+  for(let i=hi+1;i<A.length;i++){
+    const a=txt(A[i][0]);
+    if(!a) continue;
+    if(a.toLowerCase().startsWith("spolu")){ sumaRiadok=A[i]; break; }
+    // Dovolenka je vo výkaze označená stupňom za dátumom (° = deň voľna).
+    const znacka=/[°˚]/.test(a);
+    const iso=faktToISO(znacka?a.replace(/[°˚]/g,"").trim():A[i][0]);
+    if(!iso||!/^\d{4}-\d{2}-\d{2}$/.test(iso)) continue;   // nie je to deň, preskoč
+    const hodiny=parseFloat(String(A[i][1]).replace(",","."))||0;
+    const pozn=txt(A[i][2]);
+    const aktivity=pozn?pozn.split(/\r?\n/).map(x=>x.trim()).filter(Boolean):[];
+    // Hodiny a činnosť sa preberajú AJ pri značke. Zahodiť ich preto, že za
+    // dátumom je stupeň, by z výkazu BELGM0124 (184 h, štyri značkové dni
+    // po 8–10 h) spravilo 152 h — teda by import ticho znížil to, čo je
+    // v podpísanom súbore napísané. Že je taký deň rozpor, appka povie
+    // (`vykazSporneDni`); prepísať ho môže len človek.
+    const p={datum:iso, hodiny, aktivity, poznamka:aktivity.join("; ")};
+    if(znacka) p.znacka=true;
+    polozky.push(p);
+  }
+  if(!polozky.length) return {chyba:"Vo výkaze som nenašiel ani jeden deň s dátumom."};
+
+  // Súčty zo súboru — to, čo videl a podpísal odberateľ.
+  let hodinySub=null, cldSub=null;
+  if(sumaRiadok){
+    const h=parseFloat(String(sumaRiadok[1]).replace(",","."));
+    if(!isNaN(h)) hodinySub=h;
+    const m=txt(sumaRiadok[2]).match(/([\d]+(?:[.,]\d+)?)\s*$/);
+    if(m) cldSub=parseFloat(m[1].replace(",","."));
+  }
+  return {
+    typ:"vykaz",
+    zakazka:najdi("Interné číslo zákazky"),
+    projekt:najdi("Projekt:"),
+    pracovnik:najdi("Pracovník:"),
+    obdobie:najdi("Obdobie:"),
+    schvalil:(()=>{ for(const r of A){ const a=txt(r[0]);
+      const m=a.match(/^Za Odberateľa schválil:\s*(.*)$/i); if(m) return m[1].trim(); } return ""; })(),
+    polozky, hodinySub, cldSub
+  };
+}
+
+// Z hodín a človekodní v podpísanom súbore odvodí, ako sa človekodeň počítal.
+// Nehádže sa: keď to nevychádza, vráti null a rozhodne človek.
+//
+// Keď človekodne sedia s počtom dní a ZÁROVEŇ vychádza okrúhly počet hodín
+// na deň (20 dní, 160 h, 20 čld), sú obe čítania správne a dnes dávajú to
+// isté číslo. Prednosť má jednoduchší model — pevná denná sadzba. Rozídu sa
+// až pri budúcej zmene hodín a vtedy si to používateľ prepne v editore.
+function vykazOdvodRezim(hodiny, cld, poctDni){
+  if(!(cld>0)) return null;
+  if(Math.abs(cld-poctDni)<0.01) return {mdRezim:"dni"};
+  if(!(hodiny>0)) return null;
+  const n=hodiny/cld;
+  const zaokr=Math.round(n*2)/2;             // polhodiny stačia (7,5 / 8 / 8,5)
+  if(Math.abs(n-zaokr)>0.01||zaokr<=0) return null;
+  return {mdRezim:"hodiny", mdHodin:zaokr};
+}
+
+// ── DOCX akceptačný protokol ────────────────────────────────────────────────
+// Knižnica `docx` vie len zapisovať. DOCX je ZIP, takže sa rozbalí cez fflate
+// (appka ho už má na iné veci) a číta sa `word/document.xml`.
+function vykazImportProtokol(file){
+  ensureFflate().then(fz=>{
+    const rd=new FileReader();
+    rd.onload=ev=>{
+      let parsed;
+      try{
+        const zip=fz.unzipSync(new Uint8Array(ev.target.result));
+        const xml=zip["word/document.xml"];
+        if(!xml){ alert("Toto nie je platný .docx súbor."); return; }
+        parsed=vykazParsujProtokol(docxNaText(fz.strFromU8(xml)));
+      }catch(err){
+        console.error("import protokolu:", err);
+        alert("Súbor sa nepodarilo prečítať: "+err.message); return;
+      }
+      if(parsed.chyba){ alert(parsed.chyba); return; }
+      vykazImportNahlad(parsed, file.name);
+    };
+    rd.readAsArrayBuffer(file);
+  }).catch(()=>alert("Knižnicu na čítanie .docx sa nepodarilo načítať. Skontrolujte pripojenie."));
+}
+
+// Text z Wordu. Odsek aj zalomenie sú koniec riadka; `<w:t>` sú kúsky textu,
+// ktoré Word delí aj uprostred slova (pri zmene formátu), preto sa lepia
+// bez oddeľovača — inak by z „350 Eur" vzniklo „3 50 Eur".
+function docxNaText(xml){
+  return String(xml)
+    .replace(/<w:(p|br|tab)\b[^>]*\/>/g,"\n")
+    .replace(/<\/w:p>/g,"\n")
+    .replace(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g,(_,t)=>t)
+    .replace(/<[^>]+>/g,"")
+    .replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">")
+    .replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/&#(\d+);/g,(_,d)=>String.fromCharCode(+d))
+    .replace(/\u00A0/g," ")
+    .replace(/[ \t]+/g," ")
+    .replace(/\n{2,}/g,"\n");
+}
+
+function vykazParsujProtokol(t){
+  const cislo=(s)=>parseFloat(String(s).replace(/\s/g,"").replace(",","."));
+  const mDni=t.match(/v\s*rozsahu\s*([\d\s]+(?:[.,]\d+)?)\s*človekodn/i);
+  if(!mDni) return {chyba:"Toto nevyzerá ako akceptačný protokol — nenašiel som vetu s rozsahom v človekodňoch.\n\nImportovať sa dá protokol stiahnutý z tejto appky, aj keď ste ho medzitým upravili vo Worde."};
+  const mTar=t.match(/jednotkovou\s*cenou\s*([\d\s]+(?:[.,]\d+)?)/i);
+  const mSum=t.match(/celkovej\s*hodnote\s*([\d\s]+(?:[.,]\d+)?)/i);
+  const mObd=t.match(/za\s*obdobie\s*(.+?)\s*\.\s*$/im)
+          || t.match(/za\s*obdobie\s*([^\n.]*\d{4})/i);
+  const mSchv=t.match(/Za\s*objednávateľa:?\s*\n?\s*Meno:\s*(.+)/i);
+  return {
+    typ:"protokol",
+    cld:cislo(mDni[1]),
+    tarifa:mTar?cislo(mTar[1]):null,
+    suma:mSum?cislo(mSum[1]):null,
+    obdobie:mObd?mObd[1].trim().replace(/\.$/,""):"",
+    schvalil:mSchv?mSchv[1].trim():""
+  };
+}
+
+// ── Náhľad a potvrdenie ─────────────────────────────────────────────────────
+// Import PREPISUJE prácu, ktorá už v appke je — to je nezvratná operácia
+// a nesmie sa stať jedným klepnutím bez toho, aby bolo vidieť čo za čo.
+// Preto sa najprv ukáže porovnanie a až potom sa zapisuje.
+let _vykImport=null;
+
+// Ku ktorému výkazu súbor patrí. Mesiac je silnejší kľúč než zákazka —
+// zákazku Roman v Exceli občas prepíše, mesiac nie.
+function vykazNajdiPodobny(p){
+  const mes=vykazMesiac({obdobie:p.obdobie, polozky:p.polozky||[]});
+  if(!mes) return -1;
+  const vyk=firmaData.vykazy||[];
+  let zaloha=-1;
+  for(let i=0;i<vyk.length;i++){
+    if(vykazMesiac(vyk[i])!==mes) continue;
+    if(p.zakazka && vyk[i].zakazka && String(vyk[i].zakazka).trim()===String(p.zakazka).trim()) return i;
+    if(zaloha<0) zaloha=i;
+  }
+  return zaloha;
+}
+
+function vykazImportNahlad(p, nazovSuboru){
+  const idx=vykazNajdiPodobny(p);
+  const stary=idx>=0?firmaData.vykazy[idx]:null;
+  _vykImport={p, idx};
+
+  const riadok=(l,a,b)=>`<div class="dphline"><span>${esc(l)}</span><b>${a===b||b==null?esc(String(a)):
+    `<span style="color:var(--ink-soft);font-weight:400;text-decoration:line-through">${esc(String(b))}</span> → ${esc(String(a))}`}</b></div>`;
+
+  let telo, titulok;
+  if(p.typ==="vykaz"){
+    const odprac=p.polozky.filter(x=>!x.znacka), dov=p.polozky.filter(x=>x.znacka);
+    // Hodiny sa počítajú tým istým pravidlom ako v appke — zo VŠETKÝCH
+    // riadkov. Keď sa tu rátalo bez značkových dní, náhľad výkazu BELGM0124
+    // hlásil „súčet v súbore (184 h) nesedí so súčtom dní (152 h), Excel má
+    // asi ručne prepísaný súčet". Nič prepísané nebolo; nesedel náhľad.
+    const hod=vykazHodiny(p);
+    const sporneImp=vykazSporneDni(p);
+    const odv=vykazOdvodRezim(p.hodinySub!=null?p.hodinySub:hod, p.cldSub, odprac.length);
+    p._odvod=odv;
+    titulok="Import upraveného výkazu";
+    telo=`
+      <div class="csub" style="margin-bottom:10px">${esc(nazovSuboru)}</div>
+      ${riadok("Obdobie", p.obdobie||"—", stary?stary.obdobie:null)}
+      ${riadok("Zákazka", p.zakazka||"—", stary?(stary.zakazka||"—"):null)}
+      ${riadok("Odpracované dni", odprac.length, stary?vykazDni(stary):null)}
+      ${riadok("Hodiny", hod, stary?vykazHodiny(stary):null)}
+      ${dov.length?riadok("Označené ako dovolenka (dní)", dov.length, null):""}
+      ${p.cldSub!=null?riadok("Človekodní v súbore", cldTxt(p.cldSub), stary?cldTxt(vykazClovekodni(stary)):null):""}
+      ${p.hodinySub!=null&&Math.abs(p.hodinySub-hod)>0.01
+        ? `<div style="background:var(--sfc-warn);border-radius:8px;padding:8px 11px;margin-top:10px;font-size:12px;color:var(--neg)">
+             ⚠ Súčet v súbore (${cldTxt(p.hodinySub)} h) nesedí so súčtom jednotlivých dní (${cldTxt(hod)} h). Súčet v Exceli je asi prepísaný ručne — appka počíta z dní.</div>`
+        : ""}
+      ${sporneImp.length
+        ? `<div style="background:var(--sfc-warn);border-radius:8px;padding:8px 11px;margin-top:10px;font-size:12px;color:var(--neg)">
+             ⚠ ${sporneImp.length} ${sporneImp.length===1?"deň má":(sporneImp.length<5?"dni majú":"dní má")} za dátumom stupeň (dovolenka), ale zapísané aj hodiny a činnosť: ${sporneImp.map(x=>esc(x.datum)).join(", ")}.
+             Hodiny (${cldTxt(sporneImp.reduce((a,x)=>a+(+x.hodiny||0),0))} h) sa preberú a počítajú do fakturácie — appka nič nezahadzuje. Skontrolujte, či tam ten stupeň patrí.</div>`
+        : ""}
+      ${odv
+        ? `<div style="background:var(--sfc-pos);border-radius:8px;padding:8px 11px;margin-top:10px;font-size:12px;color:var(--pos)">
+             ✓ Zo súboru vyplýva: ${odv.mdRezim==="dni"?"1 človekodeň = 1 odpracovaný deň":"1 človekodeň = "+odv.mdHodin+" h"}. Nastaví sa to výkazu.</div>`
+        : (p.cldSub!=null
+          ? `<div style="background:var(--sfc-warn);border-radius:8px;padding:8px 11px;margin-top:10px;font-size:12px;color:var(--neg)">
+               ⚠ Z ${p.hodinySub!=null?p.hodinySub:hod} h a ${p.cldSub} človekodní nevychádza okrúhly počet hodín na deň. Režim si po importe nastavte v editore výkazu ručne.</div>`
+          : "")}
+      <div style="font-size:11.5px;color:var(--ink-soft);margin-top:12px">
+        ${stary?"Prepíšu sa dni, hodiny aj činnosti existujúceho výkazu. Pôvodné údaje sa nedajú vrátiť späť — ak si ich chcete nechať, zvoľte „Uložiť ako nový“."
+               :"Za toto obdobie zatiaľ výkaz nie je, vytvorí sa nový."}
+      </div>`;
+  } else {
+    const mes=(p.obdobie||"").match(/(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})/);
+    titulok="Import podpísaného protokolu";
+    telo=`
+      <div class="csub" style="margin-bottom:10px">${esc(nazovSuboru)}</div>
+      ${riadok("Obdobie", p.obdobie||"—", stary?stary.obdobie:null)}
+      ${riadok("Človekodní", p.cld, stary?vykazClovekodni(stary):null)}
+      ${p.tarifa!=null?riadok("Cena za človekodeň", eur(p.tarifa), null):""}
+      ${p.suma!=null?riadok("Suma bez DPH", eur(p.suma), null):""}
+      ${p.schvalil?riadok("Schválil", p.schvalil, null):""}
+      ${p.tarifa!=null&&p.suma!=null&&Math.abs(r2(p.cld*p.tarifa)-p.suma)>0.01
+        ? `<div style="background:var(--sfc-warn);border-radius:8px;padding:8px 11px;margin-top:10px;font-size:12px;color:var(--neg)">
+             ⚠ ${p.cld} × ${eur(p.tarifa)} = ${eur(r2(p.cld*p.tarifa))}, ale v protokole je ${eur(p.suma)}. Skontrolujte dokument.</div>`
+        : ""}
+      <div style="font-size:11.5px;color:var(--ink-soft);margin-top:12px">
+        Protokol sa uloží medzi akceptačné protokoly.${stary&&Math.abs(vykazClovekodni(stary)-p.cld)>0.01
+          ? " Výkaz za toto obdobie má iný počet človekodní — appka ho NEPREPÍŠE, len na rozdiel upozorní; opraviť sa má to, čo je zle, a to appka nevie rozhodnúť."
+          : ""}
+      </div>`;
+  }
+
+  // „Uložiť ako nový" je vlastné tlačidlo v tele, nie prevzaté `onDelete`:
+  // to má natvrdo potvrdenie „Naozaj zmazať tento záznam?" a na uloženie
+  // vedľa by sa pýtalo nezmyselnú otázku.
+  const druhe=(p.typ==="vykaz"&&idx>=0)
+    ? `<button class="aabtn" style="width:100%;justify-content:center;margin-top:12px" onclick="vykazImportPotvrd(true)">＋ Uložiť ako nový výkaz (pôvodný nechať)</button>`
+    : "";
+  openModal(titulok, telo+druhe, ()=>vykazImportPotvrd(false), null, "siroky");
+}
+
+function vykazImportPotvrd(akoNovy){
+  if(!_vykImport) return;
+  const {p}=_vykImport; let {idx}=_vykImport;
+  if(!firmaData.vykazy) firmaData.vykazy=[];
+  if(!firmaData.protokoly) firmaData.protokoly=[];
+
+  if(p.typ==="vykaz"){
+    const stary=(!akoNovy&&idx>=0)?firmaData.vykazy[idx]:null;
+    const w=stary?JSON.parse(JSON.stringify(stary)):{};
+    w.projekt=p.projekt||w.projekt||"";
+    w.zakazka=p.zakazka||w.zakazka||"";
+    w.pracovnik=p.pracovnik||w.pracovnik||"";
+    w.obdobie=p.obdobie||w.obdobie||"";
+    w.polozky=p.polozky;
+    if(p._odvod){ w.mdRezim=p._odvod.mdRezim; w.mdHodin=p._odvod.mdHodin||null; }
+    vykazPrepocitaj(w);
+    if(stary) firmaData.vykazy[idx]=w; else firmaData.vykazy.push(w);
+    closeModal(); _vykImport=null; poZmene(); appVykazy();
+    cloudMsg("Výkaz načítaný: "+vykazDni(w)+" dní · "+vykazHodiny(w)+" h · "+cldTxt(vykazClovekodni(w))+" človekodní.","ok");
+    return;
+  }
+
+  // Protokol: ukladá sa ako doklad o tom, čo odberateľ podpísal. Výkaz sa
+  // ním neprepisuje — protokol nenesie jednotlivé dni, takže by sa stratili.
+  const S=firmaData.settings||{}, M=firmaData.meta||{};
+  const mes=(p.obdobie||"").match(/(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})/);
+  const tarifa=p.tarifa!=null?p.tarifa:(+S.denTarifa||+S.tarifa||0);
+  const zaznam={
+    cislo: mes?("Akceptačný protokol_"+String(+mes[2]).padStart(2,"0")+"_"+mes[3]):"",
+    datum: new Date().toISOString().slice(0,10),
+    obdobie:p.obdobie||"", pracovnik:M.nazov||"",
+    dni:p.cld, tarifa, suma:p.suma!=null?p.suma:r2(p.cld*tarifa),
+    dodavatel:M.nazov||"", dodavatelIco:M.ico||"", dodavatelIcDph:M.icdph||"",
+    dodavatelAdresa:M.adresa||"",
+    objednavatel:S.odberatelNazov||"", objednavatelIco:S.odberatelIco||"",
+    objednavatelAdresa:S.odberatelAdresa||"", schvalil:p.schvalil||S.odberatelSchvalil||"",
+    miesto:M.obec||"", text:"", _import:true
+  };
+  firmaData.protokoly.unshift(zaznam);
+  closeModal(); _vykImport=null; poZmene(); appVykazy();
+  cloudMsg("Protokol načítaný: "+cldTxt(p.cld)+" človekodní"+(zaznam.suma?" · "+eur(zaznam.suma):"")+".","ok");
 }
 
 let _icsEvents=null;
@@ -12587,6 +13075,15 @@ function appData(){
         <div class="mfield"><label>Stravné za deň (€)</label><input type="number" step="0.01" id="set_stravne" value="${esc((d.settings||{}).stravneDen||5.12)}"></div>
       </div>
       <div class="mrow2">
+        <div class="mfield"><label>Človekodeň sa počíta</label>
+          <select id="set_mdRezim">
+            <option value="hodiny"${((d.settings||{}).mdRezim||"hodiny")!=="dni"?" selected":""}>podľa odpracovaných hodín</option>
+            <option value="dni"${(d.settings||{}).mdRezim==="dni"?" selected":""}>pevná denná sadzba (1 deň = 1 MD)</option>
+          </select></div>
+        <div class="mfield"><label>Hodín na 1 človekodeň</label><input type="number" step="0.5" min="0.5" id="set_mdHodin" value="${esc((d.settings||{}).mdHodin||8)}"></div>
+      </div>
+      <div style="font-size:11.5px;color:var(--ink-soft);margin:-6px 0 12px">Predvoľba pre nové výkazy. Jednotlivý výkaz si to môže prepnúť sám — zmluvy sa líšia.</div>
+      <div class="mrow2">
         <div class="mfield"><label>Číslo zákazky</label><input id="set_zakazka" value="${esc((d.settings||{}).zakazkaCislo||'')}"></div>
         <div class="mfield"><label>Názov projektu</label><input id="set_projekt" value="${esc((d.settings||{}).projektNazov||'')}"></div>
       </div>
@@ -12702,6 +13199,9 @@ async function ulozNastavenia(){
   s.denTarifa=num("set_denTarifa",350);
   s.tarifa=s.denTarifa; // alias pre protokol
   s.stravneDen=num("set_stravne",5.12);
+  if(document.getElementById("set_mdRezim")) s.mdRezim=(val("set_mdRezim")==="dni")?"dni":"hodiny";
+  // Nula alebo prázdno by delili nulou — vtedy sa vracia predvolených 8.
+  if(document.getElementById("set_mdHodin")) s.mdHodin=num("set_mdHodin",VYKAZ_MD_HODIN_DEF)||VYKAZ_MD_HODIN_DEF;
   s.zakazkaCislo=val("set_zakazka")||"";
   s.projektNazov=val("set_projekt")||"";
   s.odberatelSchvalil=val("set_schvalil")||"";
