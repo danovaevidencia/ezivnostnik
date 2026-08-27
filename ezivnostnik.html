@@ -1233,7 +1233,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.27-IB";  // súbory patria firme, nie používateľovi
+const APP_VERZIA = "2026.08.27-IC";  // plán Účtovník v cenníku — server ho vedel, appka nie
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -1620,6 +1620,27 @@ const PLANY = {
     limity:{ faktury:0, odberatelia:0, doklady:0, bankaImporty:0, ulozisko:0 },
     moduly:["faktury","vykazy","pohladavky","vydavky","banka","kalendar",
             "jazdy","majetok","dokumenty","dovolenka","priznania","priznanieB","prognoza","dph"]
+  },
+  // Plán, ktorý platí ÚČTOVNÍK za svojich klientov (kap. 38.11). Klientova
+  // firma ostáva na Free a účtovník v nej robí KV DPH, priznania a párovanie;
+  // živnostník fakturuje a nahráva doklady.
+  //
+  // Do `firma_config` ho zapisuje `aktivuj_plan_uctovnika` (admin_28) všetkým
+  // firmám s `plan_zdroj = uctovnik:<user_id>`. Kým tu tento kľúč nebol,
+  // vyhodnotenie plánu ticho spadlo na Free — server aj
+  // Stripe by boli hotové a zákazník by zaplatil za zamknuté moduly bez
+  // jedinej hlášky. Preto plán musí byť v cenníku skôr, než sa začne predávať.
+  //
+  // Cena a strop sú rozhodnuté 25. 7. 2026: základ 10 firiem, každá ďalšia
+  // +2,00 €/mes do dvadsiatich. Vyšší limit zapisuje server do
+  // `firma_config.firmy_limit`, preto tu stojí len základ.
+  uctovnik: {
+    kod:"uctovnik", nazov:"Účtovník", farba:"#6b4fa8",
+    cenaMes:26.90, cenaRok:269,
+    popis:"Vy účtujete, klient nahráva doklady. Jeden účet, dve role.",
+    limity:{ faktury:0, odberatelia:0, doklady:0, bankaImporty:0, ulozisko:0, firmy:10 },
+    moduly:["faktury","vykazy","pohladavky","vydavky","banka","kalendar",
+            "jazdy","majetok","dokumenty","dovolenka","priznania","priznanieB","prognoza","dph"]
   }
 };
 // jednorazové doplnky
@@ -1627,9 +1648,30 @@ const DOPLNKY = {
   priznanieB: { kod:"priznanieB", nazov:"Daňové priznanie typ B", cena:7.90,
                 popis:"Jednorazové odomknutie priznania za jeden rok" }
 };
+// Plán, podľa ktorého sa riadia moduly a limity. Neznámy kľúč spadne na Free —
+// ale NIE ticho: presne to sa stalo pri pláne `uctovnik`, ktorý vedel nastaviť
+// server, kým ho appka nemala v cenníku. Zákazník by zaplatil a dostal zamknuté
+// moduly bez jedinej hlášky (kap. 63.5).
+let _neznamyPlanHlaseny = "";
+function planFirmy(){
+  const kod = aktualnyPlan();
+  const p = PLANY[kod];
+  if(p) return p;
+  if(_neznamyPlanHlaseny !== kod){
+    _neznamyPlanHlaseny = kod;
+    console.error("Neznámy plán „"+kod+"“ — appka ho nepozná a použije Free. "
+      + "Pravdepodobne pribudol na serveri skôr než v cenníku.");
+  }
+  return PLANY.free;
+}
 // limit = 0 znamená neobmedzene
 function limitPlanu(kluc){
-  const p=PLANY[aktualnyPlan()]||PLANY.free;
+  // Počet spravovaných firiem je jediný limit, ktorý sa dokupuje: účtovník má
+  // v základe desať a ďalšie do dvadsiatich za príplatok. Zaplatenú výšku drží
+  // server v `firma_config.firmy_limit`, cenník len základ.
+  if(kluc==="firmy" && firmaConfig && +firmaConfig.firmy_limit>0)
+    return +firmaConfig.firmy_limit;
+  const p=planFirmy();
   return (p.limity&&p.limity[kluc])||0;
 }
 // koľko z limitu je vyčerpané
@@ -1641,6 +1683,9 @@ function vyuzitieLimitu(kluc){
     case "doklady":      return (d.vydavky||[]).length;
     case "bankaImporty": return +((d.settings||{}).pocetImportovBanka||0);
     case "ulozisko":     return (d.vydavky||[]).filter(x=>x.doklad).length + (d.dokumenty||[]).length;
+    // Firmy sa nepočítajú z dát firmy, ale z toho, ku koľkým mám prístup —
+    // je to jediný limit, ktorý sa netýka obsahu, ale rozsahu predplatného.
+    case "firmy":        return (typeof firmyZoznam!=="undefined" && firmyZoznam) ? firmyZoznam.length : 0;
     default: return 0;
   }
 }
@@ -1651,8 +1696,9 @@ function skontrolujLimit(kluc, popisAkcie){
   const teraz=vyuzitieLimitu(kluc);
   if(teraz < limit) return true;
   const nazvy={faktury:"faktúr", odberatelia:"odberateľov", doklady:"dokladov",
-               bankaImporty:"importov výpisu", ulozisko:"uložených súborov"};
-  const p=PLANY[aktualnyPlan()]||PLANY.free;
+               bankaImporty:"importov výpisu", ulozisko:"uložených súborov",
+               firmy:"spravovaných firiem"};
+  const p=planFirmy();
   if(confirm("Dosiahli ste limit plánu "+p.nazov+".\n\nVyužité: "+teraz+" z "+limit+" "+(nazvy[kluc]||kluc)+
              ".\n\n"+(popisAkcie?popisAkcie+"\n\n":"")+"Chcete si pozrieť vyššie plány?")){
     zobrazCennik();
@@ -1691,7 +1737,7 @@ function modulPovoleny(kod){
   // 1) PLÁN JE ZÁKLAD — čo je v zaplatenom pláne, je vždy dostupné.
   //    (Platený prístup nesmie nič „prebiť" — inak by starý admin override
   //     zasekol zákazníka pod úroveň, ktorú si zaplatil.)
-  const p = PLANY[aktualnyPlan()] || PLANY.free;
+  const p = planFirmy();
   if(p.moduly.includes(modul)) return true;
   // 2) Admin override len PRIDÁVA moduly navyše (darovaný prístup), nikdy neuberá.
   if(firmaConfig && Array.isArray(firmaConfig.moduly) &&
@@ -4631,7 +4677,7 @@ async function nainstalujApp(){
 function renderHomeStrip(){
   const host = document.getElementById("homeStrip");
   if(!host) return;
-  const p    = PLANY[aktualnyPlan()] || PLANY.free;
+  const p    = planFirmy();
   const dni  = dniDoKoncaPlanu();
   const kod  = aktualnyPlan();
 
@@ -12882,7 +12928,7 @@ function appData(){
         </div>
         <div id="dmKarta"><div class="csub">Načítavam adresu…</div></div>
       </div>`}
-      ${(()=>{ const p=PLANY[aktualnyPlan()]||PLANY.free;
+      ${(()=>{ const p=planFirmy();
         const limFakt=zostatokLimitu("faktury"), limDokl=zostatokLimitu("doklady");
         const dni=dniDoKoncaPlanu();
         const doKedy=(firmaConfig&&firmaConfig.plan_do)?new Date(firmaConfig.plan_do):null;
@@ -15445,7 +15491,7 @@ function spracujNavratZPlatby(){
       if(hotovo){
         _saasFaktury=null; _saasAutoDone=false;
         try{ await autoZaevidujSaasFaktury(); }catch(_){}
-        const pl=PLANY[aktualnyPlan()];
+        const pl=planFirmy();
         alert("✓ Ďakujeme za platbu!\n\nVáš plán "+(pl?pl.nazov:aktualnyPlan())+" je aktívny.\nFaktúru sme pridali do vašich Výdavkov a poslali e-mailom.");
         renderLauncher(); if(typeof zobrazFirmu==="function") zobrazFirmu();
       } else {
@@ -15824,8 +15870,22 @@ function chybajuceFakturacneUdaje(){
   return chyba;
 }
 
+// Kto plán hradí. `plan_zdroj` má tvar `uctovnik:<user_id>` (admin_28): keď je
+// vyplnený, firma plán neplatí sama — platí ho účtovník, ktorý ju spravuje.
+function planHradiUctovnik(){
+  return /^uctovnik:/.test(String((firmaConfig && firmaConfig.plan_zdroj) || ""));
+}
+
 async function spustiPredplatne(plan, obdobie){
   if(localMode || !sb || !firmaId){ alert("Predplatné je dostupné len v prihlásenom (cloud) režime."); return; }
+  // Firma, ktorej plán hradí účtovník, si ho nemá kupovať druhýkrát. Bez tejto
+  // stráže by klient zaplatil za to, čo už má — a zistil by to až na výpise.
+  if(planHradiUctovnik()){
+    alert("Plán tejto firmy hradí váš účtovník.\n\n"
+      + "Kupovať vlastné predplatné netreba. Ak chcete spoluprácu ukončiť a platiť si sami, "
+      + "povedzte to najprv účtovníkovi — po odobraní firmy zo svojho plánu si predplatné kúpite tu.");
+    return;
+  }
 
   // bez týchto údajov by faktúra nespĺňala náležitosti daňového dokladu
   const chyba=chybajuceFakturacneUdaje();
