@@ -1233,7 +1233,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.27-IA";  // opakovaný oznam z banky sa dá umlčať
+const APP_VERZIA = "2026.08.27-IB";  // súbory patria firme, nie používateľovi
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -10155,7 +10155,9 @@ async function ulozOriginalVypisu(text, zaznam){
     if(localMode || !sb){ zaznam.bezOriginalu="lokálny režim"; return; }
     const { data:{ user } }=await sb.auth.getUser();
     if(!user){ zaznam.bezOriginalu="bez prihlásenia"; return; }
-    const cesta=`${user.id}/vypisy/vypis_${Date.now()}.xml`;
+    const koren=ulozKoren();
+    if(!koren){ zaznam.bezOriginalu="nie je otvorená firma"; return; }
+    const cesta=`${koren}/vypisy/vypis_${Date.now()}.xml`;
     const blob=new Blob([text],{type:"application/xml"});
     const { error }=await sb.storage.from("dokumenty").upload(cesta, blob, {upsert:false, contentType:"application/xml"});
     if(error){ console.error("uloženie výpisu do úložiska:", error); zaznam.bezOriginalu="úložisko odmietlo"; return; }
@@ -19859,8 +19861,8 @@ async function dphUlozSubor(mk, typ, xml){
   try{
     if(!localMode && sb){
       const { data:{ user } }=await sb.auth.getUser();
-      if(user){
-        const cesta=`${user.id}/podania/${typ}_${mk}_${Date.now()}.xml`;
+      if(user && ulozKoren()){
+        const cesta=`${ulozKoren()}/podania/${typ}_${mk}_${Date.now()}.xml`;
         const blob=new Blob([xml],{type:"application/xml"});
         const { error }=await sb.storage.from("dokumenty").upload(cesta, blob, {upsert:false, contentType:"application/xml"});
         if(!error){ zaznam.cesta=cesta; uloz(); return; }
@@ -25554,12 +25556,26 @@ function backupOverdue(){
 //  DOKLADY V CLOUDE (Supabase Storage, bucket "dokumenty")
 //  Originál dokladu (PDF/foto) sa uloží do cloudu, JSON drží len odkaz.
 // ═══════════════════════════════════════════════════
+// Koreň úložiska pre súbory firmy.
+//
+// Priečinok je FIRMA, nie prihlásený používateľ (admin_36). Kým sa skladal
+// z `user.id`, účtovník nevidel ani jeden súbor firmy a to, čo nahral on,
+// zase nevidel vlastník — hoci cesta k súboru leží v zdieľanom `firmaData`
+// a obaja ju mali pred očami. Osobný priečinok by navyše pri viacerých firmách
+// jedného vlastníka otvoril účtovníkovi aj firmu, ku ktorej prístup nemá.
+//
+// Vracia null, keď firma nie je známa — vtedy sa nemá kam uložiť a volajúci
+// to musí zniesť rovnako ako zlyhaný upload.
+function ulozKoren(){ return firmaId || null; }
+
 async function dokladUpload(file, prefix){
   if(localMode||!sb){ return null; } // v lokálnom režime doklady neukladáme do cloudu
   const { data:{ user } }=await sb.auth.getUser();
   if(!user) return null;
+  const koren=ulozKoren();
+  if(!koren){ console.error("upload dokladu: nie je otvorená firma"); return null; }
   const ext=(file.name.split(".").pop()||"bin").toLowerCase();
-  const cesta=`${user.id}/${prefix||"doklad"}_${Date.now()}.${ext}`;
+  const cesta=`${koren}/${prefix||"doklad"}_${Date.now()}.${ext}`;
   const { error }=await sb.storage.from("dokumenty").upload(cesta, file, { upsert:false });
   if(error){ console.error("upload dokladu:",error); return null; }
   return cesta; // uložíme do záznamu ako odkaz
