@@ -21873,6 +21873,11 @@ async function spracujCakajuci(id){
     // Nebol to výpis (alebo sa nerozbalil) — ak doklad v schránke ostal,
     // skúsime ho ešte bežnou cestou.
     if(!cakajuceDoklady.find(x=>x.id===id)) return;
+    if(await archivBezVypisu(z)) return;
+    // ...ale ARCHÍV bežnou cestou neprejde. Na OCR by šiel celý ZIP a
+    // Tesseract zlyhá na „nedá sa prečítať obrázok" — používateľ potom dostane
+    // radu skúsiť kvalitnejšiu fotku, hoci nefotil nič. Doložené 27. 8. na
+    // dennom archíve z Prima banky. Radšej povieme, čo v archíve naozaj je.
   }
   if(!skontrolujLimit("doklady","Vo vyššom pláne môžete načítať doklady bez obmedzenia.")) return;
   closeModal();
@@ -21886,6 +21891,32 @@ async function spracujCakajuci(id){
     _cakajuciSpracovavany = id;
     spracujOCR({ target:{ files:[subor], value:"" } });
   }catch(e){ alert("Súbor sa nepodarilo načítať: "+(e.message||e)); }
+}
+// Archív, v ktorom nie je bankový výpis. Vracia `true`, keď sa oň postaral —
+// teda povedal používateľovi, čo v ňom je, a ďalej sa už nemá pokračovať.
+//
+// Zoznam súborov v archíve sa dá prečítať aj bez hesla (centrálny adresár ZIP
+// šifrovaný nie je), takže hláška je konkrétna aj pri zamknutom archíve.
+async function archivBezVypisu(z){
+  const nazov=String(z && z.subor_nazov || "").toLowerCase();
+  const jeArchiv = /\.zip$/.test(nazov) || String(z && z.subor_typ || "").includes("zip");
+  if(!jeArchiv) return false;             // XML bez <Stmt> nech ide bežnou cestou
+  let obsah=[];
+  try{
+    const { data, error } = await sb.storage.from("dokumenty").download(z.subor_cesta);
+    if(error) throw error;
+    obsah=await zipObsah(new File([data], z.subor_nazov||"archiv.zip"));
+  }catch(e){
+    // Nezhltnúť: bez dôvodu vyzerá prázdny zoznam ako prázdny archív.
+    console.error("obsah archívu sa nepodarilo prečítať:", e);
+  }
+  alert("V archíve "+(z.subor_nazov||"")+" nie je bankový výpis vo formáte XML (camt.053)."
+    + (obsah.length
+        ? "\n\nObsahuje:\n" + obsah.map(x=>"  • "+x.nazov+(x.zaheslovany?" 🔒":"")).join("\n")
+        : "\n\nObsah archívu sa nepodarilo prečítať — podrobnosti sú v konzole.")
+    + "\n\nAk je vnútri faktúra alebo bloček, rozbaľte archív a nahrajte súbor priamo."
+    + "\nAk banka posiela výpis v inom formáte než XML, appka ho zatiaľ nečíta.");
+  return true;
 }
 let _cakajuciSpracovavany = null;
 
