@@ -1233,7 +1233,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.26-HY";  // človekodeň podľa hodín, import upraveného výkazu
+const APP_VERZIA = "2026.08.27-HZ";  // notifikácie z banky sa čítajú aj v zlepenom tvare
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -16491,7 +16491,12 @@ const NOTIF_STITKY = {
 // desatinným oddeľovačom je ten vzadu. `\s` v JS zahŕňa aj nezlomiteľnú
 // a úzku medzeru, ktorými banky oddeľujú tisíce — vlastný zoznam netreba.
 function notifCislo(s){
-  let t=String(s??"").replace(/\s/g,"").replace(/[^\d.,+-]/g,"");
+  // Berie PRVÉ číslo, nie všetky číslice zo vstupu. Hodnota poľa môže mať za
+  // sebou chvost („35,06 EUR S pozdravom Prima banka Slovensko, a.s.") a
+  // vyhádzať z neho len nečíslice by z roku v pätičke urobilo súčasť sumy.
+  const cely=String(s??"").replace(/\s/g,"");
+  const m=cely.match(/-?\d[\d.,]*/);
+  let t=m ? m[0].replace(/[.,]+$/,"") : "";
   if(!t) return null;
   const pb=t.lastIndexOf("."), pc=t.lastIndexOf(",");
   if(pb>=0 && pc>=0) t = pc>pb ? t.replace(/\./g,"").replace(",",".") : t.replace(/,/g,"");
@@ -16552,6 +16557,75 @@ function notifBanka(email, text){
   return null;
 }
 
+// Normalizácia, ktorá ZACHOVÁVA DĹŽKU reťazca — znak za znak. Bežné
+// `normTxt` používa NFD a dĺžku mení, čo by rozbilo pozície, podľa ktorých sa
+// nižšie krájajú hodnoty polí.
+function notifNorm(s){
+  return Array.from(String(s||"")).map(ch=>{
+    const z=ch.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
+    return z.length===1 ? z : ch.toLowerCase();
+  }).join("");
+}
+
+// Rozobratie na polia. Štítky sa hľadajú V CELOM TEXTE, nie po riadkoch.
+//
+// Doložený dôvod (25. 8. 2026): tá istá notifikácia vyzerá inak podľa toho,
+// ako k nám dorazí. Preposlaná cez Gmail má každé pole na vlastnom riadku —
+// na tom bol parser pôvodne postavený. Priamo z banky je ale zlepená do
+// odstavca, bez medzery za dvojbodkou a zalomená aj uprostred hodnoty
+// („Názov príjemcu:financne\nriaditelstvo"). Riadkový parser na ostrých
+// dátach nenašiel ani sumu — a mail bez sumy sa zahodí ako nečitateľný.
+//
+// Hodnota poľa siaha po najbližší ĎALŠÍ štítok alebo po koniec odstavca,
+// podľa toho, čo príde skôr. Bez konca odstavca by posledné pole zhltlo aj
+// „S pozdravom, Prima banka Slovensko, a.s.".
+function notifPolia(text){
+  const raw=String(text||"");
+  // Dĺžka musí ostať 1:1, inak nesedia pozície — preto sa zalomenia menia na
+  // medzeru, nemažú. Chýbajúcu medzeru medzi zlepenými slovami to zároveň
+  // doplní, čo je presne to, čo zalomenie v origináli znamenalo.
+  const plocha=raw.replace(/[\r\n]/g," ");
+  const norm=notifNorm(plocha);
+  const konceOdstavcov=[];
+  raw.replace(/\n[ \t]*\n/g, (m,i)=>{ konceOdstavcov.push(i); return m; });
+
+  // Najdlhšie štítky prvé: „suma" sa nesmie chytiť vnútri „odpísaná suma".
+  const zoznam=[];
+  Object.keys(NOTIF_STITKY).forEach(kluc=>
+    NOTIF_STITKY[kluc].forEach(s=>zoznam.push({kluc, s})));
+  zoznam.sort((a,b)=>b.s.length-a.s.length);
+
+  const najdene=[];
+  zoznam.forEach(({kluc,s})=>{
+    let od=0, p;
+    while((p=norm.indexOf(s,od))>=0){
+      od=p+1;
+      // Pred štítkom sa NEVYŽADUJE hranica slova. Priamo z banky je štítok
+      // zlepený s hodnotou predošlého poľa („…3262 9421Názov príjemcu:") a
+      // podmienka na hranicu slova zahodila práve tie polia, kvôli ktorým
+      // sa parser prepisoval. Pred nájdením kratšieho štítku vnútri dlhšieho
+      // chráni poradie (najdlhšie prvé) a test prekrytia nižšie; pred
+      // náhodným slovom chráni to, že hneď za štítkom musí stáť dvojbodka.
+      const m=norm.slice(p+s.length).match(/^[ \t]*:/);
+      if(!m) continue;                                  // štítok bez dvojbodky
+      const koniec=p+s.length+m[0].length;
+      // prekrytie s už nájdeným (dlhším) štítkom
+      if(najdene.some(n=>p<n.koniec && koniec>n.zaciatok)) continue;
+      najdene.push({kluc, zaciatok:p, koniec});
+    }
+  });
+  najdene.sort((a,b)=>a.zaciatok-b.zaciatok);
+
+  const polia={};
+  najdene.forEach((n,i)=>{
+    let do_ = i+1<najdene.length ? najdene[i+1].zaciatok : plocha.length;
+    const odstavec=konceOdstavcov.find(x=>x>=n.koniec);
+    if(odstavec!=null && odstavec<do_) do_=odstavec;
+    if(!(n.kluc in polia)) polia[n.kluc]=plocha.slice(n.koniec, do_).trim();
+  });
+  return polia;
+}
+
 // Rozoberie notifikáciu. Vracia buď údaje o pohybe, alebo `{chyba:"…"}` —
 // nikdy nevyhadzuje a nikdy nevracia prázdno bez dôvodu: mail, ktorý sa
 // nepodarilo prečítať, musí byť vidieť aj s tým, čo mu chýbalo.
@@ -16561,23 +16635,8 @@ function parseNotifikaciu(telo, odKoho, predmet){
 
   const odosielatel=notifOdosielatel(text, odKoho);
   const banka=notifBanka(odosielatel, text);
-
-  // Dvojice `štítok: hodnota`. Hodnota sa berie LEN zo zvyšku toho istého
-  // riadka. Regex cez celý text by pri prázdnom poli („Variabilný symbol:"
-  // bez hodnoty, čo Prima posiela bežne) zliepol štítok s nasledujúcim
-  // riadkom — `\s` zahŕňa `\n` a je to doložená pasca (kap. 16).
-  const polia={};
-  const riadky=text.split(/\r?\n/);
-  for(const r of riadky){
-    const m=r.match(/^[ \t>*|-]*([^:]{2,40}?)[ \t]*:[ \t]*(.*)$/);
-    if(!m) continue;
-    const stitok=normTxt(m[1]).replace(/[ \t]+/g," ").trim();
-    if(!(stitok in polia)) polia[stitok]=m[2].trim();   // prvý výskyt vyhráva
-  }
-  const daj=(kluc)=>{
-    for(const s of NOTIF_STITKY[kluc]) if(polia[s]) return polia[s];
-    return "";
-  };
+  const polia=notifPolia(text);
+  const daj=(kluc)=>polia[kluc]||"";
 
   // Smer: najprv podľa toho, ktoré pole sumy banka použila, potom podľa
   // znamienka, nakoniec podľa predmetu a typu transakcie.
@@ -16594,6 +16653,14 @@ function parseNotifikaciu(telo, odKoho, predmet){
     else if(/\bdebet\b|prikaz na uhradu|odchadzajuca platba|platba kartou|vyber/.test(tHl)) smer="vydaj";
   }
 
+  // Banka posiela aj maily, ktoré pohybom nie sú — potvrdenie o zriadení
+  // notifikácie, oznamy. Tie sa nemajú hlásiť ako „nepodarilo sa prečítať":
+  // je to falošný poplach a ten učí preskakovať aj pravé nálezy (kap. 16).
+  // Za pokazený pohyb sa považuje len mail, ktorý aspoň jeden znak pohybu má.
+  const vyzeraAkoPohyb = !!(daj("typ") || daj("zostatok") || daj("vlastne")
+                            || daj("sumaPrijem") || daj("sumaVydaj") || daj("suma"));
+  if(!vyzeraAkoPohyb) return {nieJePohyb:true, banka, odosielatel};
+
   if(suma==null || !(suma>0)) return {chyba:"nenašla sa suma", banka, odosielatel};
   if(!smer) return {chyba:"nedá sa určiť, či ide o príjem alebo výdaj", banka, odosielatel, suma};
   const datum=notifDatum(daj("datum"));
@@ -16604,7 +16671,7 @@ function parseNotifikaciu(telo, odKoho, predmet){
   // preposlaného mailu, kde by sa dal chytiť nesúvisiaci reťazec.
   const ibanProti=notifIban(daj("ibanProti"));
   let mojUcet="";
-  for(const r of riadky){
+  for(const r of text.split(/\r?\n/)){
     if(/^[ \t>]*(od|from|to|komu)[ \t]*:/i.test(r)) continue;
     const kand=notifIban(r);
     if(!kand || kand===ibanProti) continue;
@@ -21462,7 +21529,7 @@ const DOKLADY_DOMENA = "tolapnal.resend.app";
 // Bez tejto podmienky by každá faktúra v tele mailu („Suma: 120 EUR",
 // „Dátum: …") vyzerala ako platba — a falošný poplach je drahší než žiadny.
 function notifDovera(n){
-  if(!n || n.chyba) return null;
+  if(!n || n.chyba || n.nieJePohyb) return null;
   if(n.banka) return "banka";                 // známa doména odosielateľa
   if(n.zostatok!=null) return "zostatok";     // zostatok po transakcii faktúra nemá
   return null;
