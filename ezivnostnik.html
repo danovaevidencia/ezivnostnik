@@ -1233,7 +1233,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.27-HZ";  // notifikácie z banky sa čítajú aj v zlepenom tvare
+const APP_VERZIA = "2026.08.27-IA";  // opakovaný oznam z banky sa dá umlčať
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -21648,6 +21648,127 @@ function prijmiVsetkyNotifikacie(){
     +(dvojmo?" "+dvojmo+" vyzerá ako platba, ktorú už evidujete — v Banke sú označené.":""),"ok");
 }
 
+// ── OPAKOVANÝ OZNAM, KTORÝ NIKDY NEBUDE DOKLADOM (kap. 49.12) ──────────────
+//
+// Prima banka posiela „Zostatok na účte" každý deň o 5:01 ako ZIP s PDF.
+// Appka z PDF pohyby nečíta a nepotrebuje — zostatok nesie každá notifikácia
+// o pohybe sama. Ročne je to okolo 19 MB v úložisku a 365 riadkov v schránke,
+// ktoré nikdy nebude treba spracovať. Odznak, ktorý každé ráno svieti na
+// prácu, ktorá neexistuje, sa prestane čítať celý.
+//
+// Zákazník nemá ako vedieť, že mu appka ten formát nespracuje. Preto to
+// nerieši rada „vypnite si to v bankingu", ale appka sama.
+
+// Zoskupovací tvar predmetu. POZOR: o tom, čo pravidlo naozaj zachytí,
+// rozhoduje `predmet_vzor` v databáze (admin_34) — tá vie aj o diakritike
+// a o predponách „Fwd:". Táto klientská verzia slúži LEN na to, aby appka
+// v zozname videla, že sa niečo opakuje, a je zámerne UŽŠIA: zoskupí menej
+// než databáza, nikdy viac. Tým sa nemôže stať, že by appka sľúbila potlačiť
+// skupinu, ktorú pravidlo potom nechytí celú.
+function vzorPredmetuNahlad(p){
+  return String(p||"").toLowerCase().replace(/[0-9]+/g,"#").replace(/\s+/g," ").trim();
+}
+// Skupiny mailov, ktoré vyzerajú ako opakovaný oznam. Dva môžu byť náhoda,
+// tri sú vzorec — pod tri sa neponúka nič, aby to nebol falošný poplach.
+function cakajuceOpakovane(){
+  const sk={};
+  (cakajuceDoklady||[]).forEach(z=>{
+    const od=String(z.od_koho||"").toLowerCase().trim();
+    if(!od) return;
+    const kluc=od+"|"+vzorPredmetuNahlad(z.predmet);
+    if(!sk[kluc]) sk[kluc]={od, predmet:z.predmet||"", pocet:0, bajtov:0, ids:[]};
+    sk[kluc].pocet++;
+    sk[kluc].bajtov += (+z.subor_bajtov||0);
+    sk[kluc].ids.push(z.id);
+  });
+  // Druhotné triedenie podľa kľúča: poradie musí byť rovnaké pri vykreslení
+  // aj pri kliknutí, lebo tlačidlo odovzdáva INDEX skupiny, nie jej predmet.
+  // Predmet by cez `onclick` prejsť nemohol — `esc` neescapuje apostrof
+  // a jediný apostrof v predmete by rozbil celé volanie.
+  return Object.values(sk).filter(x=>x.pocet>=3)
+    .sort((a,b)=> b.pocet-a.pocet || (a.od+a.predmet).localeCompare(b.od+b.predmet));
+}
+
+// Založí pravidlo a upratá, čo už prišlo. Poradie je dôležité: najprv
+// pravidlo, potom mazanie — keby to bolo opačne a zápis pravidla zlyhal,
+// doklady by zmizli a zajtra by prišiel ďalší.
+async function potlacOpakovane(index){
+  if(localMode || !sb || !firmaId){ alert("Funguje len s cloudovým účtom."); return; }
+  const sk=cakajuceOpakovane()[+index];
+  if(!sk){ alert("Skupina sa nenašla — schránka sa medzitým zmenila."); return; }
+  const odKoho=sk.od, predmet=sk.predmet, pocet=sk.pocet;
+  if(!confirm("Prestať ukazovať maily „"+predmet+"“ od "+odKoho+"?\n\n"
+    +"Ďalšie sa už neuložia ani nezobrazia — appka si bude len počítať, koľko ich prišlo, "
+    +"a v Nastavení sa to dá kedykoľvek zrušiť.\n\n"
+    +(pocet?"Tých "+pocet+", čo už čakajú, sa zároveň odstráni.":""))) return;
+  try{
+    const { error } = await sb.from("doklady_potlacene")
+      .insert({ firma_id:firmaId, od_koho:String(odKoho||"").toLowerCase().trim(), predmet:String(predmet||"") });
+    // Pravidlo už môže existovať (unikátny index) — to nie je chyba, len sa
+    // znova použije.
+    if(error && !/duplicate key|unique/i.test(error.message||"")) throw error;
+
+    if(sk && sk.ids.length){
+      const cesty=(cakajuceDoklady||[])
+        .filter(z=>sk.ids.includes(z.id) && z.subor_cesta).map(z=>z.subor_cesta);
+      if(cesty.length){
+        try{ await sb.storage.from("dokumenty").remove(cesty); }
+        catch(e){ console.warn("Súbory sa nepodarilo zmazať:", e.message||e); }
+      }
+      const { error:e2 } = await sb.from("cakajuce_doklady")
+        .update({ stav:"odmietnute", spracovane:new Date().toISOString() }).in("id", sk.ids);
+      if(e2) throw e2;
+    }
+    await nacitajCakajuce(true);
+    cloudMsg("Hotovo — tieto maily už neuvidíte.","ok");
+    otvorCakajuce();
+  }catch(e){ alert("Nepodarilo sa nastaviť: "+(e.message||e)); }
+}
+
+// Prehľad pravidiel. Počítadlo je tu podstatné: bez neho by potlačený mail
+// zmizol bez stopy a nedalo by sa zistiť, či pravidlo ešte niečo chytá.
+async function spravujPotlacene(){
+  let zoznam=[];
+  try{
+    const { data, error } = await sb.from("doklady_potlacene")
+      .select("*").eq("firma_id", firmaId).order("posledny", { ascending:false, nullsFirst:false });
+    if(error) throw error;
+    zoznam=data||[];
+  }catch(e){
+    alert("Zoznam sa nepodarilo načítať: "+(e.message||e)
+      +"\n\nAk ste ešte nespustili admin_34, tabuľka neexistuje.");
+    return;
+  }
+  openModal("🔕 Umlčané maily", `
+    <div class="ocr-hint" style="margin-bottom:12px">
+      Sem patria opakované oznamy, ktoré nikdy nebudú dokladom — napríklad denný
+      zostatok z banky v PDF. Neuložia sa, ale appka si počíta, koľko ich prišlo,
+      takže nič nemizne bez stopy.
+    </div>
+    ${zoznam.length ? zoznam.map(x=>`<div style="padding:8px 0;border-bottom:1px solid var(--line-soft)">
+      <div style="display:flex;gap:8px;align-items:center">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(x.predmet||"—")}</div>
+          <div style="font-size:11px;color:var(--ink-soft);font-family:monospace;overflow:hidden;text-overflow:ellipsis">${esc(x.od_koho||"")}</div>
+        </div>
+        <button class="aabtn" style="padding:3px 9px;font-size:11px" onclick="zrusPotlacenie('${esc(x.id)}')">Zrušiť</button>
+      </div>
+      <div style="font-size:11px;color:var(--ink-soft);margin-top:3px">
+        ${x.pocet ? "zachytených "+x.pocet+(x.posledny?", naposledy "+fmtDatum(String(x.posledny).slice(0,10)):"")
+                  : "zatiaľ nič nezachytilo"}
+      </div>
+    </div>`).join("") : '<div class="ocr-hint">Nič nie je umlčané — chodí vám všetko.</div>'}
+  `, null, null, "siroky");
+}
+async function zrusPotlacenie(id){
+  try{
+    const { error } = await sb.from("doklady_potlacene").delete().eq("id", id);
+    if(error) throw error;
+    cloudMsg("Zrušené — tieto maily budú znova chodiť.","ok");
+    spravujPotlacene();
+  }catch(e){ alert("Nepodarilo sa zrušiť: "+(e.message||e)); }
+}
+
 // ── obrazovka schránky ─────────────────────────────────────────────────────
 async function otvorCakajuce(){
   if(localMode){ alert("Doklady e-mailom fungujú len v cloudovom režime — prihláste sa."); return; }
@@ -21662,6 +21783,7 @@ async function otvorCakajuce(){
   const notifNove= notifik.filter(x=>x.pohyb && !x.uzMam);
   const notifZle = notifik.filter(x=>!x.pohyb);
   const bezPril= cakajuceDoklady.filter(x=>x.stav==="bez_prilohy" && !notifik.some(p=>p.z.id===x.id));
+  const opakuje= cakajuceOpakovane();
 
   openModal("📨 Doklady e-mailom", `
     <div class="mfield">
@@ -21703,6 +21825,17 @@ async function otvorCakajuce(){
       </div>`).join("")}
     </div>` : ""}
 
+    ${opakuje.length ? opakuje.map((s,i)=>`<div class="ocr-hint" style="margin-top:12px;border-left:3px solid var(--brand);padding-left:9px">
+      <div style="font-weight:600;margin-bottom:2px">Toto vám chodí stále dokola</div>
+      <div style="margin-bottom:6px">
+        <b>${esc(s.predmet||"—")}</b> od <span style="font-family:monospace">${esc(s.od)}</span>
+        — ${s.pocet}× ${s.bajtov ? "("+Math.round(s.bajtov/1024)+" kB)" : ""}.
+        Ak to nikdy nebude doklad, netreba to nechať chodiť.
+      </div>
+      <button class="aabtn" style="padding:3px 9px;font-size:11px"
+              onclick="potlacOpakovane(${i})">Prestať ukazovať</button>
+    </div>`).join("") : ""}
+
     ${notifNove.length ? `<div style="margin-top:14px">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
         <div style="font-weight:700;font-size:13px;flex:1">Pohyby na účte (${notifNove.length})</div>
@@ -21738,6 +21871,7 @@ async function otvorCakajuce(){
 
     <div style="margin-top:16px;border-top:1px solid var(--line);padding-top:12px">
       <button class="aabtn" onclick="spravujOdosielatelov()">🚫 Blokované adresy</button>
+      <button class="aabtn" onclick="spravujPotlacene()">🔕 Umlčané maily</button>
       <button class="aabtn" onclick="prerazDokladyToken()" title="Stará adresa okamžite prestane fungovať">↻ Nová adresa</button>
     </div>
   `, null, null, "siroky");
