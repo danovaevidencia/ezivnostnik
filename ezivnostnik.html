@@ -585,6 +585,19 @@ h1,h2,h3,h4,.chead,.wbig,.sbox .sn,.sp-title b,.splittitle{text-wrap:balance}
 .aabtn.upo{border-color:var(--accent);color:var(--accent-deep)}
 .aabtn.pri.pos{background:var(--pos);color:var(--on-brand);border-color:var(--pos)}
 .aabtn.pri.neg{background:var(--neg);color:var(--on-brand);border-color:var(--neg)}
+/* ⚠ KONTRAST TÝCHTO ŠIESTICH PRAVIDIEL NEPREJDE V SVETLEJ TÉME.
+   Namerané: .pos 3,38 · .neg 4,36 · .upo 3,34 pri minime 4,5. V tmavej téme
+   prejdú všetky (5,15–7,9), takže to NIE JE problém tmavého režimu — je to
+   naopak.
+
+   Príčina: `--pos`, `--neg` a `--accent-deep` sú farby na VÝPLŇ a používajú
+   sa tu ako TEXT. Na text existujú `--ink-pos`, `--ink-neg`, `--ink-warn`
+   a tie prejdú v oboch témach. Zámena je teda jednoriadková — ale dotkne sa
+   stavových farieb naprieč celou appkou (`.apill` má ten istý problém),
+   preto je to vlastný krok s vlastným overením, nie príveskom fázy B.
+
+   Podrobnosti a namerané dvojice: spec kap. 48.9.
+   NEMEŇ tu len jedno pravidlo — stav by potom mal dva rôzne odtiene. */
 /* Ovládací prvok, ktorý zapisuje, ale rola doňho písať nesmie. Značku [data-w]
    pridáva `zam(modul)` pri kreslení — tu už len vyzerá a správa sa ako vypnutý. */
 [data-w]{opacity:.38;pointer-events:none;filter:saturate(.15);cursor:not-allowed}
@@ -1003,7 +1016,7 @@ a.clWeb{display:inline-block;margin-top:12px;font-size:12.5px;color:var(--brand)
   .spin,.ob-spin{animation-duration:2.4s}
 }
 
-/* ═══ ZAKRYTÉ ČÍSLA — režim pre schôdzku (kap. 49) ═══
+/* ═══ ZAKRYTÉ ČÍSLA — režim pre schôdzku (kap. 67) ═══
    Sumy sa NEROZMAZÁVAJÚ, ale nahrádzajú reťazcom pevnej dĺžky. Rozmazané
    sedemmiestne číslo je stále vidieť ako sedemmiestne a rád veličiny je
    presne to, čo pri cudzích ľuďoch v miestnosti nechceš dať. Blur ostáva
@@ -1242,7 +1255,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.28-ID";  // ukážka sa dá spustiť z prihlásenia (príprava na Play)
+const APP_VERZIA = "2026.08.30-IE";  // zápisy z viacerých vlákien: komentáre k rozhodnutiam v kóde
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -1314,6 +1327,17 @@ function vratFocus(){
   if (ciel && ciel.focus) ciel.focus();
 }
 const _KLIK_SAM = "button,a,input,select,textarea,summary,label";
+// Vedomý kompromis: `role="button"` dostane KAŽDÝ prvok s `onclick`, teda aj
+// viacstĺpcový riadok zoznamu (`.arow`). Odčítavač obrazovky ho oznámi ako
+// jedno tlačidlo a stratí štruktúru buniek.
+//
+// Zvažovaná alternatíva bola rozlišovať typy prvkov a dávať `role="row"`
+// alebo `gridcell` — zamietnutá preto, že by to znamenalo zoznam tried, ktorý
+// sa pri každom novom prvku rozíde. Presne tomu sa pozorovateľ vyhýba.
+//
+// Prednosť má, že sa prvok dá dosiahnuť A spustiť; presnejšia sémantika až
+// keď bude dôvod. Bez skúsenosti so skutočným odčítavačom je to zatiaľ
+// hypotéza, nie nález (spec kap. 48.9, bod 3).
 function spristupniOvladace(koren){
   const c = koren || document.body;
   let n = 0;
@@ -1381,7 +1405,7 @@ async function boot(){
   try { await sadzbyNacitaj(); } catch(e){ console.warn("sadzby:", e); }
   const ok = initSupabase();
   spustiKlavesnicu();   // E1 — ovládanie klávesnicou (kap. 48.4)
-  spustiZakrytie();     // zakryté čísla — režim pre schôdzku (kap. 49)
+  spustiZakrytie();     // zakryté čísla — režim pre schôdzku (kap. 67)
   hide("loading");
 
   // Pozvánku odlož skôr, než sa čokoľvek presmeruje alebo prepíše URL.
@@ -16359,6 +16383,16 @@ function exportDanXLS(rok){
 
 // ── MODÁL ──
 let modalSave=null, modalDelete=null;
+// ⚠ Okno NIE JE uzavreté pre klávesnicu — vedomá medzera, nie prehliadnutie.
+// Čo funguje: keď akciu spustí klávesnica, `vratFocus` presunie focus na
+// krížik okna (kap. 48.6e). Čo NEfunguje:
+//   · tabulátor z okna vyjde do stránky pod ním (focus trap tu nie je);
+//   · Escape okno nezatvára — jediné miesto, kde appka Escape spracúva, je
+//     pole IČ DPH v module DPH.
+// Kým to tak je, okno sa dá otvoriť aj ovládať, ale nedá sa z neho slušne
+// odísť. Riešenie patrí sem, do `openModal`/`closeModal`, nie do posluchača
+// pri `spristupniOvladace` — ten nevie, ktoré okno je práve otvorené.
+// Spec kap. 48.9, bod 2.
 function openModal(title, bodyHTML, onSave, onDelete, trieda){
   modalSave=onSave; modalDelete=onDelete||null;
   const karta=document.querySelector("#modal .modalcard");
@@ -22262,7 +22296,7 @@ function prepniTemu(){
   cloudMsg(novy ? "Tmavý režim zapnutý." : "Svetlý režim zapnutý.", "ok");
 }
 
-// ── ZAKRYTÉ ČÍSLA (kap. 49) ───────────────────────────────────────────────
+// ── ZAKRYTÉ ČÍSLA (kap. 67) ───────────────────────────────────────────────
 // Situácia: v meetingovke sedia ľudia a treba niečo nájsť v účtovníctve.
 // Dashboard hodí tržby na prvú obrazovku.
 //
@@ -22273,7 +22307,8 @@ function prepniTemu(){
 // poplachu (spec kap. 16). Pravidlo je preto viazané na OBSAH, nie na miesto:
 // zakryje sa každý text, ktorý vyzerá ako suma v eurách. `eur()` aj `eur0()`
 // vždy pripájajú „€", takže pravidlo pokrýva aj kód, ktorý ešte nikto nenapísal.
-// Upraviť render bola aj tak fikcia — `eur`/`eur0` sa volá na 405 miestach.
+// Upraviť render bola aj tak fikcia — `eur`/`eur0` sa volá v stovkách miest
+// (29. 8. 2026: 520 výskytov, `grep -o "eur0?(" | wc -l`).
 //
 // Dátumy, čísla faktúr, IČO ani mená sa nezakrývajú. V miestnosti práve
 // potrebuješ nájsť faktúru podľa čísla; appka musí ostať použiteľná.
@@ -23528,6 +23563,16 @@ function txRozdelene(tx){
   return r2((tx.uhrady||[]).reduce((a,u)=>a+uhrNaPohyb(u),0));
 }
 function txZostava(tx){ return r2(txSuma(tx)-txRozdelene(tx)); }
+// POZOR na zdanlivý rozpor s `pohybStav`: tá považuje väzbu na neexistujúci
+// doklad za neplatnú (stav `sirota`, kap. 47.18), ale `txRozdelene` ju do sumy
+// ráta ďalej. Je to zámer, nie prehliadnutie:
+//   • `txZostava` je STROP NA PRIRADENIE — hovorí, koľko z platby je ešte
+//     nerozdelené. Keby siroty preskakovala, dala by sa tá istá suma priradiť
+//     druhýkrát a vznikol by preplatok.
+//   • `pohybStav` hovorí, čo je PRAVDA pre používateľa — a väzba do prázdna
+//     pravda nie je.
+// Kým človek sirotu neodoberie, pohyb je teda zablokovaný a appka to povie.
+// Nezjednocovať to „opravou" jednej z tých dvoch funkcií.
 
 // ═══ ZAOKRÚHĽOVACIA TOLERANCIA (kap. 47.8) ═════════════════════════════
 //

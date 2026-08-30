@@ -22,7 +22,7 @@
 //
 //  Pri zmene appky staci zvysit VERZIA — stary cache sa vymaze pri aktivacii.
 // ═══════════════════════════════════════════════════════════════════════════
-const VERZIA = "2026.08.28-ID";
+const VERZIA = "2026.08.30-IE";
 const CACHE  = "ezivnostnik-" + VERZIA;
 // Odkladisko pre súbor zo systémového „Zdieľať". Nemá verziu v mene — obsah je
 // dočasný a musí prežiť aj aktualizáciu workera medzi zdieľaním a vyzdvihnutím.
@@ -135,7 +135,15 @@ self.addEventListener("fetch", e => {
     return;
   }
 
-  // statika: najprv cache, na pozadí dopĺňame
+  // Statika: najprv cache. POZOR — pri zásahu sa vráti uložená kópia a na sieť
+  // sa už nesiahne, ani na pozadí. Nie je to stale-while-revalidate: uložený
+  // súbor tu leží, kým ho nezmaže zmena VERZIA pri aktivácii.
+  //
+  // Dôsledok, ktorý nie je vidieť: sem padá VŠETKO, čo nie je .html ani .js —
+  // teda aj `firma_demo.json`, ktoré si appka ťahá za behu. Nasadenie nových
+  // ukážkových dát sa k používateľovi, čo demo raz otvoril, nedostane, kým sa
+  // nezvýši verzia. Appka ho pritom žiada s `cache:"no-store"`; tento riadok
+  // ten zámer prebíja. Preto sa verzia zvyšuje aj pri zmene dátového súboru.
   e.respondWith((async () => {
     const z = await caches.match(req);
     if (z) return z;
