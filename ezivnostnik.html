@@ -1264,7 +1264,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.02-II";  // plán Účtovník sa dá kúpiť a aktivuje klientske firmy
+const APP_VERZIA = "2026.09.02-IJ";  // oddiel KV vo formulári ukazuje výsledok, nie pravidlo
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -8739,7 +8739,13 @@ function vydavokFormHtml(x, nova, idx){
     <div class="mfield" style="margin-bottom:10px">
       <label>Zaradenie do výkazu <span style="font-weight:400;color:var(--ink-soft)">(mení sa výnimočne)</span></label>
       <select id="m_oddielRucne" onchange="mAktualizujOddiel()">
-        <option value="">Nechať podľa druhu dokladu</option>
+        <!-- Text prvej voľby dopĺňa mAktualizujOddiel o oddiel, ktorý z druhu
+             dokladu práve vychádza. Bez toho tu stálo len "Nechať podľa druhu
+             dokladu" a používateľ z tohto poľa nevedel prečítať výsledok, hoci
+             sa nad ním menil správne. Riešil to tým, že si oddiel vybral ručne,
+             čím ho zamrazil. POZOR: tento komentár je vnútri šablónového
+             reťazca, takže v ňom nesmie byť spätný apostrof. -->
+        <option value="">Podľa druhu dokladu</option>
         ${Object.keys(DPH_ODDIELY).map(o=>`<option value="${o}" ${x.oddielRucne===o?"selected":""}>${esc(DPH_ODDIELY[o])}</option>`).join("")}
       </select>
     </div>
@@ -18154,19 +18160,59 @@ function mAktualizujOddiel(){
     if(rz.length){ x.rozpis=rz; x.bez=rz.reduce((a,r)=>a+(+r.bez||0),0); x.dph=rz.reduce((a,r)=>a+(+r.dph||0),0); }
   }
   const od=dphOddielVydavok(x);
-  const nazov=(typeof DPH_ODDIELY!=="undefined" && DPH_ODDIELY[od]) || od;
+  // Čo by vyšlo BEZ ručného prepísania. Počíta sa vždy, lebo sa používa na dve
+  // veci: na text prvej voľby v zozname a na to, či ručné nastavenie ešte dáva
+  // zmysel po tom, čo sa zmenil druh dokladu.
+  const odAuto=dphOddielVydavok(Object.assign({}, x, {oddielRucne:""}));
+  const nazovOddielu=(o)=>(typeof DPH_ODDIELY!=="undefined" && DPH_ODDIELY[o]) || o;
+  const nazov=nazovOddielu(od);
   const mimo = od==="X";
+
+  // Prvá voľba pomenuje výsledok, nie pravidlo. Používateľ zmení druh dokladu
+  // hore a v tomto poli rovno vidí, kam doklad pôjde — dovtedy tu bola veta
+  // „Nechať podľa druhu dokladu", z ktorej sa výsledok prečítať nedal.
+  // `options` sa overuje zvlášť: `mAktualizujOddiel` sa volá z piatich miest
+  // a výnimka tu by zhodila celú obsluhu zmeny druhu dokladu — teda aj
+  // zosúladenie kategórie a väzby na auto, ktoré s oddielom nesúvisí.
+  const sel=document.getElementById("m_oddielRucne");
+  if(sel && sel.options && sel.options.length){
+    sel.options[0].textContent = "Podľa druhu dokladu — " + nazovOddielu(odAuto);
+  }
   const pozn = od==="B31" ? "Vykáže sa súhrnne s ostatnými bločkami, IČ DPH sa neuvádza."
              : od==="B2"  ? "Vykáže sa jednotlivo — IČ DPH dodávateľa je povinné."
              : od==="B1"  ? "Samozdanenie — daň sa dopočíta do výstupu aj odpočtu."
              : mimo       ? "Doklad nevstúpi do kontrolného výkazu (bez DPH alebo bez nároku)."
              : "";
+  // Ručné prepísanie je TICHÉ — panel ukáže zvolený oddiel a nič neprezradí
+  // o tom, že sa už neriadi druhom dokladu. Keď potom používateľ druh zmení,
+  // oddiel sa nepohne a nemá sa ako dozvedieť prečo. Preto sa to pomenuje,
+  // a keď sa rozišlo s tým, čo by vyšlo automaticky, ponúkne sa návrat.
+  //
+  // Zámerne sa NEPREPISUJE samo: oddiel kontrolného výkazu je daňové
+  // rozhodnutie človeka a appka ho prebíjať nesmie (rovnaké pravidlo ako pri
+  // zaevidovaní SaaS faktúry, ktorú používateľ zmazal).
+  const jeRucne = !!(x.oddielRucne && (typeof DPH_ODDIELY!=="undefined") && DPH_ODDIELY[x.oddielRucne]);
+  const rozisloSa = jeRucne && odAuto!==od;
   box.innerHTML=`<div style="background:${mimo?'var(--bg)':'var(--brand-lite)'};
       border-left:3px solid ${mimo?'var(--line)':'var(--brand)'};border-radius:0 9px 9px 0;padding:9px 12px">
       <div style="font-size:11px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px">Oddiel kontrolného výkazu</div>
       <div style="font-size:13px;font-weight:600;color:${mimo?'var(--ink-soft)':'var(--brand-deep)'}">${esc(nazov)}</div>
       ${pozn?`<div style="font-size:11.5px;color:var(--ink-soft);margin-top:3px;line-height:1.45">${esc(pozn)}</div>`:""}
+      ${jeRucne?`<div style="font-size:11.5px;color:var(--ink-warn);margin-top:5px;line-height:1.45">
+        ✎ Nastavené ručne — nemení sa podľa druhu dokladu.${
+          rozisloSa?` Z druhu dokladu by teraz vyšlo <b>${esc(nazovOddielu(odAuto))}</b>.`:""}
+      </div>
+      ${rozisloSa?`<button type="button" class="aabtn" style="margin-top:7px;padding:5px 11px;font-size:11.5px"
+        onclick="mZrusRucnyOddiel()">↺ Nechať podľa druhu dokladu</button>`:""}`:""}
     </div>`;
+}
+// Uvoľnenie ručného zaradenia. Vlastná funkcia preto, že sa musí prekresliť aj
+// panel — samotné vynulovanie zoznamu by nechalo na obrazovke starý text.
+function mZrusRucnyOddiel(){
+  const sel=document.getElementById("m_oddielRucne");
+  if(!sel) return;
+  sel.value="";
+  mAktualizujOddiel();
 }
 
 // ═══ DRUH DOKLADU URČUJE ODDIEL, NIČ SA NEHÁDA ═══
