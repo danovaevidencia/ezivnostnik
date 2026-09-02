@@ -435,7 +435,19 @@ h1,h2,h3,h4,.chead,.wbig,.sbox .sn,.sp-title b,.splittitle{text-wrap:balance}
 .cenIk.ano{color:var(--pos)}
 .cenIk.nie{color:var(--line-strong,#c3cedd)}
 .cenRiadok:has(.cenIk.nie){color:var(--ink-soft);opacity:.65}
-.cenDoplnok{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px dashed var(--line);border-radius:12px;padding:12px 14px;margin-top:14px}
+/* Odkedy sa vedľa ceny vyberá aj rok, ovládanie zaberá 175 px. Bez zalomenia
+   ostalo na 375 px pre popis 74 px a nadpis „Daňové priznanie typ B" sa lámal
+   do piatich riadkov (zmerané). `flex-wrap` s minimálnou šírkou popisu zhodí
+   na mobile ovládanie pod text; na širokej obrazovke sa nezmení nič. */
+/* Ponuka pre účtovníkov. Na širokej obrazovke text vľavo a karta vpravo,
+   na mobile pod sebou — karta má vlastnú minimálnu šírku, takže by sa vedľa
+   textu na 390 px zlomila na nečitateľnú. */
+.cenUct{display:grid;grid-template-columns:1fr;gap:12px;margin-top:16px;padding-top:16px;border-top:1px solid var(--line-soft)}
+@media(min-width:720px){ .cenUct{grid-template-columns:1fr 260px;align-items:center} }
+.cenUct>div:first-child b{display:block;font-size:14px;color:var(--ink);margin-bottom:4px}
+.cenUct>div:first-child span{display:block;font-size:12.5px;color:var(--ink-soft);line-height:1.65}
+.cenDoplnok{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;border:1px dashed var(--line);border-radius:12px;padding:12px 14px;margin-top:14px}
+.cenDoplnok>div:first-child{flex:1 1 190px;min-width:0}
 .cenDoplnok b{display:block;font-size:13.5px;color:var(--ink)}
 .cenDoplnok span{display:block;font-size:11.5px;color:var(--ink-soft);margin-top:1px}
 .cenDoplnok .abtn{flex-shrink:0;font-weight:700}
@@ -1252,7 +1264,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.08.30-IF";  // sémantické stavy majú kontrast aj v svetlej téme
+const APP_VERZIA = "2026.09.02-II";  // plán Účtovník sa dá kúpiť a aktivuje klientske firmy
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -1618,10 +1630,23 @@ function dniDoKoncaPlanu(){
   if(isNaN(doKedy)) return null;
   return Math.ceil((doKedy - new Date())/86400000);
 }
+// Roky, ktoré má firma zaplatené jednorazovým doplnkom. Jediné miesto, kde sa
+// `priznanie_b_roky` číta.
+//
+// 🔴 Do 2. 9. 2026 tieto dve funkcie **nikto nevolal**. Server zaplatený rok
+// zapísal správne (`aktivuj_plan`, vetva `priznanieB` v `admin_22`), ale
+// `modulPovoleny()` pozerá len na plán a admin override — takže zákazník na
+// Free zaplatil 7,90 € a sprievodca priznaním zostal zamknutý. Doplnok bol
+// mŕtvy predaj a spec 10.3 ho pritom uvádzala medzi zapojenými prvkami.
+// Odvtedy ich konzumuje `modulPovolenyPreModul` (prístup k modulu)
+// a `appPriznanieB` (prístup ku konkrétnemu roku).
+function kupenePriznanieRoky(){
+  const roky=(firmaConfig && firmaConfig.priznanie_b_roky) || [];
+  return Array.isArray(roky) ? roky.map(String) : [];
+}
 // má odomknuté priznanie B za konkrétny rok (jednorazový nákup)?
 function maPriznanieBZaRok(rok){
-  const roky=(firmaConfig && firmaConfig.priznanie_b_roky) || [];
-  return Array.isArray(roky) && roky.includes(String(rok));
+  return kupenePriznanieRoky().includes(String(rok));
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1637,7 +1662,7 @@ const PLANY = {
   },
   standard: {
     kod:"standard", nazov:"Štandard", farba:"#1f5fa8",
-    cenaMes:3.90, cenaRok:39,
+    cenaMes:7.90, cenaRok:79,
     popis:"Pre živnostníka, ktorý nie je platiteľ DPH",
     limity:{ faktury:0, odberatelia:0, doklady:0, bankaImporty:0, ulozisko:2000 },
     moduly:["faktury","vykazy","pohladavky","vydavky","banka","kalendar",
@@ -1645,7 +1670,7 @@ const PLANY = {
   },
   profi: {
     kod:"profi", nazov:"Profi", farba:"var(--ink-pos)",
-    cenaMes:7.90, cenaRok:79,
+    cenaMes:11.90, cenaRok:119,
     popis:"Pre platiteľa DPH — vrátane podaní",
     limity:{ faktury:0, odberatelia:0, doklady:0, bankaImporty:0, ulozisko:0 },
     moduly:["faktury","vykazy","pohladavky","vydavky","banka","kalendar",
@@ -1664,6 +1689,12 @@ const PLANY = {
   // Cena a strop sú rozhodnuté 25. 7. 2026: základ 10 firiem, každá ďalšia
   // +2,00 €/mes do dvadsiatich. Vyšší limit zapisuje server do
   // `firma_config.firmy_limit`, preto tu stojí len základ.
+  //
+  // 26,90 € POTVRDENÉ 2. 9. 2026, keď sa Štandard zdvihol na 7,90 €. Pomer sa
+  // tým zmenil sám: desať firiem samostatne stojí 79 €, takže Účtovník je
+  // odvtedy 34 % z toho namiesto pôvodných 69 %. Nechané vedome — účtovník
+  // prináša objem a jeden zákazník sa obsluhuje lacnejšie než desať.
+  // Cena teda NIE JE zabudnutá, je rozhodnutá (spec 70.8).
   uctovnik: {
     kod:"uctovnik", nazov:"Účtovník", farba:"#6b4fa8",
     cenaMes:26.90, cenaRok:269,
@@ -1715,7 +1746,14 @@ function vyuzitieLimitu(kluc){
     case "ulozisko":     return (d.vydavky||[]).filter(x=>x.doklad).length + (d.dokumenty||[]).length;
     // Firmy sa nepočítajú z dát firmy, ale z toho, ku koľkým mám prístup —
     // je to jediný limit, ktorý sa netýka obsahu, ale rozsahu predplatného.
-    case "firmy":        return (typeof firmyZoznam!=="undefined" && firmyZoznam) ? firmyZoznam.length : 0;
+    //
+    // Počítajú sa len CUDZIE firmy, teda tie, ktoré účtovník spravuje. Vlastná
+    // firma sa do limitu neráta: účtovník je sám živnostník a účtovať si mu
+    // miesto za vlastné knihy by znamenalo, že „10 firiem klientov" v cenníku
+    // je v skutočnosti deväť. Doteraz sa limit nevynucoval nikde, takže sa tým
+    // nič existujúce nemení — len sa dopĺňa význam, ktorý cenník sľubuje.
+    case "firmy":        return (typeof firmyZoznam!=="undefined" && firmyZoznam)
+                                ? firmyZoznam.filter(f=>f.mojaRola!=="vlastnik").length : 0;
     default: return 0;
   }
 }
@@ -1785,7 +1823,14 @@ const MODUL_KATEGORIA={
 function modulPovolenyPreModul(m){
   const kat=MODUL_KATEGORIA[m];
   if(!kat) return true;              // neznámy modul → nechaj (kalendár a pod.)
-  return modulPovoleny(kat);
+  if(modulPovoleny(kat)) return true;
+  // Jednorazový doplnok odomyká LEN sprievodcu priznaním, nie celú kategóriu
+  // „priznanie" — v tej je aj prognóza a podania, za ktoré zákazník nezaplatil.
+  // Preto sa to rieši tu a nie v `modulPovoleny`, kde sa kategórie zlievajú.
+  // Ktorý konkrétny rok je zaplatený, si stráži samotný modul (`appPriznanieB`);
+  // sem stačí, že aspoň jeden je — inak by dlaždica ani neexistovala.
+  if(m==="priznanieB" && kupenePriznanieRoky().length) return true;
+  return false;
 }
 // mapovanie dashboard widgetov na konfiguračné kategórie
 const WIDGET_KATEGORIA={
@@ -2198,6 +2243,23 @@ async function spracujPozvanku(){
   try{
     const { data:{ user } } = await sb.auth.getUser();
     if(!user) return false;                 // prihlásenie prebehne a zavolá sa znova
+    // Limit spravovaných firiem. Je to OBCHODNÁ stráž, nie bezpečnostná —
+    // `prijmi_pozvanku` limit na serveri nekontroluje, takže sa dá obísť
+    // priamym volaním RPC. Kým sa plán predáva účtovníkom, ktorých Roman pozná
+    // osobne, je to primerané; pred širším predajom patrí kontrola do RPC
+    // (spec 64.1, bod 3).
+    //
+    // Pri štarte beží `spracujPozvanku` SÚBEŽNE s `nacitajFirmu`, takže zoznam
+    // firiem ani konfigurácia nemusia byť načítané. Vtedy sa nekontroluje nič
+    // a je to vidieť v konzole — tichý priechod by tvrdil, že limit sedí, hoci
+    // sa nemeral (kap. 45.5: prázdny výsledok vyzerá ako výsledok).
+    if(firmaConfig && firmyZoznam.length){
+      if(!skontrolujLimit("firmy","Pozvánku prijmete, keď sa miesto uvoľní alebo si limit navýšite.")){
+        return false;
+      }
+    }else{
+      console.warn("prijatie pozvánky: limit spravovaných firiem sa neoveril — konfigurácia ešte nebola načítaná");
+    }
     const { data, error } = await sb.rpc("prijmi_pozvanku", { p_token:t });
     // Odložený token sa zahadzuje aj pri neúspechu — inak by sa neplatná
     // pozvánka pokúšala prijať pri každom ďalšom štarte appky.
@@ -13790,6 +13852,11 @@ function pbKontrolyHtml(rok){
   </div>`;
 }
 let pbRok=new Date().getFullYear(), pbKrok=0;
+// Pri PRVOM otvorení sprievodcu sa skočí na rok, ktorý je odomknutý. Bez toho
+// by zákazník, ktorý si jednorazovo kúpil napríklad 2025, otvoril modul
+// a uvidel „Rok 2026 nemáte odomknutý" — teda hlášku o tom, čo si nekúpil.
+// Len raz: keď si potom klikne na zamknutý rok, má tam zostať.
+let _pbRokZvoleny=false;
 // ═══ NÁHĽAD PRIZNANIA FO TYP B — replika formulára FS s číslami riadkov ═══
 function pbNahladFormular(rok){
   const V=pbVypocet(rok);
@@ -13909,11 +13976,28 @@ function appPriznanieB(){
   const v=pbVypocet(pbRok);
   const roky=[...new Set([...(firmaData.faktury||[]).map(f=>String(f.datum||f.vystavenie||"").slice(0,4))].filter(y=>y&&y.length===4))].sort().reverse();
   if(!roky.length) roky.push(String(pbRok));
+  // Zaplatený rok musí byť v prepínači, aj keď zaň niet ani jednej faktúry —
+  // inak by sa zákazník k tomu, čo si kúpil, nemal ako preklikať.
+  for(const r of kupenePriznanieRoky()) if(!roky.includes(r)) roky.push(r);
+  roky.sort().reverse();
+  // Prístup k ROKU, nie k modulu: plán odomyká všetky roky, jednorazový doplnok
+  // práve ten jeden zaplatený. Modul sa otvorí, kým je zaplatený aspoň jeden
+  // (`modulPovolenyPreModul`) — tu sa rozhoduje o konkrétnom.
+  const rokPovoleny=(r)=>modulPovoleny("priznanie") || maPriznanieBZaRok(r);
+  if(!_pbRokZvoleny){
+    _pbRokZvoleny=true;
+    if(!rokPovoleny(pbRok)){
+      const prvy=roky.find(rokPovoleny);
+      if(prvy) pbRok=+prvy;
+    }
+  }
+  const otvoreny=rokPovoleny(pbRok);
   document.getElementById("appScreen").innerHTML=appHlavicka("priznanieB","")+`
     <div style="background:var(--sfc-neg);border-left:3px solid #c0564a;border-radius:8px;padding:11px 14px;margin-bottom:14px;font-size:12.5px">
       <b>Predvyplňovací nástroj.</b> Vytvorí návrh priznania DPFO typ B na kontrolu. <b>Nenahrádza daňového poradcu ani oficiálne priznanie.</b> Pred podaním si všetko overte. Výpočet je postavený na 15 % sadzbe (príjmy pod 100 000 €) a pravidlách 2026.
     </div>
-    <div class="atool" style="margin-bottom:12px">${roky.map(r=>`<span class="achip ${String(pbRok)===r?'on':''}" onclick="pbRok=${r};pbKrok=0;appPriznanieB()">Rok ${r}</span>`).join('')}</div>
+    <div class="atool" style="margin-bottom:12px">${roky.map(r=>`<span class="achip ${String(pbRok)===r?'on':''}" onclick="pbRok=${r};pbKrok=0;appPriznanieB()">${rokPovoleny(r)?"":"🔒 "}Rok ${r}</span>`).join('')}</div>
+    ${otvoreny?`
     <div class="atool atabs" style="margin-bottom:14px">${PB_KROKY.map((k,i)=>`<span class="atab ${i===pbKrok?'on':''}" style="${i<pbKrok?'opacity:.6':''}" onclick="pbKrok=${i};appPriznanieB()">${i+1}. ${k}</span>`).join('')}</div>
     ${rocnaKontrolaHtml(pbRok)}
     <div class="card">${pbKrokObsah(pbKrok, v, S)}</div>
@@ -13921,8 +14005,16 @@ function appPriznanieB(){
       ${pbKrok>0?`<button class="aabtn" onclick="pbKrok--;appPriznanieB()">← Späť</button>`:''}
       <div class="sp" style="flex:1"></div>
       ${pbKrok<PB_KROKY.length-1?`<button class="aabtn pri" onclick="pbKrok++;appPriznanieB()">Pokračovať →</button>`:`<button class="aabtn" onclick="pbNahladFormular(pbRok)">▦ Ako formulár</button><button class="aabtn pri" onclick="pbExportXml()">↧ Exportovať XML</button>`}
-    </div>`;
-  setCrumb(`priznanie B · ${pbRok} · krok ${pbKrok+1}/${PB_KROKY.length}`);
+    </div>`:`
+    <div class="card">
+      <b>Rok ${pbRok} nemáte odomknutý.</b>
+      <p style="margin:8px 0 0;font-size:13px;line-height:1.6">
+        Sprievodca priznaním je súčasťou plánov Štandard a Profi. Ak nechcete predplatné,
+        dá sa odomknúť jeden rok jednorazovo za ${DOPLNKY.priznanieB.cena.toFixed(2).replace(".",",")} € — zostane odomknutý natrvalo.
+      </p>
+      <button class="aabtn pri" style="margin-top:12px" onclick="zobrazCennik()">Pozrieť plány a ceny</button>
+    </div>`}`;
+  setCrumb(`priznanie B · ${pbRok}${otvoreny?` · krok ${pbKrok+1}/${PB_KROKY.length}`:" · zamknuté"}`);
 }
 function pbRiadok(label, val, kod, bold){ return `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line-soft);${bold?'font-weight:700':''}"><span>${label}${kod?` <span style="font-size:10px;opacity:.5">${kod}</span>`:''}</span><span>${typeof val==="number"?eur(val):val}</span></div>`; }
 // Doťah názvu neziskovky z registra (RPO) podľa IČO — využíva existujúci rpoDotiahni.
@@ -15510,22 +15602,42 @@ function spracujNavratZPlatby(){
     return;
   }
   if(stav==="ok"){
+    // Čo sa kupovalo — poznámku si nechala `spustiPredplatne` pred odchodom na
+    // bránu. Keď chýba (iná karta, vyčistené úložisko), správame sa ako predtým
+    // a čakáme na plán; pri doplnku je to horšie, ale nie nesprávne.
+    let objednane=null;
+    try{
+      objednane=JSON.parse(sessionStorage.getItem("ez_platba")||"null");
+      sessionStorage.removeItem("ez_platba");
+    }catch(_){}
+    const jeDoplnok = objednane && objednane.plan==="priznanieB";
+    const rokDoplnku = jeDoplnok ? objednane.rok : null;
     // Stripe webhook aktivuje plán na pozadí; môže to trvať pár sekúnd
     setTimeout(async ()=>{
       let hotovo=false;
+      const kupenychPred = kupenePriznanieRoky().length;
       for(let pokus=0; pokus<6 && !hotovo; pokus++){
         await new Promise(r=>setTimeout(r, pokus===0?1200:2000));
         if(firmaId) await nacitajFirmaConfig(firmaId);
-        if(aktualnyPlan()!=="free"){ hotovo=true; }
+        // Doplnok plán NEMENÍ — čaká sa na zaplatený rok, nie na koniec Free.
+        if(jeDoplnok) hotovo = rokDoplnku
+          ? maPriznanieBZaRok(rokDoplnku)
+          : kupenePriznanieRoky().length > kupenychPred;
+        else if(aktualnyPlan()!=="free") hotovo=true;
       }
       if(hotovo){
         _saasFaktury=null; _saasAutoDone=false;
         try{ await autoZaevidujSaasFaktury(); }catch(_){}
-        const pl=planFirmy();
-        alert("✓ Ďakujeme za platbu!\n\nVáš plán "+(pl?pl.nazov:aktualnyPlan())+" je aktívny.\nFaktúru sme pridali do vašich Výdavkov a poslali e-mailom.");
+        if(jeDoplnok){
+          alert("✓ Ďakujeme za platbu!\n\nDaňové priznanie typ B za rok "+(rokDoplnku||"")+" máte odomknuté natrvalo.\n"+
+                "Sprievodcu nájdete v sekcii Podania.\nFaktúru sme pridali do vašich Výdavkov a poslali e-mailom.");
+        }else{
+          const pl=planFirmy();
+          alert("✓ Ďakujeme za platbu!\n\nVáš plán "+(pl?pl.nazov:aktualnyPlan())+" je aktívny.\nFaktúru sme pridali do vašich Výdavkov a poslali e-mailom.");
+        }
         renderLauncher(); if(typeof zobrazFirmu==="function") zobrazFirmu();
       } else {
-        alert("Platba prebehla. Aktivácia plánu môže trvať chvíľu — obnovte stránku o pár sekúnd.\n\nAk by plán neostal aktívny, napíšte nám cez kontaktný formulár na ezivnostnik.eu.");
+        alert("Platba prebehla. Aktivácia môže trvať chvíľu — obnovte stránku o pár sekúnd.\n\nAk by sa nič nezmenilo, napíšte nám cez kontaktný formulár na ezivnostnik.eu.");
       }
     }, 300);
   }
@@ -15563,6 +15675,7 @@ function zobrazCennik(){
         ${riadok("Kniha jázd, majetok, dokumenty", p.moduly.includes("jazdy"))}
         ${riadok("Daňové priznanie typ B", p.moduly.includes("priznanieB"))}
         ${riadok("DPH — priznanie a kontrolný výkaz", p.moduly.includes("dph"))}
+        ${lim.firmy?riadok(`Až ${lim.firmy} firiem klientov v jednom účte`, true):""}
       </div>
       ${(()=>{
         const zm = cakajucaZmena();
@@ -15599,16 +15712,79 @@ function zobrazCennik(){
       ${kartaPlanu(PLANY.standard)}
       ${kartaPlanu(PLANY.profi)}
     </div>
+    ${(()=>{
+      // Účtovník má inú cieľovú skupinu než zvyšok cenníka, preto stojí bokom
+      // a nie ako štvrtá karta v rade. Živnostník, ktorý hľadá plán pre seba,
+      // by inak porovnával 26,90 € s 11,90 € a nechápal, za čo je ten rozdiel.
+      //
+      // Firme, ktorej plán hradí účtovník, sa ponuka nezobrazuje vôbec —
+      // `spustiPredplatne` ju síce zastaví, ale ponúkať niekomu kúpu toho, čo
+      // už má zaplatené, je zlé aj keď to ustrážime.
+      if(typeof planHradiUctovnik==="function" && planHradiUctovnik()) return "";
+      return `
+    <div class="cenUct">
+      <div>
+        <b>Vediete účtovníctvo viacerým živnostníkom?</b>
+        <span>Jeden účet a v ňom až ${PLANY.uctovnik.limity.firmy} firiem klientov.
+        Vy robíte DPH, priznania a párovanie s bankou, klient fakturuje a nahráva doklady.
+        Klientovi sa plán aktivuje sám a neplatí zaň nič.
+        Potrebujete viac firiem? Ozvite sa na ${SAAS_DODAVATEL.email}.</span>
+      </div>
+      ${kartaPlanu(PLANY.uctovnik)}
+    </div>`;
+    })()}
+    ${(()=>{
+      // Doplnok sa kupuje NA ROK a ten rok treba vybrať, nie uhádnuť. Dovtedy
+      // sa neposielal vôbec a server dosadil `extract(year from now())` —
+      // priznanie za rok 2026 sa pritom podáva na jar 2027, takže by sa
+      // odomkol rok 2027. Predvolený je `priznanieZaRok()`, teda tá istá
+      // funkcia, podľa ktorej sa riadi kalendár aj odklad; druhá odpoveď na
+      // tú istú otázku by sa s ňou rozišla (kap. 16).
+      const rokAkt = (typeof priznanieZaRok==="function") ? priznanieZaRok() : new Date().getFullYear()-1;
+      const volby = [rokAkt, rokAkt-1, rokAkt-2];
+      const kupene = kupenePriznanieRoky();
+      const vPlane = modulPovoleny("priznanie");
+      return `
     <div class="cenDoplnok">
       <div>
         <b>${DOPLNKY.priznanieB.nazov}</b>
         <span>${DOPLNKY.priznanieB.popis}</span>
+        ${vPlane?`<span style="display:block;margin-top:3px;opacity:.75">Váš plán ho už obsahuje — kúpou si rok odomknete natrvalo, aj keď predplatné skončí.</span>`:""}
       </div>
-      <button class="abtn" onclick="spustiPredplatne('priznanieB','jednorazovo')">${DOPLNKY.priznanieB.cena.toFixed(2).replace(".",",")} €</button>
-    </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <select id="cenDoplnokRok" onchange="cennikDoplnokStav()"
+                style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:13px">
+          ${volby.map(r=>`<option value="${r}"${kupene.includes(String(r))?" data-kupeny=\"1\"":""}>Rok ${r}${kupene.includes(String(r))?" ✓ zaplatené":""}</option>`).join("")}
+        </select>
+        <button class="abtn" id="cenDoplnokBtn" onclick="kupPriznanieB()">${DOPLNKY.priznanieB.cena.toFixed(2).replace(".",",")} €</button>
+      </div>
+    </div>`;
+    })()}
     <div class="cenPozn">Ceny sú s DPH. Predplatné sa obnovuje automaticky, zrušiť ho môžete kedykoľvek. Po zaplatení dostanete faktúru e-mailom.</div>
   `;
   openModal("Plány a ceny", html, null, null, "siroky");
+  cennikDoplnokStav();
+}
+
+// Rok, ktorý je už zaplatený, sa nesmie dať kúpiť druhýkrát. Vetva v SQL síce
+// duplicitu do `priznanie_b_roky` nepridá (je idempotentná), ale peniaze by
+// prešli a faktúra by vznikla — zákazník by zaplatil za to, čo má.
+function cennikDoplnokStav(){
+  const sel=document.getElementById("cenDoplnokRok");
+  const btn=document.getElementById("cenDoplnokBtn");
+  if(!sel || !btn) return;
+  const kupeny=maPriznanieBZaRok(sel.value);
+  btn.disabled=kupeny;
+  btn.style.opacity=kupeny?".5":"";
+  btn.textContent=kupeny ? "Máte zaplatené"
+    : DOPLNKY.priznanieB.cena.toFixed(2).replace(".",",")+" €";
+}
+function kupPriznanieB(){
+  const sel=document.getElementById("cenDoplnokRok");
+  const rok=sel ? sel.value : "";
+  if(!rok){ alert("Vyberte rok, za ktorý priznanie potrebujete."); return; }
+  if(maPriznanieBZaRok(rok)){ alert("Priznanie za rok "+rok+" už máte zaplatené."); return; }
+  spustiPredplatne("priznanieB","jednorazovo",rok);
 }
 
 // ── Predplatné cez Stripe checkout ──
@@ -15906,7 +16082,10 @@ function planHradiUctovnik(){
   return /^uctovnik:/.test(String((firmaConfig && firmaConfig.plan_zdroj) || ""));
 }
 
-async function spustiPredplatne(plan, obdobie){
+// `rok` sa posiela len pri jednorazovom doplnku — hovorí, ZA KTORÝ rok sa
+// priznanie odomyká. Dovtedy sa neposielal a `aktivuj_plan` dosadil aktuálny
+// kalendárny rok; v marci by to odomklo rok, ktorý sa ešte nepodáva.
+async function spustiPredplatne(plan, obdobie, rok){
   if(localMode || !sb || !firmaId){ alert("Predplatné je dostupné len v prihlásenom (cloud) režime."); return; }
   // Firma, ktorej plán hradí účtovník, si ho nemá kupovať druhýkrát. Bez tejto
   // stráže by klient zaplatil za to, čo už má — a zistil by to až na výpise.
@@ -15946,7 +16125,9 @@ async function spustiPredplatne(plan, obdobie){
       // prijala (dostala neprázdnu hodnotu, nemá čo dopĺňať). Tá istá oprava
       // musí platiť na oboch koncoch, inak stačí jeden nový volajúci, ktorý
       // parameter zabudne, a zákazník kúpi ročné predplatné.
-      body:JSON.stringify({ plan, obdobie:obdobie||"mes", firma_id:firmaId, navrat_url:location.origin+location.pathname })
+      body:JSON.stringify({ plan, obdobie:obdobie||"mes", firma_id:firmaId,
+                            navrat_url:location.origin+location.pathname,
+                            rok: rok ? String(rok) : null })
     });
     const r=await res.json().catch(()=>({}));
 
@@ -15970,7 +16151,18 @@ async function spustiPredplatne(plan, obdobie){
       return;
     }
 
-    if(r.url){ location.href=r.url; }   // nové predplatné → Stripe checkout
+    if(r.url){
+      // Po návrate z brány treba vedieť, ČO sa kupovalo. `spracujNavratZPlatby`
+      // čakal len na to, že plán prestane byť Free — pri jednorazovom doplnku
+      // plán ostáva Free, takže po úspešnej platbe hlásil „Aktivácia môže trvať
+      // chvíľu, obnovte stránku". Zavádzajúca hláška hneď po zaplatení.
+      //
+      // sessionStorage, nie firmaData: je to poznámka pre jednu kartu na jednu
+      // cestu na Stripe a späť, nie údaj firmy (CLAUDE.md — do úložiska
+      // prehliadača patrí len to, čo nemá odísť do cloudu).
+      try{ sessionStorage.setItem("ez_platba", JSON.stringify({ plan, rok: rok?String(rok):null })); }catch(_){}
+      location.href=r.url;              // nové predplatné → Stripe checkout
+    }
     else alert("Platbu sa nepodarilo spustiť: "+(r.error||res.status));
   }catch(e){ alert("Chyba: "+e.message); }
 }
