@@ -1023,6 +1023,9 @@ a.clWeb{display:inline-block;margin-top:12px;font-size:12.5px;color:var(--brand)
   .tile:hover,.gtile:hover,.saCard:hover,.hchip:hover{transform:none}
   .w.wediting{animation:none}
   .spin,.ob-spin{animation-duration:2.4s}
+  /* Bodka bežiacej jazdy — zrušiť. To, že jazda beží, hovorí samotný pás;
+     tep je len zvýraznenie. */
+  .jazdapruh .jbod{animation:none}
 }
 
 /* ═══ ZAKRYTÉ ČÍSLA — režim pre schôdzku (kap. 67) ═══
@@ -1056,6 +1059,23 @@ html[data-zakryte] #zakrBtn .zakrskrt{display:inline}
   padding:8px 13px;font-size:12.5px;line-height:1.35}
 html[data-zakryte] .zakrpruh{display:flex}
 .zakrpruh button{border:none;background:var(--paper);color:var(--ink);font-weight:700;border-radius:8px;
+  padding:6px 11px;font-size:12px;cursor:pointer;font-family:inherit;flex:none}
+
+/* Pás rozbehnutej jazdy. Meranie beží len s otvorenou appkou, takže pás nie je
+   ozdoba — je to jediné, čo o bežiacej jazde hovorí, a musí byť vidieť aj
+   z Faktúr. Rovnaká trieda ako zakrpruh: je to stav ZARIADENIA, nie modulu,
+   preto príznak na `html`. */
+.jazdapruh{display:none;align-items:center;gap:10px;background:var(--brand-deep);color:var(--on-brand);
+  padding:8px 13px;font-size:12.5px;line-height:1.35;cursor:pointer}
+html[data-jazda] .jazdapruh{display:flex}
+/* `--on-brand`, nie natvrdo biela: v tmavej téme je `--brand-deep` SVETLÁ
+   modrá (#4a86c8) a biely text na nej má kontrast 3,8 — pod čitateľnosťou.
+   Zmerané v prehliadači, nie odhadnuté. To isté platí pre bodku: zelená na
+   svetlomodrom pozadí je 2,3, takže nesie farbu textu a „beží“ hovorí tep. */
+.jazdapruh .jbod{width:9px;height:9px;border-radius:50%;background:currentColor;flex:none;
+  animation:jtep 1.8s ease-in-out infinite}
+@keyframes jtep{0%,100%{opacity:1}50%{opacity:.28}}
+.jazdapruh button{border:none;background:var(--paper);color:var(--ink);font-weight:700;border-radius:8px;
   padding:6px 11px;font-size:12px;cursor:pointer;font-family:inherit;flex:none}
 </style>
 </head>
@@ -1155,6 +1175,15 @@ html[data-zakryte] .zakrpruh{display:flex}
   <div class="zakrpruh" id="zakrPruh">
     <span style="flex:1">Čísla sú zakryté. Podržte prstom sumu, ak ju potrebujete vidieť.</span>
     <button onclick="prepniZakrytie()">Odkryť</button>
+  </div>
+
+  <!-- Prebiehajúca jazda. Zámerne v lište, nie v knihe jázd: meranie sa
+       zastaví, keď appka stratí popredie, takže človek musí vedieť, že beží,
+       aj keď medzitým vystavuje faktúru. -->
+  <div class="jazdapruh" id="jazdaPruh" onclick="jazdaPanel()" title="Prebiehajúca jazda">
+    <span class="jbod"></span>
+    <span style="flex:1" id="jazdaPruhText">Jazda beží</span>
+    <button onclick="event.stopPropagation();jazdaUkonci()">Ukončiť</button>
   </div>
 
   <div class="wrap">
@@ -1264,7 +1293,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.02-IJ";  // oddiel KV vo formulári ukazuje výsledok, nie pravidlo
+const APP_VERZIA = "2026.09.03-IK";  // kniha jázd meria po trase, nie vzdušnou čiarou
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -2438,6 +2467,9 @@ function zobrazFirmu(){
   // okno výdavku potrebuje kategórie, partnerov aj limity plánu; skôr by sa
   // otvoril modál nad prázdnou appkou.
   if(!_zdielaneSkusene){ _zdielaneSkusene=true; prevezmiZdielane(); spustiSkratku(); }
+  // Jazda rozbehnutá pred zavretím appky. Musí sa obnoviť skôr, než človek
+  // stihne otvoriť knihu jázd — pás hore je jediné, čo o nej hovorí.
+  try{ jazdaObnov(); }catch(e){ console.error("obnova jazdy zlyhala:", e); }
   // Doklady bez `id` by mali prázdnu identitu — doplní sa raz, ticho.
   try{ if(doplnIdDokladom()) poZmene(); }catch(_){}
   // Čakajúce doklady sa ťahajú na pozadí — plocha na ne nečaká.
@@ -2455,8 +2487,14 @@ let _zdielaneSkusene=false;
 function spustiSkratku(){
   let akcia="";
   try{ akcia=new URLSearchParams(location.search).get("akcia")||""; }catch(_){ return; }
-  if(akcia!=="doklad") return;
+  if(akcia!=="doklad" && akcia!=="jazda") return;
   try{ history.replaceState(null,"",location.pathname); }catch(_){}
+  // Jazda sa spúšťa pri nastupovaní do auta — dve klepnutia navyše cez menu
+  // znamenajú, že sa človek nespustí vôbec a km si potom vymyslí.
+  if(akcia==="jazda"){
+    if(typeof jazdaSpusti==="function") setTimeout(jazdaSpusti, 60);
+    return;
+  }
   const btn=document.getElementById("quickDoklad");
   if(typeof rychlyDoklad==="function") setTimeout(()=>rychlyDoklad(btn), 60);
 }
@@ -11370,7 +11408,7 @@ function appJazdy(){
   const kontroly=jazdyKontrola();
 
   document.getElementById("appScreen").innerHTML=appHlavicka("jazdy",
-    `<button class="aabtn" onclick="vwImport()">🚗 Z vozidla</button><button class="aabtn" onclick="zseImport()">⚡ ZSE</button><button class="aabtn" onclick="kjImport()">📥 GPX/CSV</button><button class="aabtn" onclick="editJazda(null,true)">📍 GPS</button><button class="aabtn pri" onclick="editJazda()">＋ Nová</button>`)+`
+    `<button class="aabtn" onclick="vwImport()">🚗 Z vozidla</button><button class="aabtn" onclick="zseImport()">⚡ ZSE</button><button class="aabtn" onclick="kjImport()">📥 GPX/CSV</button><button class="aabtn" onclick="jazdaSpusti()">📍 ${_jazda?"Prebieha jazda":"Merať jazdu"}</button><button class="aabtn pri" onclick="editJazda()">＋ Nová</button>`)+`
     <div class="amini">
       <div class="aminbox"><div class="al">${kmSukrAll?'Podnikateľské (spolu)':'Najazdené (spolu)'}</div><div class="av">${Math.round(kmSukrAll?kmPodnikAll:kmAll).toLocaleString('sk')} km</div></div>
       ${kmSukrAll
@@ -12514,15 +12552,27 @@ function kjExportXLS(iba){ // iba = mesiac (napr "2026-04") alebo null pre celú
   }).catch(()=>alert("Knižnicu na export sa nepodarilo načítať (potrebné pripojenie na internet)."));
 }
 
-function editJazda(idx, gpsRezim){
+function editJazda(idx){
   const d=firmaData; const nova=idx==null;
   const S=d.settings||{};
-  const j=nova?{cesta:S.kjTrasaDefault||"",ucel:S.kjUcel||"",datum:new Date().toLocaleDateString('sk'),km:""}:Object.assign({},d.jazdy[idx]);
-  openModal(nova?(gpsRezim?"📍 GPS jazda":"Nová jazda"):"Upraviť jazdu",`
+  const dnes=new Date().toLocaleDateString('sk');
+  const j=nova?{cesta:S.kjTrasaDefault||"",ucel:jazdaUcelNavrh(dnes).ucel,datum:dnes,km:""}:Object.assign({},d.jazdy[idx]);
+  // Počiatočný stav sa ponúka z predchádzajúcej jazdy. Doteraz sa nezadával
+  // vôbec, takže KAŽDÁ nová jazda pretrhla reťaz tachometra a čakala na
+  // ručné „↻ Prepočítať“ — spojitosť `kon` → `poc` je pritom prvá vec,
+  // ktorú pri kontrole niekto overí.
+  const pocNavrh = nova ? jazdaPoslednyStav() : (+j.poc||0);
+  openModal(nova?"Nová jazda":"Upraviť jazdu",`
     <div class="mfield"><label>Trasa</label><input id="m_cesta" value="${esc(j.cesta||j.trasa||'')}" placeholder="napr. Trnava – Bratislava – Trnava"></div>
     <div class="mfield"><label>Účel</label><input id="m_ucel" value="${esc(j.ucel)}"></div>
     <div class="mfield"><label>Dátum</label><input id="m_datum" value="${esc(j.datum)}" placeholder="6. 6. 2026"></div>
     <div class="mfield"><label>Kilometre</label><input id="m_km" type="number" value="${esc(j.km)}"></div>
+    <div class="mfield"><label>Stav tachometra na začiatku</label>
+      <input id="m_poc" type="number" value="${pocNavrh||''}" placeholder="napr. 48210">
+      <div style="font-size:11.5px;color:var(--ink-soft);margin-top:5px">${nova&&pocNavrh
+        ? "Doplnené z predchádzajúcej jazdy. Koncový stav dopočítame."
+        : "Koncový stav dopočítame z kilometrov."}</div>
+    </div>
     <div class="mfield" style="margin-top:2px">
       <label style="display:flex;align-items:center;gap:9px;cursor:pointer;font-size:13.5px">
         <input type="checkbox" id="m_sukromna" ${jazdaSukromna(j)?"checked":""} style="width:auto" onchange="mSukromnaPozn()">
@@ -12533,13 +12583,11 @@ function editJazda(idx, gpsRezim){
           : "Zaškrtnite pri ceste, ktorá s podnikaním nesúvisí. Kilometre ostanú v knihe, len sa neuplatnia."}
       </div>
     </div>
-    ${nova?`<div style="background:${gpsRezim?'var(--brand-lite)':'var(--bg)'};border-radius:9px;padding:12px 14px;margin-top:4px;${gpsRezim?'border:1.5px solid var(--brand)':''}">
-      <div style="font-size:13px;font-weight:600;margin-bottom:4px">📍 GPS meranie jazdy</div>
-      <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px">Pred jazdou stlačte „Štart tu", po príchode „Cieľ tu". Meria vzdušnou čiarou (× 1,3 odhad cesty) — km si potom over.</div>
-      <div style="display:flex;gap:8px"><button type="button" class="aabtn pri" style="flex:1;justify-content:center" onclick="gpsStart()">▶ Štart tu</button><button type="button" class="aabtn" style="flex:1;justify-content:center" onclick="gpsCiel()">■ Cieľ tu</button></div>
-      <div id="gpsStav" style="font-size:12px;color:var(--ink-soft);margin-top:10px">${gpsRezim?'Pripravené — stlačte „Štart tu" pred vyrazením.':''}</div>
-    </div>`:''}`,
+    ${nova?`<div style="background:var(--bg);border-radius:9px;padding:11px 14px;margin-top:4px;font-size:12.5px;color:var(--ink-soft);line-height:1.55">
+      📍 Namiesto odhadu si jazdu môžete <b style="color:var(--ink)">nechať zmerať</b> —
+      tlačidlom „Merať jazdu“ v hlavičke pred vyrazením.</div>`:''}`,
   ()=>{const obj={cesta:val("m_cesta"),ucel:val("m_ucel"),datum:val("m_datum"),km:parseFloat(val("m_km"))||0,sukromna:chk("m_sukromna")};
+    jazdaDoplnTacho(obj, parseFloat(val("m_poc")));
     if(!d.jazdy)d.jazdy=[]; if(nova)d.jazdy.push(obj); else d.jazdy[idx]=Object.assign(d.jazdy[idx],obj); poZmene(); appJazdy();},
   nova?null:()=>{ d.jazdy.splice(idx,1); poZmene(); appJazdy(); });
 }
@@ -12568,23 +12616,422 @@ function mSukromnaPozn(){
     : "Zaškrtnite pri ceste, ktorá s podnikaním nesúvisí. Kilometre ostanú v knihe, len sa neuplatnia.";
 }
 
-// GPS meranie štart/cieľ (experimentálne — vzdušná čiara)
-let _gpsStart=null;
-function gpsStart(){
-  const st=document.getElementById("gpsStav"); st.textContent="Zisťujem polohu…";
-  navigator.geolocation.getCurrentPosition(p=>{ _gpsStart=[p.coords.latitude,p.coords.longitude]; st.textContent="✓ Štart zaznamenaný. Choďte na cieľ a stlačte „Cieľ tu“."; },
-    e=>{ st.textContent="Polohu sa nepodarilo získať ("+e.message+")."; }, {enableHighAccuracy:true});
+// ═══════════════════════════════════════════════════════════════
+//  JAZDA S GPS — meranie PO TRASE
+//
+//  Predchodca (do 3. 9. 2026) zmeral vzdušnú čiaru medzi dvoma stlačeniami
+//  tlačidla a vynásobil ju 1,3. Malo to tri chyby naraz:
+//   · okružná jazda — odíď a vráť sa, čiže najbežnejší tvar služobnej cesty —
+//     vyšla na NULU,
+//   · koeficient 1,3 je vymyslené číslo v podklade pre daňovú kontrolu,
+//   · štart žil v premennej v pamäti, takže zavretie okna, pád prehliadača
+//     alebo nasadenie novej verzie jazdu ticho zmazali. A appka si ju zabíjala
+//     sama: `controllerchange` volá `location.reload()`.
+//
+//  Teraz sa sčítava vzdialenosť medzi bodmi trasy. Zdroj bodov je zámerne
+//  VYMENITEĽNÝ (`gpsZdroj`): vo webe `watchPosition`, ktorý beží len
+//  s otvorenou appkou — prehliadač vypne prístup k polohe v momente, keď
+//  stránka stratí popredie, a service worker k nej prístup nemá vôbec.
+//  V natívnom obale bude zdrojom služba na pozadí; zvyšok modulu o tom nevie.
+//
+//  Stav jazdy leží v `localStorage`, nie vo `firmaData`:
+//   · sú to súradnice a zásady ochrany údajov sľubujú, že zariadenie neopustia
+//     (`firmaData` sa synchronizuje do cloudu),
+//   · rozbehnutá jazda musí prežiť to, čo appku zabije.
+//
+//  Ukladá sa len súčet a POSLEDNÝ bod, nie celá trasa. Na ďalší úsek viac
+//  netreba a zapísaná trasa by bola údaj, ktorý sme sľúbili nezbierať.
+// ═══════════════════════════════════════════════════════════════
+const GPS_KLUC     = "ez_jazda_beh";    // rozbehnutá jazda (toto zariadenie)
+const GPS_MIESTA   = "ez_miesta";       // pomenované miesta (toto zariadenie)
+const GPS_PRESNOST = 35;                // m — horší bod sa zahodí
+const GPS_POSUN    = 12;                // m — menší posun je šum stojaceho prijímača
+const GPS_RYCHLOST = 250;               // km/h — väčší skok je chyba merania
+const GPS_ZASTAVKA = 10*60*1000;        // 10 min bez pohybu = medzizastávka trasy
+const GPS_MIESTO_R = 0.25;              // km — dovtedy je to to isté miesto
+const GPS_MEDZERA  = 90*1000;           // ms ticha, od ktorých je úsek podozrivý
+const GPS_TICHO    = 5*60*1000;         // ms ticha, ktoré samo o sebe stačí na priznanie
+
+let _jazda=null, _jazdaWatch=null, _jazdaLock=null, _jazdaTik=null, _jazdaVidit=false;
+
+// Adaptér zdroja polohy — jediné miesto, kde sa modul dotýka prehliadača.
+// Natívny obal podstrčí `window.EzGeoNativ` s rovnakými dvoma metódami
+// a meranie potom pobeží aj so zhasnutým displejom. Nič iné sa meniť nebude.
+const gpsZdroj={
+  jeNativny(){ return !!(window.EzGeoNativ && typeof window.EzGeoNativ.start==="function"); },
+  dostupny(){ return this.jeNativny() || !!(typeof navigator!=="undefined" && navigator.geolocation); },
+  start(naBod, naChybu){
+    if(this.jeNativny()){ window.EzGeoNativ.start(naBod, naChybu); return; }
+    _jazdaWatch=navigator.geolocation.watchPosition(naBod, naChybu,
+      {enableHighAccuracy:true, maximumAge:0, timeout:60000});
+  },
+  stop(){
+    // Zastavenie merania nesmie zlyhať hlučne: v najhoršom prípade ostane
+    // visieť sledovanie, ktoré aj tak nikto nečíta — `_jazda` je už preč.
+    try{
+      if(this.jeNativny()){ window.EzGeoNativ.stop(); return; }
+      if(_jazdaWatch!=null) navigator.geolocation.clearWatch(_jazdaWatch);
+    }catch(e){ console.error("zastavenie merania polohy:", e); }
+    _jazdaWatch=null;
+  }
+};
+
+// Úložisko a príznak na `html` cez jedno miesto. Privátny režim prehliadača
+// hodí pri `localStorage` výnimku a jediná správna reakcia je zaobísť sa bez
+// neho — hlásiť to používateľovi by bolo hlásenie o ničom. Dôvod tu stojí raz,
+// nie pri každom volaní.
+function gpsCitaj(kluc){ try{ return localStorage.getItem(kluc); }catch(_){ return null; } }
+function gpsUloz(kluc, hodnota){
+  try{ hodnota==null ? localStorage.removeItem(kluc) : localStorage.setItem(kluc, hodnota); }catch(_){}
 }
-function gpsCiel(){
-  const st=document.getElementById("gpsStav");
-  if(!_gpsStart){ st.textContent="Najprv stlačte „Štart tu“."; return; }
-  st.textContent="Zisťujem polohu…";
-  navigator.geolocation.getCurrentPosition(p=>{
-    const km=haversine(_gpsStart[0],_gpsStart[1],p.coords.latitude,p.coords.longitude);
-    st.innerHTML=`✓ Vzdialenosť vzdušnou čiarou: <b>${km.toFixed(1)} km</b>. Reálna cesta býva dlhšia — upravte km podľa potreby.`;
-    const kmField=document.getElementById("m_km"); if(kmField && !kmField.value) kmField.value=Math.round(km*1.3);
-    _gpsStart=null;
-  }, e=>{ st.textContent="Polohu sa nepodarilo získať."; }, {enableHighAccuracy:true});
+function jazdaPriznak(zapnut){
+  const h=document.documentElement; if(!h || !h.setAttribute) return;
+  if(zapnut) h.setAttribute("data-jazda","1"); else h.removeAttribute("data-jazda");
+}
+function jazdaZapis(){ gpsUloz(GPS_KLUC, JSON.stringify(_jazda)); }
+function jazdaZmazStav(){ _jazda=null; gpsUloz(GPS_KLUC, null); jazdaPriznak(false); }
+
+// ── Register miest ──────────────────────────────────────────────────────────
+// Je na ZARIADENÍ, nie vo `firmaData`: sú to súradnice. Cena je, že sa
+// neprenesie na druhý telefón — názov trasy sa však ukladá do samotnej jazdy,
+// takže história o nič nepríde. Nahrádza to reverzný geokóding, ktorý by
+// znamenal ďalšiu tretiu stranu, ktorá vidí, kam človek chodí.
+function miestaNacitaj(){
+  try{ const s=localStorage.getItem(GPS_MIESTA); const p=s?JSON.parse(s):[]; return Array.isArray(p)?p:[]; }
+  catch(_){ return []; }
+}
+function miestoNajdi(bod){
+  if(!bod) return null;
+  let naj=null, najD=GPS_MIESTO_R;
+  miestaNacitaj().forEach(m=>{
+    const d=haversine(+m.lat,+m.lon,+bod[0],+bod[1]);
+    if(d<najD){ najD=d; naj=m; }
+  });
+  return naj;
+}
+function miestoUloz(nazov, bod){
+  nazov=String(nazov||"").trim();
+  if(!nazov || !bod) return;
+  const zoz=miestaNacitaj();
+  // Existujúce miesto sa NEPREPISUJE novými súradnicami: to isté meno zadané
+  // z parkoviska o 200 m ďalej by bod postupne odtiahlo preč.
+  if(zoz.some(m=>String(m.n||"").toLowerCase()===nazov.toLowerCase())) return;
+  zoz.push({n:nazov, lat:r6(bod[0]), lon:r6(bod[1])});
+  gpsUloz(GPS_MIESTA, JSON.stringify(zoz.slice(-200)));
+}
+// Šesť desatinných miest je ~11 cm. Viac je šum prijímača, nie údaj.
+function r6(n){ return Math.round((+n||0)*1e6)/1e6; }
+
+// ── Príjem bodu ─────────────────────────────────────────────────────────────
+function gpsBod(p){
+  if(!_jazda || _jazda.ukoncena) return;
+  const c=p&&p.coords; if(!c) return;
+  const t=+p.timestamp||Date.now();
+  // Medzera sa meria od posledného DORUČENÉHO bodu, nie od posledného
+  // započítaného. Kým appka beží, body chodia aj pri státí — a dvojhodinová
+  // zastávka u zákazníka by sa inak tvárila ako výpadok merania a dopočítala
+  // by sa vzdušnou čiarou.
+  const predch=+_jazda.poslPokus||0;
+  _jazda.poslPokus=t; _jazda.chyba=null;
+  // Bod s veľkou chybou vie pridať stovky metrov postojačky. Prvý fix v aute
+  // býva z vysielača, nie z družíc — bez tohto filtra sa to celé započíta.
+  if(!(+c.accuracy<=GPS_PRESNOST)){ _jazda.zahodene=(_jazda.zahodene||0)+1; jazdaPruhText(); return; }
+  const bod=[r6(c.latitude), r6(c.longitude), t];
+  if(!_jazda.prvy){ _jazda.prvy=bod; _jazda.posl=bod; _jazda.poslPohyb=t; jazdaZapis(); jazdaPruhText(); return; }
+  const km=haversine(_jazda.posl[0], _jazda.posl[1], bod[0], bod[1]);
+  const sek=Math.max(1,(t-_jazda.posl[2])/1000);
+
+  // Appku medzitým niečo uspalo (zamknutý displej, prepnutá aplikácia, nová
+  // verzia). Úsek sa dopočíta vzdušnou čiarou, ale ZVLÁŠŤ — na konci sa povie,
+  // koľko z výsledku je merané a koľko odhadnuté. Ticho dopočítaný kilometer
+  // je ten istý hriech ako koeficient 1,3.
+  //
+  // Samotné ticho na rozhodnutie NESTAČÍ: prijímač pri slabom signále alebo
+  // v úspornom režime posiela body riedko a stránka je pritom celý čas
+  // v popredí. Preto sa priznáva len úsek, pred ktorým appka naozaj odišla
+  // do pozadia — alebo ktorý bol tichý tak dlho, že chord cezeň je aj tak
+  // odhad, nech bol dôvod akýkoľvek.
+  const ticho = predch ? (t-predch) : 0;
+  if(ticho>GPS_MEDZERA && (_jazda.bolSkryty || ticho>GPS_TICHO) && km*1000>GPS_POSUN){
+    _jazda.bolSkryty=false;
+    _jazda.km=r2((_jazda.km||0)+km);
+    _jazda.kmOdhad=r2((_jazda.kmOdhad||0)+km);
+    _jazda.prerusenia=(_jazda.prerusenia||0)+1;
+    _jazda.posl=bod; _jazda.poslPohyb=t; jazdaZapis(); jazdaPruhText(); return;
+  }
+  // Stojíme: referenčný bod sa ZÁMERNE neposúva. Inak by sa drift stojaceho
+  // prijímača sčítaval po metroch a z hodinovej zastávky by boli kilometre.
+  if(km*1000 < GPS_POSUN
+     || (c.speed!=null && isFinite(c.speed) && c.speed<1.2 && km<0.04)){ jazdaPruhText(); return; }
+  if(km/(sek/3600) > GPS_RYCHLOST){ _jazda.zahodene=(_jazda.zahodene||0)+1; return; }
+  // Dlhé státie pred týmto pohybom je zastávka — a zastávky robia z okružnej
+  // cesty trasu „Trnava – Bratislava – Trnava“ namiesto holého „Trnava“.
+  if(_jazda.poslPohyb && (t-_jazda.poslPohyb)>=GPS_ZASTAVKA){
+    (_jazda.zastavky=_jazda.zastavky||[]).push(
+      {lat:_jazda.posl[0], lon:_jazda.posl[1], od:_jazda.poslPohyb, doC:t});
+  }
+  _jazda.km=r2((_jazda.km||0)+km);
+  _jazda.posl=bod; _jazda.poslPohyb=t;
+  jazdaZapis(); jazdaPruhText();
+}
+function gpsChyba(e){
+  if(!_jazda) return;
+  // Zamietnutá poloha nie je výpadok signálu — bez nej sa nedá merať vôbec,
+  // takže sa to povie hneď a jazda sa nepredstiera.
+  if(e && e.code===1){
+    _jazda.chyba="poloha je zakázaná";
+    gpsZdroj.stop(); jazdaUvolniLock();
+    if(_jazdaTik){ clearInterval(_jazdaTik); _jazdaTik=null; }
+    jazdaZmazStav(); closeModal();
+    alert("Meranie sa nespustilo — prehliadač nemá povolenú polohu.\n\n"
+      +"Povoľte ju pre túto stránku v nastaveniach prehliadača a skúste to znova.");
+    return;
+  }
+  _jazda.chyba="bez signálu"; jazdaPruhText();
+}
+
+// ── Beh ─────────────────────────────────────────────────────────────────────
+function jazdaSpusti(){
+  if(!strazZapis("jazdy")) return;
+  if(_jazda){ jazdaPanel(); return; }
+  if(!gpsZdroj.dostupny()){ alert("Toto zariadenie polohu neposkytuje."); return; }
+  if(gpsCitaj("ez_jazda_vysvetlene")!=="1"){ jazdaVysvetli(); return; }
+  jazdaBez();
+}
+// Prvý raz sa povie, ako to naozaj je. Sľúbiť meranie na pozadí a nedodať ho
+// by bolo horšie než ho nemať: človek zamkne telefón a príde o jazdu.
+function jazdaVysvetli(){
+  openModal("📍 Meranie jazdy", `
+    <div style="font-size:13.5px;line-height:1.65">
+      <p style="margin:0 0 10px">Kilometre sa počítajú <b>po trase</b>, nie vzdušnou čiarou.</p>
+      <p style="margin:0 0 10px"><b>Nechajte appku otvorenú a displej rozsvietený.</b>
+      Prehliadač odpojí polohu v momente, keď stránka stratí popredie — je to
+      obmedzenie webu, nie nastavenie, ktoré by sa dalo zapnúť.</p>
+      <p style="margin:0 0 10px">Ak sa appka predsa zavrie, jazda sa <b>nestratí</b>: obnoví sa
+      po návrate a chýbajúci úsek sa dopočíta vzdušnou čiarou — na konci vám povieme koľko.</p>
+      <p style="margin:0;color:var(--ink-soft);font-size:12.5px">Súradnice zostávajú v telefóne.
+      Do knihy jázd sa uloží len počet kilometrov, čas a názov trasy.</p>
+    </div>`,
+  ()=>{ gpsUloz("ez_jazda_vysvetlene","1"); jazdaBez(); });
+}
+function jazdaBez(){
+  _jazda={zac:Date.now(), km:0, kmOdhad:0, prerusenia:0, zahodene:0, zastavky:[]};
+  jazdaZapis();
+  jazdaPriznak(true);
+  gpsZdroj.start(gpsBod, gpsChyba);
+  jazdaLock(); jazdaSledujVidit();
+  if(_jazdaTik) clearInterval(_jazdaTik);
+  _jazdaTik=setInterval(jazdaPruhText, 10000);
+  jazdaPruhText();
+}
+// Wake lock drží displej zapnutý, kým sa meria. Bez neho telefón zhasne
+// a meranie sa preruší — v natívnom obale netreba, tam beží služba.
+async function jazdaLock(){
+  if(gpsZdroj.jeNativny() || _jazdaLock) return;
+  try{ if(navigator.wakeLock) _jazdaLock=await navigator.wakeLock.request("screen"); }catch(_){}
+}
+function jazdaUvolniLock(){ try{ _jazdaLock && _jazdaLock.release(); }catch(_){} _jazdaLock=null; }
+// Zámok sa pri odchode z karty uvoľní sám, takže sa po návrate berie znova.
+function jazdaSledujVidit(){
+  if(_jazdaVidit) return; _jazdaVidit=true;
+  document.addEventListener("visibilitychange", ()=>{
+    if(!_jazda || _jazda.ukoncena) return;
+    // Odchod na pozadie je JEDINÝ spoľahlivý signál, že meranie stálo.
+    // Bez neho by sa riedko chodiace body v popredí tvárili ako výpadok.
+    if(document.visibilityState!=="visible"){ _jazda.bolSkryty=true; jazdaZapis(); return; }
+    jazdaLock(); jazdaPruhText();
+  });
+}
+function jazdaTrvanie(){
+  if(!_jazda) return "";
+  const min=Math.max(0, Math.round(((_jazda.ukoncena||Date.now())-_jazda.zac)/60000));
+  return min<60 ? min+" min" : Math.floor(min/60)+" h "+String(min%60).padStart(2,"0")+" min";
+}
+function jazdaKm(){ return (_jazda?(+_jazda.km||0):0).toFixed(1).replace(".",","); }
+function jazdaPruhText(){
+  const el=document.getElementById("jazdaPruhText");
+  if(!el || !_jazda) return;
+  if(_jazda.ukoncena){ el.textContent=`Jazda ${jazdaKm()} km čaká na zapísanie`; return; }
+  let stav="";
+  if(_jazda.chyba) stav=" · "+_jazda.chyba;
+  else if(!_jazda.prvy) stav=" · hľadám signál…";
+  else if(_jazda.poslPokus && Date.now()-_jazda.poslPokus>120000) stav=" · bez signálu";
+  el.textContent=`Jazda beží · ${jazdaKm()} km · ${jazdaTrvanie()}${stav}`;
+}
+// Po načítaní appky. Bez tohto by zavretie okna, pád prehliadača alebo
+// nasadenie novej verzie znamenali stratu jazdy — ticho, bez hlášky.
+function jazdaObnov(){
+  if(_jazda) return;
+  const s=gpsCitaj(GPS_KLUC);
+  if(!s) return;
+  try{ _jazda=JSON.parse(s); }catch(_){ jazdaZmazStav(); return; }
+  if(!_jazda || !_jazda.zac){ jazdaZmazStav(); return; }
+  // Jazda spred viac než dňa je zabudnutá jazda, nie prebiehajúca.
+  if(Date.now()-_jazda.zac > 24*3600*1000){ jazdaZmazStav(); return; }
+  jazdaPriznak(true);
+  if(_jazda.ukoncena){ jazdaPruhText(); return; }
+  // Obnova znamená, že appka medzitým nebežala — či ju uspal systém, alebo
+  // sa sama načítala nanovo po nasadení verzie. Prvý úsek po nej je odhad.
+  _jazda.bolSkryty=true;
+  gpsZdroj.start(gpsBod, gpsChyba);
+  jazdaLock(); jazdaSledujVidit();
+  if(_jazdaTik) clearInterval(_jazdaTik);
+  _jazdaTik=setInterval(jazdaPruhText, 10000);
+  jazdaPruhText();
+}
+function jazdaPanel(){
+  if(!_jazda) return;
+  const zac=new Date(_jazda.zac);
+  const z=(_jazda.zastavky||[]).length;
+  openModal("📍 Prebiehajúca jazda", `
+    <div style="text-align:center;padding:4px 0 12px">
+      <div style="font-size:34px;font-weight:800;letter-spacing:-.5px">${jazdaKm()} <span style="font-size:17px;font-weight:600">km</span></div>
+      <div style="font-size:12.5px;color:var(--ink-soft);margin-top:4px">
+        od ${zac.getHours()}:${String(zac.getMinutes()).padStart(2,"0")} · ${jazdaTrvanie()}${z?` · ${z} ${z===1?"zastávka":z<5?"zastávky":"zastávok"}`:""}</div>
+    </div>
+    ${_jazda.prerusenia?`<div style="font-size:12px;color:var(--ink-soft);background:var(--bg);border-radius:9px;padding:9px 12px;line-height:1.55">
+      Meranie sa ${_jazda.prerusenia}× prerušilo, lebo appka nebola v popredí. Chýbajúce úseky sú
+      dopočítané vzdušnou čiarou — spolu ${(+_jazda.kmOdhad||0).toFixed(1).replace(".",",")} km.</div>`:""}
+    <div style="font-size:12px;color:var(--ink-soft);margin-top:12px;line-height:1.55">
+      Meria sa, kým je appka otvorená. Kniha jázd sa dá medzitým pokojne používať —
+      pás hore ostáva.</div>
+    <button type="button" class="aabtn pri" style="width:100%;justify-content:center;margin-top:14px" onclick="closeModal();jazdaUkonci()">■ Ukončiť a zapísať</button>
+    <div style="text-align:center;margin-top:10px"><button type="button" class="aabtn" style="font-size:12px" onclick="jazdaZahod()">Zahodiť jazdu</button></div>`);
+}
+function jazdaZahod(){
+  if(!_jazda) return;
+  if(!confirm("Zahodiť jazdu?\n\nNameraných "+jazdaKm()+" km sa neuloží a nedá sa to vrátiť.")) return;
+  gpsZdroj.stop(); jazdaUvolniLock();
+  if(_jazdaTik){ clearInterval(_jazdaTik); _jazdaTik=null; }
+  jazdaZmazStav(); closeModal();
+}
+
+// ── Ukončenie a zápis ───────────────────────────────────────────────────────
+// Meranie sa zastaví hneď, ale stav ostáva v `localStorage`, kým sa jazda
+// nezapíše. Zavretie okna počas vypĺňania ju teda nesmie zmazať — pás hore
+// medzitým hlási, že čaká na zapísanie.
+function jazdaUkonci(){
+  if(!_jazda) return;
+  if(!_jazda.ukoncena){
+    _jazda.ukoncena=Date.now();
+    gpsZdroj.stop(); jazdaUvolniLock();
+    if(_jazdaTik){ clearInterval(_jazdaTik); _jazdaTik=null; }
+    jazdaZapis(); jazdaPruhText();
+  }
+  jazdaZaver();
+}
+// Trasa sa skladá z pomenovaných miest: štart, dlhé zastávky, cieľ. Neznáme
+// miesto sa VYNECHÁ, nenahradí otáznikom — polovičný názov je použiteľný,
+// „? – Bratislava – ?“ nie je.
+function jazdaTrasaNavrh(zNazov, cNazov){
+  if(!_jazda) return "";
+  const zn=miestoNajdi(_jazda.prvy), cn=miestoNajdi(_jazda.posl);
+  const kus=[String(zNazov||(zn?zn.n:"")).trim()];
+  (_jazda.zastavky||[]).forEach(s=>{ const m=miestoNajdi([s.lat,s.lon]); if(m) kus.push(m.n); });
+  kus.push(String(cNazov||(cn?cn.n:"")).trim());
+  const t=[];
+  kus.filter(Boolean).forEach(s=>{ if(t[t.length-1]!==s) t.push(s); });
+  return t.join(" – ");
+}
+function jazdaTrasaAktualizuj(){
+  const p=document.getElementById("m_cesta"); if(!p) return;
+  p.value=jazdaTrasaNavrh(val("m_miestoZ"), val("m_miestoC"));
+}
+// Počiatočný stav tachometra: koniec poslednej jazdy, ktorá ho má. Reťaz
+// `kon` → `poc` je pri kontrole prvá vec, ktorá sa overuje, a doteraz ju
+// nová jazda vždy pretrhla — dopĺňala sa až ručným prepočtom.
+function jazdaPoslednyStav(){
+  const zoz=(firmaData.jazdy||[]).filter(j=>+j.kon>0);
+  if(!zoz.length) return +((firmaData.settings||{}).tachometer)||0;
+  zoz.sort((a,b)=>{
+    const da=jazdaDatum(a), db=jazdaDatum(b);
+    if(da&&db&&da-db) return da-db;
+    return String(a.dt||"").localeCompare(String(b.dt||""));
+  });
+  return +zoz[zoz.length-1].kon||0;
+}
+// Účel jazdy: najprv to, čo si človek v ten deň naozaj zapísal do výkazu prác,
+// až potom predvolený účel z nastavení. Funkciu `vykazAktivitaDna` používal
+// doteraz len sprievodca, a to hromadne — jazda vznikajúca teraz o nej nevedela
+// a človek prepisoval „Stretnutie s klientom" na to, čo o riadok vedľa už raz
+// napísal. Vracia aj príznak, odkiaľ to je: sprievodca podľa neho pozná, čo má
+// ešte dopĺňať.
+function jazdaUcelNavrh(datumSk){
+  const S=firmaData.settings||{};
+  let akt=null;
+  if(typeof vykazAktivitaDna==="function"){
+    try{ akt=vykazAktivitaDna(jazdaDayKey({datum:datumSk})); }
+    catch(e){ console.error("účel z výkazu:", e); }
+  }
+  if(akt && akt.aktivita) return {ucel:akt.aktivita, zVykazu:true};
+  return {ucel:S.kjUcel||"", zVykazu:false};
+}
+// Doplnenie tachometra do jazdy. Je to jedna funkcia, hoci volajúce miesta sú
+// dve (ručná jazda a ukončenie merania) — to isté pravidlo na dvoch miestach
+// sa v tomto projekte vždy rozišlo. Prázdne pole NESMIE prepísať už vedený
+// stav na nulu, preto sa dopĺňa len vtedy, keď je čo doplniť.
+function jazdaDoplnTacho(obj, pocStav){
+  const p=+pocStav||0;
+  if(p>0){ obj.poc=r2(p); obj.kon=r2(p+(+obj.km||0)); }
+  return obj;
+}
+function jazdaZaver(){
+  if(!_jazda) return;
+  const S=firmaData.settings||{};
+  const zn=miestoNajdi(_jazda.prvy), cn=miestoNajdi(_jazda.posl);
+  const km=r2(_jazda.km||0);
+  const poc=jazdaPoslednyStav();
+  const zac=new Date(_jazda.zac);
+  const U=jazdaUcelNavrh(zac.toLocaleDateString("sk"));
+  const poleMiesta=(id,popis,znamy)=>znamy?"":
+    `<div class="mfield"><label>${popis}</label><input id="${id}" placeholder="napr. Bratislava, Mlynské nivy" oninput="jazdaTrasaAktualizuj()"></div>`;
+  openModal("📍 Ukončiť jazdu", `
+    <div style="text-align:center;padding:2px 0 14px">
+      <div style="font-size:34px;font-weight:800;letter-spacing:-.5px">${jazdaKm()} <span style="font-size:17px;font-weight:600">km</span></div>
+      <div style="font-size:12.5px;color:var(--ink-soft);margin-top:4px">${jazdaTrvanie()} · namerané po trase</div>
+    </div>
+    ${_jazda.prerusenia?`<div style="font-size:12px;background:var(--bg);border-radius:9px;padding:9px 12px;margin-bottom:12px;line-height:1.55">
+      ⚠ Meranie sa ${_jazda.prerusenia}× prerušilo (appka nebola v popredí).
+      <b>${(+_jazda.kmOdhad||0).toFixed(1).replace(".",",")} km</b> z toho je dopočítaných vzdušnou čiarou.
+      Skutočná cesta býva dlhšia — kilometre pokojne upravte.</div>`:""}
+    ${(!zn||!cn)?`<div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;line-height:1.55">
+      Pomenujte miesto raz a appka ho nabudúce doplní sama. Názvy zostávajú v tomto telefóne.</div>`:""}
+    ${poleMiesta("m_miestoZ","Odkiaľ",zn)}
+    ${poleMiesta("m_miestoC","Kam",cn)}
+    <div class="mfield"><label>Trasa</label><input id="m_cesta" value="${esc(jazdaTrasaNavrh()||S.kjTrasaDefault||"")}" placeholder="napr. Trnava – Bratislava – Trnava"></div>
+    <div class="mfield"><label>Účel</label><input id="m_ucel" value="${esc(U.ucel)}" placeholder="napr. stretnutie s klientom">
+      ${U.zVykazu?`<div style="font-size:11.5px;color:var(--ink-soft);margin-top:5px">Prevzaté z výkazu prác na tento deň.</div>`:""}</div>
+    <div class="mfield"><label>Dátum</label><input id="m_datum" value="${esc(zac.toLocaleDateString("sk"))}"></div>
+    <div class="mfield"><label>Kilometre</label><input id="m_km" type="number" step="0.1" value="${km}"></div>
+    <div class="mfield"><label>Stav tachometra na začiatku</label>
+      <input id="m_poc" type="number" value="${poc||""}" placeholder="napr. 48210">
+      <div style="font-size:11.5px;color:var(--ink-soft);margin-top:5px">${poc
+        ? "Doplnené z predchádzajúcej jazdy. Koncový stav dopočítame."
+        : "Zadajte raz a ďalšie jazdy už naň nadviažu samy."}</div>
+    </div>
+    <div class="mfield" style="margin-top:2px">
+      <label style="display:flex;align-items:center;gap:9px;cursor:pointer;font-size:13.5px">
+        <input type="checkbox" id="m_sukromna" style="width:auto"><b>Súkromná jazda</b></label>
+      <div style="font-size:11.5px;color:var(--ink-soft);margin-top:5px;line-height:1.5">
+        Zaškrtnite pri ceste, ktorá s podnikaním nesúvisí. Kilometre ostanú v knihe, len sa neuplatnia.</div>
+    </div>`,
+  ()=>{
+    if(!strazZapis("jazdy")) return false;
+    miestoUloz(val("m_miestoZ"), _jazda.prvy);
+    miestoUloz(val("m_miestoC"), _jazda.posl);
+    const obj={cesta:val("m_cesta"), ucel:val("m_ucel"), datum:val("m_datum"),
+      km:r2(parseFloat(val("m_km"))||0), sukromna:chk("m_sukromna"),
+      zdroj:"gps", dt:new Date(_jazda.zac).toISOString()};
+    // Príznak nesie len jazda, ktorá účel z výkazu naozaj DOSTALA a človek ho
+    // nechal tak — sprievodca podľa neho pozná, čo už dopĺňať netreba.
+    if(U.zVykazu && val("m_ucel")===U.ucel) obj.ucelZVykazu=true;
+    jazdaDoplnTacho(obj, parseFloat(val("m_poc")));
+    if(!firmaData.jazdy) firmaData.jazdy=[];
+    firmaData.jazdy.push(obj);
+    jazdaZmazStav();
+    poZmene();
+    if(aktualnaApp==="jazdy") appJazdy(); else otvorApp("jazdy");
+  });
 }
 
 // ── MAJETOK ──
