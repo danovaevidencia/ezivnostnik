@@ -1306,7 +1306,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.03-IM";  // náhľady tlačív sú papier, nie téma
+const APP_VERZIA = "2026.09.03-IN";  // vzdialenosť z mapy na vyžiadanie
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -12580,6 +12580,7 @@ function editJazda(idx){
     <div class="mfield"><label>Účel</label><input id="m_ucel" value="${esc(j.ucel)}"></div>
     <div class="mfield"><label>Dátum</label><input id="m_datum" value="${esc(j.datum)}" placeholder="6. 6. 2026"></div>
     <div class="mfield"><label>Kilometre</label><input id="m_km" type="number" value="${esc(j.km)}"></div>
+    ${mapaBlokHtml()}
     <div class="mfield"><label>Stav tachometra na začiatku</label>
       <input id="m_poc" type="number" value="${pocNavrh||''}" placeholder="napr. 48210">
       <div style="font-size:11.5px;color:var(--ink-soft);margin-top:5px">${nova&&pocNavrh
@@ -12600,6 +12601,9 @@ function editJazda(idx){
       📍 Namiesto odhadu si jazdu môžete <b style="color:var(--ink)">nechať zmerať</b> —
       tlačidlom „Merať jazdu“ v hlavičke pred vyrazením.</div>`:''}`,
   ()=>{const obj={cesta:val("m_cesta"),ucel:val("m_ucel"),datum:val("m_datum"),km:parseFloat(val("m_km"))||0,sukromna:chk("m_sukromna")};
+    // Odkiaľ číslo je, sa zapisuje do jazdy. Pri kontrole je rozdiel medzi
+    // „namerané" a „z mapy" podstatný a appka ho nemá zamlčať.
+    if(val("m_kmZdroj")==="mapa") obj.zdrojKm="mapa";
     jazdaDoplnTacho(obj, parseFloat(val("m_poc")));
     if(!d.jazdy)d.jazdy=[]; if(nova)d.jazdy.push(obj); else d.jazdy[idx]=Object.assign(d.jazdy[idx],obj); poZmene(); appJazdy();},
   nova?null:()=>{ d.jazdy.splice(idx,1); poZmene(); appJazdy(); });
@@ -12979,6 +12983,84 @@ function jazdaUcelNavrh(datumSk){
   if(akt && akt.aktivita) return {ucel:akt.aktivita, zVykazu:true};
   return {ucel:S.kjUcel||"", zVykazu:false};
 }
+// ── Vzdialenosť z mapy ──────────────────────────────────────────────────────
+//  JEDINÉ miesto v celej appke, kde poloha opúšťa zariadenie — a deje sa to
+//  len vtedy, keď o to človek sám požiada tlačidlom pri konkrétnej jazde.
+//  Nikdy nie priebežne a nikdy nie na pozadí. Rozdiel medzi tým a „appka vie,
+//  kade chodíš" je presne to, čo sľubuje `sukromie.html`.
+//
+//  Dva vstupy podľa toho, čo je po ruke: meraná jazda pošle svoje súradnice,
+//  ručná pošle názvy miest z poľa Trasa. Ten druhý prípad je to, čo appka
+//  dovtedy nevedela vôbec — zistiť kilometre bez toho, aby človek sedel v aute.
+let _mapaVysvetlena=null;
+function mapaSuhlas(){
+  if(_mapaVysvetlena===null) _mapaVysvetlena = gpsCitaj("ez_mapa_suhlas")==="1";
+  if(_mapaVysvetlena) return true;
+  const ok=confirm("Zistiť vzdialenosť z mapy?\n\n"
+    +"Miesta tejto jazdy sa jednorazovo pošlú mapovej službe OpenRouteService, "
+    +"ktorá vráti dĺžku cesty. Deje sa to len teraz, na toto stlačenie.\n\n"
+    +"Appka polohu inak nikam neposiela a priebeh meranej jazdy zostáva v telefóne.");
+  if(!ok) return false;
+  gpsUloz("ez_mapa_suhlas","1"); _mapaVysvetlena=true;
+  return true;
+}
+// Trasa „Trnava – Bratislava – Trnava" → ["Trnava","Bratislava","Trnava"].
+// Delí sa na pomlčkách aj spojovníku; ľudia píšu oboje.
+function mapaMiestaZTrasy(text){
+  return String(text||"").split(/\s*[–—-]\s*/).map(s=>s.trim()).filter(Boolean);
+}
+async function mapaVzdialenost(prvok){
+  if(!mapaSuhlas()) return;
+  const stav=document.getElementById("m_mapaStav");
+  const povedz=(t)=>{ if(stav) stav.innerHTML=t; };
+  if(!sb || !SUPABASE_URL){ povedz("Vzdialenosť z mapy potrebuje cloudový účet."); return; }
+  // Meraná jazda má vlastné body; ručná ide cez názvy miest.
+  const telo={akcia:"trasa"};
+  if(_jazda && _jazda.prvy && _jazda.posl){
+    const b=[[_jazda.prvy[1], _jazda.prvy[0]]];
+    (_jazda.zastavky||[]).forEach(s=>b.push([s.lon, s.lat]));
+    b.push([_jazda.posl[1], _jazda.posl[0]]);
+    telo.body=b;
+  } else {
+    const miesta=mapaMiestaZTrasy(val("m_cesta"));
+    if(miesta.length<2){ povedz("Do poľa Trasa napíšte aspoň dve miesta, napríklad „Trnava – Bratislava“."); return; }
+    telo.miesta=miesta;
+  }
+  if(prvok) prvok.disabled=true;
+  povedz("Počítam…");
+  try{
+    const res=await fetch(SUPABASE_URL+"/functions/v1/proxy",{
+      method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(telo)});
+    if(!res.ok){ povedz("Mapová služba nie je dostupná (HTTP "+res.status+")."); return; }
+    const d=await res.json();
+    // Neúspech sa POMENUJE. Prázdne pole km po stlačení tlačidla vyzerá ako
+    // nula kilometrov a to je horšie než chyba.
+    if(!d.ok){ povedz(esc(d.sprava || "Vzdialenosť sa nepodarilo zistiť.")); return; }
+    const pole=document.getElementById("m_km");
+    if(pole) pole.value=d.km;
+    const kmField=document.getElementById("m_kmZdroj"); if(kmField) kmField.value="mapa";
+    povedz("<b>"+String(d.km).replace(".",",")+" km</b> po ceste"
+      +(d.minuty?" · približne "+d.minuty+" min":"")
+      +(d.miesta&&d.miesta.length?"<br><span style=\"color:var(--ink-soft)\">"+esc(d.miesta.join(" → "))+"</span>":"")
+      +"<br><span style=\"color:var(--ink-soft);font-size:11px\">"+esc(d.uvedenie||"")+"</span>");
+  }catch(e){
+    console.error("vzdialenosť z mapy:", e);
+    povedz("Spojenie s mapovou službou zlyhalo.");
+  }finally{ if(prvok) prvok.disabled=false; }
+}
+// Blok tlačidla do editora jazdy aj do záveru merania — jeden tvar na oboch
+// miestach, nech sa texty nerozídu.
+function mapaBlokHtml(){
+  return `<div style="background:var(--bg);border-radius:9px;padding:10px 13px;margin-top:2px">
+    <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap">
+      <button type="button" class="aabtn" onclick="mapaVzdialenost(this)">🗺️ Zistiť z mapy</button>
+      <span style="font-size:11.5px;color:var(--ink-soft);flex:1;min-width:140px">Dĺžku cesty vypočíta mapová služba. Miesta sa jej pošlú len na toto stlačenie.</span>
+    </div>
+    <div id="m_mapaStav" style="font-size:12px;margin-top:8px;line-height:1.5"></div>
+    <input type="hidden" id="m_kmZdroj" value="">
+  </div>`;
+}
+
 // Doplnenie tachometra do jazdy. Je to jedna funkcia, hoci volajúce miesta sú
 // dve (ručná jazda a ukončenie merania) — to isté pravidlo na dvoch miestach
 // sa v tomto projekte vždy rozišlo. Prázdne pole NESMIE prepísať už vedený
@@ -13016,6 +13098,7 @@ function jazdaZaver(){
       ${U.zVykazu?`<div style="font-size:11.5px;color:var(--ink-soft);margin-top:5px">Prevzaté z výkazu prác na tento deň.</div>`:""}</div>
     <div class="mfield"><label>Dátum</label><input id="m_datum" value="${esc(zac.toLocaleDateString("sk"))}"></div>
     <div class="mfield"><label>Kilometre</label><input id="m_km" type="number" step="0.1" value="${km}"></div>
+    ${mapaBlokHtml()}
     <div class="mfield"><label>Stav tachometra na začiatku</label>
       <input id="m_poc" type="number" value="${poc||""}" placeholder="napr. 48210">
       <div style="font-size:11.5px;color:var(--ink-soft);margin-top:5px">${poc
@@ -13034,6 +13117,7 @@ function jazdaZaver(){
     miestoUloz(val("m_miestoC"), _jazda.posl);
     const obj={cesta:val("m_cesta"), ucel:val("m_ucel"), datum:val("m_datum"),
       km:r2(parseFloat(val("m_km"))||0), sukromna:chk("m_sukromna"),
+      ...(val("m_kmZdroj")==="mapa" ? {zdrojKm:"mapa"} : {}),
       zdroj:"gps", dt:new Date(_jazda.zac).toISOString()};
     // Príznak nesie len jazda, ktorá účel z výkazu naozaj DOSTALA a človek ho
     // nechal tak — sprievodca podľa neho pozná, čo už dopĺňať netreba.
