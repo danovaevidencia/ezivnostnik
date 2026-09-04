@@ -1311,7 +1311,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.04-IU";  // pole na ID dokladu nevyzerá vyplnené, keď prázdne je
+const APP_VERZIA = "2026.09.04-IV";  // QR sa skenuje zo živého obrazu, nie z jednej fotky
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -23823,6 +23823,139 @@ function uholZRohov(tl, tr){
 let _qrDovod="";
 function qrPrecoZlyhal(){ return _qrDovod; }
 
+// ── ŽIVÉ SKENOVANIE QR Z KAMERY ───────────────────────────────────────────
+//
+// 🔴 Nález zo 4. 9. 2026, priamo z Romanovej ukážky. Natívny fotoaparát
+// Samsungu na tom istom pokrčenom bločku QR NAŠIEL a ponúkol „Skenovať",
+// kým appka ho z uloženej fotky neprečítala ani natívnym BarcodeDetectorom
+// (celá fotka + 54 dlaždíc v pôvodnom rozlíšení), ani jsQR (1924 pokusov
+// v troch mierkach vrátane zväčšenia).
+//
+// Rozdiel nie je v kvalite obrázka. Je v POČTE POKUSOV: fotoaparát skenuje
+// desiatky snímok za sekundu s priebežným doostrovaním, takže mu stačí, aby
+// v jednej jedinej záhyb papiera padol tak, že sa moduly zarovnajú. My sme
+// lúštili jednu uloženú snímku — a tá buď trafí, alebo nie.
+//
+// Lepšie spracovanie fotky preto tento problém nerieši; rieši ho živý obraz.
+// Overené v appke na telefóne: BarcodeDetector vie `qr_code`, getUserMedia
+// je dostupné, kontext je bezpečný.
+let _skenStop=null, _skenChyba="";
+function zavriSkener(){
+  if(_skenStop){ _skenStop(); _skenStop=null; }
+  const el=document.getElementById("qrSkener");
+  if(el) el.remove();
+}
+// Kamera sa musí pustiť aj vtedy, keď je stream už zavretý — preto obal.
+// Je to jediné miesto, kde sa tu chyba naozaj zahodiť smie: zastavovanie
+// zastaveného zariadenia nemá čo hlásiť.
+function pustiKameru(stream){
+  try{ stream.getTracks().forEach(t=>t.stop()); }catch(_){}
+}
+// Vráti obsah QR (string) alebo null, keď človek skenovanie zruší.
+async function skenujQRkamerou(){
+  zavriSkener();
+  const box=document.createElement("div");
+  box.id="qrSkener";
+  box.style.cssText="position:fixed;inset:0;z-index:99999;background:#000;display:flex;flex-direction:column";
+  box.innerHTML=
+    '<video id="qrVideo" playsinline muted style="flex:1;width:100%;object-fit:cover;background:#000"></video>'
+   +'<div style="position:absolute;top:0;left:0;right:0;padding:14px 16px;background:linear-gradient(#000c,#0000);color:#fff;font-size:13.5px;line-height:1.5">'
+   +'Namierte na QR kód na bločku. Skenujeme priebežne — <b>pomaly pohybujte telefónom</b>, pokrčený papier sa raz za čas zarovná sám.'
+   +'</div>'
+   +'<div id="qrSkenStav" style="position:absolute;bottom:88px;left:0;right:0;text-align:center;color:#fff;font-size:12.5px;text-shadow:0 1px 3px #000"></div>'
+   +'<div style="position:absolute;bottom:0;left:0;right:0;padding:16px;display:flex;gap:10px;justify-content:center;background:linear-gradient(#0000,#000c)">'
+   +'<button type="button" id="qrSkenZrus" style="padding:11px 22px;font-size:14px;border-radius:10px;border:0;background:#fff;color:#111">Zrušiť</button>'
+   +'</div>';
+  document.body.appendChild(box);
+  const video=box.querySelector("#qrVideo");
+  const stav=box.querySelector("#qrSkenStav");
+
+  let stream=null;
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({
+      video:{ facingMode:{ideal:"environment"}, width:{ideal:1920}, height:{ideal:1080} }, audio:false });
+  }catch(e){
+    zavriSkener();
+    alert("Kameru sa nepodarilo otvoriť: "+(e && e.message || e)+"\n\nSkontrolujte povolenie prístupu ku kamere.");
+    return null;
+  }
+  video.srcObject=stream;
+  // Autoplay na mobile vie spadnúť, kým stream nabieha; obraz sa rozbehne aj
+  // tak a ďalšia snímka to dorovná — ale nech je v konzole stopa.
+  try{ await video.play(); }catch(e){ console.warn("QR skener — video.play:", e); }
+
+  return await new Promise((hotovo)=>{
+    let bezi=true, snimok=0;
+    const koniec=(vysledok)=>{
+      if(!bezi) return; bezi=false;
+      pustiKameru(stream);
+      zavriSkener();
+      hotovo(vysledok);
+    };
+    _skenStop=()=>{ bezi=false; pustiKameru(stream); };
+    box.querySelector("#qrSkenZrus").onclick=()=>koniec(null);
+
+    const detektor=(typeof BarcodeDetector!=="undefined")
+      ? new BarcodeDetector({formats:["qr_code"]}) : null;
+    let jsQRfn=null;
+    if(!detektor){
+      import("https://esm.sh/jsqr@1.4.0")
+        .then(m=>{ jsQRfn=m.default||m; })
+        .catch(()=>{ stav.textContent="Čítač kódov sa nepodarilo načítať."; });
+    }
+    const platno=document.createElement("canvas");
+
+    // Snímky sa berú cez setTimeout, nie cez requestAnimationFrame — rAF
+    // v karte bez fokusu vôbec nebeží (doložené 23. 8. 2026) a skener sa má
+    // správať rovnako na monitore aj v obale.
+    const krok=async()=>{
+      if(!bezi) return;
+      if(video.readyState>=2 && video.videoWidth){
+        snimok++;
+        if(stav) stav.textContent="Hľadám kód… ("+snimok+")";
+        try{
+          let kod=null;
+          if(detektor){
+            const n=await detektor.detect(video);
+            if(n && n.length) kod=n[0].rawValue;
+          } else if(jsQRfn){
+            platno.width=video.videoWidth; platno.height=video.videoHeight;
+            const ctx=platno.getContext("2d",{willReadFrequently:true});
+            ctx.drawImage(video,0,0);
+            const d=ctx.getImageData(0,0,platno.width,platno.height);
+            const c=jsQRfn(d.data,platno.width,platno.height,{inversionAttempts:"attemptBoth"});
+            if(c && c.data) kod=c.data;
+          }
+          if(kod){ koniec(kod); return; }
+        }catch(e){
+          // Chyba čítača sa NEZAHADZUJE. Keby sa zhltla, skener by donekonečna
+          // vypisoval „Hľadám kód…" a vyzeral by ako funkčný, hoci nehľadá nič —
+          // presne ten stav, ktorý nás pri tomto doklade stál celý večer.
+          if(!_skenChyba){ _skenChyba=(e && e.message) || String(e); console.error("QR skener:", e); }
+          if(stav) stav.textContent="Čítač kódov hlási chybu: "+_skenChyba;
+        }
+      }
+      setTimeout(krok, 120);
+    };
+    setTimeout(krok, 250);
+  });
+}
+
+// Naskenuje QR a rovno z neho dotiahne doklad z FS. Vracia true pri úspechu.
+async function skenujEkasaQR(){
+  const raw=await skenujQRkamerou();
+  if(raw===null) return false;                 // človek zrušil
+  const e=parseEkasaQR(raw);
+  if(!e || !e.ekasaId){
+    alert("Naskenovaný kód nie je eKasa doklad.\n\nObsah: "+String(raw).slice(0,80));
+    return false;
+  }
+  const pole=document.getElementById("m_ekasaIdRucne");
+  if(pole) pole.value=e.ekasaId;
+  await ekasaDoplnDoFormulara(e.ekasaId);
+  return true;
+}
+
 async function precitajQRzObrazka(file){
   _qrDovod="";
   const kroky=[];
@@ -24164,7 +24297,8 @@ function otvorOcrVysledok(R){
     ${R.reverseCharge?`<div style="background:var(--sfc-info);color:#6b4fbf;font-size:12px;padding:9px 12px;border-radius:9px;margin-bottom:14px">🌍 <b>Zahraničná faktúra s prenesením daňovej povinnosti (reverse charge).</b> Označili sme ju ako zahraničnú — appka dopočíta slovenskú DPH 23% (samozdanenie) do výstupu aj odpočtu.</div>`:''}
     ${(!R.ekasaId && R._qrChyba)?`<div style="background:var(--sfc-warn);font-size:12px;padding:9px 12px;border-radius:9px;margin-bottom:14px;line-height:1.55">
       🔍 <b>QR kód sa na fotke nenašiel</b>, takže sumy sú z rozpoznávania textu — a to sa pri bločkoch mýli.
-      Ak doklad QR má, <b>vyrovnajte ho</b> a odfoťte rovno zhora — pokrčený papier kód deformuje a to je častejšia príčina než zlé svetlo či vzdialenosť.
+      Ak doklad QR má, <b>naskenujte ho kamerou</b> — zo živého obrazu sa to darí aj tam, kde z fotky nie.
+      <div style="margin-top:9px"><button type="button" class="aabtn pri" style="padding:7px 13px;font-size:12.5px" onclick="skenujEkasaQR()">📷 Naskenovať QR kamerou</button></div>
       <span style="display:block;color:var(--ink-soft);font-size:11px;margin-top:4px">${esc(R._qrChyba)}</span></div>`:""}
     ${R.ekasaId?`<div style="background:var(--sfc-pos);color:var(--pos-deep,var(--ink-pos));font-size:12px;padding:9px 12px;border-radius:9px;margin-bottom:14px">🧾 <b>Rozpoznaný eKasa bloček.</b> ID dokladu: <span style="font-family:monospace;font-size:11px">${esc(R.ekasaId)}</span><br>
       <div style="margin-top:7px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -24180,6 +24314,7 @@ function otvorOcrVysledok(R){
         ${R._uidZTextu?`<div style="font-size:11px;color:var(--ink-soft);margin-top:5px">Predvyplnené tým, čo sa podarilo prečítať z fotky — <b>skontrolujte znaky</b>, na pokrčenom doklade sa OCR mýli. Sú v ňom len číslice a písmená A až F.</div>`:''}
         <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <button type="button" class="aabtn pri" style="font-size:12px;padding:5px 12px" onclick="ekasaDoplnDoFormulara((document.getElementById('m_ekasaIdRucne').value||'').trim())">⬇ Dotiahnuť z FS</button>
+          <button type="button" class="aabtn" style="font-size:12px;padding:5px 12px" onclick="skenujEkasaQR()">📷 Naskenovať kamerou</button>
           <span id="ekasaStav" style="font-size:11.5px;color:var(--ink-soft)"></span>
         </div>
       </details>`}
