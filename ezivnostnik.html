@@ -1311,7 +1311,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.04-IV";  // QR sa skenuje zo živého obrazu, nie z jednej fotky
+const APP_VERZIA = "2026.09.04-IW";  // naskenovaný QR zruší varovanie a ostane na doklade
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -8062,8 +8062,20 @@ async function ekasaDoplnDoFormulara(receiptId){
     if(stav){ stav.textContent="Finančná správa doklad s týmto ID nepozná — ID je zrejme prečítané zle."; stav.style.color="var(--neg)"; }
     return;
   }
+  // Doklad si ID PONESIE — či prišlo zo skenera, alebo ho človek odpísal.
+  // Bez tohto sa výdavok uložil so `zdroj:"ocr"` a bez `ekasaId`, hoci sumy
+  // prišli z Finančnej správy, a spätne sa už nedalo zistiť, že sú presné.
+  // Uloženie číta výsledok OCR, nie formulár, takže to musí ísť tam.
+  if(_ocrR && !_ocrR.ekasaId){
+    _ocrR.ekasaId=id;
+    _ocrR.ekasaOverUrl="https://ekasa.financnasprava.sk/#/receipt/"+encodeURIComponent(id);
+    _ocrR._druh="Bloček";
+    if(!_ocrR.cislo) _ocrR.cislo=id;
+  }
   const doplnene=[];
-  const set=(id,val)=>{ const el=document.getElementById(id); if(el && val!=null && val!=="") el.value=val; };
+  // Parameter sa NEVOLÁ `id` — tá premenná tu už drží ID dokladu a tieňovať
+  // ju názvom pre id prvku je presne tá zámena, ktorú nikto nečíta ako chybu.
+  const set=(pole,val)=>{ const el=document.getElementById(pole); if(el && val!=null && val!=="") el.value=val; };
   if(d.dodavatel){ set("m_partner", d.dodavatel); doplnene.push("dodávateľa"); }
   if(d.ico){ set("m_dodIco", d.ico); doplnene.push("IČO"); }
   if(d.icdph){ set("m_dodIcDph", d.icdph); doplnene.push("IČ DPH"); const el=document.getElementById("m_dodIcDph"); if(el) skontrolujICDPHpole(el); }
@@ -23942,6 +23954,7 @@ async function skenujQRkamerou(){
 }
 
 // Naskenuje QR a rovno z neho dotiahne doklad z FS. Vracia true pri úspechu.
+let _ocrR=null;
 async function skenujEkasaQR(){
   const raw=await skenujQRkamerou();
   if(raw===null) return false;                 // človek zrušil
@@ -23952,6 +23965,18 @@ async function skenujEkasaQR(){
   }
   const pole=document.getElementById("m_ekasaIdRucne");
   if(pole) pole.value=e.ekasaId;
+
+  // Varovanie „QR sa nenašiel" musí zmiznúť — vzniklo pri OCR, teraz už
+  // neplatí. Nechať ho svietiť nad údajmi z FS je tá istá trieda ako zelená
+  // pečiatka nad údajmi z OCR, len naopak: správny výsledok s nesprávnou
+  // nálepkou.
+  const var_=document.getElementById("qrVarovanie");
+  if(var_){
+    var_.style.background="var(--sfc-pos)";
+    var_.innerHTML='📷 <b>QR kód naskenovaný z kamery.</b> Údaje dopĺňame priamo z Finančnej správy — sú presné.'
+      +'<div style="font-family:monospace;font-size:11px;margin-top:5px">'+esc(e.ekasaId)+'</div>'
+      +'<div id="ekasaStav" style="font-size:11.5px;margin-top:5px"></div>';
+  }
   await ekasaDoplnDoFormulara(e.ekasaId);
   return true;
 }
@@ -24256,6 +24281,15 @@ function ocrNaVydavok(R){
 }
 
 function otvorOcrVysledok(R){
+  // 🔴 4. 9. 2026: skener QR síce kód prečítal a formulár správne doplnil
+  // z FS, ale okno ďalej hlásilo „QR kód sa na fotke nenašiel" — rámček
+  // vznikol pri OCR a nikto ho po úspechu nezrušil. A horšie: naskenované
+  // ID sa nemalo kam zapísať, takže uložený doklad ostal so `zdroj:"ocr"`
+  // a bez `ekasaId`, hoci sumy prišli z Finančnej správy.
+  //
+  // Preto si výsledok držíme aj mimo tejto uzávery — skener doň po úspechu
+  // zapíše ID a zruší varovanie.
+  _ocrR=R;
   const jeCloud=!localMode&&sb;
   const jePHM=R.druh==="PHM (tankovanie)"||R.litre>0;
   openModal("Skontrolujte údaje z dokladu", `
@@ -24295,7 +24329,7 @@ function otvorOcrVysledok(R){
     </div>`:''}
     ${R._vlastnaFaktura?`<div style="background:var(--sfc-neg);color:#8f2d26;font-size:12px;padding:9px 12px;border-radius:9px;margin-bottom:14px">⚠ <b>Dodávateľom na tomto doklade je vaša firma.</b> Ide o faktúru, ktorú ste vystavili vy — nepatrí medzi výdavky. Skontrolujte, či ste nenačítali nesprávny súbor.</div>`:''}
     ${R.reverseCharge?`<div style="background:var(--sfc-info);color:#6b4fbf;font-size:12px;padding:9px 12px;border-radius:9px;margin-bottom:14px">🌍 <b>Zahraničná faktúra s prenesením daňovej povinnosti (reverse charge).</b> Označili sme ju ako zahraničnú — appka dopočíta slovenskú DPH 23% (samozdanenie) do výstupu aj odpočtu.</div>`:''}
-    ${(!R.ekasaId && R._qrChyba)?`<div style="background:var(--sfc-warn);font-size:12px;padding:9px 12px;border-radius:9px;margin-bottom:14px;line-height:1.55">
+    ${(!R.ekasaId && R._qrChyba)?`<div id="qrVarovanie" style="background:var(--sfc-warn);font-size:12px;padding:9px 12px;border-radius:9px;margin-bottom:14px;line-height:1.55">
       🔍 <b>QR kód sa na fotke nenašiel</b>, takže sumy sú z rozpoznávania textu — a to sa pri bločkoch mýli.
       Ak doklad QR má, <b>naskenujte ho kamerou</b> — zo živého obrazu sa to darí aj tam, kde z fotky nie.
       <div style="margin-top:9px"><button type="button" class="aabtn pri" style="padding:7px 13px;font-size:12.5px" onclick="skenujEkasaQR()">📷 Naskenovať QR kamerou</button></div>
