@@ -1311,7 +1311,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.04-IR";  // QR na fotke sa hľadá v pôvodnom rozlíšení
+const APP_VERZIA = "2026.09.04-IS";  // eKasa ID musí byť platné, inak sa nehlási úspech
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -8041,11 +8041,22 @@ async function ekasaDoplnDoFormulara(receiptId){
     if(stav){ stav.textContent="Nepodarilo sa (proxy nenasadená alebo FS neodpovedá)."; stav.style.color="var(--neg)"; }
     return;
   }
+  // 🔴 4. 9. 2026: FS na neznáme ID odpovie „doklad neexistuje" a proxy to
+  // dovtedy prekladala na úspech so samými prázdnymi poľami. Appka nedoplnila
+  // nič a napísala „✓ Doplnené z FS" — zelená pečiatka na údajoch, ktoré boli
+  // celé z OCR, vrátane nesprávneho IČO a nezmyselného názvu partnera.
+  // Hláška preto stojí na TOM, ČO SA NAOZAJ ZAPÍSALO, nie na tom, že odpoveď
+  // prišla.
+  if(d.najdene===false){
+    if(stav){ stav.textContent="Finančná správa doklad s týmto ID nepozná — ID je zrejme prečítané zle."; stav.style.color="var(--neg)"; }
+    return;
+  }
+  const doplnene=[];
   const set=(id,val)=>{ const el=document.getElementById(id); if(el && val!=null && val!=="") el.value=val; };
-  if(d.dodavatel) set("m_partner", d.dodavatel);
-  if(d.ico) set("m_dodIco", d.ico);
-  if(d.icdph){ set("m_dodIcDph", d.icdph); const el=document.getElementById("m_dodIcDph"); if(el) skontrolujICDPHpole(el); }
-  if(d.suma!=null){ set("m_spolu", d.suma);
+  if(d.dodavatel){ set("m_partner", d.dodavatel); doplnene.push("dodávateľa"); }
+  if(d.ico){ set("m_dodIco", d.ico); doplnene.push("IČO"); }
+  if(d.icdph){ set("m_dodIcDph", d.icdph); doplnene.push("IČ DPH"); const el=document.getElementById("m_dodIcDph"); if(el) skontrolujICDPHpole(el); }
+  if(d.suma!=null){ set("m_spolu", d.suma); doplnene.push("sumu");
     // FS je AUTORITA nad OCR. Predtým tu bolo `if(bez && !bez.value)`, teda
     // prepočet len do prázdneho poľa — lenže OCR ich už vyplnilo, často zle.
     // Doklad potom niesol správnu sumu z FS a k nej základ a DPH z OCR, ktoré
@@ -8077,6 +8088,7 @@ async function ekasaDoplnDoFormulara(receiptId){
     const litre=litreZPoloziekFS(d.polozky);
     if(litre>0){
       litreEl.value=litre;
+      doplnene.push("litre");
       if(typeof mKontrolaLitre==="function") mKontrolaLitre();
     }
   }
@@ -8086,8 +8098,18 @@ async function ekasaDoplnDoFormulara(receiptId){
     const p=najdiPartnera({dodavatelIco:d.ico||val("m_dodIco"), partner:d.dodavatel||val("m_partner")});
     if(p && p.icdph){ polIcDph.value=p.icdph; skontrolujICDPHpole(polIcDph); }
   }
+  // Keď FS pošle IČO, je autoritatívne — a názov od nej má prednosť pred OCR.
+  // Ak by ho FS výnimočne neposlala, dotiahne sa z registra podľa TOHTO IČO,
+  // nie podľa toho, čo prečítalo OCR. `ocrNazovZRegistra` inak beží 200 ms po
+  // vykreslení, teda spravidla ešte pred odpoveďou FS, a v tej chvíli je pole
+  // s IČO buď prázdne, alebo v ňom je chybné číslo z OCR (31322802 namiesto
+  // 31322832 — jediná číslica, a register by odpovedal o inej firme).
+  if(d.ico && !d.dodavatel){ try{ await ocrNazovZRegistra(); }catch(_){} }
   if(typeof mAktualizujOddiel==="function") mAktualizujOddiel();
-  if(stav){ stav.textContent="✓ Doplnené z FS"; stav.style.color="var(--pos)"; }
+  if(stav){
+    if(doplnene.length){ stav.textContent="✓ Z FS doplnené: "+doplnene.join(", "); stav.style.color="var(--pos)"; }
+    else { stav.textContent="FS odpovedala, ale žiadny údaj neposlala — čísla nižšie sú z OCR."; stav.style.color="var(--neg)"; }
+  }
 }
 
 // Názov firmy má prednosť z registra, nie z OCR. Ak máme platné IČO, je to
@@ -23587,10 +23609,33 @@ async function spracujDokladSubor(file, setStav){
   // QR sa dopĺňa PRED eKasou aj registrom: eKasa má vlastnú, presnejšiu cestu
   // cez FS, a register dopĺňa len to, čo ešte chýba.
   if(pbs) doplnZPayBySquare(R, pbs);
-  // ak QR čítač zlyhal, skús UID:O-... priamo z textu
+  // Ak QR čítač zlyhal, skús UID:O-... priamo z textu.
+  //
+  // 🔴 4. 9. 2026 tento krok vyrobil FALOŠNÝ ÚSPECH. Regulárny výraz bral
+  // `[A-Z0-9]{28,40}`, čo je oveľa voľnejšie než skutočný tvar UID (`O-`
+  // a presne 32 HEXADECIMÁLNYCH znakov). Na pokrčenom bločku OCR prečítalo
+  //     O-8EG09FCOBEDGAYIAROIECOBEDE199ABS
+  // namiesto
+  //     O-8E609FC06ED6499AA09FC06ED6199A68
+  // — pätnásť znakov z tridsiatich dvoch zle (6→G/B/E, 0→O, 4→A, 9→Y/I,
+  // A→R, F→E, 8→S). Písmená G, Y, I, R, S v hexadecimálnom reťazci vôbec
+  // nemôžu byť, appka to však prijala, poslala na FS, dostala „doklad
+  // neexistuje" a aj tak napísala „Rozpoznaný eKasa bloček" a „Doplnené
+  // z FS". Na obrazovke potom ostali samé OCR údaje s dôveryhodnou zelenou
+  // pečiatkou — horší stav, než keby QR nenašla vôbec.
+  //
+  // Preto sa tu nič neopravuje ani nehádže: buď je to platný UID, alebo to
+  // nie je eKasa ID. Uhádnuté ID sa síce na FS overiť dá (neexistujúce vráti
+  // prázdno), ale pätnásť chybných znakov sa uhádnuť nedá a každý pokus by
+  // len vrátil túto istú tichú lož.
   if(!ekasa){
-    let uidM=text.match(/UID\s*:?\s*([O0]-[A-Z0-9\s]{28,40})/i) || text.match(/\b([O0]-[A-Z0-9]{28,36})\b/i);
-    if(uidM){ const uidRaw=uidM[1].replace(/\s+/g,"").toUpperCase().replace(/^0-/,"O-"); ekasa=parseEkasaQR(uidRaw) || {ekasaId:uidRaw, overUrl:"https://ekasa.financnasprava.sk/#/receipt/"+encodeURIComponent(uidRaw)}; }
+    let uidM=text.match(/UID\s*:?\s*([O0]-[A-Za-z0-9\s]{28,44})/i) || text.match(/\b([O0]-[A-Za-z0-9]{28,40})\b/i);
+    if(uidM){
+      const uidRaw=uidM[1].replace(/\s+/g,"").toUpperCase().replace(/^0-/,"O-");
+      ekasa=parseEkasaQR(uidRaw);            // parseEkasaQR trvá na 32 hex znakoch
+      // Dôvod musí ísť do R, nie do premennej — `R._qrChyba` je vyplnené vyššie.
+      if(!ekasa) R._qrChyba=(R._qrChyba?R._qrChyba+" · ":"")+"vytlačené UID sa prečítalo chybne ("+uidRaw.slice(0,12)+"…), nie je to platný tvar";
+    }
   }
   if(ekasa){ R.ekasaId=ekasa.ekasaId; R.ekasaOverUrl=ekasa.overUrl; if(ekasa.suma && !R.spolu) R.spolu=ekasa.suma; if(!R.cislo && ekasa.ekasaId) R.cislo=ekasa.ekasaId; R._druh="Bloček"; }
   // 1) NAJPRV skús zapamätaných partnerov (smart pamäť z predošlých dokladov) —
@@ -23994,8 +24039,12 @@ function doplnZPayBySquare(R, q){
 function parseEkasaQR(raw){
   if(!raw) return null;
   const s=String(raw);
-  // eKasa QR obsahuje ID dokladu O-XXXX... (32 hex + prefix) alebo URL s parametrom
-  const idMatch=s.match(/O-[0-9A-F]{32,}/i) || s.match(/[?&]id=(O-[0-9A-F]{32,})/i);
+  // eKasa QR obsahuje ID dokladu O-XXXX... (PRESNE 32 hex znakov) alebo URL
+  // s parametrom. Dĺžka je tu jediná poistka proti tomu, aby sa za ID vydalo
+  // niečo, čo len tak vyzerá — `{32,}` bralo aj dlhšie reťazce a cez OCR
+  // vetvu tadiaľ prešiel 4. 9. 2026 blud, ktorý appka ohlásila ako platný
+  // doklad (viď komentár pri hľadaní UID v texte).
+  const idMatch=s.match(/O-[0-9A-F]{32}(?![0-9A-F])/i) || s.match(/[?&]id=(O-[0-9A-F]{32})(?![0-9A-F])/i);
   const ekasaId=idMatch?(idMatch[1]||idMatch[0]):null;
   if(!ekasaId && !/ekasa|financnasprava|pokladnic/i.test(s)) return null;
   // niektoré QR obsahujú aj sumu (napr. za 'sum=' alebo ako číslo)
