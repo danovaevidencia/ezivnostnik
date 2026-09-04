@@ -1311,7 +1311,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.04-IQ";  // hláška o meraní hovorí pravdu aj v obale
+const APP_VERZIA = "2026.09.04-IR";  // QR na fotke sa hľadá v pôvodnom rozlíšení
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -16821,6 +16821,17 @@ function ocrPrepocitajZoSpolu(bez, dph){
   alert("Prepočítané z celkovej sumy.\n\nZáklad: "+eur(bez)+" · DPH: "+eur(dph));
 }
 
+// Opačná oprava: rozpis je správny (DPH sedí na zákonnú sadzbu), zle sa
+// prečítala CELKOVÁ suma. Bez tejto možnosti ponúkala appka jediné tlačidlo,
+// ktoré správny rozpis prepísalo — a pokazilo tak jediné, čo bolo v poriadku.
+function ocrOpravSpolu(spolu){
+  const s=document.getElementById("m_spolu");
+  if(s) s.value=String(spolu).replace(".",",");
+  if(typeof mAktualizujOddiel==="function") mAktualizujOddiel();
+  if(typeof mPhmPrepocet==="function") mPhmPrepocet();
+  alert("Celková suma opravená na "+eur(spolu)+".\n\nZáklad a DPH ostávajú tak, ako sú na doklade.");
+}
+
 // Dobropis spoznáme podľa zápornej sumy — vtedy treba vedieť, čo opravuje.
 function mOpravaBox(){
   const b=document.getElementById("m_opravaBox"); if(!b) return;
@@ -22314,13 +22325,35 @@ function parseFakturaText(text){
   // faktúrach je „Total 51.09" riadok so základom, nie celková suma.
   let spolu=0;
   if(kandSum.length){
-    const maxV=Math.max(...kandSum.map(k=>k.vaha));
-    const vyber=kandSum.filter(k=>k.vaha===maxV);
-    const ocakavane=(R.bez||0)+(R.dph||0);
+    const ocakavane=r2((R.bez||0)+(R.dph||0));
+    // 🔴 Kľúčové slovo NIE JE dôkaz. Na bločkoch je rekapitulácia DPH
+    // trojstĺpcová tabuľka:
+    //
+    //     Sadzby   Základ    DPH    Spolu
+    //     23%      44.28    10.19   54.47 EUR
+    //     Spolu    44.28    10.19   54.47 EUR
+    //
+    // Slovo „Spolu" je tu NÁZOV RIADKU a číslo hneď za ním je ZÁKLAD.
+    // Vzor „Spolu → prvé číslo" teda dostal 44,28 s váhou 2, kým správnych
+    // 54,47 sa chytilo len ako „číslo pred EUR" s váhou 1 — a kľúčové slovo
+    // vyhralo nad správnou hodnotou. Doložené 4. 9. 2026 na bločku zo
+    // Slovnaftu: appka zapísala celkovú sumu 44,28 namiesto 54,47 a ešte
+    // ponúkla „opravu", ktorá by prepísala aj správny základ a DPH.
+    //
+    // Keď rozpis poznáme, je sám o sebe silnejší dôkaz než ktorékoľvek
+    // slovo: hodnota rovná `základ + DPH` je celková suma, bodka.
     if(ocakavane>0){
-      vyber.sort((a,b)=>Math.abs(a.v-ocakavane)-Math.abs(b.v-ocakavane));
+      const sedi=kandSum.filter(k=>Math.abs(k.v-ocakavane)<=0.005);
+      if(sedi.length){ spolu=sedi[0].v; }
     }
-    spolu=vyber[0].v;
+    if(!spolu){
+      const maxV=Math.max(...kandSum.map(k=>k.vaha));
+      const vyber=kandSum.filter(k=>k.vaha===maxV);
+      if(ocakavane>0){
+        vyber.sort((a,b)=>Math.abs(a.v-ocakavane)-Math.abs(b.v-ocakavane));
+      }
+      spolu=vyber[0].v;
+    }
   }
   // Celková suma býva na doklade najväčším písmom a číta sa najspoľahlivejšie.
   // Ak sa rozchádza s rozpisom len o pár centov, je to chyba OCR v rozpise —
@@ -22339,7 +22372,27 @@ function parseFakturaText(text){
         // drobná odchýlka → chyba v prečítaní rozpisu, ver celkovej sume
         R.bez = dopocBez; R.dph = dopocDph; R._sumyDopocitane = true;
       } else {
-        R._sumyNesedia = { spolu, bez:R.bez, dph:R.dph, navrhBez:dopocBez, navrhDph:dopocDph };
+        // ── Ktorému číslu veriť? ────────────────────────────────────────
+        //  Predpoklad „celková suma sa číta najspoľahlivejšie" neplatí vždy.
+        //  Doložené 4. 9. 2026 na tankovacom bločku: základ 44,28 a DPH
+        //  10,19 boli prečítané SPRÁVNE, ale do celkovej sumy sa dostal
+        //  znova základ (44,28) namiesto 54,47. Ponúknutá oprava by
+        //  správnu dvojicu prepísala na 36,00 + 8,28 — teda pokazila
+        //  jediné, čo bolo v poriadku.
+        //
+        //  Rozhodnúť sa dá: keď pomer DPH ku základu sedí na ZÁKONNÚ
+        //  sadzbu, tá dvojica spolu drží a chyba je v celkovej sume.
+        //  Nič sa neprepisuje automaticky — mení sa len to, ČO SA PONÚKNE
+        //  ako prvé, a prečo.
+        const pomer = R.bez>0 ? (R.dph/R.bez) : -1;
+        const sedíSadzba = ZAKONNE_SADZBY_DPH.some(s=>s>0 && Math.abs(pomer-s)<0.004);
+        R._sumyNesedia = {
+          spolu, bez:R.bez, dph:R.dph,
+          navrhBez:dopocBez, navrhDph:dopocDph,
+          navrhSpolu: r2(R.bez + R.dph),
+          rozpisSedi: sedíSadzba,
+          sadzbaZRozpisu: sedíSadzba ? Math.round(pomer*100) : null,
+        };
       }
     }
   } else if(R.bez>0 && !spolu){
@@ -23473,6 +23526,9 @@ async function spracujDokladSubor(file, setStav){
     return R;
   }
   let text="", ekasa=null, pbs=null;
+  // Prečo sa QR nenašiel — patrí do rovnakého rozsahu ako `R`, inak by sa
+  // pri prenose doň hlásila nedeklarovaná premenná až za behu.
+  let qrChyba="";
   const jePdf = file.type==="application/pdf" || /\.pdf$/i.test(file.name);
   if(jePdf){
     setStav("Čítam PDF…");
@@ -23516,13 +23572,18 @@ async function spracujDokladSubor(file, setStav){
         // Nie je to bloček z eKasy? Môže to byť platobný QR z faktúry.
         if(!ekasa) pbs=await dekodujPayBySquare(qr.data);
       }
-    }catch(_){}
+    }catch(e){ console.error("čítanie QR z fotky:", e); }
+    // Keď sa QR nenašiel, POVIE SA to. Údaje potom stoja len na OCR a to je
+    // pri bločku rozdiel medzi „presné číslo z FS" a „uhádnutá suma" —
+    // človek má vedieť, ktoré z toho práve číta.
+    if(!ekasa && !pbs) qrChyba=qrPrecoZlyhal();
     setStav("OCR obrázka…");
     // Uhol z QR: OCR nemusí skúšať štyri natočenia, keď ho poznáme.
     text=await obrazokNaText(file, (p,popis)=>setStav(typeof p==="number"?("OCR "+p+"%"+(popis?" — "+popis:"")):p), { uhol:qrUhol });
   }
   const R=parseFakturaText(text);
   R._surovyText=text;
+  if(qrChyba) R._qrChyba=qrChyba;
   // QR sa dopĺňa PRED eKasou aj registrom: eKasa má vlastnú, presnejšiu cestu
   // cez FS, a register dopĺňa len to, čo ešte chýba.
   if(pbs) doplnZPayBySquare(R, pbs);
@@ -23693,7 +23754,16 @@ function uholZRohov(tl, tr){
 
 // Vracia { data, uhol } alebo null. `uhol` je natočenie fotky v stupňoch —
 // OCR ho použije na jedno správne otočenie namiesto štyroch pokusov.
+// Prečo sa QR nenašiel. Bez tohto bola celá funkcia obalená tichým `catch`
+// a neúspech vyzeral rovnako, či už čítač chýbal, spadol, alebo kód na fotke
+// naozaj nebol. Doložené 4. 9. 2026: doklad s QR skončil na OCR, ktoré
+// prečítalo celkovú sumu ako základ dane — a nedalo sa zistiť prečo.
+let _qrDovod="";
+function qrPrecoZlyhal(){ return _qrDovod; }
+
 async function precitajQRzObrazka(file){
+  _qrDovod="";
+  const kroky=[];
   // 1) natívne BarcodeDetector (Samsung Browser, Chrome na Androide)
   try{
     if("BarcodeDetector" in window){
@@ -23704,11 +23774,23 @@ async function precitajQRzObrazka(file){
         const cp=codes[0].cornerPoints||[];
         return { data: codes[0].rawValue, uhol: uholZRohov(cp[0], cp[1]) };
       }
+      kroky.push("BarcodeDetector: nenašiel kód");
+    } else {
+      kroky.push("BarcodeDetector tu nie je");
     }
-  }catch(_){}
+  }catch(e){
+    kroky.push("BarcodeDetector zlyhal: "+(e && e.message || e));
+    console.error("QR — BarcodeDetector:", e);
+  }
   // 2) fallback jsQR — viac mierok, výrezov a predspracovanie (desktop / zošikmené fotky)
   try{
-    const jsQRmod=await import("https://esm.sh/jsqr@1.4.0");
+    const jsQRmod=await import("https://esm.sh/jsqr@1.4.0").catch(e=>{
+      // Knižnica sa ťahá zo siete. Keď sa nenačíta, QR sa nenájde NIKDY
+      // a bez tejto hlášky to vyzerá ako doklad bez kódu.
+      kroky.push("jsQR sa nenačítal: "+(e && e.message || e));
+      console.error("QR — import jsQR:", e);
+      throw e;
+    });
     const jsQR=jsQRmod.default||jsQRmod;
     const url=URL.createObjectURL(file);
     const img=await new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=url; });
@@ -23727,9 +23809,22 @@ async function precitajQRzObrazka(file){
     // Prvé kombinácie nájdu QR takmer vždy; zvyšok je pre zlé fotky.
     const zaciatok=Date.now();
     const DOST_CASU=4000;
+    // Dlaždice v pôvodnom rozlíšení dostávajú vlastný, väčší rozpočet:
+    // jedna dlaždica 800×800 trvá ~38 ms na počítači, na telefóne rádovo
+    // 150 ms. Pri fotke 4000×3000 je dlaždíc do 60, takže 10 s stačí na
+    // väčšinu z nich — a míňajú sa od stredu, teda tam, kde je nádej.
+    // Bez tohto kroku sa QR na telefónnej fotke nenájde NIKDY (kap. 77).
+    const ROZPOCET=10000;
     for(const vz of vyrezy){
       for(const cielW of cielSirky){
-        if(Date.now()-zaciatok > DOST_CASU) return null;
+        if(Date.now()-zaciatok > DOST_CASU){
+          // Rozpočet času vypršal. Je to iný stav než „kód tam nie je":
+          // pri lepšej fotke by ho ďalšie kombinácie ešte našli.
+          kroky.push("jsQR: vypršal čas ("+DOST_CASU+" ms)");
+          _qrDovod=kroky.join(" · ");
+          console.warn("QR sa nenašiel —", _qrDovod);
+          return null;
+        }
         const scale=Math.min(cielW/vz.sw, 2);
         const cw=Math.max(1,Math.round(vz.sw*scale)), ch=Math.max(1,Math.round(vz.sh*scale));
         const cv=document.createElement("canvas"); cv.width=cw; cv.height=ch;
@@ -23752,8 +23847,69 @@ async function precitajQRzObrazka(file){
         if(code && code.data) return zRohov(code);
       }
     }
+    // 3) 🔴 DLAŽDICE V PÔVODNOM ROZLÍŠENÍ
+    //
+    //  Vyššie uvedené výrezy sa zmenšujú na 600–1200 px šírky. Na dnešnej
+    //  telefónnej fotke (4000×3000) to QR kód ZNIČÍ: kód má na doklade
+    //  ~200 px, po zmenšení na 900 px zostane 45 px — a QR verzie 4 má
+    //  33 modulov, takže je pod hranicou čitateľnosti.
+    //
+    //  Doložené 4. 9. 2026 na bločku zo Slovnaftu: appka QR nenašla,
+    //  hoci na fotke bol a posuvné okno v PÔVODNOM rozlíšení ho prečítalo
+    //  na prvý pokus (`O-8E609FC0…`). Nebola to zlá fotka ani chýbajúci
+    //  kód — bolo to zmenšenie.
+    //
+    //  Preto sa fotka prejde po dlaždiciach bez zmenšovania. Poradie ide
+    //  od stredu von: doklad si človek do záberu vystredí, takže tam je
+    //  nádej najvyššia a rozpočet času sa minie na najlepšie miesta.
+    const DLAZDICA=800, PREKRYV=0.5;
+    const krok=Math.round(DLAZDICA*(1-PREKRYV));
+    const sx0=W/2, sy0=H/2;
+    const dlazdice=[];
+    for(let sy=0; sy<H; sy+=krok){
+      for(let sx=0; sx<W; sx+=krok){
+        const w=Math.min(DLAZDICA, W-sx), hh=Math.min(DLAZDICA, H-sy);
+        if(w<200 || hh<200) continue;
+        dlazdice.push({sx, sy, w, h:hh, d:Math.hypot(sx+w/2-sx0, sy+hh/2-sy0)});
+      }
+    }
+    dlazdice.sort((a,b)=>a.d-b.d);
+    const cvD=document.createElement("canvas");
+    const ctxD=cvD.getContext("2d", {willReadFrequently:true});
+    let skusenych=0;
+    for(const dl of dlazdice){
+      if(Date.now()-zaciatok > ROZPOCET) break;
+      cvD.width=dl.w; cvD.height=dl.h;
+      ctxD.drawImage(img, dl.sx, dl.sy, dl.w, dl.h, 0, 0, dl.w, dl.h);
+      const dat=ctxD.getImageData(0,0,dl.w,dl.h);
+      skusenych++;
+      let c=jsQR(dat.data, dl.w, dl.h, {inversionAttempts:"attemptBoth"});
+      if(!c || !c.data){
+        const dd=dat.data;
+        for(let i=0;i<dd.length;i+=4){
+          const g=0.299*dd[i]+0.587*dd[i+1]+0.114*dd[i+2];
+          const v=g>135?255:0;
+          dd[i]=dd[i+1]=dd[i+2]=v;
+        }
+        c=jsQR(dd, dl.w, dl.h, {inversionAttempts:"attemptBoth"});
+      }
+      if(c && c.data){
+        return { data:c.data, uhol:uholZRohov(c.location?.topLeftCorner, c.location?.topRightCorner) };
+      }
+    }
+
+    kroky.push("jsQR: výrezy aj "+skusenych+" dlaždíc v pôvodnom rozlíšení, kód nenájdený");
+    _qrDovod=kroky.join(" · ");
+    console.warn("QR sa nenašiel —", _qrDovod);
     return null;
-  }catch(_){ return null; }
+  }catch(e){
+    if(!kroky.length || !/jsQR sa nenačítal/.test(kroky.join(""))){
+      kroky.push("jsQR zlyhal: "+(e && e.message || e));
+      console.error("QR — jsQR:", e);
+    }
+    _qrDovod=kroky.join(" · ");
+    return null;
+  }
 }
 // ═══ PAY by square z PRIJATÉHO dokladu ═════════════════════════════════════
 // Ten istý formát, ktorý appka na svojich faktúrach generuje — len čítaný
@@ -23912,7 +24068,11 @@ function otvorOcrVysledok(R){
     ${R._sumyNesedia?`<div style="background:var(--sfc-warn);border-left:3px solid var(--warn);border-radius:0 9px 9px 0;padding:11px 13px;margin-bottom:14px;font-size:12.5px;line-height:1.6">
       ⚠ <b>Sumy na doklade si neodporujú len o centy.</b> Prečítali sme základ ${eur(R._sumyNesedia.bez)} a DPH ${eur(R._sumyNesedia.dph)},
       čo dáva ${eur(R._sumyNesedia.bez+R._sumyNesedia.dph)}, ale celková suma je ${eur(R._sumyNesedia.spolu)}.
-      <div style="margin-top:8px"><button class="aabtn" style="padding:6px 11px;font-size:12px" onclick="ocrPrepocitajZoSpolu(${R._sumyNesedia.navrhBez},${R._sumyNesedia.navrhDph})">Prepočítať z celkovej sumy (${eur(R._sumyNesedia.navrhBez)} + ${eur(R._sumyNesedia.navrhDph)})</button></div>
+      ${R._sumyNesedia.rozpisSedi?`<div style="margin-top:6px">DPH je presne <b>${R._sumyNesedia.sadzbaZRozpisu} %</b> zo základu, takže rozpis drží — chyba je skôr v <b>celkovej sume</b>.</div>`:""}
+      <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+        ${R._sumyNesedia.rozpisSedi?`<button class="aabtn pri" style="padding:6px 11px;font-size:12px" onclick="ocrOpravSpolu(${R._sumyNesedia.navrhSpolu})">Opraviť spolu na ${eur(R._sumyNesedia.navrhSpolu)}</button>`:""}
+        <button class="aabtn" style="padding:6px 11px;font-size:12px" onclick="ocrPrepocitajZoSpolu(${R._sumyNesedia.navrhBez},${R._sumyNesedia.navrhDph})">Prepočítať z celkovej sumy (${eur(R._sumyNesedia.navrhBez)} + ${eur(R._sumyNesedia.navrhDph)})</button>
+      </div>
       <div style="margin-top:7px;color:var(--ink-soft);font-size:11.5px">Skontrolujte doklad — môže ísť o viac sadzieb DPH alebo o chybu v prečítaní.</div>
     </div>`:''}
     ${R._sumyDopocitane?`<div style="background:var(--sfc-pos);border-left:3px solid var(--pos);border-radius:0 9px 9px 0;padding:9px 12px;margin-bottom:14px;font-size:12px;line-height:1.5">
@@ -23936,6 +24096,10 @@ function otvorOcrVysledok(R){
     </div>`:''}
     ${R._vlastnaFaktura?`<div style="background:var(--sfc-neg);color:#8f2d26;font-size:12px;padding:9px 12px;border-radius:9px;margin-bottom:14px">⚠ <b>Dodávateľom na tomto doklade je vaša firma.</b> Ide o faktúru, ktorú ste vystavili vy — nepatrí medzi výdavky. Skontrolujte, či ste nenačítali nesprávny súbor.</div>`:''}
     ${R.reverseCharge?`<div style="background:var(--sfc-info);color:#6b4fbf;font-size:12px;padding:9px 12px;border-radius:9px;margin-bottom:14px">🌍 <b>Zahraničná faktúra s prenesením daňovej povinnosti (reverse charge).</b> Označili sme ju ako zahraničnú — appka dopočíta slovenskú DPH 23% (samozdanenie) do výstupu aj odpočtu.</div>`:''}
+    ${(!R.ekasaId && R._qrChyba)?`<div style="background:var(--sfc-warn);font-size:12px;padding:9px 12px;border-radius:9px;margin-bottom:14px;line-height:1.55">
+      🔍 <b>QR kód sa na fotke nenašiel</b>, takže sumy sú z rozpoznávania textu — a to sa pri bločkoch mýli.
+      Ak doklad QR má, skúste ho odfotiť zblízka a rovno zhora.
+      <span style="display:block;color:var(--ink-soft);font-size:11px;margin-top:4px">${esc(R._qrChyba)}</span></div>`:""}
     ${R.ekasaId?`<div style="background:var(--sfc-pos);color:var(--pos-deep,var(--ink-pos));font-size:12px;padding:9px 12px;border-radius:9px;margin-bottom:14px">🧾 <b>Rozpoznaný eKasa bloček.</b> ID dokladu: <span style="font-family:monospace;font-size:11px">${esc(R.ekasaId)}</span><br>
       <div style="margin-top:7px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <button type="button" class="aabtn pri pos" style="font-size:12px;padding:5px 12px" onclick="ekasaDoplnDoFormulara('${esc(R.ekasaId)}')">⬇ Dotiahnuť údaje z FS znova</button>
