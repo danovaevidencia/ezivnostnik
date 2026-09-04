@@ -1164,6 +1164,11 @@ html[data-jazda] .jazdapruh{display:flex}
     <select id="firmaPrepinac" class="usermenu tbFirma" style="display:none" onchange="prepniFirmu(this.value)" title="Prepnúť firmu"></select>
     <div class="syncchip" id="syncChip" onclick="syncInfo()" title="Stav ukladania do cloudu (klepnite pre detail)" style="cursor:pointer">✓ uložené</div>
     <button class="usermenu" id="quickDoklad" onclick="rychlyDoklad(this)" title="Načítať doklad (foto alebo PDF)">📷</button>
+    <!-- Jazda sa spúšťa pri nastupovaní do auta, nie pri prezeraní knihy jázd.
+         Preto je to v lište vedľa fotenia dokladu — dve klepnutia navyše cez
+         menu znamenajú, že sa človek nespustí a km si potom vymyslí.
+         Keď jazda beží, tlačidlo otvára jej panel (rieši `jazdaSpusti`). -->
+    <button class="usermenu" id="quickJazda" onclick="jazdaSpusti()" title="Zaznamenať jazdu do knihy jázd">📍</button>
     <button class="usermenu notifbtn" id="notifBtn" onclick="otvorNotifikacie()" title="Notifikácie">🔔<span id="notifBadge" class="notifbadge" style="display:none">0</span></button>
     <!-- Zapnúť sa to musí jedným klepnutím, práve keď ľudia vchádzajú do
          miestnosti — nie tromi cez menu. Preto ikona v lište, nie iba položka
@@ -1306,7 +1311,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.03-IO";  // mapová vetva proxy vyžaduje prihlásenie
+const APP_VERZIA = "2026.09.04-IP";  // jazda z lišty, názvy miest z mapy
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -2473,6 +2478,7 @@ function zobrazFirmu(){
   empty.classList.add("hidden");
   renderHomeStrip();
   renderNotifBadge();
+  nastavTlacidloJazdy();
   renderHero();
   vykresliDashboard();
   renderLauncher();
@@ -12808,7 +12814,25 @@ function gpsChyba(e){
 }
 
 // ── Beh ─────────────────────────────────────────────────────────────────────
+// Tlačidlo v lište sa kreslí len tomu, kto knihu jázd má. Prvok, ktorý by
+// väčšine ľudí len hlásil „nemáte to v pláne", miesto v lište nezaberá —
+// a to miesto je vzácne: po pridaní 📍 klesla rezerva na 375 px na nulu.
+//
+// Nestačí to samo o sebe: `jazdaSpusti` kontroluje plán aj tak, lebo vstupov
+// je viac (skratka na ploche, kniha jázd) a schované tlačidlo nie je obrana.
+function nastavTlacidloJazdy(){
+  const b=document.getElementById("quickJazda"); if(!b) return;
+  b.style.display = modulPovolenyPreModul("jazdy") ? "" : "none";
+}
+
 function jazdaSpusti(){
+  // Vstupov je viac (lišta, skratka na ploche, kniha jázd), takže kontroly
+  // sedia TU a nie pri každom tlačidle zvlášť. Rovnaká obrana ako pri
+  // priamom volaní `otvorApp("dph")` neplatiteľom.
+  if(!modulPovolenyPreModul("jazdy")){
+    alert("Kniha jázd nie je vo vašom pláne.\n\nMeranie jazdy by nemalo kam uložiť výsledok.");
+    return;
+  }
   if(!strazZapis("jazdy")) return;
   if(_jazda){ jazdaPanel(); return; }
   if(!gpsZdroj.dostupny()){ alert("Toto zariadenie polohu neposkytuje."); return; }
@@ -13054,6 +13078,53 @@ async function mapaVzdialenost(prvok){
     povedz("Spojenie s mapovou službou zlyhalo.");
   }finally{ if(prvok) prvok.disabled=false; }
 }
+// ── Názvy miest zo súradníc ─────────────────────────────────────────────────
+//  Doplní „Odkiaľ" a „Kam" z bodov meranej jazdy. Je to DRUHÁ cesta polohy
+//  von a líši sa od `mapaVzdialenost` v jednej podstatnej veci: tam sú
+//  súradnice vstupom do výpočtu vzdialenosti, tu odchádza poloha sama o sebe.
+//  Preto to `sukromie.html` menuje zvlášť a preto sa to deje len na stlačenie.
+//
+//  Výsledok sa VYPÍŠE DO POLÍ, neuloží. Človek ho vidí, môže prepísať a až
+//  uložením jazdy sa názov zapamätá do registra miest v zariadení.
+async function mapaNazvyMiest(prvok){
+  if(!_jazda || !_jazda.prvy){ return; }
+  if(!mapaSuhlas()) return;
+  const stav=document.getElementById("m_mapaStav");
+  const povedz=(t)=>{ if(stav) stav.innerHTML=t; };
+  if(!sb || !SUPABASE_URL){ povedz("Názvy z mapy potrebujú cloudový účet."); return; }
+  const token=await ziskajToken();
+  if(!token){ povedz(esc(CHYBA_SESSION)); return; }
+  if(prvok) prvok.disabled=true;
+  povedz("Hľadám názvy miest…");
+  const pytaj=async(bod)=>{
+    const res=await fetch(SUPABASE_URL+"/functions/v1/proxy",{
+      method:"POST",
+      headers:{"Content-Type":"application/json", Authorization:"Bearer "+token},
+      body:JSON.stringify({akcia:"miesto", lat:bod[0], lon:bod[1]})});
+    if(!res.ok) return null;
+    const d=await res.json();
+    return d.ok ? d : null;
+  };
+  try{
+    const z=await pytaj(_jazda.prvy);
+    const c=_jazda.posl ? await pytaj(_jazda.posl) : null;
+    // Doplní sa len do PRÁZDNEHO poľa — čo si človek napísal sám, sa
+    // neprepisuje. Pole existuje len vtedy, keď miesto ešte nie je známe.
+    const nasad=(id,d)=>{ const p=document.getElementById(id);
+      if(p && d && !String(p.value||"").trim()) p.value=d.nazov; };
+    nasad("m_miestoZ", z); nasad("m_miestoC", c);
+    jazdaTrasaAktualizuj();
+    if(!z && !c){ povedz("Mapa pre tieto body názov nevrátila. Napíšte ich ručne."); return; }
+    povedz((z?"Odkiaľ: <b>"+esc(z.nazov)+"</b>":"")
+      +(z&&c?"<br>":"")+(c?"Kam: <b>"+esc(c.nazov)+"</b>":"")
+      +"<br><span style=\"color:var(--ink-soft);font-size:11px\">"
+      +esc((z||c).uvedenie||"")+" · názvy môžete prepísať</span>");
+  }catch(e){
+    console.error("názvy miest z mapy:", e);
+    povedz("Spojenie s mapovou službou zlyhalo.");
+  }finally{ if(prvok) prvok.disabled=false; }
+}
+
 // Blok tlačidla do editora jazdy aj do záveru merania — jeden tvar na oboch
 // miestach, nech sa texty nerozídu.
 function mapaBlokHtml(){
@@ -13099,6 +13170,12 @@ function jazdaZaver(){
       Pomenujte miesto raz a appka ho nabudúce doplní sama. Názvy zostávajú v tomto telefóne.</div>`:""}
     ${poleMiesta("m_miestoZ","Odkiaľ",zn)}
     ${poleMiesta("m_miestoC","Kam",cn)}
+    ${(!zn||!cn)?`<div style="margin:-4px 0 12px">
+      <button type="button" class="aabtn" onclick="mapaNazvyMiest(this)">📍 Doplniť názvy z mapy</button>
+      <div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;line-height:1.5">
+        Súradnice začiatku a konca sa jednorazovo pošlú mapovej službe, ktorá vráti názov.
+        Návrh môžete prepísať.</div>
+    </div>`:""}
     <div class="mfield"><label>Trasa</label><input id="m_cesta" value="${esc(jazdaTrasaNavrh()||S.kjTrasaDefault||"")}" placeholder="napr. Trnava – Bratislava – Trnava"></div>
     <div class="mfield"><label>Účel</label><input id="m_ucel" value="${esc(U.ucel)}" placeholder="napr. stretnutie s klientom">
       ${U.zVykazu?`<div style="font-size:11.5px;color:var(--ink-soft);margin-top:5px">Prevzaté z výkazu prác na tento deň.</div>`:""}</div>
