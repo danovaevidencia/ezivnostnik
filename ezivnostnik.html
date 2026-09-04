@@ -1311,7 +1311,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.04-IT";  // ručné ID dokladu je pri zlyhanom QR hneď po ruke
+const APP_VERZIA = "2026.09.04-IU";  // pole na ID dokladu nevyzerá vyplnené, keď prázdne je
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -8035,10 +8035,21 @@ function odvodSadzbuDPH(bez, dph, zaloha){
 // UI: dotiahne doklad z FS a vyplní OCR formulár (partner, suma, IČO, IČ DPH, dátum)
 async function ekasaDoplnDoFormulara(receiptId){
   const stav=document.getElementById("ekasaStav");
+  const chyba=(t)=>{ if(stav){ stav.textContent=t; stav.style.color="var(--neg)"; } };
+  // 🔴 4. 9. 2026: klik na „Dotiahnuť z FS" s PRÁZDNYM poľom hlásil
+  // „proxy nenasadená alebo FS neodpovedá". Proxy pritom bežala — chýbal
+  // vstup. Jedna hláška na štyri rôzne príčiny je horšia než žiadna: posiela
+  // hľadať poruchu tam, kde nie je. Každý dôvod má odteraz vlastnú vetu.
+  const id=String(receiptId||"").trim().toUpperCase().replace(/\s+/g,"").replace(/^0-/,"O-");
+  if(!id){ chyba("Zadajte ID dokladu z bločku — začína O-."); return; }
+  if(!/^O-[0-9A-F]{32}$/.test(id)){
+    chyba("Toto nie je platné ID dokladu. Má tvar O- a za ním 32 znakov, len číslice a písmená A až F.");
+    return;
+  }
   if(stav){ stav.textContent="Načítavam z FS…"; stav.style.color="var(--ink-soft)"; }
-  const d=await ekasaDotiahni(receiptId);
+  const d=await ekasaDotiahni(id);
   if(!d){
-    if(stav){ stav.textContent="Nepodarilo sa (proxy nenasadená alebo FS neodpovedá)."; stav.style.color="var(--neg)"; }
+    chyba("Finančná správa neodpovedala. Skúste to o chvíľu znova — údaje môžete zatiaľ zadať ručne.");
     return;
   }
   // 🔴 4. 9. 2026: FS na neznáme ID odpovie „doklad neexistuje" a proxy to
@@ -23634,7 +23645,13 @@ async function spracujDokladSubor(file, setStav){
       const uidRaw=uidM[1].replace(/\s+/g,"").toUpperCase().replace(/^0-/,"O-");
       ekasa=parseEkasaQR(uidRaw);            // parseEkasaQR trvá na 32 hex znakoch
       // Dôvod musí ísť do R, nie do premennej — `R._qrChyba` je vyplnené vyššie.
-      if(!ekasa) R._qrChyba=(R._qrChyba?R._qrChyba+" · ":"")+"vytlačené UID sa prečítalo chybne ("+uidRaw.slice(0,12)+"…), nie je to platný tvar";
+      if(!ekasa){
+        R._qrChyba=(R._qrChyba?R._qrChyba+" · ":"")+"vytlačené UID sa prečítalo chybne ("+uidRaw.slice(0,12)+"…), nie je to platný tvar";
+        // Chybný odpis je aj tak lepší východiskový bod než prázdne pole:
+        // opraviť pár znakov na mobile je únosné, odpísať tridsaťdva nie.
+        // Riziko žiadne — nesprávne ID FS jednoducho nenájde.
+        R._uidZTextu=uidRaw;
+      }
     }
   }
   if(ekasa){ R.ekasaId=ekasa.ekasaId; R.ekasaOverUrl=ekasa.overUrl; if(ekasa.suma && !R.spolu) R.spolu=ekasa.suma; if(!R.cislo && ekasa.ekasaId) R.cislo=ekasa.ekasaId; R._druh="Bloček"; }
@@ -24147,7 +24164,7 @@ function otvorOcrVysledok(R){
     ${R.reverseCharge?`<div style="background:var(--sfc-info);color:#6b4fbf;font-size:12px;padding:9px 12px;border-radius:9px;margin-bottom:14px">🌍 <b>Zahraničná faktúra s prenesením daňovej povinnosti (reverse charge).</b> Označili sme ju ako zahraničnú — appka dopočíta slovenskú DPH 23% (samozdanenie) do výstupu aj odpočtu.</div>`:''}
     ${(!R.ekasaId && R._qrChyba)?`<div style="background:var(--sfc-warn);font-size:12px;padding:9px 12px;border-radius:9px;margin-bottom:14px;line-height:1.55">
       🔍 <b>QR kód sa na fotke nenašiel</b>, takže sumy sú z rozpoznávania textu — a to sa pri bločkoch mýli.
-      Ak doklad QR má, skúste ho odfotiť zblízka a rovno zhora.
+      Ak doklad QR má, <b>vyrovnajte ho</b> a odfoťte rovno zhora — pokrčený papier kód deformuje a to je častejšia príčina než zlé svetlo či vzdialenosť.
       <span style="display:block;color:var(--ink-soft);font-size:11px;margin-top:4px">${esc(R._qrChyba)}</span></div>`:""}
     ${R.ekasaId?`<div style="background:var(--sfc-pos);color:var(--pos-deep,var(--ink-pos));font-size:12px;padding:9px 12px;border-radius:9px;margin-bottom:14px">🧾 <b>Rozpoznaný eKasa bloček.</b> ID dokladu: <span style="font-family:monospace;font-size:11px">${esc(R.ekasaId)}</span><br>
       <div style="margin-top:7px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -24159,7 +24176,8 @@ function otvorOcrVysledok(R){
       <details ${R._qrChyba?"open":""} style="background:var(--sfc-info);border-radius:9px;padding:9px 12px;margin-bottom:14px">
         <summary style="cursor:pointer;font-size:12px;color:var(--brand);font-weight:600;list-style:none">🧾 Doplniť z Finančnej správy (zadať ID dokladu ručne)</summary>
         <div style="font-size:11.5px;color:var(--ink-soft);margin:8px 0">QR sa nepodarilo prečítať z fotky. ID dokladu (UID) nájdete na bločku dole, začína <b>O-</b>. Odpíšte ho a dotiahneme sumu, rozpis DPH aj dodávateľa priamo z FS — presne, bez hádania z OCR.</div>
-        <input id="m_ekasaIdRucne" placeholder="O-A254A710A430493694A710A430793632" style="width:100%;font-family:monospace;font-size:11px;box-sizing:border-box">
+        <input id="m_ekasaIdRucne" value="${esc(R._uidZTextu||"")}" placeholder="sem odpíšte ID z bločku" autocapitalize="characters" autocomplete="off" spellcheck="false" style="width:100%;font-family:monospace;font-size:11px;box-sizing:border-box">
+        ${R._uidZTextu?`<div style="font-size:11px;color:var(--ink-soft);margin-top:5px">Predvyplnené tým, čo sa podarilo prečítať z fotky — <b>skontrolujte znaky</b>, na pokrčenom doklade sa OCR mýli. Sú v ňom len číslice a písmená A až F.</div>`:''}
         <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <button type="button" class="aabtn pri" style="font-size:12px;padding:5px 12px" onclick="ekasaDoplnDoFormulara((document.getElementById('m_ekasaIdRucne').value||'').trim())">⬇ Dotiahnuť z FS</button>
           <span id="ekasaStav" style="font-size:11.5px;color:var(--ink-soft)"></span>
