@@ -1311,7 +1311,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.05-JC";  // jazda dostane mesiac, inak vypadne z ročných km
+const APP_VERZIA = "2026.09.05-JD";  // ročná kontrola hlási doklad bez rozpísanej sumy
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -20105,6 +20105,54 @@ function rocnaKontrola(rok){
         daSa ? {l:"Doplniť IČ DPH do "+daSa+" dokladov", fn:"doplnPartnerovDoVydavkov()"} : null);
     }
   }
+
+  // ── 7a. Doklad, ktorého sumy nedávajú dokopy ──
+  //
+  // 🔴 Nájdené 5. 9. 2026 nezávislým prepočtom ostrých dát: súčet `bez` a `DPH`
+  // za rok nesedel so súčtom `spolu` o 319,40 €. Za rozdielom boli dva doklady:
+  //
+  //     24. 2.   bez 36,50  DPH 8,40   spolu   0,00
+  //     21. 2.   bez  0,00  DPH 0,00   spolu 364,30
+  //
+  // Ani jeden appka nehlásila, hoci oba stoja peniaze:
+  //
+  //  · Doklad BEZ ROZPISU (druhý) sa neuplatní ani ako výdavok, ani na odpočet
+  //    DPH. Zaplatené je, uplatnené nič — a v evidencii to vyzerá normálne.
+  //  · Doklad BEZ CELKOVEJ SUMY (prvý) sa nedá spárovať so žiadnou platbou
+  //    z banky, takže ostane navždy „neuhradený".
+  //
+  // Je to iná trieda než `_sumyNesedia` pri OCR: to hlási rozpor pri čítaní
+  // dokladu, kým tu ide o už uložené záznamy, ktoré si nikto znova neotvorí.
+  try{
+    const bezRozpisu=[], bezSpolu=[], rozpor=[];
+    vydavky.forEach(x=>{
+      const b=+x.bez||0, dp=+x.dph||0, sp=+x.spolu||0;
+      if(sp>0 && b+dp===0) bezRozpisu.push(x);
+      else if(b+dp>0 && sp===0) bezSpolu.push(x);
+      else if(b+dp>0 && sp>0 && Math.abs(r2(b+dp)-r2(sp))>0.02) rozpor.push(x);
+    });
+    const popis=x=>(x.datum||"—")+" · "+(x.partner||x.cislo||"—")+" · "
+      +"bez "+eur(+x.bez||0)+" + DPH "+eur(+x.dph||0)+" = spolu "+eur(+x.spolu||0);
+    if(bezRozpisu.length){
+      const suma=r2(bezRozpisu.reduce((a,x)=>a+(+x.spolu||0),0));
+      pridaj("chyba","bezRozpisu", bezRozpisu.length+" dokladov nemá rozpísanú sumu ("+eur(suma)+")",
+        "Základ ani DPH nie sú vyplnené, takže sa doklad neuplatní ako výdavok a "
+        +"neuplatní sa z neho ani odpočet DPH. Peniaze sú minuté, v priznaní sa neobjavia.",
+        bezRozpisu.slice(0,8).map(popis));
+    }
+    if(bezSpolu.length){
+      pridaj("pozor","bezCelkovej", bezSpolu.length+" dokladov nemá celkovú sumu",
+        "Základ a DPH sú vyplnené, celková suma je nula. Taký doklad sa nedá spárovať "
+        +"so žiadnou platbou z banky a ostane navždy neuhradený.",
+        bezSpolu.slice(0,8).map(popis));
+    }
+    if(rozpor.length){
+      pridaj("pozor","sumyNesedia", rozpor.length+" dokladov má sumy, ktoré nedávajú dokopy",
+        "Základ plus DPH sa nerovná celkovej sume. Buď je niektoré číslo prepísané zle, "
+        +"alebo je na doklade viac sadzieb DPH — v druhom prípade to zaškrtnite v doklade.",
+        rozpor.slice(0,8).map(popis));
+    }
+  }catch(e){ zlyhalo("sumy dokladov", e); }
 
   // ── 7b. Účet dodávateľa neoznámený Finančnej správe (§ 69 ods. 14) ──
   // Ručenie za daň: kto zaplatí na účet, ktorý dodávateľ FS neoznámil, ručí
