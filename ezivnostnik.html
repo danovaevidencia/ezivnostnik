@@ -1311,7 +1311,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.05-JU";  // príjem patrí do roka podľa úhrady, DPH podľa dodania
+const APP_VERZIA = "2026.09.05-JV";  // kniha pohľadávok a záväzkov: stav ku dňu, aj prenesené doklady
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -16643,6 +16643,37 @@ function xkBuild(X){
     const ws=X.utils.aoa_to_sheet(aoa); ws['!cols']=[{wch:12},{wch:28},{wch:14},{wch:12},{wch:11},{wch:13},{wch:12},{wch:13},{wch:13}];
     ws['!merges']=[{s:{r:0,c:0},e:{r:0,c:4}}]; ws['!freeze']={xSplit:0,ySplit:3}; ws['!rows']=[{hpt:22},{hpt:6},{hpt:24}];
     X.utils.book_append_sheet(wb,ws,"Faktúry"); }
+  // --- Kniha pohľadávok a kniha záväzkov (kap. 86) ---
+  // Časť dlhu z kap. 33.3: doteraz sa z exportu nedalo vyčítať, čo je
+  // zaplatené a kedy — hárok Faktúry mal len „Zaplatená / Nezaplatená".
+  const knRoky=[...new Set([
+    ...(D.faktury||[]).map(f=>String(f.datum||f.vystavenie||"").slice(0,4)),
+    ...(D.vydavky||[]).filter(x=>String(x.druh||"")==="Došlá faktúra").map(x=>String(x.datum||"").slice(0,4))
+  ].filter(y=>/^\d{4}$/.test(y)))].sort();
+  knRoky.forEach(rk=>{
+    ["faktura","vydavok"].forEach(typ=>{
+      const K=knihaDokladov(typ, rk, knihaKuDnu(rk));
+      if(!K.riadky.length) return;
+      const aoa=[[xkCell(K.nazov+" "+rk,S.title)],
+        [xkCell((D.meta&&D.meta.nazov||"")+" · IČO "+(D.meta&&D.meta.ico||"")+" · stav k "+fmtSk(K.kuDnu),S.sub)],[],
+        ["Číslo","Partner","IČO","Dátum","Splatnosť","Suma","Uhradené dňa","Uhradená suma","Zostatok","Stav"]
+          .map(x=>xkCell(x,S.hdr))];
+      K.riadky.forEach((r,i)=>{ const z=i%2===1, sc=z?S.cellZ:S.cell, se=z?S.eurZ:S.eur;
+        aoa.push([xkCell(r.cislo,sc),xkCell(r.partner,sc),xkCell(r.ico,sc),
+          xkCell(fmtSk(r.datum),sc),xkCell(r.splatnost?fmtSk(r.splatnost):"",sc),
+          xkCell(r.suma,se),xkCell(r.datumUhrady?fmtSk(r.datumUhrady):"",sc),
+          xkCell(r.zaplatene,se),xkCell(r.zostatok,se),xkCell(knihaStavText(r),sc)]);
+      });
+      aoa.push([xkCell("Spolu",S.foot),xkCell("",S.foot),xkCell("",S.foot),xkCell("",S.foot),xkCell("",S.foot),
+        xkCell(K.sumy.suma,S.footE),xkCell("",S.foot),xkCell(K.sumy.zaplatene,S.footE),
+        xkCell(K.sumy.zostatok,S.footE),xkCell("",S.foot)]);
+      const ws=X.utils.aoa_to_sheet(aoa);
+      ws['!cols']=[{wch:14},{wch:26},{wch:11},{wch:12},{wch:12},{wch:13},{wch:13},{wch:14},{wch:13},{wch:22}];
+      ws['!merges']=[{s:{r:0,c:0},e:{r:0,c:5}},{s:{r:1,c:0},e:{r:1,c:9}}];
+      ws['!freeze']={xSplit:1,ySplit:4}; ws['!rows']=[{hpt:22},{hpt:14},{hpt:6},{hpt:26}];
+      X.utils.book_append_sheet(wb,ws,xkSheetName((typ==="faktura"?"Pohľadávky ":"Záväzky ")+rk));
+    });
+  });
   // --- Výdavky (po rokoch) ---
   // Hárok bol pôvodne jeden pre všetky roky s jediným súčtom, ktorý sa nedal
   // naviazať na žiadny daňový hárok. Odteraz jeden hárok na rok a dva stĺpce
@@ -26254,6 +26285,110 @@ function uhradyPopis(typ, cislo, kratky){
 }
 
 // stav dokladu v ľudskej reči
+// ═══════════════════════════════════════════════════════════════
+//  KNIHA POHĽADÁVOK A KNIHA ZÁVÄZKOV (kap. 86)
+//  Jeden zdroj pre obrazovku, XLSX aj PDF — tri zostavy z troch výpočtov by
+//  si o tom istom doklade skôr či neskôr povedali tri rôzne veci.
+//
+//  Kniha nie je prehľad roka, je to STAV KU DŇU. Preto:
+//   · úhrady s dátumom po `kuDnu` sa nezapočítavajú — inak sa ňou nedá
+//     doložiť, ako to vyzeralo k dátumu, na ktorý sa niekto pýta
+//   · nesie aj neuhradené doklady zo STARŠÍCH rokov; záväzok sa 1. januára
+//     neresetuje a KROSova kniha ich má z toho istého dôvodu
+//
+//  Záväzky sú LEN došlé faktúry (rozhodnutie Romana). Bloček zaplatený na
+//  mieste záväzkom nikdy nebol a knihu by zaplnil riadkami, ktoré vznikli
+//  a zanikli v tej istej sekunde.
+// ═══════════════════════════════════════════════════════════════
+function knihaDokladov(typ, rok, kuDnu){
+  const R=String(rok||new Date().getFullYear());
+  const den=String(kuDnu||"").slice(0,10) || (R+"-12-31");
+  const zoznam = typ==="faktura"
+    ? (firmaData.faktury||[])
+    : (firmaData.vydavky||[]).filter(x=>String(x.druh||"")==="Došlá faktúra");
+  const riadky=[];
+  zoznam.forEach(d=>{
+    const vznik=String((typ==="faktura" ? (d.datum||d.vystavenie) : d.datum)||"").slice(0,10);
+    if(!vznik || vznik>den) return;                 // doklad ku dňu ešte neexistoval
+    const kluc=dokladKluc(d); if(!kluc) return;
+    const suma=r2(+d.spolu||+d.bez||0);
+    if(!(suma>0)) return;
+
+    // Úhrady KU DŇU — z bankových väzieb. Ručné potvrdenie sa berie zvlášť
+    // nižšie, lebo nenesie deň platby, len deň odkliknutia (kap. 86.5).
+    let zaplatene=0, poslednaUhrada="", doZaciatkuRoka=0;
+    uhradyDokladuPohyby(typ, kluc).forEach(p=>{
+      const dp=String(p.datum||"").slice(0,10);
+      if(!dp) return;
+      if(dp < R+"-01-01") doZaciatkuRoka=r2(doZaciatkuRoka+(+p.suma||0)+(+p.zaokr||0));
+      if(dp>den) return;
+      zaplatene=r2(zaplatene+(+p.suma||0)+(+p.zaokr||0));
+      if(dp>poslednaUhrada) poslednaUhrada=dp;
+    });
+
+    // Ručne potvrdená úhrada: suma áno, DÁTUM NIE. `oznacDokladUhradeny`
+    // zapisuje dnešok, nie deň platby — vytlačiť ho do dokumentu pre kontrolu
+    // by bolo tvrdenie bez opory (kap. 85.5).
+    //
+    // Berie sa VÝHRADNE ručné tvrdenie. `dokladJeUhradeny` sa použiť nedá:
+    // nepozná dátum, takže doklad zaplatený až PO dni knihy by sa v nej javil
+    // ako vyrovnaný a stav ku dňu by prestal platiť. A stav „rozpor" sa za
+    // úhradu nepovažuje vôbec — výpis to obdobie pokrýva a platbu neobsahuje,
+    // takže do dokumentu pre kontrolu nepatrí ako zaplatené.
+    let rucne=false;
+    if(zaplatene < r2(suma-0.005)){
+      const st=uhradaStav(typ, kluc);
+      if(st && (st.zdroj==="rucne" || st.zdroj==="legacy")
+            && (st.stav==="rucne" || st.stav==="zaplatene")){
+        zaplatene=suma; rucne=true;
+      }
+    }
+    const zostatok=r2(suma-zaplatene);
+
+    // Rok knihy = doklady tohto roka PLUS staršie, ktoré k 1. januáru neboli
+    // vyrovnané. Nie tie, ktoré nie sú vyrovnané dnes: kniha musí ukázať aj
+    // vyrovnanie prenesených položiek — KROSova kniha za 2026 obsahovala
+    // štyri doklady z 2025 práve preto, že sa v tom roku doplácali.
+    //
+    // Ručne vyrovnaný starý doklad sa neprenáša: nevieme, kedy sa zaplatil,
+    // takže by v knihe visel navždy a nebolo by z neho čo prečítať.
+    const zRoka=vznik.slice(0,4)===R;
+    if(!zRoka && (rucne || r2(suma-doZaciatkuRoka)<=0.005)) return;
+
+    const spl=String(d.splatnost||"").slice(0,10);
+    riadky.push({
+      cislo:d.cislo||"—",
+      partner: typ==="faktura"
+        ? ((typeof d.odberatel==="string") ? d.odberatel : ((d.odberatel&&d.odberatel.nazov)||""))
+        : (d.partner||""),
+      ico:d.ico||d.dodavatelIco||"",
+      datum:vznik, splatnost:spl, suma, zaplatene, zostatok,
+      datumUhrady: rucne ? "" : poslednaUhrada,
+      rucne,
+      prenesene: !zRoka,
+      poSplat: zostatok>0.005 && !!spl && spl<den
+    });
+  });
+  riadky.sort((a,b)=>String(a.datum).localeCompare(String(b.datum)) || String(a.cislo).localeCompare(String(b.cislo)));
+  const sum=k=>r2(riadky.reduce((a,x)=>a+x[k],0));
+  return {typ, rok:R, kuDnu:den, riadky,
+    nazov: typ==="faktura" ? "Kniha pohľadávok" : "Kniha záväzkov",
+    sumy:{suma:sum("suma"), zaplatene:sum("zaplatene"), zostatok:sum("zostatok")},
+    poSplat:riadky.filter(x=>x.poSplat).length,
+    prenesenych:riadky.filter(x=>x.prenesene).length};
+}
+// Ku ktorému dňu sa kniha zostavuje. Bežiaci rok → dnes (staršie dátumy by
+// tvrdili stav, ktorý ešte nenastal), uzavretý rok → jeho koniec.
+function knihaKuDnu(rok){
+  const dnes=new Date().toISOString().slice(0,10);
+  return String(rok)===dnes.slice(0,4) ? dnes : (String(rok)+"-12-31");
+}
+function knihaStavText(r){
+  const zaklad = r.zostatok<=0.005
+    ? ("uhradené"+(r.rucne?" (ručne potvrdené)":""))
+    : (r.zaplatene>0.005 ? "čiastočne uhradené" : "neuhradené");
+  return zaklad + (r.poSplat?" · po splatnosti":"") + (r.prenesene?" · z minulého roka":"");
+}
 function dokladStavUhrady(typ, cislo){
   const celkom=dokladSuma(typ,cislo), zapl=dokladUhradene(typ,cislo), zost=r2(celkom-zapl);
   if(celkom<=0) return {stav:"neznamy", text:"", zost:0};
