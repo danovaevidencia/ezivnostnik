@@ -1311,7 +1311,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.05-JG";  // export KV varuje pri chýbajúcom IČ DPH dodávateľa
+const APP_VERZIA = "2026.09.05-JH";  // pri zálohe a vyúčtovaní sa počíta, koľkokrát ide DPH
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -19936,15 +19936,27 @@ function rocnaKontrola(rok){
     if(!kto) return;
     (denKluce[suma+"|"+kto+"|"+den]=denKluce[suma+"|"+kto+"|"+den]||[]).push(x);
   });
-  const dvojmo=Object.values(denKluce).filter(g=>g.length>1
-      && new Set(g.map(x=>String(x.cislo||""))).size>1)     // rovnaké číslo rieši kontrola vyššie
-    .map(g=>(g[0].partner||"—")+" · "+eur(g[0].spolu)+" · "+fmtDatum(g[0].datum)
-      +" · č. "+g.map(x=>x.cislo||"—").join(" a "));
-  if(dvojmo.length) pridaj("pozor","dvojmoVDen", dvojmo.length+"× dva doklady na tú istú sumu v ten istý deň",
+  // Pri dvojici sa dá spočítať, KOĽKOKRÁT je DPH uplatnená — a to je to, na
+  // čom naozaj záleží. Doložené 5. 9. 2026 na dvojici NAY v KROSe: preddavková
+  // faktúra mala sadzbu „N" (bez odpočtu) a vyúčtovacia mala sadzbu 23 % aj
+  // oddiel KV, ale nulové sumy. DPH sa teda neuplatnila ANI RAZ a 68,12 €
+  // prepadlo. Hlásenie „odpočítajte si len z jedného" by na to neupozornilo.
+  const skupiny=Object.values(denKluce).filter(g=>g.length>1
+      && new Set(g.map(x=>String(x.cislo||""))).size>1);    // rovnaké číslo rieši kontrola vyššie
+  const dvojmo=skupiny.map(g=>{
+    const sDph=g.filter(x=>r2(+x.dph||0)>0).length;
+    return (g[0].partner||"—")+" · "+eur(g[0].spolu)+" · "+fmtDatum(g[0].datum)
+      +" · č. "+g.map(x=>x.cislo||"—").join(" a ")
+      +(sDph===0 ? " — DPH neuplatnená ani raz" : sDph>1 ? " — DPH uplatnená DVAKRÁT" : "");
+  });
+  const ziadnaDph=skupiny.filter(g=>!g.some(x=>r2(+x.dph||0)>0)).length;
+  if(dvojmo.length) pridaj(ziadnaDph?"chyba":"pozor","dvojmoVDen",
+    dvojmo.length+"× dva doklady na tú istú sumu v ten istý deň"
+      +(ziadnaDph?", z toho "+ziadnaDph+"× bez uplatnenej DPH":""),
     "Rovnaký dodávateľ, rovnaký deň a rovnaká suma, ale iné číslo dokladu. Býva to zálohová "
     +"a vyúčtovacia faktúra k jednému nákupu — vtedy je to v poriadku, len sa suma počíta dvakrát "
-    +"v prehľade výdavkov. Skontrolujte, že DPH si odpočítavate len z JEDNÉHO z nich; ak sú to dva "
-    +"samostatné nákupy, nechajte ich tak.",
+    +"v prehľade výdavkov. DPH sa z takej dvojice odpočítava PRÁVE RAZ: keď ani na jednom doklade "
+    +"nie je, odpočet prepadol; keď je na oboch, uplatnili ste ho dvakrát.",
     dvojmo);
 
   // ── 3b. Rovnaké číslo pri RÔZNYCH sumách ──
