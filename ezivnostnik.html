@@ -1311,7 +1311,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.05-IX";  // vlastný fotoaparát skenuje QR už počas mierenia
+const APP_VERZIA = "2026.09.05-IY";  // náhľad ľahký, fotka plná — viac pokusov o QR
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -24018,10 +24018,12 @@ async function odfotDoklad(){
   const track=stream.getVideoTracks()[0];
   let cap={};
   try{ cap=track.getCapabilities(); }catch(e){ console.warn("getCapabilities:", e); }
-  if(cap.width && cap.width.max){
-    try{ await track.applyConstraints({width:{ideal:cap.width.max}, height:{ideal:cap.height.max}}); }
-    catch(e){ console.warn("applyConstraints:", e); }
-  }
+  // Náhľad zostáva ĽAHKÝ. Zmerané 5. 9. 2026: pri náhľade 720x1280 vráti
+  // `takePhoto()` aj tak 3060x4080 a 2648 kB — plné rozlíšenie fotky teda od
+  // náhľadu nezávisí. A keďže celý zmysel skenovania zo živého obrazu je POČET
+  // POKUSOV, je lepšie stihnúť viac snímok v menšom rozlíšení než málo
+  // dvanásťmegapixelových. Zdvíhať sa oplatí len pre zálohu cez plátno, ktorá
+  // rozlíšenie z náhľadu naozaj berie.
   video.srcObject=stream;
   try{ await video.play(); }catch(e){ console.warn("odfotDoklad — video.play:", e); }
 
@@ -24086,9 +24088,13 @@ async function odfotDoklad(){
       }
     }catch(e){ console.warn("takePhoto:", e); }
     if(!blob){
-      // Záloha cez plátno. Rozlíšenie je to isté, kompresia horšia — ale
-      // doklad radšej v horšej kvalite než žiadny.
+      // Záloha cez plátno. Tá rozlíšenie z náhľadu berie, tak ho tesne pred
+      // snímkou zdvihneme na maximum kamery a počkáme, kým sa prepne.
       try{
+        if(cap.width && cap.width.max){
+          await track.applyConstraints({width:{ideal:cap.width.max}, height:{ideal:cap.height.max}});
+          await new Promise(r=>setTimeout(r,500));
+        }
         const s=track.getSettings();
         platno.width=s.width; platno.height=s.height;
         platno.getContext("2d").drawImage(video,0,0,platno.width,platno.height);
