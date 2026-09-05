@@ -1311,7 +1311,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.05-JD";  // ročná kontrola hlási doklad bez rozpísanej sumy
+const APP_VERZIA = "2026.09.05-JE";  // KV DPH bez IČ DPH dodávateľa varuje pred stiahnutím
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -19906,6 +19906,36 @@ function rocnaKontrola(rok){
   if(dupl.length) pridaj("pozor","duplicity", dupl.length+" možných duplicít vo výdavkoch",
     "Rovnaké číslo dokladu, suma aj dodávateľ vo viacerých mesiacoch.", dupl);
 
+  // ── 3a. Ten istý nákup zaevidovaný DVAKRÁT pod iným číslom ──
+  //
+  // 🔴 Nájdené 5. 9. 2026 porovnaním s výkazom z KROSu: NAY a.s., 21. 2.,
+  // 364,30 € — dvakrát, raz ako „5426097939" so správnym rozpisom a raz ako
+  // „6840601675" s prázdnym základom a poznámkou „oprava obchodného mena".
+  // Vyzerá to na opätovné zadanie namiesto úpravy pôvodného dokladu.
+  //
+  // Kontrola vyššie porovnáva ČÍSLO dokladu, takže dvojica s rôznymi číslami
+  // jej unikne — a práve tak duplicita najčastejšie vzniká.
+  //
+  // Zhoda dodávateľa, dňa a sumy je silná stopa, nie dôkaz: dva rovnaké nákupy
+  // v jeden deň sa stať môžu. Preto „pozor" a nie „chyba" — appka sa pýta,
+  // nezakazuje.
+  const denKluce={};
+  vydavky.forEach(x=>{
+    const suma=r2(+x.spolu||0); if(suma<=0) return;
+    const den=String(x.datum||"").slice(0,10); if(!den) return;
+    const kto=String(x.dodavatelIco||x.partner||"").toLowerCase().replace(/\s/g,"");
+    if(!kto) return;
+    (denKluce[suma+"|"+kto+"|"+den]=denKluce[suma+"|"+kto+"|"+den]||[]).push(x);
+  });
+  const dvojmo=Object.values(denKluce).filter(g=>g.length>1
+      && new Set(g.map(x=>String(x.cislo||""))).size>1)     // rovnaké číslo rieši kontrola vyššie
+    .map(g=>(g[0].partner||"—")+" · "+eur(g[0].spolu)+" · "+fmtDatum(g[0].datum)
+      +" · č. "+g.map(x=>x.cislo||"—").join(" a "));
+  if(dvojmo.length) pridaj("pozor","dvojmoVDen", dvojmo.length+" nákupov je zaevidovaných dvakrát v ten istý deň",
+    "Rovnaký dodávateľ, rovnaký deň a rovnaká suma, ale iné číslo dokladu — tak vzniká duplicita, "
+    +"keď sa doklad zadá znova namiesto opravy pôvodného. Ak sú to naozaj dva nákupy, nechajte ich tak.",
+    dvojmo);
+
   // ── 3b. Rovnaké číslo pri RÔZNYCH sumách ──
   //
   // Toto nie je duplicita — je to horšie. Appka identifikuje doklad ČÍSLOM,
@@ -21512,7 +21542,28 @@ function dphGenerujDP(mk){
 telo+`\r\n</telo>\r\n</dokument>\r\n`;
 }
 
-function exportKVDPH(mk){ downloadBlob(new Blob([dphGenerujKV(mk)],{type:"application/xml"}),"kv_dph_"+mk+".xml"); }
+// 🔴 5. 9. 2026: porovnanie s výkazom z KROSu za február ukázalo, že appka
+// vyexportuje B2 riadky BEZ `Dod`, teda bez IČ DPH dodávateľa. KROS ho má na
+// všetkých siedmich, appka na jednom z ôsmich. Kontrolný výkaz bez IČ DPH
+// dodávateľa Finančná správa neprijme — a človek sa to dozvie až od nej.
+//
+// Ročná kontrola to hlási („27 dokladov si odpočítava DPH bez IČ DPH"), lenže
+// to je iná obrazovka a iný okamih. Varovanie musí prísť TAM, kde sa súbor
+// sťahuje, inak sa exportuje výkaz, ktorý sa nedá podať.
+function exportKVDPH(mk){
+  const xml=dphGenerujKV(mk);
+  const b2=xml.split("<B2 ").slice(1);
+  const bezDod=b2.filter(r=>r.indexOf(' Dod="')<0 || r.indexOf(' Dod=""')>=0);
+  if(bezDod.length){
+    const dan=bezDod.reduce((a,r)=>{ const m=r.match(/ D="([\d.]+)"/); return a+(m?parseFloat(m[1]):0); },0);
+    if(!confirm("⚠ "+bezDod.length+" z "+b2.length+" riadkov oddielu B.2 nemá IČ DPH dodávateľa"
+      +(dan?" (odpočet "+eur(r2(dan))+")":"")+".\n\n"
+      +"Finančná správa taký kontrolný výkaz odmietne. Doplňte IČ DPH v dokladoch — "
+      +"pomôže tlačidlo „Skontrolovať / doplniť z registra“ v doklade.\n\n"
+      +"Stiahnuť aj tak?")) return;
+  }
+  downloadBlob(new Blob([xml],{type:"application/xml"}),"kv_dph_"+mk+".xml");
+}
 function exportDPDPH(mk){ downloadBlob(new Blob([dphGenerujDP(mk)],{type:"application/xml"}),"dp_dph_"+mk+".xml"); }
 
 // ═══════════════════════════════════════════════════════════════════════════
