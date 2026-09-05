@@ -1311,7 +1311,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.04-IW";  // naskenovaný QR zruší varovanie a ostane na doklade
+const APP_VERZIA = "2026.09.05-IX";  // vlastný fotoaparát skenuje QR už počas mierenia
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -23494,7 +23494,7 @@ function rdVyber(typ){
   else if(typ==="email") otvorCakajuce();
   else ocrVydavokFile();
 }
-function ocrVydavok(){ document.getElementById("ocrInput").click(); }       // kamera
+function ocrVydavok(){ odfotDoklad(); }   // vlastný fotoaparát so skenovaním QR
 function ocrVydavokFile(){ document.getElementById("ocrInputFile").click(); } // PDF/súbor z úložiska
 
 // ── HROMADNÝ IMPORT FAKTÚR Z PDF (Release 3) ──
@@ -23558,7 +23558,7 @@ function najdiDuplicityVydavku(nov, ignorujId){
 }
 // ═══ SPOLOČNÉ spracovanie jedného dokladu (súbor → R) — používa jednorazový AJ hromadný import ═══
 // Zabezpečuje rovnakú kvalitu: PDF text → OCR fallback pri skenoch → eKasa QR/UID → parse → register
-async function spracujDokladSubor(file, setStav){
+async function spracujDokladSubor(file, setStav, qrVopred){
   setStav = setStav || (()=>{});
   const jeXml=/\.xml$/i.test(file.name) || file.type==="application/xml" || file.type==="text/xml";
   // e-faktúra (UBL/ISDOC XML) — presné dáta, netreba OCR ani register
@@ -23609,7 +23609,14 @@ async function spracujDokladSubor(file, setStav){
     // obrázok: najprv eKasa QR (presnejšie než OCR), potom OCR text
     setStav("Hľadám QR kód dokladu…");
     let qrUhol=null;
-    try{
+    // Kód prečítaný ZO ŽIVÉHO OBRAZU pri mierení má prednosť pred lúštením
+    // uloženej snímky — a je to jediný spôsob, ako ho na pokrčenom bločku
+    // dostať vôbec (kap. 77.7). Fotka slúži na archív a na ostatné polia.
+    if(qrVopred){
+      ekasa=parseEkasaQR(qrVopred);
+      if(!ekasa) pbs=await dekodujPayBySquare(qrVopred);
+    }
+    if(!ekasa && !pbs) try{
       const qr=await precitajQRzObrazka(file);
       if(qr){
         qrUhol=qr.uhol;
@@ -23953,6 +23960,148 @@ async function skenujQRkamerou(){
   });
 }
 
+// ── VLASTNÁ OBRAZOVKA NA FOTENIE DOKLADU ──────────────────────────────────
+//
+// Systémový fotoaparát fotku spraví, ale QR nám nedá — a z uloženej snímky
+// sa pokrčený bloček prečítať nedá (kap. 77.7). Príznak bol pritom celý čas
+// na očiach: natívny fotoaparát kód NAŠIEL a ponúkol „Skenovať", kým appka
+// nad tou istou fotkou zlyhala.
+//
+// Preto fotíme sami: jeden obraz, ktorý QR skenuje UŽ POČAS MIERENIA, a
+// spúšť, ktorá uloží doklad do archívu. Tri kroky (odfoť → appka zlyhá →
+// namier znova) sa tým zmenia na jeden.
+//
+// Zmerané na Samsungu 5. 9. 2026, a bez toho by sa to stavať nemalo:
+//     maximum kamery      4080 × 3060   (systémový fotoaparát 4000 × 3000)
+//     ImageCapture        4080 × 3060, 2367 kB, 577 ms
+//     prisvietenie        áno
+// Rozlíšenie ani veľkosť súboru sa teda oproti systémovému fotoaparátu
+// nestrácajú. Pozor na jednu vec: požiadavka na 4096×3072 rovno pri pripojení
+// pošle Chromium na kameru „2", ktorú Samsung nepúšťa („disabled by policy").
+// Pripojiť sa treba skromne a rozlíšenie zdvihnúť až cez applyConstraints.
+async function odfotDoklad(){
+  // Bez kamery v prehliadači (počítač, staršie systémy) ostáva pôvodná cesta.
+  if(!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia) || !window.isSecureContext){
+    document.getElementById("ocrInput").click();
+    return;
+  }
+  zavriSkener();
+  const box=document.createElement("div");
+  box.id="qrSkener";
+  box.style.cssText="position:fixed;inset:0;z-index:99999;background:#000;display:flex;flex-direction:column";
+  box.innerHTML=
+    '<video id="qrVideo" playsinline muted style="flex:1;width:100%;object-fit:cover;background:#000"></video>'
+   +'<div style="position:absolute;top:0;left:0;right:0;padding:14px 16px;background:linear-gradient(#000c,#0000);color:#fff;font-size:13px;line-height:1.5">'
+   +'Zamierte na celý doklad. <b>QR kód hľadáme priebežne</b> už teraz — keď ho nájdeme, dáme vedieť.'
+   +'</div>'
+   +'<div id="qrSkenStav" style="position:absolute;top:78px;left:16px;right:16px;text-align:center;color:#fff;font-size:12.5px;text-shadow:0 1px 3px #000"></div>'
+   +'<div style="position:absolute;bottom:0;left:0;right:0;padding:18px 16px 26px;display:flex;gap:14px;align-items:center;justify-content:space-between;background:linear-gradient(#0000,#000c)">'
+   +'<button type="button" id="qrZrus" style="padding:11px 18px;font-size:14px;border-radius:10px;border:0;background:#ffffff33;color:#fff">Zrušiť</button>'
+   +'<button type="button" id="qrSpust" aria-label="Odfotiť" style="width:74px;height:74px;border-radius:50%;border:5px solid #ffffff66;background:#fff"></button>'
+   +'<button type="button" id="qrSvetlo" style="padding:11px 18px;font-size:14px;border-radius:10px;border:0;background:#ffffff33;color:#fff">💡</button>'
+   +'</div>';
+  document.body.appendChild(box);
+  const video=box.querySelector("#qrVideo");
+  const stav=box.querySelector("#qrSkenStav");
+
+  let stream=null;
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({
+      video:{ facingMode:{ideal:"environment"}, width:{ideal:1920}, height:{ideal:1080} }, audio:false });
+  }catch(e){
+    zavriSkener();
+    console.error("odfotDoklad — kamera:", e);
+    // Kamera sa nedá otvoriť? Doklad sa musí dať odfotiť aj tak.
+    document.getElementById("ocrInput").click();
+    return;
+  }
+  const track=stream.getVideoTracks()[0];
+  let cap={};
+  try{ cap=track.getCapabilities(); }catch(e){ console.warn("getCapabilities:", e); }
+  if(cap.width && cap.width.max){
+    try{ await track.applyConstraints({width:{ideal:cap.width.max}, height:{ideal:cap.height.max}}); }
+    catch(e){ console.warn("applyConstraints:", e); }
+  }
+  video.srcObject=stream;
+  try{ await video.play(); }catch(e){ console.warn("odfotDoklad — video.play:", e); }
+
+  // prisvietenie — na bločkoch v aute alebo večer rozhoduje
+  const tlSvetlo=box.querySelector("#qrSvetlo");
+  let svieti=false;
+  if(!("torch" in cap)) tlSvetlo.style.visibility="hidden";
+  tlSvetlo.onclick=async()=>{
+    try{ svieti=!svieti; await track.applyConstraints({advanced:[{torch:svieti}]});
+      tlSvetlo.style.background=svieti?"#fff":"#ffffff33"; tlSvetlo.style.color=svieti?"#111":"#fff";
+    }catch(e){ console.warn("torch:", e); }
+  };
+
+  let qrNajdeny=null, bezi=true;
+  const koniec=()=>{ bezi=false; pustiKameru(stream); zavriSkener(); };
+  _skenStop=()=>{ bezi=false; pustiKameru(stream); };
+  box.querySelector("#qrZrus").onclick=koniec;
+
+  // hľadanie QR počas mierenia
+  const detektor=(typeof BarcodeDetector!=="undefined") ? new BarcodeDetector({formats:["qr_code"]}) : null;
+  let jsQRfn=null;
+  if(!detektor){ import("https://esm.sh/jsqr@1.4.0").then(m=>{ jsQRfn=m.default||m; })
+    .catch(e=>{ console.error("jsQR:", e); }); }
+  const platno=document.createElement("canvas");
+  const krok=async()=>{
+    if(!bezi) return;
+    if(!qrNajdeny && video.readyState>=2 && video.videoWidth){
+      try{
+        let kod=null;
+        if(detektor){ const n=await detektor.detect(video); if(n && n.length) kod=n[0].rawValue; }
+        else if(jsQRfn){
+          platno.width=video.videoWidth; platno.height=video.videoHeight;
+          const ctx=platno.getContext("2d",{willReadFrequently:true});
+          ctx.drawImage(video,0,0);
+          const d=ctx.getImageData(0,0,platno.width,platno.height);
+          const c=jsQRfn(d.data,platno.width,platno.height,{inversionAttempts:"attemptBoth"});
+          if(c && c.data) kod=c.data;
+        }
+        if(kod){
+          qrNajdeny=kod;
+          const e=parseEkasaQR(kod);
+          stav.innerHTML=e&&e.ekasaId
+            ? '✅ <b>QR kód dokladu nájdený.</b> Odfoťte doklad — sumy dotiahneme z Finančnej správy.'
+            : '✅ <b>QR kód nájdený.</b> Odfoťte doklad.';
+        }
+      }catch(e){
+        if(!_skenChyba){ _skenChyba=(e&&e.message)||String(e); console.error("QR pri mierení:", e); }
+      }
+    }
+    setTimeout(krok, 140);
+  };
+  setTimeout(krok, 250);
+
+  // spúšť
+  box.querySelector("#qrSpust").onclick=async()=>{
+    if(!bezi) return;
+    stav.textContent="Fotím…";
+    let blob=null;
+    try{
+      if(typeof ImageCapture!=="undefined"){
+        blob=await new ImageCapture(track).takePhoto();
+      }
+    }catch(e){ console.warn("takePhoto:", e); }
+    if(!blob){
+      // Záloha cez plátno. Rozlíšenie je to isté, kompresia horšia — ale
+      // doklad radšej v horšej kvalite než žiadny.
+      try{
+        const s=track.getSettings();
+        platno.width=s.width; platno.height=s.height;
+        platno.getContext("2d").drawImage(video,0,0,platno.width,platno.height);
+        blob=await new Promise(r=>platno.toBlob(r,"image/jpeg",0.92));
+      }catch(e){ console.error("snímka z plátna:", e); }
+    }
+    koniec();
+    if(!blob){ alert("Fotku sa nepodarilo urobiť. Skúste to znova."); return; }
+    const file=new File([blob], "doklad_"+Date.now()+".jpg", {type:blob.type||"image/jpeg"});
+    spracujDokladZoSuboru(file, qrNajdeny);
+  };
+}
+
 // Naskenuje QR a rovno z neho dotiahne doklad z FS. Vracia true pri úspechu.
 let _ocrR=null;
 async function skenujEkasaQR(){
@@ -24236,6 +24385,11 @@ function parseEkasaQR(raw){
 async function spracujOCR(e){
   const file=e.target.files[0]; if(!file) return;
   e.target.value="";
+  spracujDokladZoSuboru(file, null);
+}
+// Jedna cesta pre obe možnosti — vlastný fotoaparát aj výber súboru. `qrVopred`
+// je kód prečítaný zo živého obrazu pri mierení; z výberu súboru je null.
+async function spracujDokladZoSuboru(file, qrVopred){
   _ocrFile=file; // zapamätaj originál na neskoršie uloženie do cloudu
   openModal("Spracúvam doklad…", `<div style="text-align:center;padding:20px">
     <div class="spin" style="margin:0 auto 14px"></div>
@@ -24245,7 +24399,7 @@ async function spracujOCR(e){
   document.getElementById("modalDelete").classList.add("hidden");
   try{
     const setStav=s=>{ const el=document.getElementById("ocrStav"); if(el) el.textContent=s; };
-    const R=await spracujDokladSubor(file, setStav);
+    const R=await spracujDokladSubor(file, setStav, qrVopred);
     if(R._chyba){ document.getElementById("modalBody").innerHTML=`<div style="padding:10px;color:var(--neg)">${esc(R.partner||"Doklad sa nepodarilo spracovať")}.<br><br>Skúste kvalitnejšiu fotku alebo zadajte výdavok ručne.</div>`; return; }
     otvorOcrVysledok(R);
   }catch(err){
