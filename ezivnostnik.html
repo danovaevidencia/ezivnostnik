@@ -1311,7 +1311,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.05-IY";  // náhľad ľahký, fotka plná — viac pokusov o QR
+const APP_VERZIA = "2026.09.05-IZ";  // fotenie najprv pošle k QR, až potom na celý doklad
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -23991,10 +23991,12 @@ async function odfotDoklad(){
   box.style.cssText="position:fixed;inset:0;z-index:99999;background:#000;display:flex;flex-direction:column";
   box.innerHTML=
     '<video id="qrVideo" playsinline muted style="flex:1;width:100%;object-fit:cover;background:#000"></video>'
-   +'<div style="position:absolute;top:0;left:0;right:0;padding:14px 16px;background:linear-gradient(#000c,#0000);color:#fff;font-size:13px;line-height:1.5">'
-   +'Zamierte na celý doklad. <b>QR kód hľadáme priebežne</b> už teraz — keď ho nájdeme, dáme vedieť.'
+   +'<div id="qrPokyn" style="position:absolute;top:0;left:0;right:0;padding:14px 16px;background:linear-gradient(#000c,#0000);color:#fff;font-size:13px;line-height:1.5">'
+   +'<b>Najprv choďte bližšie k QR kódu</b> na bločku a chvíľu ním pohybujte — hľadáme ho priebežne. Potom zamierte na celý doklad a odfoťte.'
    +'</div>'
-   +'<div id="qrSkenStav" style="position:absolute;top:78px;left:16px;right:16px;text-align:center;color:#fff;font-size:12.5px;text-shadow:0 1px 3px #000"></div>'
+   // Stav ide NAD tlačidlá, nie pod pokyn — pokyn má tri riadky a prekrývali
+   // sa. Na 390 px je hore miesta málo a text nesmie zakryť doklad v zábere.
+   +'<div id="qrSkenStav" style="position:absolute;bottom:118px;left:16px;right:16px;text-align:center;color:#fff;font-size:12.5px;text-shadow:0 1px 3px #000"></div>'
    +'<div style="position:absolute;bottom:0;left:0;right:0;padding:18px 16px 26px;display:flex;gap:14px;align-items:center;justify-content:space-between;background:linear-gradient(#0000,#000c)">'
    +'<button type="button" id="qrZrus" style="padding:11px 18px;font-size:14px;border-radius:10px;border:0;background:#ffffff33;color:#fff">Zrušiť</button>'
    +'<button type="button" id="qrSpust" aria-label="Odfotiť" style="width:74px;height:74px;border-radius:50%;border:5px solid #ffffff66;background:#fff"></button>'
@@ -24037,7 +24039,8 @@ async function odfotDoklad(){
     }catch(e){ console.warn("torch:", e); }
   };
 
-  let qrNajdeny=null, bezi=true;
+  const pokyn=box.querySelector("#qrPokyn");
+  let qrNajdeny=null, bezi=true, snimok=0;
   const koniec=()=>{ bezi=false; pustiKameru(stream); zavriSkener(); };
   _skenStop=()=>{ bezi=false; pustiKameru(stream); };
   box.querySelector("#qrZrus").onclick=koniec;
@@ -24051,6 +24054,11 @@ async function odfotDoklad(){
   const krok=async()=>{
     if(!bezi) return;
     if(!qrNajdeny && video.readyState>=2 && video.videoWidth){
+      snimok++;
+      // Počítadlo nie je ozdoba. Keď kód nenaskočí, povie, či skenovanie
+      // vôbec bežalo — a to je rozdiel medzi „appka nehľadá" a „kód sa
+      // v tomto zábere prečítať nedá". Bez neho sa to dá len hádať.
+      if(stav) stav.textContent="Hľadám QR kód… ("+snimok+")";
       try{
         let kod=null;
         if(detektor){ const n=await detektor.detect(video); if(n && n.length) kod=n[0].rawValue; }
@@ -24065,9 +24073,12 @@ async function odfotDoklad(){
         if(kod){
           qrNajdeny=kod;
           const e=parseEkasaQR(kod);
-          stav.innerHTML=e&&e.ekasaId
-            ? '✅ <b>QR kód dokladu nájdený.</b> Odfoťte doklad — sumy dotiahneme z Finančnej správy.'
-            : '✅ <b>QR kód nájdený.</b> Odfoťte doklad.';
+          stav.innerHTML='✅ <b>QR kód nájdený'+(e&&e.ekasaId?" — je to eKasa doklad":"")+'.</b>';
+          // Pokyn sa mení až teraz: dovtedy posielal k QR, odteraz k fotke.
+          // Jeden text pre obe úlohy nefunguje — sú to protichodné zábery
+          // a 5. 9. 2026 to viedlo k tomu, že sa QR z tejto obrazovky nedal
+          // prečítať vôbec, hoci samostatný skener ho našiel hneď.
+          if(pokyn) pokyn.innerHTML='✅ <b>Kód máme.</b> Teraz zamierte na celý doklad a odfoťte — sumy dotiahneme z Finančnej správy.';
         }
       }catch(e){
         if(!_skenChyba){ _skenChyba=(e&&e.message)||String(e); console.error("QR pri mierení:", e); }
