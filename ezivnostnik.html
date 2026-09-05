@@ -1311,7 +1311,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.05-JS";  // odvody a dane z banky vidno vo Výdavkoch, mimo súčtu výdavkov
+const APP_VERZIA = "2026.09.05-JT";  // zostatky z výpisu sa ukladajú, camt.053 ich konečne číta
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -10734,6 +10734,11 @@ function zapisVypisDoEvidencie(text, parsed, novych, nazov){
     kedy:new Date().toISOString(), hash:textHash(text), nazov:String(nazov||"").slice(0,80),
     iban:parsed.mojIban||"", od:dni[0]||"", do:dni[dni.length-1]||"", mesiace,
     pohybov:(parsed.txns||[]).length, novych:novych, velkost:String(text||"").length,
+    // Počiatočný a konečný stav z výpisu. Dosiaľ sa pri PDF prečítali, overili
+    // a ZAHODILI — pritom sú to jediné čísla o stave účtu, ktoré appka má
+    // z nezávislého zdroja. Peňažný denník sa nemá o čo iné oprieť (kap. 85.2).
+    // Šesť čísel na záznam; z počtov je navyše vidieť, či výpis pokrýval mesiac celý.
+    kontrola: parsed.kontrola || null,
   };
   const cely=[zaznam, ...firmaData.vypisy];
   firmaData.vypisy=cely.slice(0, VYPISY_MAX);
@@ -18387,7 +18392,40 @@ function parseVypis(xmlText){
     const vs=vsM?vsM[1]:"";
     txns.push({id:"tx"+datum+"_"+i+"_"+Math.round(suma*100), datum, suma:r2(suma), smer, proti, ibanProti, vs, popis, mesiac:(datum||"").slice(0,7)});
   }
-  return {mojIban, txns};
+  // ── ZOSTATKY A SÚČTY Z camt.053 (kap. 85.2) ──────────────────────────────
+  // Výpis ich nesie: `Bal` s kódom OPBD (počiatočný) a CLBD (konečný), plus
+  // `TxsSummry` s počtami a sumami. Parser ich dosiaľ NEČÍTAL — u PDF sa aspoň
+  // prečítali a overili, tu sa na ne nikdy nepozrelo. Sú to jediné čísla
+  // o stave účtu, ktoré appka má z nezávislého zdroja; všetko ostatné si
+  // dopočítava sama, takže sa ňou nedá overiť.
+  //
+  // PRCD je konečný stav predošlého výpisu — to isté číslo z druhej strany,
+  // preto sa berie ako počiatočný, keď OPBD chýba.
+  const balSuma=b=>{
+    const a=b.getElementsByTagName("Amt")[0]; if(!a) return null;
+    const v=parseFloat(a.textContent); if(isNaN(v)) return null;
+    // Záporný zostatok je v camt kladná suma so smerom DBIT.
+    const smer=((b.getElementsByTagName("CdtDbtInd")[0]||{}).textContent||"").trim();
+    return r2(smer==="DBIT" ? -v : v);
+  };
+  let zaciatok=null, koniec=null;
+  const baly=stmt.getElementsByTagName("Bal");
+  for(let i=0;i<baly.length;i++){
+    const b=baly[i];
+    const kod=((b.getElementsByTagName("Cd")[0]||{}).textContent||"").trim().toUpperCase();
+    if((kod==="OPBD"||kod==="PRCD") && zaciatok===null) zaciatok=balSuma(b);
+    else if(kod==="CLBD") koniec=balSuma(b);
+  }
+  const sumBlok=tag=>{
+    const el=stmt.getElementsByTagName(tag)[0];
+    if(!el) return {pocet:null, suma:null};
+    const p=parseInt((el.getElementsByTagName("NbOfNtries")[0]||{}).textContent,10);
+    const s=parseFloat((el.getElementsByTagName("Sum")[0]||{}).textContent);
+    return {pocet:isNaN(p)?null:p, suma:isNaN(s)?null:r2(s)};
+  };
+  const kr=sumBlok("TtlCdtNtries"), de=sumBlok("TtlDbtNtries");
+  return {mojIban, txns, kontrola:{ zaciatok, koniec,
+    prijem:kr.suma, vydaj:de.suma, pocetPrijem:kr.pocet, pocetVydaj:de.pocet }};
 }
 
 function klasifikujPohyb(tx){
