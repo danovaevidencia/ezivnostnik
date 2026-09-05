@@ -1311,7 +1311,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.05-JM";  // po importe výpisu je vidieť, čo ostalo na človeka
+const APP_VERZIA = "2026.09.05-JN";  // v obale sa dá stiahnuť súbor, dovtedy sa nedialo nič
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -18667,9 +18667,39 @@ function importujVypisText(text, nazovSuboru){
 // ═══════════════════════════════════════════════════
 //  VRSTVA 2: EXPORTY (PDF faktúra, XML KV DPH, XML priznanie)
 // ═══════════════════════════════════════════════════
+// 🔴 5. 9. 2026: v natívnom obale NEFUNGOVALO ŽIADNE sťahovanie — ani záloha,
+// ani kontrolný výkaz, ani PDF faktúry. Odkaz s atribútom `download` WebView
+// ignoruje a `DownloadListener` sa pri `blob:` URL nezavolá vôbec. Nič
+// nespadlo, len sa nič nestalo — tá istá trieda ako chýbajúci WebChromeClient
+// pri výbere súborov (kap. 75).
+//
+// V obale sa preto súbor prenesie po kusoch do natívnej časti a uloží do
+// Stiahnutých. Po kusoch preto, že záloha má cez 600 kB a v base64 skoro
+// 900 kB — jeden taký reťazec cez most medzi procesmi spoľahlivo neprejde.
+const MOST_KUS = 256*1024;                       // znakov base64 na jeden kus
 function downloadBlob(blob, nazov){
+  if(window.EzSubor && typeof EzSubor.zacni==="function"){
+    ulozCezObal(blob, nazov).catch(e=>{
+      console.error("uloženie cez obal zlyhalo:", e);
+      alert("Súbor sa nepodarilo uložiť: "+(e && e.message || e));
+    });
+    return;
+  }
   const url=URL.createObjectURL(blob); const a=document.createElement("a");
   a.href=url; a.download=nazov; a.click(); URL.revokeObjectURL(url);
+}
+async function ulozCezObal(blob, nazov){
+  const buf=new Uint8Array(await blob.arrayBuffer());
+  let bin=""; const KROK=8192;                   // po častiach, inak spadne na dĺžke argumentov
+  for(let i=0;i<buf.length;i+=KROK) bin+=String.fromCharCode.apply(null, buf.subarray(i,i+KROK));
+  const b64=btoa(bin);
+  if(!EzSubor.zacni(nazov, blob.type||"application/octet-stream")) throw new Error("most sa neotvoril");
+  for(let i=0;i<b64.length;i+=MOST_KUS){
+    if(!EzSubor.kus(b64.slice(i,i+MOST_KUS))) throw new Error("prenos sa prerušil");
+  }
+  const kde=EzSubor.dokonci();
+  if(!kde) throw new Error("zápis do úložiska zlyhal");
+  cloudMsg("Uložené do priečinka "+kde, "ok");
 }
 
 // ── PRIJATIE E-FAKTÚRY: parsovanie UBL 2.1 XML (povinné prijímať od 2027) ──
