@@ -1311,7 +1311,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.05-JB";  // pohyb na účte sa dá zo schránky aj odstrániť
+const APP_VERZIA = "2026.09.05-JC";  // jazda dostane mesiac, inak vypadne z ročných km
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -4966,7 +4966,7 @@ function renderSuperDashboard(){
   const dovNarok=+dovRokObj.narok||0;
   const dovCerp=dovolenkaCerpane(rok);
   const dovZost=r2(dovNarok-dovCerp);
-  const kmRok=(firmaData.jazdy||[]).filter(j=>String(j.mesiac||String(j.datum||j.dt||"").slice(0,7)).startsWith(String(rok))).reduce((a,j)=>a+(+j.km||0),0);
+  const kmRok=(firmaData.jazdy||[]).filter(j=>String(jazdaMesiac(j)).startsWith(String(rok))).reduce((a,j)=>a+(+j.km||0),0);
   // graf mesačný — príjmy (faktB) + čistý (cisty)
   const maxMes=Math.max(...rows.map(r=>Math.max(r.faktB,r.cisty)),1);
   const graf=rows.map((r,i)=>{
@@ -12705,7 +12705,12 @@ function editJazda(idx){
     // „namerané" a „z mapy" podstatný a appka ho nemá zamlčať.
     if(val("m_kmZdroj")==="mapa") obj.zdrojKm="mapa";
     jazdaDoplnTacho(obj, parseFloat(val("m_poc")));
-    if(!d.jazdy)d.jazdy=[]; if(nova)d.jazdy.push(obj); else d.jazdy[idx]=Object.assign(d.jazdy[idx],obj); poZmene(); appJazdy();},
+    // Pri úprave sa `jazdaDokonci` púšťa na ZLÚČENÝ záznam, takže starej jazde
+    // bez mesiaca ho pri prvej úprave doplní — a existujúce `id` neprepíše.
+    if(!d.jazdy)d.jazdy=[];
+    if(nova) d.jazdy.push(jazdaDokonci(obj));
+    else d.jazdy[idx]=jazdaDokonci(Object.assign(d.jazdy[idx],obj));
+    poZmene(); appJazdy();},
   nova?null:()=>{ d.jazdy.splice(idx,1); poZmene(); appJazdy(); });
 }
 // Odpoveď na otázku, či auto slúži aj na súkromné cesty. Ukladá sa, aby sa
@@ -13248,6 +13253,43 @@ function mapaBlokHtml(){
 // dve (ručná jazda a ukončenie merania) — to isté pravidlo na dvoch miestach
 // sa v tomto projekte vždy rozišlo. Prázdne pole NESMIE prepísať už vedený
 // stav na nulu, preto sa dopĺňa len vtedy, keď je čo doplniť.
+// ── MESIAC JAZDY ──────────────────────────────────────────────────────────
+//
+// 🔴 5. 9. 2026, nájdené pri prechode appky: dve najnovšie jazdy sa nerátali
+// do ročného súčtu kilometrov a v knihe jázd vyrobili dve nezmyselné skupiny
+// mesiacov, „3. 9. 2" a „4. 9. 2".
+//
+// Kniha jázd ukladá dátum PO SLOVENSKY („3. 9. 2026"), lebo tak prišiel
+// z importu z auta. Čítanie sa pritom na štyroch miestach spoliehalo na
+//     j.mesiac || String(j.datum||j.dt||"").slice(0,7)
+// čo je ISO predpoklad. Kým jazdy chodili z importu, `mesiac` mali vyplnené
+// a záloha sa nikdy nepoužila. Prvá jazda uložená v appke — ručne aj z GPS —
+// ho nemala, záloha sa spustila a vrátila „3. 9. 2".
+//
+// Zmerané: ročný súčet hlásil 14 049 km namiesto 14 061,54.
+//
+// Chybný kľúč je horší než žiadny: nespadne, len ticho vypadne z filtra
+// a inde pribudne ako skupina, ktorá neexistuje.
+function jazdaMesiac(j){
+  if(!j) return "";
+  const m=String(j.mesiac||"");
+  if(/^\d{4}-\d{2}/.test(m)) return m.slice(0,7);
+  const dt=String(j.dt||"");
+  if(/^\d{4}-\d{2}/.test(dt)) return dt.slice(0,7);
+  const d=String(j.datum||"");
+  if(/^\d{4}-\d{2}/.test(d)) return d.slice(0,7);
+  const sk=d.match(/(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})/);   // „3. 9. 2026"
+  if(sk) return sk[3]+"-"+String(sk[2]).padStart(2,"0");
+  return "";
+}
+// Doplní jazde to, čo musí mať každá — vlastnú identitu a mesiac. Volá sa na
+// OBOCH cestách uloženia (ručne aj z GPS); dve kópie by sa rozišli.
+function jazdaDokonci(obj){
+  if(!obj.id) obj.id="j"+Date.now()+Math.random().toString(36).slice(2,7);
+  const m=jazdaMesiac(obj);
+  if(m) obj.mesiac=m;
+  return obj;
+}
 function jazdaDoplnTacho(obj, pocStav){
   const p=+pocStav||0;
   if(p>0){ obj.poc=r2(p); obj.kon=r2(p+(+obj.km||0)); }
@@ -13313,7 +13355,7 @@ function jazdaZaver(){
     if(U.zVykazu && val("m_ucel")===U.ucel) obj.ucelZVykazu=true;
     jazdaDoplnTacho(obj, parseFloat(val("m_poc")));
     if(!firmaData.jazdy) firmaData.jazdy=[];
-    firmaData.jazdy.push(obj);
+    firmaData.jazdy.push(jazdaDokonci(obj));
     jazdaZmazStav();
     poZmene();
     if(aktualnaApp==="jazdy") appJazdy(); else otvorApp("jazdy");
@@ -16080,7 +16122,7 @@ function dobaToMin(doba){ const s=String(doba||""); let m=s.match(/(\d+):(\d+)/)
 function xkKnihaJazdSheet(X, S, D, m, vlastnyZoznam){
   const list = vlastnyZoznam
     ? vlastnyZoznam.slice().sort((a,b)=>String(a.dt||a.datum||"").localeCompare(String(b.dt||b.datum||"")))
-    : (D.jazdy||[]).filter(j=>(j.mesiac||String(j.datum||j.dt||"").slice(0,7))===m).sort((a,b)=>String(a.dt||a.datum||"").localeCompare(String(b.dt||b.datum||"")));
+    : (D.jazdy||[]).filter(j=>(jazdaMesiac(j))===m).sort((a,b)=>String(a.dt||a.datum||"").localeCompare(String(b.dt||b.datum||"")));
   if(!list.length) return null;
   const cfg=D.settings||{};
   const VOZIDLO=(D.meta&&D.meta.vozidlo)||"";
@@ -16216,7 +16258,7 @@ function xkBuild(X){
     X.utils.book_append_sheet(wb,ws,xkSheetName("Daň "+rok));
   });
   // --- Kniha jázd: prehľad ---
-  const months=[...new Set((D.jazdy||[]).map(j=>j.mesiac||String(j.datum||j.dt||"").slice(0,7)).filter(Boolean))].sort();
+  const months=[...new Set((D.jazdy||[]).map(j=>jazdaMesiac(j)).filter(Boolean))].sort();
   if(months.length){
     const maSukr=(D.jazdy||[]).some(jazdaSukromna);
     const hlavicka=[xkCell("Mesiac",S.hdr),xkCell("Počet jázd",S.hdr),xkCell("Km",S.hdr)];
@@ -16224,7 +16266,7 @@ function xkBuild(X){
     hlavicka.push(xkCell("kWh",S.hdr),xkCell("Poč. stav km",S.hdr),xkCell("Kon. stav km",S.hdr));
     const aoa=[[xkCell("Kniha jázd — prehľad",S.title)],[xkCell("Vozidlo "+((D.meta&&D.meta.vozidlo)||(D.majetok&&D.majetok[0]&&D.majetok[0].nazov)||""),S.sub)],[],hlavicka];
     let tk=0,tw=0,tj=0,tsu=0;
-    months.forEach((m,i)=>{ const list=(D.jazdy||[]).filter(j=>(j.mesiac||String(j.datum||j.dt||"").slice(0,7))===m).sort((a,b)=>String(a.datum||a.dt||"").localeCompare(String(b.datum||b.dt||"")));
+    months.forEach((m,i)=>{ const list=(D.jazdy||[]).filter(j=>(jazdaMesiac(j))===m).sort((a,b)=>String(a.datum||a.dt||"").localeCompare(String(b.datum||b.dt||"")));
       const km=r2(list.reduce((a,b)=>a+(+b.km||0),0)), kwh=r2(list.reduce((a,b)=>a+(+b.celkKWh||+b.kwh||0),0));
       const sukr=kmSukromne(list), podn=kmPodnik(list);
       const poc=list[0]?(list[0].poc||list[0].tachometerOd||0):0, kon=list.length?(list[list.length-1].kon||list[list.length-1].tachometerDo||0):0; const z=i%2===1, sc=z?S.cellZ:S.cell, sn=z?S.numZ:S.num;
