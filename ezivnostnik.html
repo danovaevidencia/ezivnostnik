@@ -1311,7 +1311,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.05-JO";  // PDF výpis sa naimportuje, len keď sedia súčty banky
+const APP_VERZIA = "2026.09.05-JP";  // výdavok patrí do roka podľa úhrady, DPH podľa dodania
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -2532,7 +2532,7 @@ function deMesiacneData(rok){
     const mk=rok+"-"+String(mi).padStart(2,"0");
     const fakt=(d.faktury||[]).filter(f=>faktObdobie(f)===mk);
     const prijmy=r2(fakt.reduce((a,f)=>a+(+f.bez||0),0));
-    const vyd=(d.vydavky||[]).filter(x=>String(x.datum||"").slice(0,7)===mk && !x.zaradenyOdpisovany && !(x.mozeBytMajetok&&!x.zaradenyMajetokId));
+    const vyd=(d.vydavky||[]).filter(x=>vydavokObdobieDane(x)===mk && !x.zaradenyOdpisovany && !(x.mozeBytMajetok&&!x.zaradenyMajetokId));
     let vydavky=r2(vyd.reduce((a,x)=>a+vydavokDoZakladu(x),0));   // PHL podľa zvoleného režimu
     // pri vlastnom aute nejdú do výdavkov bločky, ale náhrady prepočítané z knihy jázd
     const NAH=nahradyObdobie(rok, mk);
@@ -3189,10 +3189,10 @@ function calcDanRow(mesiacIdx, rok, S){
   // a dashboard ukazovali dve rôzne dane (tá istá chyba ako kedysi pri odpisoch).
   const _NAH=nahradyObdobie(rok, mk);
   const nahrady=_NAH.aktivne?_NAH.spolu:0;
-  const jeAktivny=faktB>0 || vyradenie>0 || nahrady>0 || (firmaData.vydavky||[]).some(x=>String(x.datum||"").slice(0,7)===mk);
+  const jeAktivny=faktB>0 || vyradenie>0 || nahrady>0 || (firmaData.vydavky||[]).some(x=>vydavokObdobieDane(x)===mk);
   const odpis=jeAktivny?odpisMes:0;
   // ostatné náklady = výdavky mesiaca bez DPH (okrem odpisovaného majetku)
-  const ostatne=r2((firmaData.vydavky||[]).filter(x=>String(x.datum||"").slice(0,7)===mk && !x.zaradenyOdpisovany).reduce((a,x)=>a+vydavokDoZakladu(x),0)+nahrady);
+  const ostatne=r2((firmaData.vydavky||[]).filter(x=>vydavokObdobieDane(x)===mk && !x.zaradenyOdpisovany).reduce((a,x)=>a+vydavokDoZakladu(x),0)+nahrady);
   const nakladySpolu=r2(odpis+ostatne+vyradenie);
   const ciastkZaklad=r2(faktB-nakladySpolu);              // čiastkový základ dane
   // SKUTOČNÉ zdravotné poistné z vymeriavacieho základu (nie preddavok!)
@@ -4140,7 +4140,7 @@ function _dashWidgetKatalogVypocet(){
     vydavky: {
       nazov:"Výdavky", ic:"€", velkost:"w-s4",
       metriky:[
-        {k:"spolu", l:"Výdavky (rok)", val:()=>{const v=(d.vydavky||[]).filter(x=>String(x.datum||"").slice(0,4)===String(rok));const fa=v.filter(x=>x.druh==="Došlá faktúra").length,bl=v.filter(x=>x.druh==="Bloček").length;return {v:eur0(v.reduce((a,x)=>a+(+x.bez||0),0)), m:v.length+" dokladov", cls:"", vedlajsie:[{l:"DPH na odpočet",v:eur(v.reduce((a,x)=>a+(+x.dph||0),0)),cls:"pos"},{l:"faktúry / bločky",v:fa+" / "+bl}]};}},
+        {k:"spolu", l:"Výdavky (rok)", val:()=>{const v=(d.vydavky||[]).filter(x=>vydavokVRoku(x, rok));const fa=v.filter(x=>x.druh==="Došlá faktúra").length,bl=v.filter(x=>x.druh==="Bloček").length;return {v:eur0(v.reduce((a,x)=>a+(+x.bez||0),0)), m:v.length+" dokladov", cls:"", vedlajsie:[{l:"DPH na odpočet",v:eur(v.reduce((a,x)=>a+(+x.dph||0),0)),cls:"pos"},{l:"faktúry / bločky",v:fa+" / "+bl}]};}},
         {k:"parovanie", l:"Párovanie", val:()=>{const vp=(d.vypis||[]).filter(t=>t.smer==="vydaj"&&String(t.datum||"").slice(0,4)===String(rok));let spar=0;vp.forEach(t=>{if(pohybStav(t).spar)spar++;});return {v:spar+" / "+vp.length, m:"spárovaných výdajov", cls:"", vedlajsie:[{l:"nespárované",v:(vp.length-spar)+"",cls:vp.length-spar?"warn":""}]};}}
       ]
     },
@@ -4225,7 +4225,7 @@ function dashMesacne(rok, typ){
     const mk=rok+"-"+String(mi+1).padStart(2,"0");
     let v=0;
     if(typ==="prijmy") v=(d.faktury||[]).filter(f=>faktObdobie(f)===mk).reduce((a,f)=>a+(+f.bez||0),0);
-    else if(typ==="vydavky") v=(d.vydavky||[]).filter(x=>String(x.datum||"").slice(0,7)===mk).reduce((a,x)=>a+(+x.bez||0),0);
+    else if(typ==="vydavky") v=(d.vydavky||[]).filter(x=>vydavokObdobieDane(x)===mk).reduce((a,x)=>a+(+x.bez||0),0);
     else if(typ==="dph") v=(d.faktury||[]).filter(f=>faktObdobie(f)===mk).reduce((a,f)=>a+(+f.dph||0),0);
     else if(typ==="km") v=(d.jazdy||[]).filter(j=>jazdaMonthKey(j)===mk).reduce((a,j)=>a+(+j.km||0),0);
     out.push(v);
@@ -5485,7 +5485,10 @@ function citajOsobitnu(obj){
 // Dátum, kedy bol doklad ÚPLNE zaplatený. Čiastočná úhrada nárok na odpočet
 // zakladá len pomerne — appka to nerobí a hovorí to nahlas (viď dphKontroly).
 function vydavokDatumUplnejUhrady(x){
-  const c=String((x&&x.cislo)||"").trim();
+  // Kľúč, nie číslo. Úhrady sa zapisujú pod `dokladKluc(x)`, čo je pri doklade
+  // bez čísla „#id" — porovnávanie s holým `cislo` by taký doklad ukázalo ako
+  // nezaplatený, hoci zaplatený je. Rovnaká identita ako v `pridajUhradu`.
+  const c=dokladKluc(x);
   if(!c) return "";
   const celkom=r2(+((x||{}).spolu)||0);
   if(!celkom) return "";
@@ -5507,6 +5510,27 @@ function vydavokObdobieDPH(x){
   const u=vydavokDatumUplnejUhrady(x);
   return u ? u.slice(0,7) : "";
 }
+
+// JEDNO pravidlo, do ktorého obdobia patrí výdavok pre DAŇ Z PRÍJMOV — a nie
+// je to to isté obdobie ako pri DPH. Pri DPH rozhoduje dátum dodania, v daňovej
+// evidencii aj jednoduchom účtovníctve rozhoduje ÚHRADA. Väčšinou vyjde rovnako
+// (bloček sa platí v deň vystavenia), rozíde sa to pri faktúre zaplatenej
+// v ďalšom mesiaci — a keď tá hranica je koniec roka, ide o dva rôzne roky.
+//
+// Doložený prípad (kap. 81): faktúra ZSE za december 2025, dátum dodania
+// 31.12.2025, uhradená 16.1.2026. DPH patrí do decembra 2025, výdavok do roku
+// 2026. Dovtedy appka oboje zaraďovala podľa dátumu dokladu, takže výdavok
+// spadol do roku, v ktorom mal Roman paušálne výdavky — a zmizol bez stopy.
+//
+// Neuhradený doklad ešte výdavkom nie je, ale nechávame ho pod dátumom dokladu:
+// väčšina bločkov sa platí v hotovosti a väzbu na pohyb nikdy nedostane, takže
+// „bez úhrady" a „nezaplatené" sa v dátach nedajú rozlíšiť. Vyhodiť ich by
+// znamenalo tichý výpadok výdavkov — horšie než mesiac navyše.
+function vydavokObdobieDane(x){
+  const u=vydavokDatumUplnejUhrady(x);
+  return u ? u.slice(0,7) : String((x&&x.datum)||"").slice(0,7);
+}
+function vydavokVRoku(x, rok){ return vydavokObdobieDane(x).slice(0,4)===String(rok); }
 
 // Doklady, ktoré v tomto období NIE SÚ, lebo čakajú na zaplatenie. Práve
 // preto o nich treba povedať — inak by odpočet ticho zmizol a nikto by
@@ -8648,11 +8672,14 @@ function appVydavky(){
   const d=firmaData, c=APPS.vydavky.c;
   const vsetky=(d.vydavky||[]).slice().sort((a,b)=>String(b.datum||"").localeCompare(String(a.datum||"")));
   // dostupné roky
-  const roky=[...new Set(vsetky.map(x=>String(x.datum||"").slice(0,4)).filter(r=>/^\d{4}$/.test(r)))].sort().reverse();
+  // Rok aj mesiac podľa obdobia DANE, nie podľa dátumu dokladu — inak by
+  // súčet na tejto obrazovke nesedel s výdavkami, ktoré appka počíta do
+  // základu dane, a používateľ by hľadal doklad v roku, kde nie je (kap. 81).
+  const roky=[...new Set(vsetky.map(x=>vydavokObdobieDane(x).slice(0,4)).filter(r=>/^\d{4}$/.test(r)))].sort().reverse();
   if(!vRok && roky.length) vRok=roky[0];
   // filtruj podľa roka a mesiaca
-  let vyd=vsetky.filter(x=>String(x.datum||"").slice(0,4)===vRok);
-  if(vMesiac) vyd=vyd.filter(x=>String(x.datum||"").slice(0,7)===vMesiac);
+  let vyd=vsetky.filter(x=>vydavokVRoku(x, vRok));
+  if(vMesiac) vyd=vyd.filter(x=>vydavokObdobieDane(x)===vMesiac);
   const bezSpolu=vyd.reduce((a,x)=>a+(+x.bez||0),0);
   const dphSpolu=vyd.reduce((a,x)=>a+(+x.dph||0),0);
   const fakt=vyd.filter(x=>x.druh==="Došlá faktúra").length;
@@ -10966,7 +10993,7 @@ function uzavierkaHtml(rok){
   const kmRok=kmSpolu(jazdyRok), kmRokPodnik=kmPodnik(jazdyRok), kmRokSukr=kmSukromne(jazdyRok);
   const NAH=nahradyObdobie(rok);
   const pocFakt=(firmaData.faktury||[]).filter(f=>String(f.datum||f.vystavenie||"").slice(0,4)===String(rok)).length;
-  const pocVyd=(firmaData.vydavky||[]).filter(x=>String(x.datum||"").slice(0,4)===String(rok)).length;
+  const pocVyd=(firmaData.vydavky||[]).filter(x=>vydavokVRoku(x, rok)).length;
   return `<div class="card" style="margin-top:14px">
     <h2 style="font-size:16px;margin-bottom:4px">📋 Ročná uzávierka ${rok}</h2>
     <div class="csub" style="margin-bottom:12px">Súhrn pre daňové priznanie — všetko na jednom mieste.</div>
@@ -11417,7 +11444,7 @@ function appSadzby(){
 //  je to tá istá funkcia vydavokDoZakladu(), len rozpísaná.
 // ═══════════════════════════════════════════════════════════════
 function kategorieRoka(rok){
-  const vyd=(firmaData.vydavky||[]).filter(x=>String(x.datum||"").slice(0,4)===String(rok) && !x.zaradenyOdpisovany);
+  const vyd=(firmaData.vydavky||[]).filter(x=>vydavokVRoku(x, rok) && !x.zaradenyOdpisovany);
   const mapa={};
   vyd.forEach(x=>{
     const k=odhadniKategoriu(x);
@@ -14560,7 +14587,7 @@ function prognozaRok(rok){
   for(let mi=0;mi<12;mi++){ const c=calcDanRow(mi,+rok,S); zdravSkut+=c.zdrav; socSkut+=c.soc; preddavkyDanSkut+=c.danPreddavok; }
   const prijmyRok=r2(prijmySkut*faktor);
   const odpisRok=odpisDaneRok(rok, S).rok;
-  const vydavkyRealRok=r2((firmaData.vydavky||[]).filter(x=>String(x.datum||"").startsWith(String(rok))).reduce((a,x)=>a+vydavokDoZakladu(x),0));
+  const vydavkyRealRok=r2((firmaData.vydavky||[]).filter(x=>vydavokVRoku(x, rok)).reduce((a,x)=>a+vydavokDoZakladu(x),0));
   const vydavkyRok=r2(vydavkyRealRok+odpisRok);
   const zdravRok=r2(zdravSkut*faktor);
   let socMesiacov=0;
@@ -16481,7 +16508,7 @@ function xkBuild(X){
   // sa tie dve čísla líšia (súkromný výdavok, krátené auto a PHL) a bez tohto
   // stĺpca by sa súčet výdavkov a daňový hárok nedali zosúladiť.
   xkRokyVydavkov(D).forEach(rk=>{
-    const zoz=(D.vydavky||[]).filter(x=>String(x.datum||"").slice(0,4)===String(rk))
+    const zoz=(D.vydavky||[]).filter(x=>vydavokVRoku(x, rk))
       .sort((a,b)=>String(a.datum||"").localeCompare(String(b.datum||"")));
     if(!zoz.length) return;
     const aoa=[[xkCell("Výdavky "+rk,S.title)],[],
@@ -17414,10 +17441,20 @@ function mDatumPozn(){
   const p=document.getElementById("m_datumPozn");
   const d=val("m_datum"), v=val("m_vystavenie");
   if(!p) return;
-  const zaklad="Kedy ste tovar alebo službu naozaj dostali. <b>Podľa tohto dátumu doklad patrí do mesiaca DPH</b> — nie podľa dátumu vystavenia ani splatnosti.";
+  let t="Kedy ste tovar alebo službu naozaj dostali. <b>Podľa tohto dátumu doklad patrí do mesiaca DPH</b> — nie podľa dátumu vystavenia ani splatnosti.";
   if(d && v && d.slice(0,7)!==v.slice(0,7)){
-    p.innerHTML=zaklad+`<br><b style="color:var(--warn)">Pozor:</b> doklad je vystavený v inom mesiaci než dodaný. Do DPH pôjde podľa dodania — teda do ${mesiacLabel(d.slice(0,7))}.`;
-  } else p.innerHTML=zaklad;
+    t+=`<br><b style="color:var(--warn)">Pozor:</b> doklad je vystavený v inom mesiaci než dodaný. Do DPH pôjde podľa dodania — teda do ${mesiacLabel(d.slice(0,7))}.`;
+  }
+  // Do VÝDAVKOV rozhoduje úhrada, nie dodanie (kap. 81). Keď sa tie dva mesiace
+  // líšia, treba to povedať priamo tu — inak používateľ hľadá doklad v roku,
+  // v ktorom nie je, a pri prelome roka je rozdiel aj daňovo podstatný.
+  const c=String(val("m_cislo")||"").trim();
+  const dok=c?(firmaData.vydavky||[]).find(y=>String(y.cislo||"").trim()===c):null;
+  const uhr=dok?vydavokDatumUplnejUhrady(dok):"";
+  if(uhr && d && uhr.slice(0,7)!==d.slice(0,7)){
+    t+=`<br><b>Do výdavkov</b> doklad patrí podľa úhrady (${fmtDatum(uhr)}), teda do ${mesiacLabel(uhr.slice(0,7))}. Pri DPH rozhoduje dodanie, pri dani z príjmov zaplatenie — a tu to vychádza rôzne.`;
+  }
+  p.innerHTML=t;
 }
 
 // zahraničná DPH sa neodpočítava → celá suma ide do základu, daň na 0
