@@ -1311,7 +1311,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.05-JQ";  // pri faktúre vidno, čo z nej po dani a odvodoch zostane
+const APP_VERZIA = "2026.09.05-JR";  // sociálne odvody sa berú z banky, nielen z nastavenia
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -3089,6 +3089,10 @@ function jeOdvodDoZakladuInak(x){
   const K=KATEGORIE_VYDAVKOV[x&&x.kategoria];
   return !!(K && (K.odvod==="zp" || K.odvod==="sp"));
 }
+// Zaplatené odvody za OBDOBIE — prefix dátumu, takže to isté pravidlo obslúži
+// rok ("2026") aj mesiac ("2026-10"). Mesačný výpočet dovtedy sociálne odvody
+// z banky nevidel a bral ich len z nastavenia; zdravotné pritom už roky
+// uprednostňovalo skutočnú platbu. Jeden zdroj pre obe (kap. 83).
 function zaplateneOdvodyRok(rok, druhOdvodu){
   const R=String(rok);
   const zpDruh = druhOdvodu==="zp" ? "odvodZP" : "odvodSP";
@@ -3214,8 +3218,11 @@ function calcDanRow(mesiacIdx, rok, S){
   // istá suma, takže chýbajúca platba znamená skôr „výpis ešte nemám" než „neplatil".
   // Predpokladá sa LEN v mesiaci, ktorý bankový výpis nepokrýva.
   const preddavokZP = U.zp>0 ? U.zp : (zpPredpoklad(mesiacIdx, rok, S));
-  // sociálne odvody — od socOdvodyOd
-  const soc=monthActiveOd(mesiacIdx, rok, S.socOdvodyOd) ? (+S.socOdvodyMes||0) : 0;
+  // Sociálne odvody rovnako ako zdravotné: SKUTOČNE zaplatené má prednosť pred
+  // nastavením. Zdroj je ten istý ako v ročnom súhrne — klasifikované pohyby
+  // z banky plus doklady —, takže sa mesiac a rok nemôžu rozísť (kap. 83).
+  const _spZapl=zaplateneOdvodyRok(mk, "sp");
+  const soc = _spZapl.pocet>0 ? _spZapl.suma : spPredpoklad(mesiacIdx, rok, S);
   const vyslZaklad=r2(ciastkZaklad-zdrav);                // výsledný základ dane (znížený o skutočné ZP)
   // efektívna ročná sadzba (progresia nad 100 000 € príjmov), bez NČZD — kap. 45.1
   const sadzba=danSadzbaEfektivna(rok);
@@ -10011,6 +10018,31 @@ function zpPredpoklad(mesiacIdx, rok, S){
     .filter(x=>x.kategoria==="preddavokZP" && String(x.datum||"")<mk+"-32")
     .sort((a,b)=>String(a.datum).localeCompare(String(b.datum)));
   return minule.length ? r2(+minule[minule.length-1].spolu || 0) : 0;
+}
+// Predpoklad sociálneho poistenia — presne ten istý princíp ako pri zdravotnom
+// o riadok vyššie (kap. 83). Skutočná platba má vždy prednosť; predpokladá sa
+// len tam, kde ju výpis nemôže poprieť:
+//   · povinnosť ešte nezačala   → 0, nie je čo predpokladať
+//   · výpis mesiac pokrýva      → 0, platba tam naozaj nie je
+//   · inak nastavenie, a keď ani to nie je, posledná známa zaplatená suma
+// Bez toho by sa po nábehu povinnosti musela mesačná suma vypĺňať ručne, hoci
+// appka platbu v banke vidí a vie ju zatriediť.
+function spPredpoklad(mesiacIdx, rok, S){
+  if(!monthActiveOd(mesiacIdx, rok, (S||{}).socOdvodyOd)) return 0;
+  const mk=rok+"-"+String(mesiacIdx+1).padStart(2,"0");
+  if(vypisPokrytie().mesiace.indexOf(mk)>=0) return 0;
+  const zNastaveni=+((S||{}).socOdvodyMes)||0;
+  if(zNastaveni>0) return zNastaveni;
+  // posledná známa zaplatená SP pred týmto mesiacom
+  let posledna=0, poslednyMk="";
+  (firmaData.vypis||[]).forEach(t=>{
+    const d=String(t.datum||"");
+    if(t.smer!=="vydaj" || d.slice(0,7)>=mk) return;
+    const kl=klasifikujPohyb(t);
+    if(!kl || kl.druh!=="odvodSP") return;
+    if(d>poslednyMk){ poslednyMk=d; posledna=r2(+t.suma||0); }
+  });
+  return posledna;
 }
 
 function kategoriaOvplyvnujeZaklad(x){
