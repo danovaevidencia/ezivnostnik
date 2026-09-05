@@ -1311,7 +1311,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.05-JE";  // KV DPH bez IČ DPH dodávateľa varuje pred stiahnutím
+const APP_VERZIA = "2026.09.05-JF";  // dva doklady v deň môžu byť záloha a vyúčtovanie
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -19906,19 +19906,28 @@ function rocnaKontrola(rok){
   if(dupl.length) pridaj("pozor","duplicity", dupl.length+" možných duplicít vo výdavkoch",
     "Rovnaké číslo dokladu, suma aj dodávateľ vo viacerých mesiacoch.", dupl);
 
-  // ── 3a. Ten istý nákup zaevidovaný DVAKRÁT pod iným číslom ──
+  // ── 3a. Dva doklady na tú istú sumu v ten istý deň ──
   //
   // 🔴 Nájdené 5. 9. 2026 porovnaním s výkazom z KROSu: NAY a.s., 21. 2.,
   // 364,30 € — dvakrát, raz ako „5426097939" so správnym rozpisom a raz ako
-  // „6840601675" s prázdnym základom a poznámkou „oprava obchodného mena".
-  // Vyzerá to na opätovné zadanie namiesto úpravy pôvodného dokladu.
+  // „6840601675" s prázdnym základom.
+  //
+  // Prvý výklad bol nesprávny a stojí za to ho tu nechať: vyzeralo to na
+  // duplicitný zápis. Roman ho opravil — NAY poslal ZÁLOHOVÚ a VYÚČTOVACIU
+  // faktúru, teda dva doklady k JEDNÉMU nákupu. Nie je to chyba v zadaní,
+  // je to bežný obchodný prípad, o ktorom appka nevie.
+  //
+  // Preto hlásenie menuje obe možnosti a nikam neposiela mazať. Riziko je
+  // reálne, ale iné, než sa zdalo: základ dane sa nezdvojí (vyúčtovacia má
+  // základ 0), zdvojí sa CELKOVÁ suma v prehľadoch „koľko som minul" —
+  // 364,30 € navyše. A keby mal rozpis aj druhý doklad, zdvojil by sa aj
+  // odpočet DPH.
   //
   // Kontrola vyššie porovnáva ČÍSLO dokladu, takže dvojica s rôznymi číslami
-  // jej unikne — a práve tak duplicita najčastejšie vzniká.
+  // jej unikne.
   //
-  // Zhoda dodávateľa, dňa a sumy je silná stopa, nie dôkaz: dva rovnaké nákupy
-  // v jeden deň sa stať môžu. Preto „pozor" a nie „chyba" — appka sa pýta,
-  // nezakazuje.
+  // Zhoda dodávateľa, dňa a sumy je stopa, nie dôkaz. Preto „pozor" a nie
+  // „chyba" — appka sa pýta, nezakazuje.
   const denKluce={};
   vydavky.forEach(x=>{
     const suma=r2(+x.spolu||0); if(suma<=0) return;
@@ -19931,9 +19940,11 @@ function rocnaKontrola(rok){
       && new Set(g.map(x=>String(x.cislo||""))).size>1)     // rovnaké číslo rieši kontrola vyššie
     .map(g=>(g[0].partner||"—")+" · "+eur(g[0].spolu)+" · "+fmtDatum(g[0].datum)
       +" · č. "+g.map(x=>x.cislo||"—").join(" a "));
-  if(dvojmo.length) pridaj("pozor","dvojmoVDen", dvojmo.length+" nákupov je zaevidovaných dvakrát v ten istý deň",
-    "Rovnaký dodávateľ, rovnaký deň a rovnaká suma, ale iné číslo dokladu — tak vzniká duplicita, "
-    +"keď sa doklad zadá znova namiesto opravy pôvodného. Ak sú to naozaj dva nákupy, nechajte ich tak.",
+  if(dvojmo.length) pridaj("pozor","dvojmoVDen", dvojmo.length+"× dva doklady na tú istú sumu v ten istý deň",
+    "Rovnaký dodávateľ, rovnaký deň a rovnaká suma, ale iné číslo dokladu. Býva to zálohová "
+    +"a vyúčtovacia faktúra k jednému nákupu — vtedy je to v poriadku, len sa suma počíta dvakrát "
+    +"v prehľade výdavkov. Skontrolujte, že DPH si odpočítavate len z JEDNÉHO z nich; ak sú to dva "
+    +"samostatné nákupy, nechajte ich tak.",
     dvojmo);
 
   // ── 3b. Rovnaké číslo pri RÔZNYCH sumách ──
