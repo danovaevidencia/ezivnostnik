@@ -1311,7 +1311,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.05-JL";  // odvody znižujú základ raz, nie dvakrát
+const APP_VERZIA = "2026.09.05-JM";  // po importe výpisu je vidieť, čo ostalo na človeka
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -4453,6 +4453,8 @@ function zapisAutomat(druh, pocet){
 }
 
 // zozbieraj všetko, čo si zaslúži pozornosť
+// skloňovanie po číslovke: 1 pohyb · 2–4 pohyby · 5+ pohybov
+function sklonPohyb(n){ return n===1?"pohyb" : (n>=2&&n<=4?"pohyby":"pohybov"); }
 function zbierNotifikacie(){
   const out=[], dnes=new Date();
   if(!firmaData) return out;
@@ -4479,6 +4481,31 @@ function zbierNotifikacie(){
         detail:"Od "+(zm.od?fmtDatum(String(zm.od).slice(0,10)):"konca obdobia")+" budete mať "+nazov+".",
         akcia:()=>zobrazCennik()});
     }
+    // ── po importe výpisu: čo ostalo na človeka (kap. 79.4) ──
+    //
+    // Zvonček je jediné miesto, kam sa človek pozerá bez toho, aby niečo
+    // hľadal. Bez tejto položky sa o nespárovaných pohyboch nedozvie nikdy —
+    // do Banky proaktívne nechodí a niet dôvodu, keď appka nič nepovedala.
+    // Presne tak zostalo päť platieb zdravotnej bez dokladu (kap. 78.4).
+    try{
+      const I=(firmaData.settings||{}).poslednyImportBanka;
+      if(I && I.davka){
+        const V=bankaVedra();
+        // Zmizne SAMA, keď niet čo vybaviť. Notifikácia, ktorú treba odklikať
+        // aj po vybavení, učí odklikávať všetko.
+        if(V.caka>0){
+          const mes=(I.mesiace&&I.mesiace.length)
+            ? " za "+I.mesiace.map(mesiacLabel).join(", ") : "";
+          out.push({kluc:"bankaImport:"+I.davka, ic:"🏦", nal:"info",
+            nazov: V.caka+" "+sklonPohyb(V.caka)+" z banky čaká na zatriedenie",
+            detail: "Z výpisu"+mes+": "+V.sparene+" spárovaných · "
+                    +V.vybavene+" vybavených bez dokladu · "+V.caka+" čaká."
+                    +(I.dokladov?" Appka založila "+I.dokladov+" interných dokladov na odvody a dane.":""),
+            akcia:()=>{ bFilter="nespar"; otvorApp("banka"); }});
+        }
+      }
+    }catch(e){ console.error("notifikácia po importe výpisu:", e); }
+
     // limit plánu takmer vyčerpaný
     // skloňovanie po číslovke: 1 faktúra · 2–4 faktúry · 5+ faktúr
     const sklon=(n,jed,dva,viac)=> n===1?jed : (n>=2&&n<=4?dva:viac);
@@ -18490,6 +18517,67 @@ function prenesStavPohybu(zo, na){
 
 // Spoločné pre ručný výber aj pre doklad prijatý e-mailom — inak by sa dve
 // cesty k tomu istému importu časom rozišli (kap. 16).
+// ═══ PO IMPORTE: ČO APPKA SPRAVÍ SAMA A ČO UKÁŽE ČLOVEKU (kap. 79) ═══════
+//
+// Deliaca čiara je od Romana a je to celý princíp tejto časti:
+//
+//   Appka určí, čo vie jednoznačne. DRUH DOKLADU, VÝŠKU ODPOČTU a ČI TO PATRÍ
+//   DO NÁKLADOV si skontroluje účtovník alebo používateľ.
+//
+// Automatika teda smie robiť EVIDENCIU, nie DAŇOVÉ ROZHODNUTIE — tá istá
+// hranica ako pri OCR (sumy z FS áno, uhádnutá kategória nie).
+//
+// Doklad sa preto zakladá LEN pri pohyboch, kde niet čo rozhodovať: odvody,
+// daň z príjmov a odvod DPH. Kategóriu tam určuje klasifikácia, odpočet DPH je
+// nula a o zaradení do nákladov nerozhoduje človek, ale zákon. Pri platbe
+// dodávateľovi bez dokladu by automatika rozhodla práve tie tri veci, ktoré
+// rozhodovať nemá — tá ostáva človeku.
+// Kategórie, pri ktorých niet čo rozhodovať: kategóriu určuje protistrana
+// alebo variabilný symbol, odpočet DPH je nula a o zaradení do nákladov
+// rozhoduje zákon. Čokoľvek mimo tohto zoznamu patrí človeku.
+//
+// Kategóriu NEURČUJE tento zoznam — určuje ju `rozpoznajOdvod`, ktorý navyše
+// rozlišuje preddavok od doplatku podľa variabilného symbolu. Zoznam je len
+// bránou: „smie sa to založiť samo?"
+const DOKLAD_BEZ_ROZHODOVANIA=new Set(
+  ["preddavokZP","preddavokSP","zuctovanieZP","odvodDPH","preddavokDan","doplatokDan","danMotor"]);
+function zaloziDokladySamé(pohyby){
+  let vzniklo=0;
+  (pohyby||[]).forEach(tx=>{
+    if(!tx || tx.smer!=="vydaj" || tx.skryty) return;
+    if(pohybMaVydavok(tx)) return;                 // pýtame sa pri KAŽDOM, nie raz
+    const n=vydavokZPohybuNavrh(tx);
+    if(!n || !DOKLAD_BEZ_ROZHODOVANIA.has(n.kategoria)) return;
+    // Keď appka o zaradení sama pochybuje (suma sedí skôr na nedoplatok než na
+    // preddavok), doklad nezakladá. Otázku sa v dávke položiť nedá a tichá
+    // odpoveď na spornú otázku je horšia než ponechanie človeku.
+    if(n._pochybnost) return;
+    delete n._pochybnost;
+    n.id="v"+Date.now()+Math.random().toString(36).slice(2,6);
+    n.zalozeneAutomaticky=true;                    // musí byť rozoznateľné
+    firmaData.vydavky=(firmaData.vydavky||[]);
+    firmaData.vydavky.push(n);
+    try{ pridajUhradu(tx, "vydavok", dokladKluc(n), null); }
+    catch(e){ console.error("priradenie automatického dokladu:", e); }
+    vzniklo++;
+  });
+  return vzniklo;
+}
+// Tri vedrá podľa kap. 79.3. Ignorované sa nepočítajú do žiadneho — sú to
+// pohyby, o ktorých človek rozhodol, že ho nezaujímajú, a číslo, ktoré nikdy
+// neklesne na nulu, sa prestane čítať.
+function bankaVedra(){
+  const out={sparene:0, vybavene:0, caka:0};
+  (firmaData.vypis||[]).forEach(tx=>{
+    let s=null;
+    try{ s=pohybStav(tx); }catch(e){ return; }
+    if(!s || s.kod==="skryty" || s.kod==="ignorovany") return;
+    if(s.kod==="vybaveny") out.sparene++;
+    else if(s.kod==="klasifikovany") out.vybavene++;
+    else out.caka++;
+  });
+  return out;
+}
 function importujVypisText(text, nazovSuboru){
   const parsed=parseVypis(String(text));
   if(!parsed || !parsed.txns.length){
@@ -18534,6 +18622,22 @@ function importujVypisText(text, nazovSuboru){
   // kým to človek naklikká v Párovaní, znamená, že do tej doby sú tie faktúry
   // všade inde vedené ako neuhradené.
   let sparene=0; try{ sparene=autoParujPohyby(); }catch(_){}
+  // Doklady tam, kde niet čo rozhodovať (kap. 79.3, druhé vedro).
+  let dokladov=0; try{ dokladov=zaloziDokladySamé(nove); }catch(e){ console.error("automatické doklady:", e); }
+  // Výsledok si appka ZAPAMÄTÁ, aby ho zvonček vedel ukázať aj potom, ako
+  // človek zavrie hlášku o importe. Kľúč visí na DÁVKE, nie na dátume — inak
+  // by sa položka buď opakovala každý deň, alebo by sa po druhom importe
+  // neukázala vôbec (kap. 79.6).
+  try{
+    const V=bankaVedra();
+    firmaData.settings.poslednyImportBanka={
+      davka: (ev && ev.id) || (nazovSuboru||"")+"|"+Date.now(),
+      kedy: new Date().toISOString(),
+      mesiace: (ev && ev.mesiace) || [],
+      pridanych: nove.length, sparenych: sparene, dokladov: dokladov,
+      caka: V.caka
+    };
+  }catch(e){ console.error("zápis výsledku importu:", e); }
   poZmene();
   if(aktualnaApp==="banka") appBanka();
   const medzery=vypisPokrytie().medzery;
@@ -18545,7 +18649,8 @@ function importujVypisText(text, nazovSuboru){
   alert((nove.length
     ? "Import hotový: pridaných "+nove.length+" pohybov"+
       (nove.length<parsed.txns.length?" ("+(parsed.txns.length-nove.length)+" už existovalo)":"")+"."+
-      (sparene?"\n\nRovno sa priradilo "+sparene+" platieb podľa sumy, symbolu a partnera.":"")
+      (sparene?"\n\nRovno sa priradilo "+sparene+" platieb podľa sumy, symbolu a partnera.":"")+
+      (dokladov?"\n"+dokladov+" pohybom appka založila interný doklad — odvody a dane, kde niet čo rozhodovať.":"")
     : (uzBol
         ? "Tento výpis už evidujete (nahratý "+new Date(uzBol.kedy).toLocaleDateString("sk-SK")+")."+
           "\nVšetkých "+parsed.txns.length+" pohybov je v evidencii — nič sa nepridalo."
@@ -27031,7 +27136,7 @@ function bkVytvorVydavok(txIdVal){
     }
   }catch(e){ console.error("bkVytvorVydavok — otázka na zúčtovanie:", e); }
   const n=vytvorVydavokZPohybu(txIdVal, prepis, prepisRok);
-  if(!n) return;
+  if(!n || !DOKLAD_BEZ_ROZHODOVANIA.has(n.kategoria)) return;
   const kat=(KATEGORIE_VYDAVKOV[n.kategoria]||{}).n;
   const txt = "Vytvorený interný doklad "+n.cislo+" na "+eur(n.spolu)+"."
     + (kat ? "\n\nZaradený ako: "+kat+(n.obdobie?" ("+n.obdobie+")":"")+"\nRozpoznané podľa: "+n.rozpoznane : "\n\nDoplňte kategóriu vo výdavkoch.")
