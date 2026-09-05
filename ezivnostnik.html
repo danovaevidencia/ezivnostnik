@@ -1311,7 +1311,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.05-IZ";  // fotenie najprv pošle k QR, až potom na celý doklad
+const APP_VERZIA = "2026.09.05-JA";  // pri načítanom QR sa doklad berie z FS a OCR sa nespúšťa
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -8000,8 +8000,13 @@ function normalizujDatumFS(v){
 
 // Litre z položiek dokladu FS. Hľadá palivo a berie jeho množstvo. Štruktúra
 // položky sa medzi verziami FS líši, preto sa skúša viac názvov polí.
+// Názvy palív, ako ich pumpy naozaj píšu na doklad. „EVO 95" zo Slovnaftu
+// sem 5. 9. 2026 nespadalo a zachránila to len záloha „jediná položka" —
+// pri bločku s kávou navyše by litre vyšli z kávy.
+const PALIVO_VZOR=/natural|diesel|nafta|benz|ba\s?9[0-9]|fuelsave|palivo|pohonn|evo\s?\d|verva|tempra|miles|efecta|gasoil|lpg|cng|\b9[58]\b/i;
+function jePalivoNazov(n){ return PALIVO_VZOR.test(String(n||"")); }
 function litreZPoloziekFS(polozky){
-  const jePalivo=n=>/natural|diesel|nafta|benz|ba\s?9[0-9]|fuelsave|palivo|pohonn/i.test(String(n||""));
+  const jePalivo=jePalivoNazov;
   let najlepsie=0;
   for(const p of polozky){
     const nazov=p.name||p.nazov||p.itemName||"";
@@ -8013,6 +8018,39 @@ function litreZPoloziekFS(polozky){
   }
   // bez rozpoznaného paliva vrátime množstvo len ak je jediná položka
   return polozky.length===1 ? r2(najlepsie) : 0;
+}
+
+// Poskladá doklad priamo z odpovede Finančnej správy — bez OCR.
+//
+// Všetko, čo sa z bločku číta, FS pozná presne: dodávateľa, IČO, IČ DPH, DIČ,
+// dátum, celkovú sumu, rozpis DPH aj položky s množstvom. Rozpis sa preto
+// NEDOPOČÍTAVA, keď ho FS pošle — dopočet zo sadzby je odhad a práve on robil
+// pri bločkoch chyby (kap. 76).
+function dokladZFS(d, ekasa){
+  const R={};
+  R.partner=d.dodavatel||"";
+  R.dodavatelIco=d.ico||"";
+  R.dodavatelIcDph=d.icdph||"";
+  R.spolu=r2(d.suma);
+  if(d.zaklad!=null && d.dphSuma!=null){ R.bez=r2(d.zaklad); R.dph=r2(d.dphSuma); }
+  else { const s=odvodSadzbuDPH(0,0); R.bez=r2(R.spolu/(1+s)); R.dph=r2(R.spolu-R.bez); R._sumyDopocitane=true; }
+  const dd=normalizujDatumFS(d.datum); if(dd) R.datum=dd;
+  R.ekasaId=ekasa.ekasaId;
+  R.ekasaOverUrl=ekasa.overUrl||("https://ekasa.financnasprava.sk/#/receipt/"+encodeURIComponent(ekasa.ekasaId));
+  R.cislo=ekasa.ekasaId;
+  R._druh="Bloček";
+  R.druh="Bloček";
+  R._zFS=true;
+  // Palivo poznáme z názvu položky, takže druh dokladu netreba hádať z textu.
+  const pol=Array.isArray(d.polozky)?d.polozky:[];
+  const litre=litreZPoloziekFS(pol);
+  if(litre>0 && pol.some(p=>jePalivoNazov(p.nazov||p.name))){
+    R.litre=litre; R.druh="PHM (tankovanie)"; R.kategoria="phm"; R.autoDoklad=true; R.autoDruh="phm";
+  } else if(litre>0 && pol.length===1){
+    R.litre=litre; R.druh="PHM (tankovanie)"; R.kategoria="phm"; R.autoDoklad=true; R.autoDruh="phm";
+  }
+  R._polozkyFS=pol;
+  return R;
 }
 
 // Odvodí sadzbu DPH z prečítaných hodnôt. Pri OCR chybe býva nesprávna
@@ -8611,7 +8649,18 @@ function appVydavky(){
 // až po otvorení. Musí sa to spustiť na OBOCH cestách — inak by pri importe
 // zostal box vozidla skrytý aj pri zaškrtnutom doklade a používateľ by ho
 // nemal ako rozbaliť.
-function vydavokFormInit(){
+// `noveZOcr` = formulár práve vznikol z prečítaného dokladu, nie z uloženého
+// výdavku. Rozdiel je podstatný: pri NOVOM doklade sa väzby, ktoré inak
+// vzniknú ručnou zmenou druhu, musia dorobiť — pri UPRAVOVANOM by prepísali
+// rozhodnutie človeka.
+//
+// 🔴 5. 9. 2026: OCR určilo druh „PHM (tankovanie)", ale „Súvisí s osobným
+// autom" ostalo nezaškrtnuté. Tú väzbu robí `mDruhZmeneny`, ktoré visí na
+// `onchange` — a to sa pri predvyplnenom druhu nikdy nespustí. Doklad tak
+// vyzeral ako tankovanie, ale do knihy jázd ani do výdavkov na auto sa
+// nedostal a percento osobného použitia sa naň neuplatnilo.
+function vydavokFormInit(noveZOcr){
+  if(noveZOcr && typeof mDruhZmeneny==="function" && val("m_druh")==="PHM (tankovanie)") mDruhZmeneny();
   if(typeof mAktualizujOddiel==="function") mAktualizujOddiel();
   if(typeof mKategoriaPozn==="function") mKategoriaPozn();
   if(typeof mOpravaBox==="function") mOpravaBox();
@@ -23629,6 +23678,27 @@ async function spracujDokladSubor(file, setStav, qrVopred){
     // pri bločku rozdiel medzi „presné číslo z FS" a „uhádnutá suma" —
     // človek má vedieť, ktoré z toho práve číta.
     if(!ekasa && !pbs) qrChyba=qrPrecoZlyhal();
+
+    // ── KEĎ MÁME eKASA ID, OCR JE ZBYTOČNÉ ────────────────────────────────
+    // Roman, 5. 9. 2026: „má zmysel to zdĺhavé OCR aj v prípade, že máme
+    // načítaný QR?" Nemá. Finančná správa dá dodávateľa, IČO, IČ DPH, DIČ,
+    // dátum, celkovú sumu, rozpis DPH aj položky s množstvom — teda VŠETKO,
+    // čo sa z bločku číta, a presne. OCR k tomu pridá len dvadsať sekúnd
+    // čakania a možnosť pomýliť sa.
+    //
+    // Preto sa FS pýtame TERAZ, pred OCR. Keď odpovie, doklad je hotový.
+    // Keď neodpovie (výpadok, offline, neznáme ID), pokračuje sa OCR ako
+    // dosiaľ — presne preto sa tu nič nepreskakuje natvrdo.
+    if(ekasa && ekasa.ekasaId){
+      setStav("Sťahujem doklad z Finančnej správy…");
+      const d=await ekasaDotiahni(ekasa.ekasaId);
+      if(d && d.najdene!==false && d.suma!=null){
+        const R=dokladZFS(d, ekasa);
+        R._surovyText="";
+        return R;
+      }
+      setStav("FS neodpovedala, čítam text dokladu…");
+    }
     setStav("OCR obrázka…");
     // Uhol z QR: OCR nemusí skúšať štyri natočenia, keď ho poznáme.
     text=await obrazokNaText(file, (p,popis)=>setStav(typeof p==="number"?("OCR "+p+"%"+(popis?" — "+popis:"")):p), { uhol:qrUhol });
@@ -24467,6 +24537,8 @@ function otvorOcrVysledok(R){
     <div style="background:var(--brand-lite);color:var(--brand-deep);font-size:12px;padding:9px 12px;border-radius:9px;margin-bottom:14px">
       ${R._efaktura
         ? `✅ Doklad obsahuje <b>e-faktúru${R._priloha?" ("+esc(R._priloha)+")":""}</b> — údaje sú načítané zo štruktúrovaných dát, nie z OCR. Sú presné.`
+        : R._zFS
+        ? `✅ Údaje sú <b>priamo z Finančnej správy</b> podľa QR kódu — nie z rozpoznávania textu. Sú presné a text dokladu sme preto ani nečítali.`
         : `💡 Údaje sme vyčítali z dokladu automaticky. <b>Skontrolujte ich a opravte</b> — OCR nie je vždy presné.`}${jeCloud?'<br>📎 Originál dokladu sa uloží do cloudu.':''}${jePHM?'<br>⛽ Rozpoznali sme tankovanie — litre sa uložia aj do prehľadu tankovaní.':''}
     </div>
     ${R._sumyNesedia?`<div style="background:var(--sfc-warn);border-left:3px solid var(--warn);border-radius:0 9px 9px 0;padding:11px 13px;margin-bottom:14px;font-size:12.5px;line-height:1.6">
@@ -24523,11 +24595,20 @@ function otvorOcrVysledok(R){
           <span id="ekasaStav" style="font-size:11.5px;color:var(--ink-soft)"></span>
         </div>
       </details>`}
+    ${R._zFS?`<details style="margin-bottom:14px;background:var(--bg);border-radius:10px;padding:10px 13px">
+      <summary style="cursor:pointer;font-size:12.5px;color:var(--ink-soft);font-weight:600;list-style:none">🧾 Položky z Finančnej správy</summary>
+      <div style="font-size:11.5px;color:var(--ink-soft);margin:8px 0 6px">Toto poslala Finančná správa k tomuto dokladu. Text z fotky sme nečítali — nebolo ho treba.</div>
+      <div style="font-size:11.5px;line-height:1.6;color:var(--ink)">${
+        (R._polozkyFS||[]).length
+          ? (R._polozkyFS||[]).map(p=>`• ${esc(p.nazov||"(bez názvu)")}${p.mnozstvo?" — "+p.mnozstvo:""}${p.cena!=null?" — "+eur(p.cena):""}`).join("<br>")
+          : "(FS k tomuto dokladu položky neposlala)"
+      }</div>
+    </details>`:`
     <details style="margin-bottom:14px;background:var(--bg);border-radius:10px;padding:10px 13px">
       <summary style="cursor:pointer;font-size:12.5px;color:var(--ink-soft);font-weight:600;list-style:none">📄 Čo appka prečítala z dokladu</summary>
       <div style="font-size:11.5px;color:var(--ink-soft);margin:8px 0 6px">Ak niektorý údaj hore nesedí, tu vidíte presný text z dokladu — pomôže vám ho rýchlo doplniť ručne.</div>
       <div style="white-space:pre-wrap;font-size:11px;line-height:1.5;color:var(--ink);max-height:220px;overflow:auto;background:var(--paper,#fff);border:1px solid var(--line);border-radius:8px;padding:9px 11px">${esc((R._surovyText||"").split("\n").map(s=>s.trim()).filter(Boolean).join("\n")||"(z dokladu sa nepodarilo prečítať text)")}</div>
-    </details>
+    </details>`}
     ${vydavokFormHtml(ocrNaVydavok(R), true, null)}
   `, async ()=>{
     const datum=val("m_datum");
@@ -24639,7 +24720,9 @@ function otvorOcrVysledok(R){
   // doklade. Kontrola litrov visela len na `oninput`, takže pri hodnotách
   // predvyplnených z OCR sa nikdy nespustila — presne tam, kde je chyba
   // najpravdepodobnejšia.
-  setTimeout(vydavokFormInit, 40);
+  // `true` = doklad prišiel z OCR, nie z uloženého výdavku — dorobia sa väzby,
+  // ktoré inak vzniknú až ručnou zmenou druhu (viď vydavokFormInit).
+  setTimeout(()=>vydavokFormInit(true), 40);
 }
 
 // ═══ DAŇOVÝ KALENDÁR — reálne povinnosti dopočítané z profilu ═══
