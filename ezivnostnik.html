@@ -1311,7 +1311,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.05-JH";  // pri zálohe a vyúčtovaní sa počíta, koľkokrát ide DPH
+const APP_VERZIA = "2026.09.05-JI";  // neuplatnený odpočet povie, dokedy sa dá ešte vziať
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -19838,6 +19838,34 @@ function dokladKontrolaPriZapise(x, typ){
   return true;
 }
 
+// ── LEHOTA NA ODPOČÍTANIE DPH (§ 51 ods. 2 zákona o DPH) ──────────────────
+//
+// 🔴 5. 9. 2026: pri porovnaní s KROSom sa našiel doklad, z ktorého sa DPH
+// neuplatnila vôbec (kap. 78.6) — 68,12 € z faktúry NAY. Appka o tom mlčala
+// a o lehote nevedela nič; jediná zmienka o § 51 v kóde bola popiska riadku
+// v priznaní.
+//
+// Zákon dáva odpočet uplatniť najskôr v období, keď právo vzniklo, a NAJNESKÔR
+// v poslednom zdaňovacom období TOHO ISTÉHO kalendárneho roka. Doklad
+// z februára sa teda dá zaradiť aj do decembra, ale nie do budúceho roka —
+// vtedy už len dodatočným priznaním.
+//
+// Živnostník nemá ako vedieť, že mu odpočet po decembri z riadneho priznania
+// vypadne. Preto sa lehota pripája k nálezom, kde je DPH preukázateľne
+// neuplatnená — nie ku každému dokladu bez dane. Odvody, poplatky, poistky
+// a nákupy od neplatiteľov dane nemajú byť čo hlásiť: falošný poplach naučí
+// preskakovať aj pravé nálezy.
+function lehotaOdpoctu(rokDokladu){
+  const r=+rokDokladu, teraz=new Date().getFullYear();
+  if(!r) return "";
+  if(r===teraz)
+    return " Odpočet sa dá uplatniť najneskôr v priznaní za december "+r
+      +" (podáva sa do 25. 1. "+(r+1)+"), stačí doklad zaradiť do niektorého mesiaca tohto roka.";
+  if(r<teraz)
+    return " Rok "+r+" je z pohľadu riadneho priznania uzavretý — odpočet už len dodatočným "
+      +"daňovým priznaním za obdobie, do ktorého doklad patrí. Poraďte sa s účtovníkom.";
+  return "";
+}
 function rocnaKontrola(rok){
   if(!firmaData) return [];
   const d=firmaData, S=d.settings||{}, out=[];
@@ -19956,7 +19984,8 @@ function rocnaKontrola(rok){
     "Rovnaký dodávateľ, rovnaký deň a rovnaká suma, ale iné číslo dokladu. Býva to zálohová "
     +"a vyúčtovacia faktúra k jednému nákupu — vtedy je to v poriadku, len sa suma počíta dvakrát "
     +"v prehľade výdavkov. DPH sa z takej dvojice odpočítava PRÁVE RAZ: keď ani na jednom doklade "
-    +"nie je, odpočet prepadol; keď je na oboch, uplatnili ste ho dvakrát.",
+    +"nie je, odpočet prepadol; keď je na oboch, uplatnili ste ho dvakrát."
+    +(ziadnaDph?lehotaOdpoctu(rok):""),
     dvojmo);
 
   // ── 3b. Rovnaké číslo pri RÔZNYCH sumách ──
@@ -20190,7 +20219,8 @@ function rocnaKontrola(rok){
       const suma=r2(bezRozpisu.reduce((a,x)=>a+(+x.spolu||0),0));
       pridaj("chyba","bezRozpisu", bezRozpisu.length+" dokladov nemá rozpísanú sumu ("+eur(suma)+")",
         "Základ ani DPH nie sú vyplnené, takže sa doklad neuplatní ako výdavok a "
-        +"neuplatní sa z neho ani odpočet DPH. Peniaze sú minuté, v priznaní sa neobjavia.",
+        +"neuplatní sa z neho ani odpočet DPH. Peniaze sú minuté, v priznaní sa neobjavia."
+        +lehotaOdpoctu(rok),
         bezRozpisu.slice(0,8).map(popis));
     }
     if(bezSpolu.length){
