@@ -1311,7 +1311,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.05-JI";  // neuplatnený odpočet povie, dokedy sa dá ešte vziať
+const APP_VERZIA = "2026.09.05-JJ";  // rok povinnosti má konečne pole a nedoplatok sa pýta
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -8675,6 +8675,13 @@ function vydavokFormInit(noveZOcr){
 
 function vydavokDoplnkovePolia(obj){
   const kat=val("m_kategoria"); if(kat) obj.kategoria=kat;
+  // Rok povinnosti sa ukladá LEN pri kategóriách, ktoré ho používajú — inak by
+  // sa hodnota niesla ďalej aj po prepnutí kategórie a ticho posúvala platbu
+  // na iný rok. Prázdne pole znamená „rok úhrady" a to je aj správne prázdno,
+  // nie chýbajúci údaj.
+  const K=KATEGORIE_VYDAVKOV[kat];
+  const zr=parseInt(val("m_zaRok"),10);
+  if(K && K.zaRok && zr>2000) obj.zaRok=zr; else delete obj.zaRok;
   const vyst=val("m_vystavenie"); if(vyst) obj.vystavenie=vyst;
   const spl=val("m_splatnostVyd"); if(spl) obj.splatnost=spl;
   const ib=String(val("m_ibanVyd")||"").replace(/\s/g,"").toUpperCase(); if(ib) obj.iban=ib;
@@ -8801,6 +8808,22 @@ function vydavokFormHtml(x, nova, idx){
           `<option value="${k}" ${odhadniKategoriu(x)===k?"selected":""}>${esc(KATEGORIE_VYDAVKOV[k].n)}</option>`).join("")}
       </select>
       <div class="ocr-hint" id="m_katPozn"></div>
+    </div>
+    <!-- 5. 9. 2026: kategórie s príznakom zaRok mali v nápovede "uveďte za
+         ktorý rok", ale pole na to NEBOLO NIKDE. Roman prepol nedoplatok
+         zdravotného na ročné zúčtovanie a nemal kam ten rok napísať.
+         Nie je to kozmetika: vydavokZaRok podľa toho priraďuje platbu
+         povinnosti — doplatok za 2025 zaplatený v 2026 vysporiadava rok 2025.
+         Bez poľa sa vždy použil rok úhrady, takže platba sadla na nesprávny
+         rok a "koľko mám odložené na odvody" bolo o ňu vedľa.
+         POZOR: tento komentár je vnútri šablónového reťazca — žiadne spätné
+         apostrofy, ukončili by ho a rozbili celý súbor. -->
+    <div class="mfield" id="m_zaRokBox" style="display:none">
+      <label>Za ktorý rok</label>
+      <input id="m_zaRok" type="number" min="2000" max="2100" step="1"
+             value="${esc(x.zaRok||"")}" placeholder="napr. ${new Date().getFullYear()-1}"
+             oninput="mZaRokPozn()">
+      <div class="ocr-hint" id="m_zaRokPozn"></div>
     </div>
     <div id="m_podielBox" style="display:none;background:var(--bg);border-radius:9px;padding:11px 13px;margin-bottom:10px">
       <label style="font-size:12.5px;font-weight:600;color:var(--ink-soft);display:block;margin-bottom:6px">Koľko z toho je na podnikanie</label>
@@ -10356,6 +10379,36 @@ const ODVOD_PROTISTRANY=[
   {re:/vszp|v[sš]eobecn[aá] zdravotn|d[oô]vera|union.*zdravotn/i,  kategoria:"preddavokZP"},
   {re:/soci[aá]lna pois[tť]|socpois[tť]|soc\. pois[tť]/i,          kategoria:"preddavokSP"},
 ];
+// Bežná výška preddavku z HISTÓRIE, nie z nastavení. Medián, nie priemer —
+// jeden nedoplatok medzi dvanástimi preddavkami by priemer vytiahol tak, že by
+// sa ďalší nedoplatok javil ako normálny.
+//
+// 🔴 5. 9. 2026: Roman zaplatil nedoplatok zo zdravotného za minulý rok, vyše
+// 5 000 €. Appka z pohybu vyrobila „Preddavok na zdravotné poistenie" a nič
+// nenamietla — rozpoznanie stálo LEN na protistrane (VšZP/Dôvera/Union),
+// suma doň nevstupovala vôbec. Pritom preddavky sú celý rok rovnaké, takže
+// odchýlka je tu najsilnejší dostupný signál.
+function bezneOdvodyMedian(kategoria, doDatumu){
+  const hranica=String(doDatumu||"").slice(0,10);
+  const sumy=(firmaData.vydavky||[])
+    .filter(x=>x.kategoria===kategoria && (!hranica || String(x.datum||"")<hranica))
+    .slice(-18)
+    .map(x=>r2(+x.spolu||0)).filter(v=>v>0).sort((a,b)=>a-b);
+  if(sumy.length<3) return 0;                 // z dvoch platieb sa normál neurčí
+  const s=sumy.length;
+  return s%2 ? sumy[(s-1)/2] : r2((sumy[s/2-1]+sumy[s/2])/2);
+}
+// Vráti podozrenie, že platba poisťovni nie je preddavok, alebo null.
+const ZUCTOVANIE_K_PREDDAVKU={ preddavokZP:"zuctovanieZP" };
+function odvodPochybnost(kategoria, suma, datum){
+  const ine=ZUCTOVANIE_K_PREDDAVKU[kategoria];
+  if(!ine) return null;
+  const bezne=bezneOdvodyMedian(kategoria, datum);
+  if(!bezne) return null;
+  const s=r2(+suma||0);
+  if(s <= bezne*2.5) return null;             // dvojnásobok je bežné doplatenie mesiaca
+  return { bezne, suma:s, ine, nazovIne:(KATEGORIE_VYDAVKOV[ine]||{}).n||ine };
+}
 function rozpoznajOdvod(tx){
   const vs=String((tx||{}).vs||"").trim();
   const dan=DANOVE_PREDCISLIA[predcislieUctu((tx||{}).ibanProti)];
@@ -17209,10 +17262,32 @@ function mAutoPozn(){
 }
 
 function mKategoriaPozn(){
-  const p=document.getElementById("m_katPozn"); if(!p) return;
+  const p=document.getElementById("m_katPozn");
   const k=KATEGORIE_VYDAVKOV[val("m_kategoria")];
+  // Pole „za ktorý rok" sa ukazuje len pri kategóriách, ktoré ho naozaj
+  // používajú. Trvalé pole, ktoré väčšinou nemá čo hlásiť, nezaberá miesto.
+  const box=document.getElementById("m_zaRokBox");
+  if(box) box.style.display = (k && k.zaRok) ? "block" : "none";
+  if(typeof mZaRokPozn==="function") mZaRokPozn();
+  if(!p) return;
   if(!k){ p.textContent=""; return; }
   p.innerHTML=esc(k.p)+(k.zaklad?"":` <b style="color:var(--warn)">Tento výdavok nezníži vašu daň.</b>`);
+}
+// Rok povinnosti je pole, ktoré ticho mení výsledok — preto sa hneď povie, čo
+// znamená, a prázdne pole sa nepredstiera za rozhodnutie.
+function mZaRokPozn(){
+  const p=document.getElementById("m_zaRokPozn"); if(!p) return;
+  const r=parseInt(val("m_zaRok"),10);
+  const rokUhrady=parseInt(String(val("m_datum")||"").slice(0,4),10) || new Date().getFullYear();
+  if(!r || r<2000){
+    p.innerHTML=`Nevyplnené — platba sa priradí roku úhrady (<b>${rokUhrady}</b>). `
+      +`Ak vysporiadava skorší rok, uveďte ho, inak sa započíta na nesprávny rok.`;
+    return;
+  }
+  p.innerHTML = (r===rokUhrady)
+    ? `Platba sa započíta na povinnosti roka <b>${r}</b> — teda toho, v ktorom bola zaplatená.`
+    : `Platba sa započíta na povinnosti roka <b>${r}</b>, hoci bola zaplatená v roku ${rokUhrady}. `
+      +`Daňovým výdavkom ostáva v roku úhrady.`;
 }
 
 // Ak sa dodanie a vystavenie líšia mesiacom, ticho to zmení obdobie DPH — povedzme to.
@@ -26803,7 +26878,10 @@ function vydavokZPohybuNavrh(tx){
     zaRok: R_ ? R_.zaRok : null,
     obdobie: R_ ? R_.obdobie : "",
     zdrojPohyb: txId(tx),
-    rozpoznane: R_ ? R_.preco : null
+    rozpoznane: R_ ? R_.preco : null,
+    // Podozrenie sa NESIE V NÁVRHU, nie sa rieši až po uložení. Otázka položená
+    // po tom, ako doklad vznikol, je oprava, nie rozhodnutie.
+    _pochybnost: R_ ? odvodPochybnost(R_.kategoria, tx.suma, tx.datum) : null
   };
 }
 // Bol už z tohto pohybu doklad vytvorený? Chráni pred dvojitým zaevidovaním.
@@ -26811,13 +26889,16 @@ function pohybMaVydavok(tx){
   const id=txId(tx);
   return (firmaData.vydavky||[]).some(x=>x.zdrojPohyb===id);
 }
-function vytvorVydavokZPohybu(txIdVal){
+function vytvorVydavokZPohybu(txIdVal, prepisKategoria, prepisZaRok){
   if(!strazZapis("banka")) return null;
   const tx=(firmaData.vypis||[]).find(t=>txId(t)===txIdVal);
   if(!tx) return null;
   if(pohybMaVydavok(tx)){ alert("Z tohto pohybu už výdavok existuje."); return null; }
   const n=vydavokZPohybuNavrh(tx);
   if(!n) return null;
+  if(prepisKategoria){ n.kategoria=prepisKategoria; n.popis=(KATEGORIE_VYDAVKOV[prepisKategoria]||{}).n||n.popis; }
+  if(prepisZaRok>2000) n.zaRok=prepisZaRok;
+  delete n._pochybnost;                       // do uloženého dokladu nepatrí
   n.id="v"+Date.now();
   firmaData.vydavky=(firmaData.vydavky||[]);
   firmaData.vydavky.push(n);
@@ -26830,7 +26911,29 @@ function vytvorVydavokZPohybu(txIdVal){
   return n;
 }
 function bkVytvorVydavok(txIdVal){
-  const n=vytvorVydavokZPohybu(txIdVal);
+  // Otázka MUSÍ prísť pred vytvorením. Roman zaplatil nedoplatok zo zdravotného
+  // za minulý rok a appka z neho ticho vyrobila preddavok — až potom to musel
+  // ísť prepnúť. Otázka po uložení je oprava, nie rozhodnutie.
+  let prepis=null, prepisRok=null;
+  try{
+    const tx=(firmaData.vypis||[]).find(t=>txId(t)===txIdVal);
+    const nav=tx?vydavokZPohybuNavrh(tx):null;
+    const P=nav && nav._pochybnost;
+    if(P){
+      const rokUhrady=parseInt(String(tx.datum||"").slice(0,4),10)||new Date().getFullYear();
+      if(confirm("Táto platba je "+eur(P.suma)+", ale bežný preddavok býva "+eur(P.bezne)+".\n\n"
+        +"Ide o "+P.nazovIne.toLowerCase()+" — teda vysporiadanie za skorší rok?\n\n"
+        +"OK = "+P.nazovIne+"\nZrušiť = ponechať ako preddavok")){
+        prepis=P.ine;
+        // Rok povinnosti je pri zúčtovaní to, čo rozhoduje, kam sa platba
+        // započíta — pýtame sa naň hneď, nie až v ročnej kontrole.
+        const odp=prompt("Za ktorý rok je to zúčtovanie?", String(rokUhrady-1));
+        const r=parseInt(odp,10);
+        if(r>2000) prepisRok=r;
+      }
+    }
+  }catch(e){ console.error("bkVytvorVydavok — otázka na zúčtovanie:", e); }
+  const n=vytvorVydavokZPohybu(txIdVal, prepis, prepisRok);
   if(!n) return;
   const kat=(KATEGORIE_VYDAVKOV[n.kategoria]||{}).n;
   const txt = "Vytvorený interný doklad "+n.cislo+" na "+eur(n.spolu)+"."
