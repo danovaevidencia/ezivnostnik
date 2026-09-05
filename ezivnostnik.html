@@ -1311,7 +1311,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.05-JN";  // v obale sa dá stiahnuť súbor, dovtedy sa nedialo nič
+const APP_VERZIA = "2026.09.05-JO";  // PDF výpis sa naimportuje, len keď sedia súčty banky
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -18052,6 +18052,166 @@ function notifRetaz(pohyby){
   return out;
 }
 
+// ═══ VÝPIS Z PDF (kap. 80) ════════════════════════════════════════════════
+//
+// Appka dovtedy vedela len SEPA XML. Roman má od Prima banky PDF a XML za
+// január a február nemal — pohyby za dva mesiace teda v evidencii chýbali
+// a s nimi 363,50 € zaplateného poistného (kap. 78.4).
+//
+// Čítanie PDF je samo osebe hádanie: každá banka má iný layout a keď sa
+// zmení, parser prestane fungovať TICHO. Preto sa to nestavia ako „vieme
+// čítať PDF", ale ako „vieme to overiť".
+//
+// 🔑 KAŽDÝ VÝPIS SI NESIE VLASTNÚ KONTROLU. Nie je to láskavosť banky, je to
+// definícia výpisu:
+//
+//     počiatočný stav + príjmy − výdavky = konečný stav
+//
+// Overené na dvoch bankách s úplne odlišným formátom (5. 9. 2026):
+//   · Prima banka — počty a sumy kreditných/debetných položiek v hlavičke
+//   · Tatra banka — „na účet mi prišlo / z účtu mi odišlo" a stavy mesiaca
+// Formulácia sa líši, rovnica nie.
+//
+// Keď rovnica nesedí, import sa NEUROBÍ. Vtedy je jedno, aký zlý je parser:
+// čo prejde, je overené na cent, a čo neprejde, je hlasné.
+function pdfRiadky(strany){
+  // Riadok = rovnaká zvislá pozícia. Bez toho je z výpisu jedna kaša a sumy
+  // sa priradia k nesprávnej transakcii.
+  const out=[];
+  strany.forEach(items=>{
+    const podla={};
+    items.forEach(it=>{ const y=Math.round(it.transform[5]);
+      (podla[y]=podla[y]||[]).push({x:it.transform[4], s:it.str}); });
+    Object.keys(podla).map(Number).sort((a,b)=>b-a).forEach(y=>{
+      const t=podla[y].sort((a,b)=>a.x-b.x).map(o=>o.s).join(" ").replace(/\s+/g," ").trim();
+      if(t) out.push(t);
+    });
+  });
+  return out;
+}
+// Názvy sú zámerne dlhé: `cislo` v appke UŽ EXISTUJE a krátky názov ju ticho
+// prekryl. Kontrola „žiadna funkcia dvakrát“ to nechytí — sú to konštanty.
+const pdfSumaSk = s => { const v=parseFloat(String(s||"").replace(/\s| /g,"").replace(/\.(?=\d{3}\b)/g,"").replace(",",".").replace(/[^\d.-]/g,"")); return isNaN(v)?null:v; };
+const pdfSumaEn = s => { const v=parseFloat(String(s||"").replace(/\s| |,/g,"")); return isNaN(v)?null:v; };
+const pdfDatum = d => /^(\d{2})\.\s?(\d{2})\.\s?(\d{4})$/.test(String(d||"").trim())
+  ? String(d).trim().replace(/^(\d{2})\.\s?(\d{2})\.\s?(\d{4})$/,"$3-$2-$1") : "";
+
+// ── Prima banka ────────────────────────────────────────────────────────────
+function vypisPrima(riadky){
+  const spolu=riadky.join("\n");
+  if(!/Prima banka/i.test(spolu)) return null;
+  const mojIban=(spolu.match(/IBAN\s+(SK[\d\s]{20,28})/i)||[])[1];
+  const kr=spolu.match(/Počet kreditných položiek\s+(\d+)\s+v sume spolu\s+([\d,\.]+)/i);
+  const de=spolu.match(/Počet debetných položiek\s+(\d+)\s+v sume spolu\s+-?([\d,\.]+)/i);
+  const zac=spolu.match(/mal zostatok\s+(-?[\d,\.]+)/i);
+  const kon=spolu.match(/Nový zostatok na vašom účte\s+(-?[\d,\.]+)/i);
+  const txns=[]; let cur=null;
+  const ZAC=/^(\d{2}\.\d{2}\.\d{4})\s+(\d{2}\.\d{2}\.\d{4})\s+(.+?)\s+(-?[\d,]+\.\d{2})$/;
+  riadky.forEach(r=>{
+    const m=r.match(ZAC);
+    if(m){ const v=pdfSumaEn(m[4]);
+      cur={datum:pdfDatum(m[1]), popis:m[3].trim(), suma:Math.abs(v),
+           smer:v<0?"vydaj":"prijem", proti:"", ibanProti:"", vs:""};
+      txns.push(cur); return; }
+    if(!cur) return;
+    const ib=r.match(/\b(SK\d{2}\s?[\dA-Z]{4}(?:\s?[\dA-Z]{4}){3,4})\b/);
+    if(ib && !cur.ibanProti) cur.ibanProti=ib[1].replace(/\s/g,"");
+    const vs=r.match(/VS:\s*(\d+)/); if(vs && !cur.vs) cur.vs=vs[1];
+    if(!cur.proti && !ib && !/^(VS:|KS:|SS:|karta |zo dňa:|Kód banky|Strana)/i.test(r)
+       && !/^\d/.test(r) && r.length>2) cur.proti=r;
+  });
+  return { banka:"Prima banka", mojIban:(mojIban||"").replace(/\s/g,""), txns,
+    kontrola:{ zaciatok:pdfSumaEn(zac&&zac[1]), koniec:pdfSumaEn(kon&&kon[1]),
+      prijem:pdfSumaEn(kr&&kr[2]), vydaj:pdfSumaEn(de&&de[2]),
+      pocetPrijem:kr?+kr[1]:null, pocetVydaj:de?+de[1]:null } };
+}
+
+// ── Tatra banka / Raiffeisen ───────────────────────────────────────────────
+function vypisTatra(riadky){
+  const spolu=riadky.join("\n");
+  if(!/Tatra banka|Raiffeisen/i.test(spolu)) return null;
+  const mojIban=(spolu.match(/Číslo účtu\s+(SK[\d\s]{20,28})/i)||[])[1];
+  const zac=spolu.match(/stav na začiatku mesiaca:\s*(-?[\d\s,\.]+)\s*€/i);
+  const kon=spolu.match(/stav na konci mesiaca:\s*(-?[\d\s,\.]+)\s*€/i);
+  const pri=spolu.match(/na účet mi prišlo:\s*(-?[\d\s,\.]+)\s*€/i);
+  const odi=spolu.match(/z účtu mi odišlo:\s*(-?[\d\s,\.]+)\s*€/i);
+  const txns=[]; let cur=null;
+  // Suma býva na tom istom riadku ako dátum, alebo hneď na ďalšom.
+  const HLAV=/^(.+?)\s+(\d{2}\.\s?\d{2}\.\s?\d{4})\s*(?:([+-])\s*([\d\s,\.]+)\s*€)?$/;
+  const SUMA=/^([+-])\s*([\d\s,\.]+)\s*€$/;
+  riadky.forEach(r=>{
+    const m=r.match(HLAV);
+    if(m && pdfDatum(m[2])){
+      cur={datum:pdfDatum(m[2]), popis:m[1].trim(), suma:null, smer:null,
+           proti:"", ibanProti:"", vs:""};
+      if(m[3]){ cur.suma=Math.abs(pdfSumaSk(m[4])); cur.smer=m[3]==="-"?"vydaj":"prijem"; }
+      txns.push(cur); return;
+    }
+    if(!cur) return;
+    const s=r.match(SUMA);
+    if(s && cur.suma===null){ cur.suma=Math.abs(pdfSumaSk(s[2])); cur.smer=s[1]==="-"?"vydaj":"prijem"; return; }
+    const ib=r.match(/(?:Na účet|Z účtu):\s*(SK\d{2}\s?[\dA-Z]{4}(?:\s?[\dA-Z]{4}){3,4})/i);
+    if(ib && !cur.ibanProti) cur.ibanProti=ib[1].replace(/\s/g,"");
+    const nm=r.match(/Názov (?:príjemcu|platiteľa):\s*(.+)$/i);
+    if(nm && !cur.proti && nm[1].trim()!=="0") cur.proti=nm[1].trim();
+    const vs=r.match(/\/VS(\d+)/); if(vs && !cur.vs) cur.vs=vs[1];
+  });
+  return { banka:"Tatra banka", mojIban:(mojIban||"").replace(/\s/g,""),
+    txns:txns.filter(t=>t.suma!==null && t.smer),
+    kontrola:{ zaciatok:pdfSumaSk(zac&&zac[1]), koniec:pdfSumaSk(kon&&kon[1]),
+      prijem:pdfSumaSk(pri&&pri[1]), vydaj:pdfSumaSk(odi&&odi[1]),
+      pocetPrijem:null, pocetVydaj:null } };
+}
+
+const VYPIS_PDF_BANKY=[vypisPrima, vypisTatra];
+
+// Overenie, bez ktorého by sa PDF importovať nemalo. Vracia {ok, sprava}.
+function overVypisPdf(P){
+  if(!P || !P.txns || !P.txns.length) return {ok:false, sprava:"Vo výpise sa nenašla ani jedna transakcia."};
+  const K=P.kontrola||{};
+  const s=(smer)=>r2(P.txns.filter(t=>t.smer===smer).reduce((a,t)=>a+(+t.suma||0),0));
+  const naseP=s("prijem"), naseV=s("vydaj");
+  const chyby=[];
+  if(K.pocetPrijem!=null && K.pocetPrijem!==P.txns.filter(t=>t.smer==="prijem").length)
+    chyby.push("počet príjmov: výpis hlási "+K.pocetPrijem+", prečítali sme "+P.txns.filter(t=>t.smer==="prijem").length);
+  if(K.pocetVydaj!=null && K.pocetVydaj!==P.txns.filter(t=>t.smer==="vydaj").length)
+    chyby.push("počet výdavkov: výpis hlási "+K.pocetVydaj+", prečítali sme "+P.txns.filter(t=>t.smer==="vydaj").length);
+  if(K.prijem!=null && Math.abs(K.prijem-naseP)>0.005)
+    chyby.push("príjmy: výpis hlási "+eur(K.prijem)+", prečítali sme "+eur(naseP));
+  if(K.vydaj!=null && Math.abs(K.vydaj-naseV)>0.005)
+    chyby.push("výdavky: výpis hlási "+eur(K.vydaj)+", prečítali sme "+eur(naseV));
+  // Rovnica zostatkov je najsilnejšia — drží aj vtedy, keď banka počty neuvádza.
+  if(K.zaciatok!=null && K.koniec!=null){
+    const ocak=r2(K.zaciatok+naseP-naseV);
+    if(Math.abs(ocak-K.koniec)>0.02)
+      chyby.push("zostatok nesedí: "+eur(K.zaciatok)+" + "+eur(naseP)+" − "+eur(naseV)
+                 +" = "+eur(ocak)+", ale výpis končí na "+eur(K.koniec));
+  } else if(K.prijem==null && K.vydaj==null){
+    return {ok:false, sprava:"Vo výpise sa nenašli kontrolné súčty, takže sa nedá overiť, či sme ho prečítali celý."};
+  }
+  return chyby.length ? {ok:false, sprava:chyby.join("\n· ")} : {ok:true, sprava:""};
+}
+
+async function parseVypisPdf(arrbuf){
+  const pdfjs=await ensurePdfjs();
+  const pdf=await pdfjs.getDocument({data:arrbuf}).promise;
+  const strany=[];
+  for(let i=1;i<=pdf.numPages;i++){
+    const page=await pdf.getPage(i);
+    strany.push((await page.getTextContent()).items);
+  }
+  const riadky=pdfRiadky(strany);
+  for(const f of VYPIS_PDF_BANKY){
+    let P=null;
+    try{ P=f(riadky); }catch(e){ console.error("PDF výpis — "+f.name+":", e); }
+    if(P && P.txns && P.txns.length){
+      P.txns=P.txns.map((t,i)=>Object.assign(t,{
+        id:"pdf"+t.datum+"_"+i+"_"+Math.round(t.suma*100), mesiac:(t.datum||"").slice(0,7)}));
+      return P;
+    }
+  }
+  return null;
+}
 function parseVypis(xmlText){
   let doc;
   try{ doc=new DOMParser().parseFromString(xmlText,"text/xml"); }catch(_){ return null; }
@@ -18443,6 +18603,31 @@ async function spracujVypis(e){
   if(!strazZapis("banka")) return;
   const file=e.target.files[0]; if(!file) return;
   e.target.value="";
+  // PDF výpis — náhradná cesta pre toho, kto k XML nemá prístup (kap. 80).
+  // Importuje sa LEN keď sedia kontrolné súčty banky; inak sa neurobí nič.
+  if(file.type==="application/pdf" || /\.pdf$/i.test(file.name)){
+    let P=null;
+    try{ P=await parseVypisPdf(await file.arrayBuffer()); }
+    catch(err){ console.error("PDF výpis:", err); }
+    if(!P){
+      alert("Tento PDF výpis appka zatiaľ nepozná.\n\n"
+        +"Rozpoznáva Prima banku a Tatra banku. Z inej banky použite výpis vo formáte "
+        +"SEPA XML (camt.053) — býva v internet bankingu vedľa PDF.");
+      return;
+    }
+    const O=overVypisPdf(P);
+    if(!O.ok){
+      alert("Výpis z "+P.banka+" sa prečítať podarilo, ale KONTROLNÉ SÚČTY NESEDIA:\n\n· "
+        +O.sprava+"\n\nImport sa neurobil. Radšej žiadne dáta než nesprávne — "
+        +"použite výpis vo formáte SEPA XML.");
+      return;
+    }
+    // Text sa odovzdáva aj tak: podľa neho sa poznáva, či ten istý výpis už
+    // bol nahratý, a ukladá sa originál. Pre PDF je to kanonický zápis
+    // prečítaných pohybov — pre ten istý súbor vyjde vždy rovnaký.
+    importujVypisText(JSON.stringify({banka:P.banka, iban:P.mojIban, txns:P.txns}), file.name, P);
+    return;
+  }
   const text=await textVypisu(file);
   if(text===null) return;          // používateľ zrušil alebo sa nepodarilo
   importujVypisText(text, file.name);
@@ -18578,8 +18763,11 @@ function bankaVedra(){
   });
   return out;
 }
-function importujVypisText(text, nazovSuboru){
-  const parsed=parseVypis(String(text));
+// `parsedVopred` je výsledok, ktorý už niekto prečítal inou cestou — dnes
+// PDF výpis. Zvyšok importu je pre obe cesty ten istý; dve kópie by sa
+// rozišli a pohyby z PDF by sa časom začali správať inak než z XML.
+function importujVypisText(text, nazovSuboru, parsedVopred){
+  const parsed=parsedVopred || parseVypis(String(text));
   if(!parsed || !parsed.txns.length){
     alert("Súbor sa nepodarilo prečítať. Podporovaný je bankový výpis vo formáte SEPA XML (ISO 20022, camt.053).");
     return 0;
