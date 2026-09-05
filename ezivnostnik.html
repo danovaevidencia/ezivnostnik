@@ -1311,7 +1311,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.05-JP";  // výdavok patrí do roka podľa úhrady, DPH podľa dodania
+const APP_VERZIA = "2026.09.05-JQ";  // pri faktúre vidno, čo z nej po dani a odvodoch zostane
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -8618,6 +8618,63 @@ function feVyberFirmu(i){
   if(c.dic && document.getElementById(c.dic)) document.getElementById(c.dic).value=v.dic||"";
   const box=document.getElementById(konf.nasep); if(box) box.style.display="none";
 }
+// ═══════════════════════════════════════════════════════════════
+//  ČO Z FAKTÚRY ZOSTANE (kap. 82)
+//  Suma na faktúre je to, čo príde na účet. Čo z toho ostane, je iné číslo
+//  a živnostník ho v hlave nemá — preto sa ukazuje priamo pri faktúre.
+//
+//  Odpočítava sa presne to, čo je na SZČO naozaj naviazané:
+//    · daň z príjmu
+//    · preddavok na sociálne poistenie
+//    · SKUTOČNÝ náklad na zdravotné poistenie (nie preddavok — ten sa
+//      na konci roka dorovnáva, takže by klamal smerom nahor)
+//
+//  Nový vzorec sa tu NEPÍŠE. Presne toto už počíta `calcDanRow` pre mesiac
+//  a appka to zobrazuje ako „Čistý príjem · pred nákladmi"; faktúra dostane
+//  svoj podiel podľa toho, akú časť fakturovaného v mesiaci tvorí. Druhý
+//  výpočet by sa s prvým skôr či neskôr rozišiel (kap. 16).
+//
+//  Je to ODHAD a musí to tak byť aj napísané. Mesiac nemusí byť celý,
+//  minimálne odvody sa rozpočítajú na všetko, čo v ňom je, a daň sa dorovná
+//  až v priznaní. Náklady sa zámerne neodpočítavajú — rovnaké pravidlo ako
+//  pri mesačnom „čistom príjme", inak by sa započítali dvakrát.
+// ═══════════════════════════════════════════════════════════════
+function faktCistyOdhad(f){
+  if(!f || !firmaData) return null;
+  const bez=r2(+((faktSumy(f)||{}).bez)||0);
+  if(!(bez>0)) return null;
+  const mk=faktObdobie(f);
+  if(!/^\d{4}-\d{2}$/.test(String(mk||""))) return null;
+  const rok=+mk.slice(0,4), mi=+mk.slice(5,7)-1;
+  let C=null;
+  // calcDanRow je drahý a feSumyHtml sa prekresľuje pri každom údere do
+  // klávesnice — memo drží výsledok, kým sa dáta nezmenia.
+  try{ C=memoRok("cistyMes:"+mk, ()=>calcDanRow(mi, rok, firmaData.settings||{})); }
+  catch(e){ return null; }
+  if(!C || !(C.faktB>0)) return null;
+  const podiel=bez/C.faktB;                 // akú časť mesiaca tvorí táto faktúra
+  const dan=r2(C.dan*podiel), zdrav=r2(C.zdrav*podiel), soc=r2(C.soc*podiel);
+  const cisty=r2(bez-dan-zdrav-soc);
+  return {bez, mk, podiel, dan, zdrav, soc, cisty, nicNezostane:cisty<=0};
+}
+function feCistyHtml(){
+  const O=faktCistyOdhad(_feEdit);
+  if(!O) return "";
+  const ram=`margin-top:9px;border-top:1px dashed var(--line);padding-top:8px`;
+  if(O.nicNezostane){
+    return `<div style="${ram}"><div style="display:flex;justify-content:space-between;align-items:baseline">
+      <span>Zostane po dani a odvodoch</span><b style="color:var(--warn)">nič</b></div>
+      <div style="font-size:11.5px;color:var(--ink-soft);margin-top:3px">Daň a odvody za ${mesiacLabel(O.mk)} prevyšujú to, čo je za tento mesiac vyfakturované.</div></div>`;
+  }
+  // Nulové zložky sa nevypisujú. „sociálne 0,00 €" nie je informácia, je to
+  // šum — a na 390 px zaberá riadok, ktorý má niesť niečo iné.
+  const zlozky=[["daň",O.dan],["zdravotné",O.zdrav],["sociálne",O.soc]]
+    .filter(z=>z[1]>0).map(z=>z[0]+" "+eur(z[1]));
+  const rozpis=zlozky.length?("odpočítané: "+zlozky.join(" · ")+"<br>"):"";
+  return `<div style="${ram}"><div style="display:flex;justify-content:space-between;align-items:baseline">
+    <span>Zostane po dani a odvodoch</span><b style="color:var(--pos)">≈ ${eur(O.cisty)}</b></div>
+    <div style="font-size:11.5px;color:var(--ink-soft);margin-top:3px">${rozpis}<b>orientačne, pred nákladmi</b> — podľa ${mesiacLabel(O.mk)}</div></div>`;
+}
 // Súčty v editore faktúry. Vlastná funkcia, aby sa dali prekresliť aj bez
 // zatvorenia modálu — inak sa zmena počtu dní alebo ceny prejaví až po uložení
 // a používateľ nevidí, čo vlastne fakturuje.
@@ -8625,7 +8682,8 @@ function feSumyHtml(){
   const s=faktSumy(_feEdit);
   return `<div style="display:flex;justify-content:space-between"><span>Základ bez DPH</span><b>${eur(s.bez)}</b></div>
     <div style="display:flex;justify-content:space-between"><span>DPH ${Math.round(s.sadzba*100)} %</span><b>${eur(s.dph)}</b></div>
-    <div style="display:flex;justify-content:space-between;font-size:15px;margin-top:4px;border-top:1px solid var(--line);padding-top:4px"><span><b>Spolu</b></span><b style="color:var(--brand)">${eur(s.spolu)}</b></div>`;
+    <div style="display:flex;justify-content:space-between;font-size:15px;margin-top:4px;border-top:1px solid var(--line);padding-top:4px"><span><b>Spolu</b></span><b style="color:var(--brand)">${eur(s.spolu)}</b></div>`
+    + feCistyHtml();
 }
 function feRefreshSumy(){
   const box=document.getElementById("feSumy");
