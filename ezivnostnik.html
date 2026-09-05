@@ -1311,7 +1311,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.05-JJ";  // rok povinnosti má konečne pole a nedoplatok sa pýta
+const APP_VERZIA = "2026.09.05-JL";  // odvody znižujú základ raz, nie dvakrát
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -2558,7 +2558,11 @@ function deRocnySuhrn(rok){
   const zpZapl=zaplateneZPRok(rok);
   const zpRok=zpZapl.suma;
   let socMes=12; if(S.socOdvodyOd){ const fm=parseInt(String(S.socOdvodyOd).split("-")[1])||13; socMes=Math.max(0,12-fm+1); }
-  const socRok=r2((+S.socOdvodyMes||0)*socMes);
+  // Sociálne rovnako ako zdravotné: skutočne zaplatené má prednosť pred
+  // odhadom z nastavení. Bez toho by doklad na odvod SP nezvýšil odvody
+  // (do základu cez výdavky už nevstupuje) a platba by sa stratila celá.
+  const socZapl=zaplateneOdvodyRok(rok, "sp");
+  const socRok = socZapl.pocet>0 ? socZapl.suma : r2((+S.socOdvodyMes||0)*socMes);
   const odvodyRok=r2(zpRok+socRok);
   const zakladPred=r2(prijmy-vydavkySkutSpolu-odvodyRok);
   // pri aute od 48 000 € sa časť odpisu vracia do základu dane, ak firma zarobila málo
@@ -3061,12 +3065,55 @@ function _dphSaldoRokVypocet(rok){
 }
 
 // skutočne ZAPLATENÉ zdravotné poistné za rok — z bankového výpisu (klasifikované ako odvodZP)
+// ── ZAPLATENÉ ODVODY: ZJEDNOTENÝ VÝPOČET ──────────────────────────────────
+//
+// 🔴 5. 9. 2026, zmerané: tá istá platba znižovala základ dane DVAKRÁT.
+// Raz cez `odvodyRok` (z klasifikovaného pohybu v banke) a druhý raz ako
+// výdavok s kategóriou preddavokZP. Appka pritom sama ponúka „Vytvoriť
+// výdavok z platby" práve na tých pohyboch.
+//
+//     bez dokladu k platbe:   základ 9 743,75
+//     po vytvorení výdavku:   základ 9 487,50     rozdiel = celá platba
+//
+// Zjednotené: berie sa ZJEDNOTENIE pohybov a dokladov, kľúčom je pohyb.
+//   · klasifikovaný pohyb sa počíta raz,
+//   · doklad sa počíta len vtedy, keď k nemu klasifikovaný pohyb NIE JE
+//     (ručne zapísaný odvod, platba z iného účtu, doklad bez väzby).
+// Doklad vytvorený z klasifikovaného pohybu teda nepridá nič — a nič sa
+// zároveň nestratí. K tomu `vydavokDoZakladu` vracia pri odvodových
+// kategóriách nulu, lebo do základu vstupujú TOUTO cestou.
+// Vstupuje výdavok do základu INOU cestou než cez výdavky? Zdravotné aj
+// sociálne odvody znižujú základ cez `odvodyRok`; keby vstúpili aj ako výdavok,
+// tá istá platba by sa odpočítala dvakrát.
+function jeOdvodDoZakladuInak(x){
+  const K=KATEGORIE_VYDAVKOV[x&&x.kategoria];
+  return !!(K && (K.odvod==="zp" || K.odvod==="sp"));
+}
+function zaplateneOdvodyRok(rok, druhOdvodu){
+  const R=String(rok);
+  const zpDruh = druhOdvodu==="zp" ? "odvodZP" : "odvodSP";
+  const zPohybov=new Set();
+  let suma=0, pocet=0;
+  (firmaData.vypis||[]).forEach(t=>{
+    if(t.smer!=="vydaj" || !String(t.datum||"").startsWith(R)) return;
+    const kl=klasifikujPohyb(t);
+    if(!kl || kl.druh!==zpDruh) return;
+    suma=r2(suma+(+t.suma||0)); pocet++;
+    zPohybov.add(txId(t));
+  });
+  (firmaData.vydavky||[]).forEach(x=>{
+    if(!String(x.datum||"").startsWith(R)) return;
+    const K=KATEGORIE_VYDAVKOV[x.kategoria];
+    if(!K || K.odvod!==druhOdvodu) return;
+    if(x.zdrojPohyb && zPohybov.has(x.zdrojPohyb)) return;   // ten pohyb sa už počítal
+    suma=r2(suma+(+x.spolu||0)); pocet++;
+  });
+  return {suma, pocet};
+}
 function zaplateneZPRok(rok){
   const S=firmaData.settings||{};
-  const vypis=(firmaData.vypis||[]).filter(t=>t.smer==="vydaj" && String(t.datum||"").startsWith(String(rok)));
-  let zaplatene=0, najdene=0;
-  vypis.forEach(t=>{ const kl=klasifikujPohyb(t); if(kl && kl.druh==="odvodZP"){ zaplatene=r2(zaplatene+(+t.suma||0)); najdene++; } });
-  if(najdene>0) return {suma:zaplatene, zdroj:"vypis", pocet:najdene};
+  const Z=zaplateneOdvodyRok(rok, "zp");
+  if(Z.pocet>0) return {suma:Z.suma, zdroj:"vypis", pocet:Z.pocet};
   const preddavok=(+S.preddavokZP||0);
   let mesiacov=0;
   for(let mi=0;mi<12;mi++){ const mk=rok+"-"+String(mi+1).padStart(2,"0");
@@ -9877,6 +9924,7 @@ function vydavokMozeKratit(x){
 }
 function vydavokDoZakladu(x){
   if(!kategoriaOvplyvnujeZaklad(x)) return 0;
+  if(jeOdvodDoZakladuInak(x)) return 0;   // odvody idú cez odvodyRok (kap. 79)
   // hotovostné zaokrúhlenie na 5 centov je súčasť daňového výdavku (kladné)
   // alebo príjmu (záporné) — UI to pri doklade sľubuje, tak to musí platiť
   const suma=r2((+((x&&x.bez))||0)+(+((x&&x.zaokruhlenie))||0));
@@ -10375,10 +10423,31 @@ function predcislieUctu(iban){
   const m=s.match(/^SK\d{2}8180(\d{6})/);
   return m ? m[1] : null;
 }
-const ODVOD_PROTISTRANY=[
-  {re:/vszp|v[sš]eobecn[aá] zdravotn|d[oô]vera|union.*zdravotn/i,  kategoria:"preddavokZP"},
-  {re:/soci[aá]lna pois[tť]|socpois[tť]|soc\. pois[tť]/i,          kategoria:"preddavokSP"},
+// ── ODVODY: JEDEN ZOZNAM VZOROV PRE OBE CESTY ─────────────────────────────
+//
+// 🔴 5. 9. 2026: vzory boli DVA a rozišli sa presne tak, ako varuje kap. 16.
+// `klasifikujPohyb` hľadalo „zdravotná poist", `rozpoznajOdvod` hľadalo
+// „všeobecná zdravotn". V bankových dátach je protistrana ORezaná na
+// „Všeobecná zdravotná p" — prvý vzor teda nesedel, druhý áno.
+//
+// Dôsledok bol merateľný: nedoplatok 5 067,30 € a platba 462,15 € sa do
+// „zaplatené zdravotné" nezapočítali vôbec, takže základ dane bol o 5 529,45 €
+// vyšší, než mal byť. Klasifikátor pritom vyzeral, že funguje — päť platieb
+// po 256,25 € chytal správne.
+//
+// Odteraz je zoznam jeden a používajú ho obe cesty.
+const ODVODY_VZORY=[
+  { druh:"odvodZP", re:/vszp|vs[ _]?zp|v[sš]eobecn[aá] zdravotn|d[oô]vera|union.*zdravotn|zdravotn[áa] pois[tť]/i,
+    kategoria:"preddavokZP", odvod:"zp", preco:"zdravotné poistenie" },
+  { druh:"odvodSP", re:/soci[aá]lna pois[tť]|socpois[tť]|soc\.?\s*pois[tť]/i,
+    kategoria:"preddavokSP", odvod:"sp", preco:"sociálne poistenie" },
 ];
+function odvodVzorPre(text){
+  const s=String(text||"");
+  for(const V of ODVODY_VZORY){ if(V.re.test(s)) return V; }
+  return null;
+}
+const ODVOD_PROTISTRANY=ODVODY_VZORY;   // pôvodný názov, nech sa nemení volanie
 // Bežná výška preddavku z HISTÓRIE, nie z nastavení. Medián, nie priemer —
 // jeden nedoplatok medzi dvanástimi preddavkami by priemer vytiahol tak, že by
 // sa ďalší nedoplatok javil ako normálny.
@@ -10403,11 +10472,34 @@ const ZUCTOVANIE_K_PREDDAVKU={ preddavokZP:"zuctovanieZP" };
 function odvodPochybnost(kategoria, suma, datum){
   const ine=ZUCTOVANIE_K_PREDDAVKU[kategoria];
   if(!ine) return null;
-  const bezne=bezneOdvodyMedian(kategoria, datum);
-  if(!bezne) return null;
   const s=r2(+suma||0);
-  if(s <= bezne*2.5) return null;             // dvojnásobok je bežné doplatenie mesiaca
-  return { bezne, suma:s, ine, nazovIne:(KATEGORIE_VYDAVKOV[ine]||{}).n||ine };
+  const nazovIne=(KATEGORIE_VYDAVKOV[ine]||{}).n||ine;
+  const bezne=bezneOdvodyMedian(kategoria, datum);
+  if(bezne){
+    if(s <= bezne*2.5) return null;           // dvojnásobok je bežné doplatenie mesiaca
+    return { zdroj:"historia", bezne, suma:s, ine, nazovIne };
+  }
+  // 🔴 Bez histórie by kontrola nepovedala nič — a presne tak dopadla 5. 9. 2026
+  // na Romanových ostrých dátach: preddavky platí každý mesiac, ale v appke
+  // bol s kategóriou `preddavokZP` jediný doklad, a to práve ten nedoplatok.
+  // Medián vyšiel nula a otázka sa nepoložila.
+  //
+  // Postaviť kontrolu na histórii, ktorú používateľ nemá, je to isté ako
+  // nemať kontrolu — a najviac chýba práve novému účtu (kap. 16: nový účet
+  // nájde inú triedu chýb než dlho používaný).
+  //
+  // Záložná kotva je ZÁKONNÉ MINIMUM: jedna platba vyššia než dvanásť
+  // minimálnych mesačných odvodov nie je mesačný preddavok. Je to zámerne
+  // veľmi voľné — kto platí viac než ročný objem miním za jeden mesiac,
+  // dostane otázku navyše, a to je lacnejšie než prepásť nedoplatok.
+  const rok=+String(datum||"").slice(0,4) || new Date().getFullYear();
+  let min=0;
+  try{ min=+sadzbaFirmy("minOdvodZP", rok, (firmaData&&firmaData.settings)||{})||0; }
+  catch(e){ console.warn("odvodPochybnost — minOdvodZP:", e); }
+  if(!min) return null;
+  const strop=r2(min*12);
+  if(s<=strop) return null;
+  return { zdroj:"minimum", strop, min:r2(min), suma:s, ine, nazovIne };
 }
 function rozpoznajOdvod(tx){
   const vs=String((tx||{}).vs||"").trim();
@@ -17975,8 +18067,10 @@ function klasifikujPohyb(tx){
     if(/^1700/.test(vs)||/^500/.test(vs)) return {druh:"danPrijem", kategoria:"danPrijem", istota:"ista", preco:"FS · VS 1700 = daň z príjmov"};
     return {druh:"danPrijem", kategoria:"danPrijem", istota:"mozna", preco:"platba finančnej správe"};
   }
-  if(/vszp|vs[ _]?zp|dovera|dôvera|union.*zdrav|zdravotn[áa] poist/.test(s)) return {druh:"odvodZP", kategoria:"odvodZP", istota:"ista", preco:"zdravotné poistenie"};
-  if(/socialna poist|sociálna poist|soc\.?\s*poist|socpoist/.test(s)) return {druh:"odvodSP", kategoria:"odvodSP", istota:"ista", preco:"sociálne poistenie"};
+  // Vzory odvodov sú spoločné s tvorbou výdavku — dva zoznamy sa rozišli
+  // a nedoplatok cez jeden prešiel a cez druhý nie (viď ODVODY_VZORY).
+  const VZ=odvodVzorPre(s);
+  if(VZ) return {druh:VZ.druh, kategoria:VZ.druh, istota:"ista", preco:VZ.preco};
   if(/union\.sk|pillow|allianz|kooperativa|axa|generali|uniqa|poist/.test(s)) return {druh:"poistenie", kategoria:"prevadzka", istota:"mozna", preco:"poistenie"};
   const mojePriezvisko=((firmaData.meta&&firmaData.meta.nazov)||"").toLowerCase();
   if(jeMojeMeno(proti)||(mojePriezvisko&&proti&&mojePriezvisko.includes(proti))) return {druh:"vlastnyPrevod", kategoria:"sukromne", ignoruj:true, istota:"ista", preco:"vlastný prevod / vklad"};
@@ -26921,7 +27015,10 @@ function bkVytvorVydavok(txIdVal){
     const P=nav && nav._pochybnost;
     if(P){
       const rokUhrady=parseInt(String(tx.datum||"").slice(0,4),10)||new Date().getFullYear();
-      if(confirm("Táto platba je "+eur(P.suma)+", ale bežný preddavok býva "+eur(P.bezne)+".\n\n"
+      const preco = P.zdroj==="historia"
+        ? "Táto platba je "+eur(P.suma)+", ale bežný preddavok býva "+eur(P.bezne)+"."
+        : "Táto platba je "+eur(P.suma)+" — viac než celý rok minimálnych odvodov ("+eur(P.strop)+").";
+      if(confirm(preco+"\n\n"
         +"Ide o "+P.nazovIne.toLowerCase()+" — teda vysporiadanie za skorší rok?\n\n"
         +"OK = "+P.nazovIne+"\nZrušiť = ponechať ako preddavok")){
         prepis=P.ine;
