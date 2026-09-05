@@ -1311,7 +1311,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.05-JR";  // sociálne odvody sa berú z banky, nielen z nastavenia
+const APP_VERZIA = "2026.09.05-JS";  // odvody a dane z banky vidno vo Výdavkoch, mimo súčtu výdavkov
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -3088,6 +3088,17 @@ function _dphSaldoRokVypocet(rok){
 function jeOdvodDoZakladuInak(x){
   const K=KATEGORIE_VYDAVKOV[x&&x.kategoria];
   return !!(K && (K.odvod==="zp" || K.odvod==="sp"));
+}
+// Platba štátu — odvod, daň z príjmov alebo odvod DPH. Je to doklad ako každý
+// iný a patrí do evidencie, ale NIE je to výdavok v bežnom zmysle: do základu
+// dane vstupuje inou cestou (odvody) alebo vôbec (DPH, daň z príjmov). Preto
+// sa vo Výdavkoch počíta zvlášť (kap. 84).
+//
+// Daň z motorových vozidiel tu zámerne NIE JE: tá je normálny daňový výdavok
+// a do základu ide priamo, takže patrí medzi ostatné doklady.
+function jePlatbaStatu(x){
+  const K=KATEGORIE_VYDAVKOV[x&&x.kategoria];
+  return !!(K && K.odvod && K.odvod!=="dzmv");
 }
 // Zaplatené odvody za OBDOBIE — prefix dátumu, takže to isté pravidlo obslúži
 // rok ("2026") aj mesiac ("2026-10"). Mesačný výpočet dovtedy sociálne odvody
@@ -8745,16 +8756,25 @@ function appVydavky(){
   // filtruj podľa roka a mesiaca
   let vyd=vsetky.filter(x=>vydavokVRoku(x, vRok));
   if(vMesiac) vyd=vyd.filter(x=>vydavokObdobieDane(x)===vMesiac);
-  const bezSpolu=vyd.reduce((a,x)=>a+(+x.bez||0),0);
-  const dphSpolu=vyd.reduce((a,x)=>a+(+x.dph||0),0);
-  const fakt=vyd.filter(x=>x.druh==="Došlá faktúra").length;
-  const blocky=vyd.filter(x=>x.druh==="Bloček").length;
+  // Platby štátu sa do „Výdavkov bez DPH" NEsčítavajú. Na doklade z banky sa
+  // `bez` rovná celej sume, takže odvody a dane by to číslo nafúkli o tisíce
+  // eur — a je to práve číslo, ktoré človek číta ako „koľko ma stálo
+  // podnikanie". Do základu dane pritom vstupujú inou cestou alebo vôbec
+  // (kap. 84). Majú preto vlastnú dlaždicu aj vlastný filter.
+  const vydBezne=vyd.filter(x=>!jePlatbaStatu(x));
+  const vydStatu=vyd.filter(jePlatbaStatu);
+  const bezSpolu=vydBezne.reduce((a,x)=>a+(+x.bez||0),0);
+  const dphSpolu=vydBezne.reduce((a,x)=>a+(+x.dph||0),0);
+  const statuSpolu=vydStatu.reduce((a,x)=>a+(+x.spolu||+x.bez||0),0);
+  const fakt=vydBezne.filter(x=>x.druh==="Došlá faktúra").length;
+  const blocky=vydBezne.filter(x=>x.druh==="Bloček").length;
   // mesiace v roku
   const mesiace=[...new Set(vsetky.filter(x=>String(x.datum||"").slice(0,4)===vRok).map(x=>String(x.datum||"").slice(0,7)).filter(m=>/^\d{4}-\d{2}$/.test(m)))].sort().reverse();
   let list=vyd;
   if(vFilter==="faktury") list=vyd.filter(x=>x.druh==="Došlá faktúra");
   else if(vFilter==="blocky") list=vyd.filter(x=>x.druh==="Bloček");
   else if(vFilter==="neuhradene") list=vyd.filter(x=>x.cislo && !vydJeUhradeny(x));
+  else if(vFilter==="statu") list=vydStatu;
   if((_hladaj.vydavky||"").trim()) list=list.filter(x=>hladajZhoda(_hladaj.vydavky, x.cislo, x.partner, x.popis, x.variabilny, x.spolu));
   // Kľúče, nie čísla: doklad bez čísla sa inak nedal ani vybrať, ani zmazať
   // — checkbox sa mu vôbec nevykreslil (rovnaká príčina ako v EX).
@@ -8765,9 +8785,10 @@ function appVydavky(){
     <div class="amini">
       <div class="aminbox"><div class="al">Výdavky bez DPH</div><div class="av">${eur(bezSpolu)}</div></div>
       <div class="aminbox"><div class="al">DPH na odpočet</div><div class="av pos">${eur(dphSpolu)}</div></div>
-      <div class="aminbox"><div class="al">Došlé faktúry</div><div class="av">${fakt}</div></div>
-      <div class="aminbox"><div class="al">Bločky</div><div class="av">${blocky}</div></div>
+      <div class="aminbox"><div class="al">Odvody a dane</div><div class="av">${eur(statuSpolu)}</div><div class="as">${vydStatu.length} platieb · mimo výdavkov</div></div>
+      <div class="aminbox"><div class="al">Faktúry / bločky</div><div class="av">${fakt} / ${blocky}</div></div>
     </div>
+    ${odvodyDoplnitHtml()}
     <div class="atool" style="flex-wrap:wrap;gap:8px">
       <select onchange="vRok=this.value;vMesiac='';appVydavky()" style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:13px">
         ${roky.map(r=>`<option value="${r}" ${r===vRok?'selected':''}>${r}</option>`).join('')}
@@ -8777,7 +8798,7 @@ function appVydavky(){
         ${mesiace.map(m=>`<option value="${m}" ${m===vMesiac?'selected':''}>${mesiacLabel(m)}</option>`).join('')}
       </select>
       <div style="flex-basis:100%;height:0"></div>
-      ${['vsetky|Všetky','faktury|Došlé faktúry','blocky|Bločky','neuhradene|Neuhradené'].map(x=>{const[k,l]=x.split('|');return `<span class="achip ${vFilter===k?'on':''}" onclick="vFilter='${k}';appVydavky()">${l}</span>`}).join('')}${hladatkoHtml('vydavky','appVydavky','🔍 Partner, číslo, popis, suma…')}
+      ${['vsetky|Všetky','faktury|Došlé faktúry','blocky|Bločky','neuhradene|Neuhradené','statu|Odvody a dane'].map(x=>{const[k,l]=x.split('|');return `<span class="achip ${vFilter===k?'on':''}" onclick="vFilter='${k}';appVydavky()">${l}</span>`}).join('')}${hladatkoHtml('vydavky','appVydavky','🔍 Partner, číslo, popis, suma…')}
     </div>
     ${strazcaBanner()}
     ${vydVybrane.size?`<div style="position:sticky;top:0;z-index:5;display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:var(--brand-lite);border:1px solid var(--line);border-radius:9px;padding:8px 12px;margin-bottom:10px">
@@ -18874,6 +18895,72 @@ function zaloziDokladySamé(pohyby){
     vzniklo++;
   });
   return vzniklo;
+}
+// ═══════════════════════════════════════════════════════════════
+//  ODVODY A DANE, KTORÉ BANKA POZNÁ A VÝDAVKY NIE (kap. 84)
+//  `zaloziDokladySamé` beží LEN pri importe výpisu, nad práve prijatými
+//  pohybmi. Čo bolo zatriedené skôr — alebo importované predtým, než táto
+//  funkcia vznikla — doklad nikdy nedostalo. V Banke tie platby vidno,
+//  vo Výdavkoch po nich niet stopy, a to je presne to, čo Roman hlásil.
+//
+//  Nedopĺňa sa to potichu na pozadí. Je to hromadný zápis do dát a ten má mať
+//  tvár: karta sa ukáže len keď je čo doplniť, povie koľko a čoho, a čaká na
+//  ťuknutie. Zakladá tá istá funkcia ako pri importe — druhá cesta k tomu
+//  istému by sa časom rozišla (kap. 16).
+// ═══════════════════════════════════════════════════════════════
+function odvodyBezDokladu(){
+  const hotove=[], sporne=[], podla={};
+  (firmaData.vypis||[]).forEach(tx=>{
+    if(!tx || tx.smer!=="vydaj" || tx.skryty) return;
+    if(pohybMaVydavok(tx)) return;
+    let n=null; try{ n=vydavokZPohybuNavrh(tx); }catch(e){ return; }
+    if(!n || !DOKLAD_BEZ_ROZHODOVANIA.has(n.kategoria)) return;
+    const p={tx, kategoria:n.kategoria, datum:tx.datum||"", suma:r2(+tx.suma||0)};
+    // Pochybnosť sa v dávke rozhodnúť nedá (napr. suma sedí skôr na nedoplatok
+    // než na preddavok) — taký pohyb ostáva človeku v Banke.
+    if(n._pochybnost){ sporne.push(p); return; }
+    hotove.push(p);
+    podla[n.kategoria]=(podla[n.kategoria]||0)+1;
+  });
+  hotove.sort((a,b)=>String(a.datum).localeCompare(String(b.datum)));
+  return {hotove, sporne, podla, suma:r2(hotove.reduce((a,p)=>a+p.suma,0))};
+}
+function odvodyDoplnitHtml(){
+  let O=null; try{ O=odvodyBezDokladu(); }catch(e){ return ""; }
+  if(!O || (!O.hotove.length && !O.sporne.length)) return "";
+  const menoKat=k=>(KATEGORIE_VYDAVKOV[k]||{}).n||k;
+  const ram="background:var(--sfc-warn,var(--bg));border:1px solid var(--line);border-radius:11px;padding:11px 13px;margin:10px 0";
+  const spornyRiadok=O.sporne.length
+    ? `<div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px">Ďalších ${O.sporne.length} appka sama nezaloží — pri nich si nie je istá zaradením. Tie čakajú v <b>Banke</b>.</div>`
+    : "";
+  if(!O.hotove.length) return `<div style="${ram}"><b>Platby odvodov a daní z banky</b>${spornyRiadok}</div>`;
+  const rozpis=Object.keys(O.podla).map(k=>menoKat(k)+" ×"+O.podla[k]).join(" · ");
+  return `<div style="${ram}">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px">
+      <b>V banke je ${O.hotove.length} platieb odvodov a daní, tu doklad nemajú</b>
+      <b style="white-space:nowrap">${eur(O.suma)}</b></div>
+    <div style="font-size:11.5px;color:var(--ink-soft);margin-top:4px">${esc(rozpis)}</div>
+    <button class="aabtn pri" style="width:100%;justify-content:center;margin-top:9px" onclick="doplnOdvodoveDoklady()">Doplniť ich do výdavkov</button>
+    ${spornyRiadok}</div>`;
+}
+function doplnOdvodoveDoklady(){
+  if(!strazZapis("vydavky")) return;
+  const O=odvodyBezDokladu();
+  if(!O.hotove.length){ alert("Niet čo doplniť — ku každej platbe odvodov a daní z banky už doklad je."); return; }
+  const ukazka=O.hotove.slice(0,10).map(p=>
+    "• "+fmtDatum(p.datum)+" · "+eur(p.suma)+" · "+((KATEGORIE_VYDAVKOV[p.kategoria]||{}).n||p.kategoria)).join("\n");
+  const viac=O.hotove.length>10 ? "\n… a ďalších "+(O.hotove.length-10) : "";
+  if(!confirm("Doplní sa "+O.hotove.length+" dokladov v sume "+eur(O.suma)+":\n\n"+ukazka+viac+
+      "\n\nKaždý sa rovno priradí k svojej platbe. Do základu dane sa nezapočítajú dvakrát — "+
+      "odvody idú do výpočtu cez zaplatené sumy, nie cez výdavky.")) return;
+  let n=0;
+  try{ n=zaloziDokladySamé(O.hotove.map(p=>p.tx)); }
+  catch(e){ console.error("doplnenie odvodových dokladov:", e); alert("Doplnenie zlyhalo: "+(e.message||e)); return; }
+  poZmene();
+  appVydavky();
+  setTimeout(()=>alert(n===O.hotove.length
+    ? ("Doplnené: "+n+" dokladov.")
+    : ("Doplnené: "+n+" z "+O.hotove.length+". Zvyšné appka nezaložila — nájdete ich v Banke medzi klasifikovanými pohybmi.")), 60);
 }
 // Tri vedrá podľa kap. 79.3. Ignorované sa nepočítajú do žiadneho — sú to
 // pohyby, o ktorých človek rozhodol, že ho nezaujímajú, a číslo, ktoré nikdy
