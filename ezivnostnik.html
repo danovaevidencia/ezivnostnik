@@ -1311,7 +1311,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.06-JW";  // knihy do PDF a XLSX priamo z modulu Pohľadávky
+const APP_VERZIA = "2026.09.06-JX";  // hotovosť: spôsob úhrady a zostatok pokladne, nie pokladnica
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -14287,6 +14287,21 @@ function appData(){
     </div>
 
     <div class="card" style="margin-bottom:14px">
+      <h2 style="font-size:16px;margin-bottom:4px">Hotovosť</h2>
+      <div class="csub" style="margin-bottom:14px">Pre občasné platby na ruku. Zostatok sa dopočítava z dokladov — appka nevedie pokladnicu ani dennú uzávierku.</div>
+      <div class="mrow2">
+        <div class="mfield"><label>Počiatočný stav pokladne (€)</label><input type="number" step="0.01" id="set_pokladnaZaciatok" value="${esc((d.settings||{}).pokladnaZaciatok||0)}"></div>
+        <div class="mfield"><label>K dátumu</label><input type="date" id="set_pokladnaZaciatokOd" value="${esc((d.settings||{}).pokladnaZaciatokOd||'')}"></div>
+      </div>
+      <div class="ocr-hint" style="margin:-4px 2px 10px">Doklady spred tohto dátumu sa do zostatku nerátajú — počiatočný stav ich už obsahuje.</div>
+      <label style="display:flex;align-items:center;gap:9px;font-size:13.5px;cursor:pointer">
+        <input type="checkbox" id="set_maEkasa" ${(d.settings||{}).maEkasa?'checked':''} style="width:17px;height:17px">
+        <span>Tržby eviduje pokladnica <b>eKasa</b></span>
+      </label>
+      <div class="ocr-hint" style="margin-top:5px">Rozhoduje o tom, kam idú hotovostné príjmy v kontrolnom výkaze: cez eKasu do oddielu D.1 súhrnne, bez nej do D.2 ako zjednodušené faktúry. Kto eKasu nemá, nechá vypnuté.</div>
+    </div>
+
+    <div class="card" style="margin-bottom:14px">
       <h2 style="font-size:16px;margin-bottom:4px">Kniha jázd</h2>
       <div class="csub" style="margin-bottom:14px">Predvolené hodnoty pri importe a optimalizácii jázd.</div>
       <div class="mrow2">
@@ -14448,6 +14463,10 @@ async function ulozNastavenia(){
   s.preddavokDanOd=val("set_preddavokDanOd")||"";
   s.socOdvodyMes=num("set_socOdvodyMes",0);
   s.socOdvodyOd=val("set_socOdvodyOd")||"";
+  // hotovosť (kap. 87)
+  s.pokladnaZaciatok=num("set_pokladnaZaciatok",0);
+  s.pokladnaZaciatokOd=val("set_pokladnaZaciatokOd")||"";
+  s.maEkasa=chk("set_maEkasa");
   // kniha jázd
   s.kjVodic=val("set_kjVodic")||"";
   s.kjAutoLimit=num("set_kjAutoLimit",50);
@@ -20742,6 +20761,20 @@ function rocnaKontrola(rok){
   if(buduce.length) pridaj("pozor","buducnost", buduce.length+" dokladov má dátum v budúcnosti",
     "Skontrolujte rok — preklep v dátume doklad presunie do obdobia, kde ho nikto nehľadá.", buduce);
 
+  // ── 1b. Pokladňa v mínuse ──
+  // V pokladni mínus byť nemôže. Keď vyjde, chýba príjem alebo je zlý
+  // počiatočný stav — a hlási sa DEŇ, nie len že je to mínus: bez dňa sa to
+  // nedá ísť opraviť. Kontrola sa ukáže len tomu, kto hotovosť naozaj má
+  // (kap. 87.4); komu sa hlási téma, ktorá sa ho netýka, prestane ju čítať.
+  try{
+    const PM=pokladnaPrvyMinus();
+    if(PM) pridaj("chyba","pokladnaMinus",
+      "Pokladňa je "+fmtDatum(PM.datum)+" v mínuse ("+eur(PM.stav)+")",
+      "Hotovostné výdavky prevýšili príjmy. Buď chýba príjmový doklad, alebo je "
+      +"počiatočný stav pokladne v Nastaveniach nižší, než bol v skutočnosti.",
+      ["prvý mínus pri doklade "+PM.doklad, "hotovostných dokladov spolu: "+PM.pohybov]);
+  }catch(e){ console.error("kontrola pokladne:", e); }
+
   // ── 2. Faktúra uhradená viac, než je jej suma ──
   // Dva pohyby priradené na tú istú faktúru. Buď dvojitá platba (a treba vrátiť),
   // alebo zle spárovaný pohyb, ktorý patrí inam.
@@ -26330,6 +26363,79 @@ function uhradyPopis(typ, cislo, kratky){
 }
 
 // stav dokladu v ľudskej reči
+// ═══════════════════════════════════════════════════════════════
+//  HOTOVOSŤ (kap. 87)
+//  Cieľom je OBČASNÁ hotovosť — tréner, ktorý párkrát mesačne dostane
+//  zaplatené na ruku. Nie pokladnica: žiadny druhý zoznam pohybov, žiadna
+//  denná uzávierka, žiadne párovanie.
+//
+//  Hotovosť sa zámerne NEUKLADÁ do `firmaData.vypis`. Ten zoznam nie je
+//  „pohyby", je to to, čo appka vie DOLOŽIŤ výpisom — a na tom stojí
+//  `vypisPokrytie`, teda predpoklad ZP, predpoklad SP a stav „rozpor".
+//  Všetky tri tvrdia „výpis toto obdobie pokrýva a platbu neobsahuje";
+//  pokladničný výpis neexistuje, takže by tá veta prestala byť pravdivá
+//  a rozbili by sa tri funkcie naraz — a ani jedna hlučne.
+// ═══════════════════════════════════════════════════════════════
+const UHRADA_HOTOVOST="hotovost";
+function jeHotovostnyDoklad(typ, x){
+  if(!x) return false;
+  if(x.typDokladu==="prijmovy") return true;        // hotovostný z definície
+  // Väzba na bankový pohyb hotovosť vylučuje — o tom niet čo hádať a má
+  // prednosť pred akýmkoľvek štítkom na doklade.
+  const kluc=dokladKluc(x);
+  if(kluc && uhradyDokladuPohyby(typ, kluc).length) return false;
+  if(x.uhradaRucne && x.uhradaRucne.sposob===UHRADA_HOTOVOST) return true;
+  return String(x.uhrada||"")===UHRADA_SPOSOBY.hotovost;
+}
+// Hotovostné pohyby v čase — jeden zdroj pre zostatok aj pre kontrolu.
+// Doklady spred `pokladnaZaciatokOd` sa neberú: počiatočný stav ich už
+// obsahuje a započítať ich druhýkrát by pokladňu rozhodilo.
+function pokladnaPohyby(){
+  const S=firmaData.settings||{};
+  const od=String(S.pokladnaZaciatokOd||"").slice(0,10);
+  const vObdobi=d=>!!d && (!od || d>=od);
+  const out=[];
+  (firmaData.faktury||[]).forEach(f=>{
+    if(!jeHotovostnyDoklad("faktura", f)) return;
+    const d=String(faktDatumDodania(f)||"").slice(0,10);
+    if(vObdobi(d)) out.push({datum:d, suma:r2(+f.spolu||0), cislo:f.cislo||"—", smer:"prijem"});
+  });
+  (firmaData.vydavky||[]).forEach(x=>{
+    if(!jeHotovostnyDoklad("vydavok", x)) return;
+    const d=String(x.datum||"").slice(0,10);
+    if(vObdobi(d)) out.push({datum:d, suma:r2(+x.spolu||0), cislo:x.cislo||"—", smer:"vydaj"});
+  });
+  out.sort((a,b)=>a.datum.localeCompare(b.datum));
+  return out;
+}
+function pokladnaZostatok(kuDnu){
+  const S=firmaData.settings||{};
+  const den=String(kuDnu||"").slice(0,10) || new Date().toISOString().slice(0,10);
+  let prijem=0, vydaj=0;
+  pokladnaPohyby().forEach(p=>{
+    if(p.datum>den) return;
+    if(p.smer==="prijem") prijem=r2(prijem+p.suma); else vydaj=r2(vydaj+p.suma);
+  });
+  const zaciatok=r2(+S.pokladnaZaciatok||0);
+  return {zaciatok, od:String(S.pokladnaZaciatokOd||"").slice(0,10), kuDnu:den,
+    prijem, vydaj, zostatok:r2(zaciatok+prijem-vydaj)};
+}
+// Kedy pokladňa prvýkrát klesla pod nulu. V pokladni mínus byť NEMÔŽE — ak
+// vyjde, buď chýba príjem, alebo je zlý počiatočný stav. Hlási sa dátum,
+// nie len „je to mínus": bez dňa sa to nedá ísť opraviť.
+//
+// Zámerne sa neoreže na nulu. Orezané mínus je presne ten druh opravy, po
+// ktorej sa problém prestane dať nájsť.
+function pokladnaPrvyMinus(){
+  const S=firmaData.settings||{};
+  let stav=r2(+S.pokladnaZaciatok||0);
+  const P=pokladnaPohyby();
+  for(const p of P){
+    stav=r2(stav + (p.smer==="prijem" ? p.suma : -p.suma));
+    if(stav < -0.005) return {datum:p.datum, stav, doklad:p.cislo, pohybov:P.length};
+  }
+  return null;
+}
 // ═══════════════════════════════════════════════════════════════
 //  KNIHA POHĽADÁVOK A KNIHA ZÁVÄZKOV (kap. 86)
 //  Jeden zdroj pre obrazovku, XLSX aj PDF — tri zostavy z troch výpočtov by
