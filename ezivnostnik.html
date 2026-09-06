@@ -1341,7 +1341,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.06-KJ";  // počiatočný zostatok výpisu je tiež kotva; opakovaný import záznam aktualizuje
+const APP_VERZIA = "2026.09.06-KK";  // počiatočný zostatok výpisu je tiež kotva; opakovaný import záznam aktualizuje
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -26987,10 +26987,21 @@ function dennikKotvy(){
     const den = K.zaciatokDatum || (z.od ? denPredtym(z.od) : null);
     if(den && !poDnoch[den]) out[den]={suma:r2(+K.zaciatok), zdroj:"vypis"};
   });
+  // Dva výpisy sa na spoločnom dni MUSIA zhodnúť: koniec jedného obdobia je
+  // začiatok ďalšieho, sú to dve nezávislé čísla z dvoch dokumentov. Kým
+  // kotvy sedeli na pohyboch, padli na rôzne dni a zhodu overil úsek medzi
+  // nimi. Odkedy sedia na dátume z dokumentu, padnú na ten istý deň — a bez
+  // tejto kontroly by jedna druhú ticho prepísala. Nezhoda znamená, že jeden
+  // z výpisov nie je ten, za ktorý sa považuje.
   (firmaData.vypisy||[]).forEach(z=>{
     const K=z && z.kontrola; if(!K || K.koniec==null) return;
     const den = K.koniecDatum || (z.do ? String(z.do).slice(0,10) : null);
-    if(den) out[den]={suma:r2(+K.koniec), zdroj:"vypis"};
+    if(!den) return;
+    const suma=r2(+K.koniec);
+    const uz=out[den];
+    const spor = uz && uz.zdroj==="vypis" && Math.abs(r2(uz.suma-suma))>=0.005
+      ? {den, a:uz.suma, b:suma} : null;
+    out[den]={suma, zdroj:"vypis", spor: spor || (uz && uz.spor) || null};
   });
   return out;
 }
@@ -27012,6 +27023,12 @@ function dennikKontrolaRetaze(){
     poDnoch[d]=r2((poDnoch[d]||0)+(t.smer==="prijem"?1:-1)*r2(+t.suma||0));
   });
   const useky=[], nalezy=[];
+  // Spor dvoch výpisov o ten istý deň je nález sám osebe — reťaz ho inak
+  // nezachytí, lebo úsek medzi kotvami tu žiadny nie je.
+  dniKotiev.forEach(d=>{ const S=kotvy[d] && kotvy[d].spor; if(!S) return;
+    nalezy.push({od:d, do:d, dni:0, zmena:0, ocakavane:S.a, hlasene:S.b,
+      rozdiel:r2(S.a-S.b), zdrojOd:"vypis", zdrojDo:"vypis", mekky:false,
+      spor:true, sedi:false}); });
   for(let i=1;i<dniKotiev.length;i++){
     const od=dniKotiev[i-1], doo=dniKotiev[i];
     let zmena=0, pocet=0;
@@ -27222,6 +27239,11 @@ function dennikNahladHtml(D){
 // nemôže: rozdiel môže byť platba kartou, ktorá je autorizovaná a ešte
 // nezaúčtovaná. Aj tak sa hlási — len nehovorí istotu, ktorú nemá.
 function dennikNalezText(u){
+  if(u.spor) return {typ:"chyba",
+    text:"K "+fmtDatum(u.od)+" hlásia dva výpisy iný zostatok",
+    detail:"Jeden uvádza "+eur(u.ocakavane)+", druhý "+eur(u.hlasene)
+      +". Koniec jedného obdobia je začiatok ďalšieho, takže sa musia zhodovať —"
+      +" jeden z tých výpisov nie je ten, za ktorý ho appka považuje."};
   const kde="Medzi "+fmtDatum(u.od)+" a "+fmtDatum(u.do);
   const cisla="Banka na konci "+fmtDatum(u.do)+" hlási "+eur(u.hlasene)
     +", z evidovaných pohybov vychádza "+eur(u.ocakavane)+".";
