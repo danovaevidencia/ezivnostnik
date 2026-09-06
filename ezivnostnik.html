@@ -1341,7 +1341,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.06-KA";  // sprievodca zostavou a obrazovka peňažného denníka
+const APP_VERZIA = "2026.09.06-KB";  // kompletný XLSX cez sprievodcu: voľby, kontrola, náhľad
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -2846,6 +2846,12 @@ function danZoZakladu(zaklad, rok, prijmy, S){
 //  pre bežný rok sa oproti starému výpočtu nič nemení.
 // ═══════════════════════════════════════════════════════════════
 let firmaDataVerzia=0;   // rastie pri každej zmene dát (poZmene) — kľúč cache
+// Register sprievodcov zostavou (kap. 88.9). Musí byť TU, nie pri komponente:
+// jednotlivé zostavy sa doň registrujú na úrovni skriptu a niektoré z nich
+// stoja v súbore vyššie než komponent — deklarácia nižšie by znamenala
+// prístup pred inicializáciou.
+const _zostavaKrok={};        // kluc -> otvorený krok
+const _zostavaPrekresli={};   // kluc -> funkcia, ktorá obrazovku prekreslí
 // Memoizácia drahých ročných výpočtov per (kľúč, verzia dát, firma). Jedno
 // počítadlo namiesto ručných invalidácií po moduloch — invalidácia, na ktorú
 // treba myslieť, je invalidácia, ktorá sa raz zabudne (kap. 45.8).
@@ -4502,7 +4508,10 @@ function zapisAutomat(druh, pocet){
 
 // zozbieraj všetko, čo si zaslúži pozornosť
 // skloňovanie po číslovke: 1 pohyb · 2–4 pohyby · 5+ pohybov
-function sklonPohyb(n){ return n===1?"pohyb" : (n>=2&&n<=4?"pohyby":"pohybov"); }
+function sklonPohyb(n){ return sklon(n,"pohyb","pohyby","pohybov"); }
+// Slovenčina má tri tvary: 1 nález, 2–4 nálezy, 5+ nálezov. „4 nálezov" je
+// v zostave, ktorá má pôsobiť ako doklad, rovnaká chyba ako zlé číslo.
+function sklon(n, jeden, dva, viac){ return n===1 ? jeden : (n>=2&&n<=4 ? dva : viac); }
 function zbierNotifikacie(){
   const out=[], dnes=new Date();
   if(!firmaData) return out;
@@ -14263,9 +14272,8 @@ function appData(){
         <button class="abtn" onclick="exportFirmu()">⬇ Stiahnuť zálohu</button>
       </div>
       <div style="border-top:1px solid var(--line-soft);margin:14px 0 12px"></div>
-      <div class="csub" style="margin-bottom:10px">Kompletný prehľad všetkých dát do jedného formátovaného Excelu so záložkami (daň, jazdy, faktúry, výdavky, výkazy).</div>
-      <button class="abtn" onclick="exportVsetkoXlsx()" style="width:100%">📊 Kompletný export XLSX</button>
-      <div class="cloudmsg" id="xlsxMsg" style="margin-top:8px"></div>
+      <div class="csub" style="margin-bottom:10px">Kompletný prehľad všetkých dát do jedného formátovaného Excelu so záložkami. Toto je súbor, ktorý odovzdávate účtovníkovi.</div>
+      <div id="xkBox">${xkSprievodcaHtml()}</div>
       <div class="cloudmsg" id="cloudMsg"></div>
 
       ${localMode?'':`<div style="border-top:1px solid var(--line);margin-top:16px;padding-top:14px">
@@ -16753,12 +16761,16 @@ function xkApplyFreeze(X,fflate,buf,freezeMap){
   });
   return fflate.zipSync(files);
 }
-function xkBuild(X){
+function xkBuild(X, volby){
   const S=xkStyles(); const wb=X.utils.book_new(); const D=firmaData, SET=D.settings||{};
+  // Voľby zo sprievodcu (kap. 88.9). Bez nich sa správa ako predtým —
+  // volá ju aj starší kód a ten nesmie prestať fungovať.
+  const V=volby||{};
+  const chceRok=r=>!V.roky || !V.roky.length || V.roky.indexOf(String(r))>=0;
   const fmtSk=iso=>{ const m=String(iso).match(/(\d{4})-(\d{2})-(\d{2})/); return m?`${+m[3]}.${+m[2]}.${m[1]}`:(iso||""); };
   // --- Daňová evidencia: hárok na rok ---
   const danRoky=[...new Set([...(D.faktury||[]).map(f=>String(f.datum||f.vystavenie||"").slice(0,4)),...(D.vydavky||[]).map(x=>String(x.datum||"").slice(0,4))].filter(y=>y&&y.length===4))].sort();
-  (danRoky.length?danRoky:[String(new Date().getFullYear())]).forEach(rok=>{
+  (danRoky.length?danRoky:[String(new Date().getFullYear())]).filter(chceRok).forEach(rok=>{
     const head=["Mesiac","Fakt. bez DPH","Odpis auta","Ostatné nákl.","Náklady spolu","Čiastk. základ","Zdravotné","Preddavok ZP","Daň","Predd. daň","Sociálne","Odvody+daň","Odložiť","Čistý príjem"];
     const aoa=[[xkCell("Daňová evidencia "+rok,S.title)],[xkCell((D.meta&&D.meta.nazov||"")+" · IČO "+(D.meta&&D.meta.ico||""),S.sub)],[],head.map(h=>xkCell(h,S.hdr))];
     const t={}; head.slice(1).forEach((_,k)=>t[k]=0);
@@ -16771,7 +16783,7 @@ function xkBuild(X){
     X.utils.book_append_sheet(wb,ws,xkSheetName("Daň "+rok));
   });
   // --- Kniha jázd: prehľad ---
-  const months=[...new Set((D.jazdy||[]).map(j=>jazdaMesiac(j)).filter(Boolean))].sort();
+  const months=(V.kjMesiace===false ? [] : [...new Set((D.jazdy||[]).map(j=>jazdaMesiac(j)).filter(Boolean))].sort());
   if(months.length){
     const maSukr=(D.jazdy||[]).some(jazdaSukromna);
     const hlavicka=[xkCell("Mesiac",S.hdr),xkCell("Počet jázd",S.hdr),xkCell("Km",S.hdr)];
@@ -16822,7 +16834,17 @@ function xkBuild(X){
     ...(D.faktury||[]).map(f=>String(f.datum||f.vystavenie||"").slice(0,4)),
     ...(D.vydavky||[]).filter(x=>String(x.druh||"")==="Došlá faktúra").map(x=>String(x.datum||"").slice(0,4))
   ].filter(y=>/^\d{4}$/.test(y)))].sort();
-  knRoky.forEach(rk=>{
+  // --- Peňažný denník (voliteľne, kap. 88) ---
+  // Účtovníkovi dáva to, čo z ostatných hárkov nevyčíta: pohyb peňazí
+  // v čase a väzbu platby na doklad.
+  if(V.dennik){
+    (V.roky && V.roky.length ? V.roky : danRoky).forEach(rk=>{
+      const DN=penazyDennik(String(rk), "oboje");
+      if(!DN.riadky.length) return;
+      X.utils.book_append_sheet(wb, dennikHarok(X, S, DN), xkSheetName("Denník "+rk));
+    });
+  }
+  knRoky.filter(chceRok).forEach(rk=>{
     ["faktura","vydavok"].forEach(typ=>{
       const K=knihaDokladov(typ, rk, knihaKuDnu(rk));
       if(!K.riadky.length) return;
@@ -16836,7 +16858,7 @@ function xkBuild(X){
   // navyše: kategória a suma, ktorá naozaj vstúpi do základu dane. Po oprave K1
   // sa tie dve čísla líšia (súkromný výdavok, krátené auto a PHL) a bez tohto
   // stĺpca by sa súčet výdavkov a daňový hárok nedali zosúladiť.
-  xkRokyVydavkov(D).forEach(rk=>{
+  xkRokyVydavkov(D).filter(chceRok).forEach(rk=>{
     const zoz=(D.vydavky||[]).filter(x=>vydavokVRoku(x, rk))
       .sort((a,b)=>String(a.datum||"").localeCompare(String(b.datum||"")));
     if(!zoz.length) return;
@@ -17922,12 +17944,133 @@ async function gdprMojeZmazanie(){
   }catch(e){ if(msg){msg.textContent="Chyba: "+e.message;} }
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  SPRIEVODCA KOMPLETNÝM EXPOROM (kap. 88.9)
+//  Kompletný XLSX je to, čo na konci mesiaca dostáva účtovník — a doteraz
+//  to bolo jedno tlačidlo a čierna skrinka: osemnásť hárkov, žiadna voľba
+//  a žiadna predstava o tom, čo v súbore je, kým sa neotvorí v Exceli.
+//
+//  Kontrolný krok znovu používa `rocnaKontrola` — katalóg nálezov, ktorý
+//  appka má. Druhý katalóg pre export by sa s prvým rozišiel (kap. 16).
+// ═══════════════════════════════════════════════════════════════
+let xkRoky=null, xkKjMesiace=true, xkDennik=true;
+function xkDostupneRoky(){
+  const d=firmaData||{};
+  return [...new Set([
+    ...(d.faktury||[]).map(f=>String(f.datum||f.vystavenie||"").slice(0,4)),
+    ...(d.vydavky||[]).map(x=>String(x.datum||"").slice(0,4))
+  ].filter(r=>/^\d{4}$/.test(r)))].sort().reverse();
+}
+function xkVolbyTeraz(){
+  return {roky: xkRoky && xkRoky.length ? xkRoky : null, kjMesiace: xkKjMesiace, dennik: xkDennik};
+}
+function xkNastav(co, v){
+  if(co==="roky") xkRoky = v==="*" ? null : [v];
+  else if(co==="kj") xkKjMesiace=!!v;
+  else if(co==="dennik") xkDennik=!!v;
+  xkPrekresli();
+}
+function xkPrekresli(){ const el=document.getElementById("xkBox"); if(el) el.innerHTML=xkSprievodcaHtml(); }
+_zostavaPrekresli.xk=xkPrekresli;
+
+// Čo v súbore bude — spočítané z dát, bez stavania zošita. Vytvoriť zošit
+// len kvôli náhľadu by pri veľkých dátach trvalo a nič by to nepridalo.
+function xkPrehladHarkov(){
+  const d=firmaData||{}, V=xkVolbyTeraz();
+  const chce=r=>!V.roky || V.roky.indexOf(String(r))>=0;
+  const out=[];
+  const roky=xkDostupneRoky().filter(chce).sort();
+  roky.forEach(r=>out.push({n:"Daň "+r, k:12, p:"mesačná daňová evidencia"}));
+  const jazdy=(d.jazdy||[]).length;
+  if(jazdy) out.push({n:"Jazdy prehľad", k:jazdy, p:"kniha jázd po mesiacoch"});
+  if(jazdy && V.kjMesiace){
+    const mes=[...new Set((d.jazdy||[]).map(j=>jazdaMesiac(j)).filter(Boolean))];
+    out.push({n:"KJ · "+mes.length+" "+sklon(mes.length,"hárok","hárky","hárkov"), k:jazdy, p:"jednotlivé jazdy po mesiacoch"});
+  }
+  if((d.faktury||[]).length) out.push({n:"Faktúry", k:(d.faktury||[]).length, p:"všetky vystavené"});
+  roky.forEach(r=>{
+    const P=knihaDokladov("faktura", r, knihaKuDnu(r)), Z=knihaDokladov("vydavok", r, knihaKuDnu(r));
+    if(P.riadky.length) out.push({n:"Pohľadávky "+r, k:P.riadky.length, p:"stav k "+fmtDatum(P.kuDnu)});
+    if(Z.riadky.length) out.push({n:"Záväzky "+r, k:Z.riadky.length, p:"stav k "+fmtDatum(Z.kuDnu)});
+  });
+  if(V.dennik) roky.forEach(r=>{
+    const DN=penazyDennik(String(r),"oboje");
+    if(DN.riadky.length) out.push({n:"Denník "+r, k:DN.riadky.length, p:"pohyb peňazí v čase"});
+  });
+  roky.forEach(r=>{
+    const n=(d.vydavky||[]).filter(x=>vydavokVRoku(x,r)).length;
+    if(n) out.push({n:"Výdavky "+r, k:n, p:"vrátane stĺpca do základu dane"});
+  });
+  if((d.majetok||[]).length) out.push({n:"Majetok", k:(d.majetok||[]).length, p:"odpisový plán"});
+  if((d.vykazy||[]).length) out.push({n:"Výkazy", k:(d.vykazy||[]).length, p:"odpracované dni"});
+  return out;
+}
+function xkNalezy(){
+  const V=xkVolbyTeraz();
+  const roky=(V.roky && V.roky.length) ? V.roky : xkDostupneRoky().slice(0,1);
+  const out=[];
+  roky.forEach(r=>{
+    let n=[]; try{ n=rocnaKontrola(r)||[]; }catch(e){ console.error("kontrola pred exportom:", e); }
+    n.forEach(x=>out.push({typ:x.zavaznost==="chyba"?"chyba":"pozor",
+      text:(roky.length>1?r+": ":"")+x.t, detail:x.d}));
+  });
+  // reťaz zostatkov — nález, ktorý ostatné kontroly nepoznajú
+  try{
+    const K=dennikKontrolaRetaze();
+    K.nalezy.forEach(u=>out.push({typ:"chyba",
+      text:"Medzi "+fmtDatum(u.od)+" a "+fmtDatum(u.do)+" chýba pohyb "+eur(Math.abs(u.rozdiel)),
+      detail:"Banka na konci "+fmtDatum(u.do)+" hlási "+eur(u.hlasene)+", z evidencie vychádza "+eur(u.ocakavane)+"."}));
+  }catch(e){ console.error("kontrola reťaze pred exportom:", e); }
+  return out;
+}
+function xkSprievodcaHtml(){
+  const roky=xkDostupneRoky();
+  const harky=xkPrehladHarkov();
+  const nalezy=xkNalezy();
+  const chyb=nalezy.filter(n=>n.typ==="chyba").length;
+  const def={kroky:[
+    {n:"Čo exportovať",
+     stav:()=>({text:(xkRoky&&xkRoky.length?xkRoky[0]:"všetky roky")
+       +(xkDennik?" · s denníkom":"")}),
+     telo:()=>`<div class="atool" style="flex-wrap:wrap;gap:8px;padding-top:11px">
+        <select onchange="xkNastav('roky',this.value)" style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:13px">
+          <option value="*" ${!xkRoky?'selected':''}>všetky roky</option>
+          ${roky.map(r=>`<option value="${r}" ${xkRoky&&xkRoky[0]===r?'selected':''}>rok ${r}</option>`).join("")}
+        </select>
+      </div>
+      <label style="display:flex;align-items:center;gap:9px;font-size:13px;margin-top:9px;cursor:pointer">
+        <input type="checkbox" ${xkDennik?'checked':''} onchange="xkNastav('dennik',this.checked)" style="width:17px;height:17px">
+        <span>Peňažný denník — pohyb peňazí v čase a väzba platby na doklad</span></label>
+      <label style="display:flex;align-items:center;gap:9px;font-size:13px;margin-top:7px;cursor:pointer">
+        <input type="checkbox" ${xkKjMesiace?'checked':''} onchange="xkNastav('kj',this.checked)" style="width:17px;height:17px">
+        <span>Kniha jázd po mesiacoch — jeden hárok na mesiac</span></label>`},
+
+    {n:"Kontrola dát",
+     stav:()=>nalezy.length ? {text:nalezy.length+" "+sklon(nalezy.length,"nález","nálezy","nálezov"), cls:chyb?"neg":"warn"}
+        : {text:"bez nálezov", cls:"pos"},
+     telo:()=>`<div style="padding-top:11px">${zostavaNalezyHtml(nalezy)}
+        <div class="ocr-hint" style="margin-top:8px">Nálezy export nezastavia. Sú tu preto, aby ste vedeli, čo je v súbore neisté, skôr než ho odovzdáte účtovníkovi.</div></div>`},
+
+    {n:"Náhľad",
+     stav:()=>({text:harky.length+" "+sklon(harky.length,"hárok","hárky","hárkov")}),
+     telo:()=>`<div style="padding-top:11px">${harky.length?`<div class="znahlad"><table>
+        <tr><th>Hárok</th><th>Riadkov</th><th>Obsah</th></tr>
+        ${harky.map(x=>`<tr><td><b>${esc(x.n)}</b></td><td class="c">${x.k}</td><td>${esc(x.p)}</td></tr>`).join("")}
+      </table></div>`:`<div class="ocr-hint">Pri tomto nastavení by súbor neobsahoval nič.</div>`}</div>`},
+
+    {n:"Generovať",
+     stav:()=>({text:"XLSX"}),
+     telo:()=>`<button class="abtn pri" style="width:100%;margin-top:11px" onclick="exportVsetkoXlsx()">📊 Stiahnuť kompletný export</button>
+      <div class="cloudmsg" id="xlsxMsg" style="margin-top:8px"></div>`}
+  ]};
+  return zostavaSprievodcaHtml("xk", def);
+}
 function exportVsetkoXlsx(){
   const stav=document.getElementById("xlsxMsg");
   if(stav){ stav.textContent="Pripravujem kompletný export…"; stav.className="cloudmsg"; }
   Promise.all([ensureXlsxStyle(),ensureFflate()]).then(([X,fflate])=>{
     try{
-      const wb=xkBuild(X);
+      const wb=xkBuild(X, xkVolbyTeraz());
       const freezeMap={};
       wb.SheetNames.forEach((name,i)=>{ const f=wb.Sheets[name]['!freeze']; if(f) freezeMap[i]={x:f.xSplit||0,y:f.ySplit||0}; });
       const buf=X.write(wb,{type:"array",bookType:"xlsx"});
@@ -26599,13 +26742,10 @@ function pokladnaPrvyMinus(){
 //  Stav krokov je v pamäti relácie, nie v `firmaData` — je to nastavenie
 //  zobrazenia, nie údaj firmy.
 // ═══════════════════════════════════════════════════════════════
-const _zostavaKrok={};        // kluc -> otvorený krok
-const _zostavaKontrola={};    // kluc -> výsledok poslednej kontroly
 function zostavaKrok(kluc, n){
   _zostavaKrok[kluc] = (_zostavaKrok[kluc]===n) ? 0 : n;
   if(typeof _zostavaPrekresli[kluc]==="function") _zostavaPrekresli[kluc]();
 }
-const _zostavaPrekresli={};
 function zostavaSprievodcaHtml(kluc, def){
   const otv=_zostavaKrok[kluc]!==undefined ? _zostavaKrok[kluc] : 1;
   const krok=(i,nazov,stav,telo)=>{
@@ -26834,13 +26974,13 @@ function dennikHtml(){
       <div class="ocr-hint">Dni bez pohybu sa vynechávajú. Kontrola úplnosti beží vždy nad celým rozsahom dát, nie len nad zvoleným obdobím.</div>`},
 
     {n:"Kontrola úplnosti",
-     stav:()=>K.nalezy.length ? {text:K.nalezy.length+" nález"+(K.nalezy.length===1?"":"y"), cls:"neg"}
+     stav:()=>K.nalezy.length ? {text:K.nalezy.length+" "+sklon(K.nalezy.length,"nález","nálezy","nálezov"), cls:"neg"}
         : (K.kotiev ? {text:"reťaz sedí", cls:"pos"} : {text:"nedá sa overiť", cls:"warn"}),
      telo:()=>`<div style="padding-top:11px">${zostavaNalezyHtml(nalezy)}
         <div class="ocr-hint" style="margin-top:8px">Zostatky, ktoré hlási banka, sú <b>${K.kotiev}</b>. Medzi dvoma takými bodmi sa musí zmena zostatku rovnať súčtu pohybov — keď sa nerovná, niektorý pohyb v evidencii chýba.</div></div>`},
 
     {n:"Náhľad",
-     stav:()=>({text:D.riadky.length+" riadkov · "+eur(r2(D.sumy.prijem-D.sumy.vydaj))}),
+     stav:()=>({text:D.riadky.length+" "+sklon(D.riadky.length,"riadok","riadky","riadkov")+" · "+eur(r2(D.sumy.prijem-D.sumy.vydaj))}),
      telo:()=>dennikNahladHtml(D)},
 
     {n:"Generovať",
@@ -26879,7 +27019,7 @@ function dennikNahladHtml(D){
         <td class="c">${r.zostatokBanka!=null?eur(r.zostatokBanka):"—"}</td>
         <td class="c">${eur(r.zostatokPokladna)}</td><td>${r.doZakladu}</td></tr>`).join("")}
     </table></div>
-    ${D.riadky.length>uk.length?`<div class="ocr-hint" style="margin-top:6px">Zobrazených prvých ${uk.length} z ${D.riadky.length} riadkov. Celá zostava je v súbore.</div>`:""}</div>`;
+    ${D.riadky.length>uk.length?`<div class="ocr-hint" style="margin-top:6px">Zobrazených prvých ${uk.length} z ${D.riadky.length} ${sklon(D.riadky.length,"riadku","riadkov","riadkov")}. Celá zostava je v súbore.</div>`:""}</div>`;
 }
 // Nálezy kontroly idú DO SÚBORU. Zostava má o svojej medzere hovoriť sama,
 // aj keď ju niekto pošle ďalej bez kontextu (kap. 88.9).
@@ -26927,33 +27067,38 @@ async function dennikPDF(){
   });
   doc.save("penazny_dennik_"+D.obdobie+".pdf");
 }
+// Hárok denníka. Jedna stavba pre samostatné stiahnutie aj pre kompletný
+// export — rovnaký dôvod ako pri `knihaHarok` (kap. 86.7).
+function dennikHarok(X, S, D){
+  const fmtSk=iso=>{ const m=String(iso).match(/(\d{4})-(\d{2})-(\d{2})/); return m?(+m[3]+"."+(+m[2])+"."+m[1]):(iso||""); };
+  const d=firmaData||{};
+  const aoa=[[xkCell(dennikNadpis(D),S.title)],
+    [xkCell(((d.meta&&d.meta.nazov)||"")+" · IČO "+((d.meta&&d.meta.ico)||""),S.sub)],[],
+    ["Dátum","Doklad","Popis","Účet","Príjem","Výdavok","Zostatok banka","Zostatok pokladňa","Do základu"]
+      .map(x=>xkCell(x,S.hdr))];
+  D.riadky.forEach((r,i)=>{ const z=i%2===1, sc=z?S.cellZ:S.cell, se=z?S.eurZ:S.eur;
+    aoa.push([xkCell(fmtSk(r.datum),sc),xkCell(r.doklad||"",sc),xkCell(r.popis,sc),
+      xkCell(r.ucet==="banka"?"banka":"pokladňa",sc),
+      xkCell(r.prijem||"",se),xkCell(r.vydaj||"",se),
+      xkCell(r.zostatokBanka!=null?r.zostatokBanka:"",se),
+      xkCell(r.zostatokPokladna,se),xkCell(r.doZakladu,sc)]);
+  });
+  aoa.push([xkCell("Spolu",S.foot),xkCell("",S.foot),xkCell("",S.foot),xkCell("",S.foot),
+    xkCell(D.sumy.prijem,S.footE),xkCell(D.sumy.vydaj,S.footE),
+    xkCell("",S.foot),xkCell("",S.foot),xkCell("",S.foot)]);
+  aoa.push([]); aoa.push([xkCell(dennikPoznamka(D),S.sub)]);
+  const ws=X.utils.aoa_to_sheet(aoa);
+  ws['!cols']=[{wch:12},{wch:18},{wch:34},{wch:11},{wch:13},{wch:13},{wch:16},{wch:17},{wch:11}];
+  ws['!merges']=[{s:{r:0,c:0},e:{r:0,c:5}},{s:{r:1,c:0},e:{r:1,c:8}}];
+  ws['!freeze']={xSplit:1,ySplit:4}; ws['!rows']=[{hpt:22},{hpt:14},{hpt:6},{hpt:26}];
+  return ws;
+}
 function dennikXLSX(){
   const D=penazyDennik(dennikObdobie(), dnCo);
   if(!D.riadky.length){ alert("V tomto období nie je žiadny pohyb — niet čo exportovať."); return; }
   Promise.all([ensureXlsxStyle(), ensureFflate()]).then(([X, fflate])=>{
     const S=xkStyles(), wb=X.utils.book_new();
-    const fmtSk=iso=>{ const m=String(iso).match(/(\d{4})-(\d{2})-(\d{2})/); return m?(+m[3]+"."+(+m[2])+"."+m[1]):(iso||""); };
-    const d=firmaData||{};
-    const aoa=[[xkCell(dennikNadpis(D),S.title)],
-      [xkCell(((d.meta&&d.meta.nazov)||"")+" · IČO "+((d.meta&&d.meta.ico)||""),S.sub)],[],
-      ["Dátum","Doklad","Popis","Účet","Príjem","Výdavok","Zostatok banka","Zostatok pokladňa","Do základu"]
-        .map(x=>xkCell(x,S.hdr))];
-    D.riadky.forEach((r,i)=>{ const z=i%2===1, sc=z?S.cellZ:S.cell, se=z?S.eurZ:S.eur;
-      aoa.push([xkCell(fmtSk(r.datum),sc),xkCell(r.doklad||"",sc),xkCell(r.popis,sc),
-        xkCell(r.ucet==="banka"?"banka":"pokladňa",sc),
-        xkCell(r.prijem||"",se),xkCell(r.vydaj||"",se),
-        xkCell(r.zostatokBanka!=null?r.zostatokBanka:"",se),
-        xkCell(r.zostatokPokladna,se),xkCell(r.doZakladu,sc)]);
-    });
-    aoa.push([xkCell("Spolu",S.foot),xkCell("",S.foot),xkCell("",S.foot),xkCell("",S.foot),
-      xkCell(D.sumy.prijem,S.footE),xkCell(D.sumy.vydaj,S.footE),
-      xkCell("",S.foot),xkCell("",S.foot),xkCell("",S.foot)]);
-    aoa.push([]); aoa.push([xkCell(dennikPoznamka(D),S.sub)]);
-    const ws=X.utils.aoa_to_sheet(aoa);
-    ws['!cols']=[{wch:12},{wch:18},{wch:34},{wch:11},{wch:13},{wch:13},{wch:16},{wch:17},{wch:11}];
-    ws['!merges']=[{s:{r:0,c:0},e:{r:0,c:5}},{s:{r:1,c:0},e:{r:1,c:8}}];
-    ws['!freeze']={xSplit:1,ySplit:4}; ws['!rows']=[{hpt:22},{hpt:14},{hpt:6},{hpt:26}];
-    X.utils.book_append_sheet(wb, ws, "Peňažný denník");
+    X.utils.book_append_sheet(wb, dennikHarok(X, S, D), "Peňažný denník");
     const buf=X.write(wb,{type:"array",bookType:"xlsx"});
     downloadBlob(new Blob([xkApplyFreeze(X, fflate, buf, {0:{x:1,y:4}})],
       {type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}),
