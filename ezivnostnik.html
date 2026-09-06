@@ -1341,7 +1341,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.06-KK";  // počiatočný zostatok výpisu je tiež kotva; opakovaný import záznam aktualizuje
+const APP_VERZIA = "2026.09.06-KL";  // počiatočný zostatok výpisu je tiež kotva; opakovaný import záznam aktualizuje
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -27265,6 +27265,11 @@ function dennikPoznamka(D){
   const skr=(firmaData.vypis||[]).filter(t=>t && t.skryty).length;
   if(skr) c.push("Zostava obsahuje aj "+skr+" "+sklon(skr,"pohyb skrytý","pohyby skryté","pohybov skrytých")
     +" v Banke — skrytie je voľba zobrazenia, peniaze sa pohli a do zostatku patria.");
+  const ignorP=(firmaData.vypis||[]).filter(t=>{
+    try{ return t && jePohybIgnorovany(t); }catch(_){ return false; } }).length;
+  if(ignorP) c.push("Z toho "+ignorP+" "+sklon(ignorP,"pohyb je vylúčený","pohyby sú vylúčené","pohybov je vylúčených")
+    +" pravidlom ignorovania — typicky presuny medzi vlastnými účtami. Peniaze sa pohli, "
+    +"do zostatku teda patria, ale do základu dane nie.");
   c.push("Stĺpec „Do základu“ hovorí, či pohyb vstupuje do základu dane; otáznik znamená nespárovaný pohyb.");
   return c.join(" ");
 }
@@ -27345,6 +27350,16 @@ function dennikXLSX(){
 // párovaní by to bola domnienka. „?" pri nespárovanom pohybe je pravdivá
 // odpoveď a zároveň zoznam práce (kap. 88.6).
 function dennikDoZakladu(t, doklady){
+  // Pohyb vylúčený pravidlom ignorovania je ROZHODNUTÝ, nie nespárovaný.
+  // Typicky sú to presuny medzi vlastnými účtami — vklad do podnikania nie je
+  // príjem a výber nie je výdavok. Kým sa pravidlá nečítali, mal Roman
+  // v denníku 47 otáznikov z 59 na pohyboch, ktoré appke sám označil za
+  // svoje: zostava pre daňovú kontrolu z nich robila zoznam nedorobenej
+  // práce. Vlastná kategória na to netreba — používateľ ju už má nastavenú
+  // (spec 88.8).
+  let ignor=false;
+  try{ ignor = typeof jePohybIgnorovany==="function" && jePohybIgnorovany(t); }catch(_){}
+  if(ignor) return "nie";
   const kl=(typeof klasifikujPohyb==="function") ? klasifikujPohyb(t) : null;
   if(kl && /odvod|dan|dph/i.test(String(kl.druh||""))) return "nie";
   if(!doklady || !doklady.length) return "?";
