@@ -1341,7 +1341,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.06-KF";  // modul Účtovné knihy, kniha jázd samostatne
+const APP_VERZIA = "2026.09.06-KG";  // skryté pohyby patria do zostatku aj do kontroly reťaze
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -26886,8 +26886,10 @@ function zostavaNalezyHtml(nalezy){
 // 5 093,50 € (kap. 88.4).
 function dennikKotvy(){
   const poDnoch={};
+  // Skryté sa POČÍTAJÚ: skrytie je voľba zobrazenia v Banke, nie tvrdenie,
+  // že sa peniaze nepohli. Banka ich do zostatku započítala (kap. 88.4).
   (firmaData.vypis||[]).forEach(t=>{
-    if(!t || t.skryty) return;
+    if(!t) return;
     const d=String(t.datum||"").slice(0,10); if(!d) return;
     (poDnoch[d]=poDnoch[d]||[]).push({
       delta:(t.smer==="prijem"?1:-1)*r2(+t.suma||0),
@@ -26921,7 +26923,7 @@ function dennikKontrolaRetaze(){
   if(dniKotiev.length<2) return {kotiev:dniKotiev.length, useky:[], nalezy:[]};
   const poDnoch={};
   (firmaData.vypis||[]).forEach(t=>{
-    if(!t || t.skryty) return;
+    if(!t) return;
     const d=String(t.datum||"").slice(0,10); if(!d) return;
     poDnoch[d]=r2((poDnoch[d]||0)+(t.smer==="prijem"?1:-1)*r2(+t.suma||0));
   });
@@ -26951,7 +26953,7 @@ function penazyDennik(obdobie, co, kuDnu){
   const riadky=[];
 
   if(chce("banka")) (firmaData.vypis||[]).forEach(t=>{
-    if(!t || t.skryty) return;
+    if(!t) return;
     const d=String(t.datum||"").slice(0,10);
     if(!d || !vObdobi(d)) return;
     // Doklad, ktorý pohyb uhrádza — Romanova priorita (88.10/3).
@@ -26960,7 +26962,8 @@ function penazyDennik(obdobie, co, kuDnu){
       popis:String(t.proti||t.popis||"").slice(0,60),
       prijem:t.smer==="prijem"?r2(+t.suma||0):0,
       vydaj:t.smer==="vydaj"?r2(+t.suma||0):0,
-      doZakladu:dennikDoZakladu(t, dok)});
+      skryty:!!t.skryty,
+      doZakladu:t.skryty ? "nie" : dennikDoZakladu(t, dok)});
   });
 
   if(chce("pokladna")) pokladnaPohyby().forEach(p=>{
@@ -27126,6 +27129,9 @@ function dennikPoznamka(D){
     +" hlási "+eur(u.hlasene)+", z evidovaných pohybov vychádza "+eur(u.ocakavane)+"."));
   if(!D.maZostatokBanky) c.push("Zostatok banky sa nekreslí: žiadny výpis ani notifikácia nenesie stav účtu.");
   else c.push("Zostatok banky je doložený od "+fmtDatum(D.odKotvy)+" do "+fmtDatum(D.poKotvu)+".");
+  const skr=(firmaData.vypis||[]).filter(t=>t && t.skryty).length;
+  if(skr) c.push("Zostava obsahuje aj "+skr+" "+sklon(skr,"pohyb skrytý","pohyby skryté","pohybov skrytých")
+    +" v Banke — skrytie je voľba zobrazenia, peniaze sa pohli a do zostatku patria.");
   c.push("Stĺpec „Do základu“ hovorí, či pohyb vstupuje do základu dane; otáznik znamená nespárovaný pohyb.");
   return c.join(" ");
 }
