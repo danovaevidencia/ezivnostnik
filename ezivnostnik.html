@@ -1341,7 +1341,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.06-KG";  // skryté pohyby patria do zostatku aj do kontroly reťaze
+const APP_VERZIA = "2026.09.06-KH";  // počiatočný zostatok výpisu je tiež kotva; opakovaný import záznam aktualizuje
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -10909,6 +10909,21 @@ function zapisVypisDoEvidencie(text, parsed, novych, nazov){
     // Šesť čísel na záznam; z počtov je navyše vidieť, či výpis pokrýval mesiac celý.
     kontrola: parsed.kontrola || null,
   };
+  // Ten istý výpis nahratý druhýkrát AKTUALIZUJE svoj záznam, nezaloží druhý.
+  // Dôvod nie je poriadok v zozname, ale to, že sa evidencia časom rozrastá
+  // o polia, ktoré staršie záznamy nemajú — `kontrola` pribudla 6. 9. 2026
+  // a január s februárom kvôli tomu ostali bez kotvy, hoci čísla v PDF boli.
+  // Opakovaný import je jediný spôsob, ako ich doplniť; nesmie za to trestať
+  // druhým riadkom o tom istom dokumente.
+  const stary=(firmaData.vypisy||[]).find(z=>z && z.hash===zaznam.hash);
+  if(stary){
+    zaznam.kedy=stary.kedy;                 // prvé nahratie, nie toto
+    if(stary.cesta) zaznam.cesta=stary.cesta;
+    zaznam.novych=stary.novych;             // koľko pridal vtedy, nie teraz
+
+    Object.assign(stary, zaznam);
+    return stary;
+  }
   const cely=[zaznam, ...firmaData.vypisy];
   firmaData.vypisy=cely.slice(0, VYPISY_MAX);
   const vypadli=cely.slice(VYPISY_MAX).map(z=>z.cesta).filter(Boolean);
@@ -26904,6 +26919,23 @@ function dennikKotvy(){
     out[den]= posledny ? posledny.zost : Math.max.apply(null, k.map(t=>t.zost));
   });
   // Zostatky z výpisu majú prednosť — sú jednoznačné, notifikácia nie.
+  //
+  // Výpis nesie DVE čísla a obe sú rovnako platné: počiatočný aj konečný
+  // zostatok. Počiatočný sa dlho zahadzoval, čím prvý mesiac každej série
+  // ostal nezakotvený — jeho pohyby nemal proti čomu overiť. Kotvíme ho
+  // na deň PRED prvým pohybom výpisu: výpis pokrýva celé obdobie, takže
+  // medzi jeho začiatkom a prvým pohybom sa nič nestalo (kap. 88.3).
+  (firmaData.vypisy||[]).forEach(z=>{
+    const K=z && z.kontrola; if(!K) return;
+    if(K.zaciatok!=null && z.od){
+      const d=new Date(String(z.od).slice(0,10)+"T00:00:00Z");
+      if(!isNaN(d)){
+        d.setUTCDate(d.getUTCDate()-1);
+        const den=d.toISOString().slice(0,10);
+        if(!poDnoch[den]) out[den]=r2(+K.zaciatok);
+      }
+    }
+  });
   (firmaData.vypisy||[]).forEach(z=>{
     const K=z && z.kontrola; if(!K) return;
     if(K.koniec!=null && z.do) out[String(z.do).slice(0,10)]=r2(+K.koniec);
