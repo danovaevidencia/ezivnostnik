@@ -625,6 +625,36 @@ h1,h2,h3,h4,.chead,.wbig,.sbox .sn,.sp-title b,.splittitle{text-wrap:balance}
 [data-w]{opacity:.38;pointer-events:none;filter:saturate(.15);cursor:not-allowed}
 /* mini štatistiky appky */
 .amini{display:grid;grid-template-columns:repeat(4,1fr);gap:11px;margin-bottom:14px}
+/* ── Sprievodca zostavou (kap. 88.9) ──────────────────────────────────────
+   Nastavenia → kontrola → náhľad → generovanie. Kroky sú zbaliteľné, lebo
+   cieľ je 390 px: štyri rozbalené sekcie sa na mobil nezmestia a používateľ
+   by scrolloval cez nastavenia, ktoré už vyplnil. Otvorený je vždy jeden. */
+.zkrok{border:1px solid var(--line);border-radius:12px;margin-bottom:8px;background:var(--paper);overflow:hidden}
+.zkrok.on{border-color:var(--brand)}
+.zhlav{display:flex;align-items:center;gap:10px;padding:11px 13px;cursor:pointer;user-select:none}
+.zcislo{flex:0 0 22px;height:22px;border-radius:50%;background:var(--bg);color:var(--ink-soft);
+  font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center}
+.zkrok.on .zcislo{background:var(--brand);color:var(--on-brand)}
+.zhlav b{font-size:13.5px;flex:1;min-width:0}
+.zstav{font-size:11.5px;color:var(--ink-soft);text-align:right;max-width:52%;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.zstav.warn{color:var(--warn);font-weight:600}.zstav.neg{color:var(--neg);font-weight:600}
+.zstav.pos{color:var(--pos)}
+.ztelo{padding:0 13px 13px;border-top:1px solid var(--line-soft)}
+.znalez{display:flex;gap:8px;padding:8px 10px;border-radius:9px;margin-top:7px;font-size:12.5px;line-height:1.5}
+.znalez.chyba{background:var(--sfc-neg)}.znalez.pozor{background:var(--sfc-warn)}
+.znalez.ok{background:var(--sfc-pos)}
+.znalez .zi{flex:0 0 auto;font-weight:700}
+/* Náhľad je na mobile SÚHRN, nie tabuľka — desať stĺpcov sa na 390 px
+   nezobrazí a orezaná tabuľka klame viac, než pomáha. Plná tabuľka je
+   v súbore; tu sa dá odrolovať vodorovne na širšej obrazovke. */
+.znahlad{overflow-x:auto;-webkit-overflow-scrolling:touch;margin-top:9px}
+.znahlad table{border-collapse:collapse;font-size:11.5px;min-width:100%}
+.znahlad th{text-align:left;font-weight:700;color:var(--ink-soft);padding:5px 7px;
+  border-bottom:1px solid var(--line);white-space:nowrap}
+.znahlad td{padding:4px 7px;border-bottom:1px solid var(--line-soft);white-space:nowrap}
+.znahlad tr.zvyraz td{background:var(--sfc-neg)}
+.znahlad td.c{text-align:right}
 .aminbox{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
 .aminbox .al{font-size:10.5px;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-soft);font-weight:700}
 .aminbox .av{font-size:20px;font-weight:700;font-family:var(--serif);margin-top:3px}
@@ -1311,7 +1341,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.06-JZ";  // peňažný denník — dáta a kontrola úplnosti reťaze
+const APP_VERZIA = "2026.09.06-KA";  // sprievodca zostavou a obrazovka peňažného denníka
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -11618,6 +11648,11 @@ function appUzavierka(){
         proti dokladu, ktorý sa omylom uloží spätne do obdobia, za ktoré ste už podali.
       </div>`
     + riadky.join("")
+    + `<div class="card" style="margin-top:14px">
+        <h2 style="font-size:16px;margin-bottom:4px">📒 Peňažný denník</h2>
+        <div class="csub" style="margin-bottom:12px">Chronologický záznam pohybu peňazí s priebežným zostatkom — banka aj pokladňa. Nie je to kniha jednoduchého účtovníctva; odpovedá na otázku, kde sú peniaze a odkiaľ sa tam vzali.</div>
+        <div id="dennikBox">${dennikHtml()}</div>
+      </div>`
     + skryteNalezyHtml();
 }
 
@@ -26545,6 +26580,57 @@ function pokladnaPrvyMinus(){
   return null;
 }
 // ═══════════════════════════════════════════════════════════════
+//  SPRIEVODCA ZOSTAVOU — zdieľaný pre všetky výstupy (kap. 88.9)
+//
+//  Nastavenia → kontrola → náhľad → generovanie. Tvar prevzatý z Romanovho
+//  generátora roadmapy; použije ho peňažný denník, kompletný XLSX, ročná
+//  uzávierka, knihy aj upomienka.
+//
+//  Prečo krok navyše a nie rovno tlačidlo: appka o dátach vie veci, ktoré
+//  používateľ nevie — chýbajúci pohyb v reťazi zostatkov, doklad bez dátumu,
+//  ručne potvrdená úhrada bez dňa. Súbor, ktorý mlčky vznikne s takou dierou,
+//  je horší než žiadny: tvári sa ako doklad o úplnosti.
+//
+//  Kontrola nález NEZABLOKUJE. Na rozdiel od importu výpisu (kap. 80) má
+//  človek právo vytlačiť to, čo má — často práve preto, aby dieru niekomu
+//  ukázal. Nález sa ale prenesie do zostavy.
+//
+//  Definícia: { nazov, podnadpis, kroky:[{n, stav(), telo()}], generatory:[] }
+//  Stav krokov je v pamäti relácie, nie v `firmaData` — je to nastavenie
+//  zobrazenia, nie údaj firmy.
+// ═══════════════════════════════════════════════════════════════
+const _zostavaKrok={};        // kluc -> otvorený krok
+const _zostavaKontrola={};    // kluc -> výsledok poslednej kontroly
+function zostavaKrok(kluc, n){
+  _zostavaKrok[kluc] = (_zostavaKrok[kluc]===n) ? 0 : n;
+  if(typeof _zostavaPrekresli[kluc]==="function") _zostavaPrekresli[kluc]();
+}
+const _zostavaPrekresli={};
+function zostavaSprievodcaHtml(kluc, def){
+  const otv=_zostavaKrok[kluc]!==undefined ? _zostavaKrok[kluc] : 1;
+  const krok=(i,nazov,stav,telo)=>{
+    const on=otv===i+1;
+    return `<div class="zkrok ${on?'on':''}">
+      <div class="zhlav" onclick="zostavaKrok('${kluc}',${i+1})">
+        <span class="zcislo">${i+1}</span><b>${esc(nazov)}</b>
+        <span class="zstav ${(stav&&stav.cls)||''}">${(stav&&stav.text)||''}</span>
+      </div>
+      ${on?`<div class="ztelo">${telo}</div>`:""}</div>`;
+  };
+  return (def.kroky||[]).map((k,i)=>krok(i, k.n, k.stav&&k.stav(), k.telo?k.telo():"")).join("");
+}
+// Nálezy kontroly. `chyba` je preukázateľne zlý údaj, `pozor` môže byť
+// správne — to isté delenie ako v uzávierke (kap. 43.20), aby to používateľ
+// nemusel čítať dvakrát inak.
+function zostavaNalezyHtml(nalezy){
+  if(!nalezy || !nalezy.length)
+    return `<div class="znalez ok"><span class="zi">✓</span><span>Nenašli sa žiadne nezrovnalosti.</span></div>`;
+  return nalezy.map(n=>`<div class="znalez ${n.typ==="chyba"?"chyba":"pozor"}">
+    <span class="zi">${n.typ==="chyba"?"✕":"!"}</span>
+    <span><b>${esc(n.text)}</b>${n.detail?`<br><span style="color:var(--ink-soft)">${esc(n.detail)}</span>`:""}</span>
+  </div>`).join("");
+}
+// ═══════════════════════════════════════════════════════════════
 //  PEŇAŽNÝ DENNÍK (kap. 88)
 //  Chronologický záznam pohybu peňazí s priebežným zostatkom — banka aj
 //  pokladňa. Riadky sú POHYBY, nie doklady: doklad zaplatený z účtu sa
@@ -26703,6 +26789,177 @@ function penazyDennik(obdobie, co, kuDnu){
       prijemBanka:sum("prijem","banka"), vydajBanka:sum("vydaj","banka"),
       prijemPokladna:sum("prijem","pokladna"), vydajPokladna:sum("vydaj","pokladna")},
     kontrola:dennikKontrolaRetaze()};
+}
+// ── Obrazovka denníka ─────────────────────────────────────────────────────
+let dnObdobie="", dnCo="oboje";
+function dennikObdobie(){ return dnObdobie || String(new Date().getFullYear()); }
+function dennikNastav(pole, v){ if(pole==="obdobie") dnObdobie=v; else dnCo=v; dennikPrekresli(); }
+function dennikPrekresli(){ const el=document.getElementById("dennikBox"); if(el) el.innerHTML=dennikHtml(); }
+_zostavaPrekresli.dennik=dennikPrekresli;
+
+function dennikHtml(){
+  const D=penazyDennik(dennikObdobie(), dnCo);
+  const K=D.kontrola;
+  const rok=dennikObdobie().slice(0,4);
+  const roky=[...new Set([
+    ...(firmaData.vypis||[]).map(t=>String(t.datum||"").slice(0,4)),
+    ...(firmaData.faktury||[]).map(f=>String(f.datum||f.vystavenie||"").slice(0,4))
+  ].filter(r=>/^\d{4}$/.test(r)))].sort().reverse();
+  if(!roky.length) roky.push(String(new Date().getFullYear()));
+
+  const nalezy=K.nalezy.map(u=>({typ:"chyba",
+    text:"Medzi "+fmtDatum(u.od)+" a "+fmtDatum(u.do)+" chýba pohyb "+eur(Math.abs(u.rozdiel)),
+    detail:"Banka na konci "+fmtDatum(u.do)+" hlási "+eur(u.hlasene)
+      +", z evidovaných pohybov vychádza "+eur(u.ocakavane)+"."}));
+  if(!K.kotiev) nalezy.push({typ:"pozor", text:"Zostatok sa nedá overiť ani nakresliť",
+    detail:"Žiadny výpis ani notifikácia nenesie stav účtu. Naimportujte výpis znova — "
+      +"staršie záznamy zostatky neukladali."});
+
+  const def={kroky:[
+    {n:"Obdobie a rozsah",
+     stav:()=>({text:(dennikObdobie().length>4?mesiacLabel(dennikObdobie()):dennikObdobie())
+       +" · "+({oboje:"banka aj pokladňa",banka:"len banka",pokladna:"len pokladňa"}[dnCo])}),
+     telo:()=>`<div class="atool" style="flex-wrap:wrap;gap:8px;padding-top:11px">
+        <select onchange="dennikNastav('obdobie',this.value)" style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:13px">
+          ${roky.map(r=>`<option value="${r}" ${dennikObdobie()===r?'selected':''}>rok ${r}</option>`).join("")}
+          ${MES_SK.map((m,i)=>{const v=rok+"-"+String(i+1).padStart(2,"0");
+            return `<option value="${v}" ${dennikObdobie()===v?'selected':''}>${m} ${rok}</option>`;}).join("")}
+        </select>
+        <select onchange="dennikNastav('co',this.value)" style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:13px">
+          <option value="oboje" ${dnCo==="oboje"?'selected':''}>banka aj pokladňa</option>
+          <option value="banka" ${dnCo==="banka"?'selected':''}>len banka</option>
+          <option value="pokladna" ${dnCo==="pokladna"?'selected':''}>len pokladňa</option>
+        </select>
+      </div>
+      <div class="ocr-hint">Dni bez pohybu sa vynechávajú. Kontrola úplnosti beží vždy nad celým rozsahom dát, nie len nad zvoleným obdobím.</div>`},
+
+    {n:"Kontrola úplnosti",
+     stav:()=>K.nalezy.length ? {text:K.nalezy.length+" nález"+(K.nalezy.length===1?"":"y"), cls:"neg"}
+        : (K.kotiev ? {text:"reťaz sedí", cls:"pos"} : {text:"nedá sa overiť", cls:"warn"}),
+     telo:()=>`<div style="padding-top:11px">${zostavaNalezyHtml(nalezy)}
+        <div class="ocr-hint" style="margin-top:8px">Zostatky, ktoré hlási banka, sú <b>${K.kotiev}</b>. Medzi dvoma takými bodmi sa musí zmena zostatku rovnať súčtu pohybov — keď sa nerovná, niektorý pohyb v evidencii chýba.</div></div>`},
+
+    {n:"Náhľad",
+     stav:()=>({text:D.riadky.length+" riadkov · "+eur(r2(D.sumy.prijem-D.sumy.vydaj))}),
+     telo:()=>dennikNahladHtml(D)},
+
+    {n:"Generovať",
+     stav:()=>({text:"PDF · XLSX"}),
+     telo:()=>`<div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;padding-top:11px">
+        <button class="aabtn" style="justify-content:center" onclick="dennikPDF()">📄 PDF</button>
+        <button class="aabtn" style="justify-content:center" onclick="dennikXLSX()">📊 XLSX</button>
+      </div>${K.nalezy.length?`<div class="ocr-hint" style="margin-top:8px">Nálezy z kontroly sa vytlačia aj do súboru — aby o svojej medzere hovoril sám, keď ho niekomu pošlete.</div>`:""}`}
+  ]};
+
+  return `<div class="amini">
+      <div class="aminbox"><div class="al">Príjmy</div><div class="av pos">${eur(D.sumy.prijem)}</div></div>
+      <div class="aminbox"><div class="al">Výdavky</div><div class="av">${eur(D.sumy.vydaj)}</div></div>
+      <div class="aminbox"><div class="al">Rozdiel</div><div class="av ${D.sumy.prijem-D.sumy.vydaj>=0?'pos':'neg'}">${eur(r2(D.sumy.prijem-D.sumy.vydaj))}</div></div>
+      <div class="aminbox"><div class="al">Riadkov</div><div class="av">${D.riadky.length}</div></div>
+    </div>
+    ${zostavaSprievodcaHtml("dennik", def)}`;
+}
+// Náhľad je na mobile SÚHRN. Desať stĺpcov sa na 390 px nezobrazí a orezaná
+// tabuľka klame viac než pomáha — plná je v súbore. Tu je prvých pár riadkov
+// na kontrolu, že sa zostava tvári tak, ako človek čaká.
+function dennikNahladHtml(D){
+  if(!D.riadky.length) return `<div class="ocr-hint" style="padding-top:11px">V tomto období nie je žiadny pohyb.</div>`;
+  const uk=D.riadky.slice(0,12);
+  return `<div style="padding-top:11px">
+    <div class="ocr-hint" style="margin-bottom:6px">
+      ${D.maZostatokBanky
+        ? "Zostatok banky sa kreslí od "+fmtDatum(D.odKotvy)+" do "+fmtDatum(D.poKotvu)+" — mimo tohto rozsahu ho appka nemá o čo oprieť."
+        : "Zostatok banky sa nekreslí — chýba stav účtu z výpisu."}
+    </div>
+    <div class="znahlad"><table>
+      <tr><th>Dátum</th><th>Doklad</th><th>Popis</th><th>Príjem</th><th>Výdavok</th><th>Banka</th><th>Pokladňa</th><th>Do zákl.</th></tr>
+      ${uk.map(r=>`<tr class="${r.skokZostatku?'zvyraz':''}">
+        <td>${fmtDatum(r.datum)}</td><td>${esc(r.doklad||"—")}</td><td>${esc(r.popis)}</td>
+        <td class="c">${r.prijem?eur(r.prijem):""}</td><td class="c">${r.vydaj?eur(r.vydaj):""}</td>
+        <td class="c">${r.zostatokBanka!=null?eur(r.zostatokBanka):"—"}</td>
+        <td class="c">${eur(r.zostatokPokladna)}</td><td>${r.doZakladu}</td></tr>`).join("")}
+    </table></div>
+    ${D.riadky.length>uk.length?`<div class="ocr-hint" style="margin-top:6px">Zobrazených prvých ${uk.length} z ${D.riadky.length} riadkov. Celá zostava je v súbore.</div>`:""}</div>`;
+}
+// Nálezy kontroly idú DO SÚBORU. Zostava má o svojej medzere hovoriť sama,
+// aj keď ju niekto pošle ďalej bez kontextu (kap. 88.9).
+function dennikPoznamka(D){
+  const c=[];
+  D.kontrola.nalezy.forEach(u=>c.push("Medzi "+fmtDatum(u.od)+" a "+fmtDatum(u.do)
+    +" chýba v evidencii pohyb "+eur(Math.abs(u.rozdiel))+" — banka na konci "+fmtDatum(u.do)
+    +" hlási "+eur(u.hlasene)+", z evidovaných pohybov vychádza "+eur(u.ocakavane)+"."));
+  if(!D.maZostatokBanky) c.push("Zostatok banky sa nekreslí: žiadny výpis ani notifikácia nenesie stav účtu.");
+  else c.push("Zostatok banky je doložený od "+fmtDatum(D.odKotvy)+" do "+fmtDatum(D.poKotvu)+".");
+  c.push("Stĺpec „Do základu“ hovorí, či pohyb vstupuje do základu dane; otáznik znamená nespárovaný pohyb.");
+  return c.join(" ");
+}
+function dennikNadpis(D){
+  return "Peňažný denník " + (D.obdobie.length>4 ? mesiacLabel(D.obdobie) : D.obdobie);
+}
+async function dennikPDF(){
+  const D=penazyDennik(dennikObdobie(), dnCo);
+  if(!D.riadky.length){ alert("V tomto období nie je žiadny pohyb — niet čo vytlačiť."); return; }
+  const FP=await fakturaPdfModul(); await ensureJsPDF();
+  const { jsPDF }=window.jspdf;
+  const m=firmaData.meta||{};
+  const doc=FP.vykresliZostavu(jsPDF, {
+    nadpis:dennikNadpis(D), kuDnu:"",
+    firma:{nazov:m.nazov||"", ico:m.ico||"", icdph:m.icdph||""},
+    stlpce:[
+      {k:"datum",  n:"Dátum",    w:13},
+      {k:"doklad", n:"Doklad",   w:18},
+      {k:"popis",  n:"Popis",    w:34},
+      {k:"ucet",   n:"Účet",     w:11},
+      {k:"prijem", n:"Príjem",   w:14, zar:"r"},
+      {k:"vydaj",  n:"Výdavok",  w:14, zar:"r"},
+      {k:"zb",     n:"Zostatok banka",    w:16, zar:"r"},
+      {k:"zp",     n:"Zostatok pokladňa", w:16, zar:"r"},
+      {k:"doZakladu", n:"Do základu", w:12}
+    ],
+    riadky:D.riadky.map(r=>({datum:FP.fmtDatum(r.datum), doklad:r.doklad||"",
+      popis:r.popis, ucet:r.ucet==="banka"?"banka":"pokladňa",
+      prijem:r.prijem?FP.eur(r.prijem):"", vydaj:r.vydaj?FP.eur(r.vydaj):"",
+      zb:r.zostatokBanka!=null?FP.eur(r.zostatokBanka):"—",
+      zp:FP.eur(r.zostatokPokladna), doZakladu:r.doZakladu,
+      _zvyraznit:!!r.skokZostatku})),
+    sucet:{datum:"Spolu", prijem:FP.eur(D.sumy.prijem), vydaj:FP.eur(D.sumy.vydaj)},
+    poznamka:dennikPoznamka(D)
+  });
+  doc.save("penazny_dennik_"+D.obdobie+".pdf");
+}
+function dennikXLSX(){
+  const D=penazyDennik(dennikObdobie(), dnCo);
+  if(!D.riadky.length){ alert("V tomto období nie je žiadny pohyb — niet čo exportovať."); return; }
+  Promise.all([ensureXlsxStyle(), ensureFflate()]).then(([X, fflate])=>{
+    const S=xkStyles(), wb=X.utils.book_new();
+    const fmtSk=iso=>{ const m=String(iso).match(/(\d{4})-(\d{2})-(\d{2})/); return m?(+m[3]+"."+(+m[2])+"."+m[1]):(iso||""); };
+    const d=firmaData||{};
+    const aoa=[[xkCell(dennikNadpis(D),S.title)],
+      [xkCell(((d.meta&&d.meta.nazov)||"")+" · IČO "+((d.meta&&d.meta.ico)||""),S.sub)],[],
+      ["Dátum","Doklad","Popis","Účet","Príjem","Výdavok","Zostatok banka","Zostatok pokladňa","Do základu"]
+        .map(x=>xkCell(x,S.hdr))];
+    D.riadky.forEach((r,i)=>{ const z=i%2===1, sc=z?S.cellZ:S.cell, se=z?S.eurZ:S.eur;
+      aoa.push([xkCell(fmtSk(r.datum),sc),xkCell(r.doklad||"",sc),xkCell(r.popis,sc),
+        xkCell(r.ucet==="banka"?"banka":"pokladňa",sc),
+        xkCell(r.prijem||"",se),xkCell(r.vydaj||"",se),
+        xkCell(r.zostatokBanka!=null?r.zostatokBanka:"",se),
+        xkCell(r.zostatokPokladna,se),xkCell(r.doZakladu,sc)]);
+    });
+    aoa.push([xkCell("Spolu",S.foot),xkCell("",S.foot),xkCell("",S.foot),xkCell("",S.foot),
+      xkCell(D.sumy.prijem,S.footE),xkCell(D.sumy.vydaj,S.footE),
+      xkCell("",S.foot),xkCell("",S.foot),xkCell("",S.foot)]);
+    aoa.push([]); aoa.push([xkCell(dennikPoznamka(D),S.sub)]);
+    const ws=X.utils.aoa_to_sheet(aoa);
+    ws['!cols']=[{wch:12},{wch:18},{wch:34},{wch:11},{wch:13},{wch:13},{wch:16},{wch:17},{wch:11}];
+    ws['!merges']=[{s:{r:0,c:0},e:{r:0,c:5}},{s:{r:1,c:0},e:{r:1,c:8}}];
+    ws['!freeze']={xSplit:1,ySplit:4}; ws['!rows']=[{hpt:22},{hpt:14},{hpt:6},{hpt:26}];
+    X.utils.book_append_sheet(wb, ws, "Peňažný denník");
+    const buf=X.write(wb,{type:"array",bookType:"xlsx"});
+    downloadBlob(new Blob([xkApplyFreeze(X, fflate, buf, {0:{x:1,y:4}})],
+      {type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}),
+      "penazny_dennik_"+D.obdobie+".xlsx");
+  }).catch(e=>{ console.error("denník do XLSX:", e);
+    alert("Knižnicu na export sa nepodarilo načítať. Skontrolujte pripojenie."); });
 }
 // Vstupuje pohyb do základu dane? Suma sa zámerne NEuvádza — pri čiastočnom
 // párovaní by to bola domnienka. „?" pri nespárovanom pohybe je pravdivá
