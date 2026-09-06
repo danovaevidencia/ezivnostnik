@@ -1341,7 +1341,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.06-KC";  // ročná uzávierka ako dokument, cez sprievodcu
+const APP_VERZIA = "2026.09.06-KD";  // knihy cez sprievodcu, s kontrolným krokom
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -14915,20 +14915,7 @@ function appPohladavky(){
         ${roky.map(r=>`<option value="${r}" ${r===pzRok?'selected':''}>${r}</option>`).join('')}
       </select>
     </div>
-    <div style="background:var(--bg);border-radius:11px;padding:11px 13px;margin:2px 0 12px">
-      <div style="display:flex;flex-wrap:wrap;gap:9px;align-items:center">
-        <b style="font-size:13px">Knihy ku dňu</b>
-        <input type="date" value="${esc(pzKuDnuVal())}" onchange="pzKuDnu=this.value;appPohladavky()"
-               style="border:1px solid var(--line);border-radius:8px;padding:5px 8px;font:inherit;font-size:12.5px">
-      </div>
-      <div class="ocr-hint" style="margin-top:5px">Úhrady po tomto dni sa nezapočítavajú a doklady vystavené neskôr sa v knihe neobjavia. Kniha nesie aj doklady starších rokov, ktoré k 1. januáru neboli vyrovnané.</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:9px">
-        <button class="aabtn" style="justify-content:center" onclick="knihaPDF('faktura',pzRok,pzKuDnuVal())">📄 Pohľadávky PDF</button>
-        <button class="aabtn" style="justify-content:center" onclick="knihaPDF('vydavok',pzRok,pzKuDnuVal())">📄 Záväzky PDF</button>
-        <button class="aabtn" style="justify-content:center" onclick="knihaXLSX('faktura',pzRok,pzKuDnuVal())">📊 Pohľadávky XLSX</button>
-        <button class="aabtn" style="justify-content:center" onclick="knihaXLSX('vydavok',pzRok,pzKuDnuVal())">📊 Záväzky XLSX</button>
-      </div>
-    </div>
+    <div style="margin:2px 0 12px"><div id="knBox">${knSprievodcaHtml()}</div></div>
     <div class="amini">
       <div class="aminbox"><div class="al">Otvorené pohľadávky</div><div class="av ${sumaOtvP?'warn':'pos'}">${eur(sumaOtvP)}</div></div>
       <div class="aminbox"><div class="al">Po splatnosti</div><div class="av ${poSplat.length?'neg':'pos'}">${poSplat.length}</div></div>
@@ -27356,6 +27343,92 @@ function knihaXLSX(typ, rok, kuDnu){
       (typ==="faktura"?"kniha_pohladavok_":"kniha_zavazkov_")+K.rok+".xlsx");
   }).catch(e=>{ console.error("kniha do XLSX:", e);
     alert("Knižnicu na export sa nepodarilo načítať. Skontrolujte pripojenie."); });
+}
+// ── Sprievodca knihami (kap. 86, 88.9) ────────────────────────────────────
+// Kontrolný krok zhŕňa to, čo dnes stojí roztrúsené po riadkoch: koľko
+// položiek je potvrdených ručne a teda bez dátumu úhrady, koľko je
+// prenesených z minulého roka a koľko je po splatnosti. Pri Romanovom aute
+// (51 087 €) trvalo práve toto hodinu zistiť.
+let knTyp="faktura";
+function knNastav(co, v){
+  if(co==="typ") knTyp=v;
+  else if(co==="rok"){ pzRok=v; pzKuDnu=""; }
+  else if(co==="den") pzKuDnu=v;
+  knPrekresli();
+}
+function knPrekresli(){ const el=document.getElementById("knBox"); if(el) el.innerHTML=knSprievodcaHtml(); }
+_zostavaPrekresli.kn=knPrekresli;
+function knNalezy(K){
+  const out=[];
+  const rucne=K.riadky.filter(r=>r.rucne);
+  const prenes=K.riadky.filter(r=>r.prenesene);
+  const poSpl=K.riadky.filter(r=>r.poSplat);
+  const bezSpl=K.riadky.filter(r=>r.zostatok>0.005 && !r.splatnost);
+  if(rucne.length) out.push({typ:"pozor",
+    text:rucne.length+" "+sklon(rucne.length,"položka je potvrdená","položky sú potvrdené","položiek je potvrdených")+" ručne",
+    detail:"Appka pri nich nepozná deň platby, preto v knihe zostáva stĺpec „Uhradené dňa“ prázdny."});
+  if(prenes.length) out.push({typ:"pozor",
+    text:prenes.length+" "+sklon(prenes.length,"doklad je prenesený","doklady sú prenesené","dokladov je prenesených")+" z minulého roka",
+    detail:"K 1. januáru neboli vyrovnané, preto sú v knihe aj keď nie sú z tohto roka."});
+  if(poSpl.length) out.push({typ:"chyba",
+    text:poSpl.length+" "+sklon(poSpl.length,"položka je","položky sú","položiek je")+" po splatnosti · "
+      +eur(r2(poSpl.reduce((a,r)=>a+r.zostatok,0))),
+    detail:K.typ==="faktura" ? "Peniaze, ktoré vám dlhujú a termín už uplynul."
+                             : "Záväzky po termíne — skontrolujte, či neboli zaplatené mimo evidencie."});
+  if(bezSpl.length) out.push({typ:"pozor",
+    text:bezSpl.length+" neuhradených "+sklon(bezSpl.length,"doklad nemá","doklady nemajú","dokladov nemá")+" splatnosť",
+    detail:"Bez nej sa nedá určiť, či sú po termíne."});
+  return out;
+}
+function knSprievodcaHtml(){
+  const rok=pzRok||String(new Date().getFullYear());
+  const den=pzKuDnuVal();
+  const K=knihaDokladov(knTyp, rok, den);
+  const nalezy=knNalezy(K);
+  const chyb=nalezy.filter(n=>n.typ==="chyba").length;
+  const roky=xkDostupneRoky(); if(!roky.length) roky.push(rok);
+  const uk=K.riadky.slice(0,10);
+  const def={kroky:[
+    {n:"Kniha, rok a deň",
+     stav:()=>({text:(knTyp==="faktura"?"pohľadávky":"záväzky")+" · "+rok+" · k "+fmtDatum(den)}),
+     telo:()=>`<div class="atool" style="flex-wrap:wrap;gap:8px;padding-top:11px">
+        <select onchange="knNastav('typ',this.value)" style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:13px">
+          <option value="faktura" ${knTyp==="faktura"?'selected':''}>Kniha pohľadávok</option>
+          <option value="vydavok" ${knTyp==="vydavok"?'selected':''}>Kniha záväzkov</option>
+        </select>
+        <select onchange="knNastav('rok',this.value)" style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:13px">
+          ${roky.map(r=>`<option value="${r}" ${r===rok?'selected':''}>rok ${r}</option>`).join("")}
+        </select>
+        <input type="date" value="${esc(den)}" onchange="knNastav('den',this.value)"
+               style="border:1px solid var(--line);border-radius:8px;padding:5px 8px;font:inherit;font-size:12.5px">
+      </div>
+      <div class="ocr-hint">Úhrady po zvolenom dni sa nezapočítavajú a doklady vystavené neskôr sa v knihe neobjavia. Kniha nesie aj doklady starších rokov, ktoré k 1. januáru neboli vyrovnané.</div>`},
+
+    {n:"Kontrola",
+     stav:()=>nalezy.length ? {text:nalezy.length+" "+sklon(nalezy.length,"nález","nálezy","nálezov"), cls:chyb?"neg":"warn"}
+        : {text:"bez nálezov", cls:"pos"},
+     telo:()=>`<div style="padding-top:11px">${zostavaNalezyHtml(nalezy)}</div>`},
+
+    {n:"Náhľad",
+     stav:()=>({text:K.riadky.length+" "+sklon(K.riadky.length,"riadok","riadky","riadkov")
+        +" · zostáva "+eur(K.sumy.zostatok)}),
+     telo:()=>K.riadky.length ? `<div style="padding-top:11px"><div class="znahlad"><table>
+        <tr><th>Číslo</th><th>${knTyp==="faktura"?"Odberateľ":"Dodávateľ"}</th><th>Dátum</th><th>Suma</th><th>Uhradené</th><th>Zostatok</th><th>Stav</th></tr>
+        ${uk.map(r=>`<tr class="${r.poSplat?'zvyraz':''}"><td>${esc(r.cislo)}</td><td>${esc(r.partner)}</td>
+          <td>${fmtDatum(r.datum)}</td><td class="c">${eur(r.suma)}</td>
+          <td>${r.datumUhrady?fmtDatum(r.datumUhrady):"—"}</td>
+          <td class="c">${eur(r.zostatok)}</td><td>${esc(knihaStavText(r))}</td></tr>`).join("")}
+      </table></div>
+      ${K.riadky.length>uk.length?`<div class="ocr-hint" style="margin-top:6px">Zobrazených prvých ${uk.length} z ${K.riadky.length}. Celá kniha je v súbore.</div>`:""}</div>`
+      : `<div class="ocr-hint" style="padding-top:11px">Kniha je za toto obdobie prázdna.</div>`},
+
+    {n:"Generovať", stav:()=>({text:"PDF · XLSX"}),
+     telo:()=>`<div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;padding-top:11px">
+        <button class="aabtn" style="justify-content:center" onclick="knihaPDF('${knTyp}',pzRok,pzKuDnuVal())">📄 PDF</button>
+        <button class="aabtn" style="justify-content:center" onclick="knihaXLSX('${knTyp}',pzRok,pzKuDnuVal())">📊 XLSX</button>
+      </div>`}
+  ]};
+  return zostavaSprievodcaHtml("kn", def);
 }
 // Ku ktorému dňu sa kniha zostavuje. Bežiaci rok → dnes (staršie dátumy by
 // tvrdili stav, ktorý ešte nenastal), uzavretý rok → jeho koniec.
