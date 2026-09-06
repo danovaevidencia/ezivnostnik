@@ -659,3 +659,124 @@ export function vykresliUpomienku(jsPDF, model, opts = {}) {
   }
   return doc;
 }
+
+// ═══════════════════════════════════════════════════════════════
+//  ÚČTOVNÁ ZOSTAVA — všeobecná tabuľka na šírku (kap. 86.7)
+//
+//  Kniha pohľadávok, kniha záväzkov a neskôr peňažný denník sú tri rôzne
+//  zostavy s tou istou kostrou: hlavička s firmou a dňom, tabuľka cez celú
+//  šírku, súčtový riadok, stránkovanie. Preto jeden renderer a nie tri —
+//  druhá kópia by sa rozišla presne tak ako kedysi dva generátory faktúr
+//  (kap. 36.1).
+//
+//  Zostava je určená pre kontrolu a pre účtovníka, takže dve veci nie sú
+//  ozdoba, ale podstata:
+//    · na KAŽDEJ strane je vidieť firmu, názov zostavy a ku ktorému dňu
+//      stav platí — vytrhnutá strana bez toho je bezcenná
+//    · súčtový riadok sa nikdy neoddelí od tabuľky
+//
+//  model = { nadpis, kuDnu, firma:{nazov,ico,icdph}, stlpce:[{k,n,w,zar}],
+//            riadky:[{…, _zvyraznit}], sucet:{…}, poznamka }
+// ═══════════════════════════════════════════════════════════════
+export function vykresliZostavu(jsPDF, model, opts = {}) {
+  const doc = chranFont(new jsPDF({ unit: "mm", format: "a4", orientation: "landscape" }));
+  const FONT = registrujFont(doc) ? "LibSans" : "helvetica";
+  const { INK, SOFT, MUTED, LINE, BRAND, BGSOFT, BIELA, AKCENT, LOGO2 } = PALETA;
+  const W = 297, H = 210, L = 12, R = W - 12;
+  const setC = c => doc.setTextColor(c[0], c[1], c[2]);
+  const setF = c => doc.setFillColor(c[0], c[1], c[2]);
+  const setD = c => doc.setDrawColor(c[0], c[1], c[2]);
+  const stlpce = model.stlpce || [];
+  const firma = model.firma || {};
+  const RIADOK = 5.6, PATA = H - 14;
+  let strana = 0;
+
+  // Šírky sa dopočítajú na presnú šírku strany — inak by tabuľka pri zmene
+  // jedného stĺpca prestala lícovať s hlavičkou a nikto by nevedel prečo.
+  const zadane = stlpce.reduce((a, s) => a + (+s.w || 0), 0) || 1;
+  const mierka = (R - L) / zadane;
+  const x0 = [];
+  stlpce.reduce((x, s, i) => { x0[i] = x; return x + (+s.w || 0) * mierka; }, L);
+  const sirka = i => (+stlpce[i].w || 0) * mierka;
+
+  const hlavicka = () => {
+    strana++;
+    let y = 16;
+    const lsz = 9, ly = y - 6.5;
+    setF(BRAND); doc.roundedRect(L, ly, lsz, lsz, 2, 2, "F");
+    doc.setFont(FONT, "bold"); doc.setFontSize(11.5); setC(BIELA);
+    doc.text("e", L + lsz / 2 - 0.4, y - 0.2, { align: "center" });
+    setF(AKCENT); doc.roundedRect(L + lsz - 3.1, ly + 1.5, 1.4, 1.4, 0.35, 0.35, "F");
+    setF(LOGO2);  doc.roundedRect(L + lsz - 1.5, ly + 1.5, 1.4, 1.4, 0.35, 0.35, "F");
+    doc.roundedRect(L + lsz - 3.1, ly + 3.1, 1.4, 1.4, 0.35, 0.35, "F");
+
+    doc.setFont(FONT, "bold"); doc.setFontSize(14); setC(INK);
+    doc.text(model.nadpis || "", L + lsz + 5, y);
+    doc.setFont(FONT, "normal"); doc.setFontSize(9); setC(SOFT);
+    if (model.kuDnu) doc.text("stav k " + fmtDatum(model.kuDnu), R, y - 4, { align: "right" });
+    const ident = [firma.nazov, firma.ico && ("IČO " + firma.ico), firma.icdph && ("IČ DPH " + firma.icdph)]
+      .filter(Boolean).join(" · ");
+    doc.setFontSize(8.5); setC(MUTED);
+    doc.text(ident, R, y + 1, { align: "right" });
+    y += 8;
+
+    // hlavička tabuľky
+    setF(BGSOFT); doc.rect(L, y - 4.2, R - L, 7, "F");
+    setD(LINE); doc.setLineWidth(0.3); doc.line(L, y + 2.8, R, y + 2.8);
+    doc.setFont(FONT, "bold"); doc.setFontSize(8); setC(SOFT);
+    stlpce.forEach((s, i) => {
+      const prava = s.zar === "r";
+      doc.text(String(s.n || ""), prava ? x0[i] + sirka(i) - 1.5 : x0[i] + 1.5, y,
+        { align: prava ? "right" : "left" });
+    });
+    return y + 7;
+  };
+
+  const paticka = () => {
+    setD(LINE); doc.setLineWidth(0.3); doc.line(L, PATA - 4, R, PATA - 4);
+    doc.setFont(FONT, "normal"); doc.setFontSize(7.3); setC(MUTED);
+    doc.text((model.nadpis || "") + (model.kuDnu ? " · stav k " + fmtDatum(model.kuDnu) : ""), L, PATA);
+    doc.text("strana " + strana, (L + R) / 2, PATA, { align: "center" });
+    const label = "Vytvorené v ", url = "ezivnostnik.eu";
+    const wLabel = doc.getTextWidth(label), wUrl = doc.getTextWidth(url);
+    setC(MUTED); doc.text(label, R - wLabel - wUrl, PATA);
+    setC(BRAND); doc.text(url, R - wUrl, PATA);
+  };
+
+  let y = hlavicka();
+  const bunka = (r, i, styl) => {
+    const s = stlpce[i], prava = s.zar === "r";
+    let txt = String(r[s.k] == null ? "" : r[s.k]);
+    const max = sirka(i) - 3;
+    if (doc.getTextWidth(txt) > max) {           // radšej orezať než pretiecť do suseda
+      while (txt.length > 1 && doc.getTextWidth(txt + "…") > max) txt = txt.slice(0, -1);
+      txt += "…";
+    }
+    doc.text(txt, prava ? x0[i] + sirka(i) - 1.5 : x0[i] + 1.5, y, { align: prava ? "right" : "left" });
+  };
+
+  (model.riadky || []).forEach((r, n) => {
+    // Súčtový riadok sa nesmie oddeliť od tabuľky — necháva sa naň miesto.
+    if (y > PATA - 14) { paticka(); doc.addPage(); y = hlavicka(); }
+    if (n % 2 === 1) { setF(BGSOFT); doc.rect(L, y - 3.8, R - L, RIADOK, "F"); }
+    doc.setFont(FONT, "normal"); doc.setFontSize(8.2);
+    setC(r._zvyraznit ? [176, 42, 34] : INK);
+    stlpce.forEach((s, i) => bunka(r, i));
+    y += RIADOK;
+  });
+
+  if (model.sucet) {
+    if (y > PATA - 12) { paticka(); doc.addPage(); y = hlavicka(); }
+    y += 1.5;
+    setD(LINE); doc.setLineWidth(0.5); doc.line(L, y - 4, R, y - 4);
+    doc.setFont(FONT, "bold"); doc.setFontSize(9); setC(INK);
+    stlpce.forEach((s, i) => bunka(model.sucet, i));
+    y += RIADOK + 2;
+  }
+  if (model.poznamka) {
+    doc.setFont(FONT, "normal"); doc.setFontSize(7.6); setC(MUTED);
+    doc.splitTextToSize(model.poznamka, R - L).forEach(l => { doc.text(l, L, y); y += 3.6; });
+  }
+  paticka();
+  return doc;
+}

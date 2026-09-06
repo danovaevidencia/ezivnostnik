@@ -1311,7 +1311,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.05-JV";  // kniha pohľadávok a záväzkov: stav ku dňu, aj prenesené doklady
+const APP_VERZIA = "2026.09.06-JW";  // knihy do PDF a XLSX priamo z modulu Pohľadávky
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -14502,7 +14502,11 @@ function nacitajPodpis(e){
 }
 
 // ── POHĽADÁVKY A ZÁVÄZKY ──
-let pzRok="", pzTab="pohl";
+let pzRok="", pzTab="pohl", pzKuDnu="";
+// Deň, ku ktorému sa knihy zostavujú. Prázdne = predvolený pre zvolený rok;
+// pri prepnutí roka sa ručná voľba zahadzuje, inak by kniha za 2024 tvrdila
+// stav k dátumu z roku 2026 a nikto by nevedel prečo je prázdna.
+function pzKuDnuVal(){ return pzKuDnu || knihaKuDnu(pzRok||String(new Date().getFullYear())); }
 // Stav úhrady číta kanonický dokladJeUhradeny — Pohľadávky mali dovtedy
 // vlastnú heuristiku (zhoda VS alebo LEN sumy s ľubovoľným pohybom), takže
 // tvrdili iné než zoznam faktúr a Banka (kap. 45.2).
@@ -14636,9 +14640,23 @@ function appPohladavky(){
 
   document.getElementById("appScreen").innerHTML=appHlavicka("pohladavky","")+`
     <div class="atool">
-      <select onchange="pzRok=this.value;appPohladavky()" style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:13px">
+      <select onchange="pzRok=this.value;pzKuDnu='';appPohladavky()" style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:13px">
         ${roky.map(r=>`<option value="${r}" ${r===pzRok?'selected':''}>${r}</option>`).join('')}
       </select>
+    </div>
+    <div style="background:var(--bg);border-radius:11px;padding:11px 13px;margin:2px 0 12px">
+      <div style="display:flex;flex-wrap:wrap;gap:9px;align-items:center">
+        <b style="font-size:13px">Knihy ku dňu</b>
+        <input type="date" value="${esc(pzKuDnuVal())}" onchange="pzKuDnu=this.value;appPohladavky()"
+               style="border:1px solid var(--line);border-radius:8px;padding:5px 8px;font:inherit;font-size:12.5px">
+      </div>
+      <div class="ocr-hint" style="margin-top:5px">Úhrady po tomto dni sa nezapočítavajú a doklady vystavené neskôr sa v knihe neobjavia. Kniha nesie aj doklady starších rokov, ktoré k 1. januáru neboli vyrovnané.</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:9px">
+        <button class="aabtn" style="justify-content:center" onclick="knihaPDF('faktura',pzRok,pzKuDnuVal())">📄 Pohľadávky PDF</button>
+        <button class="aabtn" style="justify-content:center" onclick="knihaPDF('vydavok',pzRok,pzKuDnuVal())">📄 Záväzky PDF</button>
+        <button class="aabtn" style="justify-content:center" onclick="knihaXLSX('faktura',pzRok,pzKuDnuVal())">📊 Pohľadávky XLSX</button>
+        <button class="aabtn" style="justify-content:center" onclick="knihaXLSX('vydavok',pzRok,pzKuDnuVal())">📊 Záväzky XLSX</button>
+      </div>
     </div>
     <div class="amini">
       <div class="aminbox"><div class="al">Otvorené pohľadávky</div><div class="av ${sumaOtvP?'warn':'pos'}">${eur(sumaOtvP)}</div></div>
@@ -16654,24 +16672,8 @@ function xkBuild(X){
     ["faktura","vydavok"].forEach(typ=>{
       const K=knihaDokladov(typ, rk, knihaKuDnu(rk));
       if(!K.riadky.length) return;
-      const aoa=[[xkCell(K.nazov+" "+rk,S.title)],
-        [xkCell((D.meta&&D.meta.nazov||"")+" · IČO "+(D.meta&&D.meta.ico||"")+" · stav k "+fmtSk(K.kuDnu),S.sub)],[],
-        ["Číslo","Partner","IČO","Dátum","Splatnosť","Suma","Uhradené dňa","Uhradená suma","Zostatok","Stav"]
-          .map(x=>xkCell(x,S.hdr))];
-      K.riadky.forEach((r,i)=>{ const z=i%2===1, sc=z?S.cellZ:S.cell, se=z?S.eurZ:S.eur;
-        aoa.push([xkCell(r.cislo,sc),xkCell(r.partner,sc),xkCell(r.ico,sc),
-          xkCell(fmtSk(r.datum),sc),xkCell(r.splatnost?fmtSk(r.splatnost):"",sc),
-          xkCell(r.suma,se),xkCell(r.datumUhrady?fmtSk(r.datumUhrady):"",sc),
-          xkCell(r.zaplatene,se),xkCell(r.zostatok,se),xkCell(knihaStavText(r),sc)]);
-      });
-      aoa.push([xkCell("Spolu",S.foot),xkCell("",S.foot),xkCell("",S.foot),xkCell("",S.foot),xkCell("",S.foot),
-        xkCell(K.sumy.suma,S.footE),xkCell("",S.foot),xkCell(K.sumy.zaplatene,S.footE),
-        xkCell(K.sumy.zostatok,S.footE),xkCell("",S.foot)]);
-      const ws=X.utils.aoa_to_sheet(aoa);
-      ws['!cols']=[{wch:14},{wch:26},{wch:11},{wch:12},{wch:12},{wch:13},{wch:13},{wch:14},{wch:13},{wch:22}];
-      ws['!merges']=[{s:{r:0,c:0},e:{r:0,c:5}},{s:{r:1,c:0},e:{r:1,c:9}}];
-      ws['!freeze']={xSplit:1,ySplit:4}; ws['!rows']=[{hpt:22},{hpt:14},{hpt:6},{hpt:26}];
-      X.utils.book_append_sheet(wb,ws,xkSheetName((typ==="faktura"?"Pohľadávky ":"Záväzky ")+rk));
+      X.utils.book_append_sheet(wb, knihaHarok(X, S, K),
+        xkSheetName((typ==="faktura"?"Pohľadávky ":"Záväzky ")+rk));
     });
   });
   // --- Výdavky (po rokoch) ---
@@ -17119,6 +17121,49 @@ async function fakturaPdfModul(){
   return _fakturaPdfModul;
 }
 
+// Kniha pohľadávok / záväzkov ako PDF (kap. 86.7). Dáta berie z toho istého
+// `knihaDokladov` ako obrazovka aj XLSX.
+async function knihaPDF(typ, rok, kuDnu){
+  const K=knihaDokladov(typ, rok, kuDnu||knihaKuDnu(rok));
+  if(!K.riadky.length){ alert(K.nazov+" za rok "+K.rok+" je prázdna — niet čo vytlačiť."); return; }
+  const FP=await fakturaPdfModul();
+  await ensureJsPDF();
+  const { jsPDF }=window.jspdf;
+  const m=firmaData.meta||{};
+  const eurP=v=>v?FP.eur(v):"";
+  const poznamky=[];
+  if(K.riadky.some(r=>r.rucne))
+    poznamky.push("Riadky bez dátumu úhrady sú potvrdené ručne — appka pri nich deň platby nepozná.");
+  if(K.prenesenych)
+    poznamky.push("Doklady označené „z minulého roka“ neboli k 1. januáru vyrovnané a prenášajú sa.");
+  const model={
+    nadpis:K.nazov+" "+K.rok, kuDnu:K.kuDnu,
+    firma:{nazov:m.nazov||"", ico:m.ico||"", icdph:m.icdph||""},
+    stlpce:[
+      {k:"cislo",       n:"Číslo",                                        w:16},
+      {k:"partner",     n:(typ==="faktura"?"Odberateľ":"Dodávateľ"),      w:30},
+      {k:"ico",         n:"IČO",                                          w:11},
+      {k:"datum",       n:"Dátum",                                        w:12},
+      {k:"splatnost",   n:"Splatnosť",                                    w:12},
+      {k:"suma",        n:"Suma",                                         w:13, zar:"r"},
+      {k:"datumUhrady", n:"Uhradené dňa",                                 w:14},
+      {k:"zaplatene",   n:"Uhradená suma",                                w:14, zar:"r"},
+      {k:"zostatok",    n:"Zostatok",                                     w:13, zar:"r"},
+      {k:"stav",        n:"Stav",                                         w:25}
+    ],
+    riadky:K.riadky.map(r=>({
+      cislo:r.cislo, partner:r.partner, ico:r.ico,
+      datum:FP.fmtDatum(r.datum), splatnost:FP.fmtDatum(r.splatnost),
+      suma:FP.eur(r.suma), datumUhrady:FP.fmtDatum(r.datumUhrady),
+      zaplatene:eurP(r.zaplatene), zostatok:FP.eur(r.zostatok),
+      stav:knihaStavText(r), _zvyraznit:r.poSplat })),
+    sucet:{cislo:"Spolu", suma:FP.eur(K.sumy.suma),
+      zaplatene:FP.eur(K.sumy.zaplatene), zostatok:FP.eur(K.sumy.zostatok)},
+    poznamka:poznamky.join(" ")
+  };
+  const doc=FP.vykresliZostavu(jsPDF, model);
+  doc.save((typ==="faktura"?"kniha_pohladavok_":"kniha_zavazkov_")+K.rok+".pdf");
+}
 async function saasFakturaPDF(f){
   const FP = await fakturaPdfModul();
   await ensureJsPDF();
@@ -26376,6 +26421,45 @@ function knihaDokladov(typ, rok, kuDnu){
     sumy:{suma:sum("suma"), zaplatene:sum("zaplatene"), zostatok:sum("zostatok")},
     poSplat:riadky.filter(x=>x.poSplat).length,
     prenesenych:riadky.filter(x=>x.prenesene).length};
+}
+// Hárok knihy do XLSX. Jedna stavba pre kompletný export aj pre samostatné
+// stiahnutie z modulu Pohľadávky — dva rovnaké hárky s inými stĺpcami sú
+// presne to, čo sa v tomto projekte vždy rozišlo.
+function knihaHarok(X, S, K){
+  const fmtSk=iso=>{ const m=String(iso).match(/(\d{4})-(\d{2})-(\d{2})/); return m?(+m[3]+"."+(+m[2])+"."+m[1]):(iso||""); };
+  const D=firmaData||{};
+  const aoa=[[xkCell(K.nazov+" "+K.rok,S.title)],
+    [xkCell(((D.meta&&D.meta.nazov)||"")+" · IČO "+((D.meta&&D.meta.ico)||"")+" · stav k "+fmtSk(K.kuDnu),S.sub)],[],
+    ["Číslo",(K.typ==="faktura"?"Odberateľ":"Dodávateľ"),"IČO","Dátum","Splatnosť","Suma",
+     "Uhradené dňa","Uhradená suma","Zostatok","Stav"].map(x=>xkCell(x,S.hdr))];
+  K.riadky.forEach((r,i)=>{ const z=i%2===1, sc=z?S.cellZ:S.cell, se=z?S.eurZ:S.eur;
+    aoa.push([xkCell(r.cislo,sc),xkCell(r.partner,sc),xkCell(r.ico,sc),
+      xkCell(fmtSk(r.datum),sc),xkCell(r.splatnost?fmtSk(r.splatnost):"",sc),
+      xkCell(r.suma,se),xkCell(r.datumUhrady?fmtSk(r.datumUhrady):"",sc),
+      xkCell(r.zaplatene,se),xkCell(r.zostatok,se),xkCell(knihaStavText(r),sc)]);
+  });
+  aoa.push([xkCell("Spolu",S.foot),xkCell("",S.foot),xkCell("",S.foot),xkCell("",S.foot),xkCell("",S.foot),
+    xkCell(K.sumy.suma,S.footE),xkCell("",S.foot),xkCell(K.sumy.zaplatene,S.footE),
+    xkCell(K.sumy.zostatok,S.footE),xkCell("",S.foot)]);
+  const ws=X.utils.aoa_to_sheet(aoa);
+  ws['!cols']=[{wch:14},{wch:26},{wch:11},{wch:12},{wch:12},{wch:13},{wch:13},{wch:14},{wch:13},{wch:24}];
+  ws['!merges']=[{s:{r:0,c:0},e:{r:0,c:5}},{s:{r:1,c:0},e:{r:1,c:9}}];
+  ws['!freeze']={xSplit:1,ySplit:4}; ws['!rows']=[{hpt:22},{hpt:14},{hpt:6},{hpt:26}];
+  return ws;
+}
+// Samostatné stiahnutie jednej knihy — ku dňu, ktorý si používateľ zvolil.
+function knihaXLSX(typ, rok, kuDnu){
+  const K=knihaDokladov(typ, rok, kuDnu||knihaKuDnu(rok));
+  if(!K.riadky.length){ alert(K.nazov+" za rok "+K.rok+" je prázdna — niet čo exportovať."); return; }
+  Promise.all([ensureXlsxStyle(), ensureFflate()]).then(([X, fflate])=>{
+    const S=xkStyles(), wb=X.utils.book_new();
+    X.utils.book_append_sheet(wb, knihaHarok(X, S, K), K.typ==="faktura"?"Pohľadávky":"Záväzky");
+    const buf=X.write(wb,{type:"array",bookType:"xlsx"});
+    const final=xkApplyFreeze(X, fflate, buf, {0:{x:1,y:4}});
+    downloadBlob(new Blob([final],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}),
+      (typ==="faktura"?"kniha_pohladavok_":"kniha_zavazkov_")+K.rok+".xlsx");
+  }).catch(e=>{ console.error("kniha do XLSX:", e);
+    alert("Knižnicu na export sa nepodarilo načítať. Skontrolujte pripojenie."); });
 }
 // Ku ktorému dňu sa kniha zostavuje. Bežiaci rok → dnes (staršie dátumy by
 // tvrdili stav, ktorý ešte nenastal), uzavretý rok → jeho koniec.
