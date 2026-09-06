@@ -1311,7 +1311,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.06-JX";  // hotovosť: spôsob úhrady a zostatok pokladne, nie pokladnica
+const APP_VERZIA = "2026.09.06-JY";  // príjmový doklad — hotovostný príjem bez faktúry
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -7438,7 +7438,7 @@ function appFaktury(){
   fakPoslednyList=list.map(dokladKluc).filter(Boolean);
   const vsetkyVybrane=fakPoslednyList.length>0 && fakPoslednyList.every(c=>fakVybrane.has(c));
   const _fIdx=new Map((d.faktury||[]).map((x,i)=>[x,i]));   // index riadku bez O(n²) indexOf (45.8)
-  document.getElementById("appScreen").innerHTML=appHlavicka("faktury",`<button class="aabtn" onclick="faktImport()">📥 Import (XLSX/XML/ISDOC/PDF)</button><button class="aabtn pri" onclick="editFaktura()">＋ Nová faktúra</button>`)+`
+  document.getElementById("appScreen").innerHTML=appHlavicka("faktury",`<button class="aabtn" onclick="faktImport()">📥 Import (XLSX/XML/ISDOC/PDF)</button><button class="aabtn" onclick="editPrijmovyDoklad()">💶 Príjem v hotovosti</button><button class="aabtn pri" onclick="editFaktura()">＋ Nová faktúra</button>`)+`
     <div class="amini">
       <div class="aminbox"><div class="al">Fakturované</div><div class="av pos">${eur(spolu)}</div></div>
       <div class="aminbox"><div class="al">Uhradené</div><div class="av">${uhr} / ${fak.length}</div></div>
@@ -7457,12 +7457,111 @@ function appFaktury(){
     </div>`:''}
     <div class="alist">
       <div class="arow head rdok rf"><div class="c-cb"><input type="checkbox" ${vsetkyVybrane?'checked':''} onclick="fakVyberVsetky(this.checked)" title="Vybrať všetky" style="cursor:pointer"></div><div class="c-sub">Číslo</div><div class="c-main">Odberateľ</div><div class="c-date">Dátum</div><div class="c-sum" style="text-align:right">Suma</div><div class="c-stav">Stav</div><div class="c-act"></div></div>
-      ${list.length?list.map(f=>{const idx=_fIdx.get(f);const fk=dokladKluc(f);const st=uhradaStav("faktura", fk);const fb=UHRADA_FARBY[st.stav]||UHRADA_FARBY.neznamy;const uhradena=faktJeUhradena(f);return `<div class="arow rdok rf"><div class="c-cb"><input type="checkbox" ${fakVybrane.has(fk)?'checked':''} onclick="event.stopPropagation();fakToggleVyber('${esc(fk)}',this.checked)" style="cursor:pointer"></div><div class="acol-strong c-sub" style="color:${c}" onclick="editFaktura(${idx})">${esc(f.cislo||"—")}</div><div class="c-main" onclick="editFaktura(${idx})">${esc(f.odberatel||"—")}</div><div class="acol-muted c-date" onclick="editFaktura(${idx})">${fmtDatum(f.datum||f.vystavenie)}</div><div class="acol-sum c-sum" onclick="editFaktura(${idx})">${eur(+f.spolu||0)}</div><div class="c-stav" ${st.stav!=="overene"?`onclick="event.stopPropagation();otvorVyberPlatby('faktura','${esc(fk)}')"`:`onclick="editFaktura(${idx})"`} style="${st.stav!=="overene"?"cursor:pointer":""}" title="${esc((st.text||'')+(st.stav!=="overene"?" · ťuknutím priradíte platbu z banky":""))}"><span style="display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:600;color:${fb.f}">${fb.ic}${fb.tichy?'':' '+fb.n}</span></div><div class="c-act" style="display:flex;gap:5px;align-items:center">${!uhradena?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vyberSposobUhrady(null,_s=>{oznacDokladUhradeny('faktura','${esc(fk)}',_s);appFaktury();})" title="Označiť ako uhradené">✓</button>`:((st.zdroj==='rucne'||st.zdroj==='legacy')?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();zrusDokladUhradu('faktura','${esc(fk)}');appFaktury()" title="Zrušiť potvrdenie úhrady">✕</button>`:'')}<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();exportFakturaPDF(${idx})" title="${f.originalSubor?'Stiahnuť pôvodný PDF':'Vygenerovať PDF faktúry'}">${f.originalSubor?'📎':'PDF'}</button><button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();exportEFakturaUBL(${idx})" title="E-faktúra UBL 2.1 / Peppol (povinné od 2027)">e-fa</button><button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();kopirujFakturu(${idx})" title="Vytvoriť kópiu — nové číslo a dátum, ostatné prevzaté">⧉</button></div></div>`;}).join(''):prazdnyAleboFilter(!(d.faktury||[]).length,
+      ${list.length?list.map(f=>{const idx=_fIdx.get(f);const fk=dokladKluc(f);const st=uhradaStav("faktura", fk);const fb=UHRADA_FARBY[st.stav]||UHRADA_FARBY.neznamy;const uhradena=faktJeUhradena(f);return `<div class="arow rdok rf"><div class="c-cb"><input type="checkbox" ${fakVybrane.has(fk)?'checked':''} onclick="event.stopPropagation();fakToggleVyber('${esc(fk)}',this.checked)" style="cursor:pointer"></div><div class="acol-strong c-sub" style="color:${c}" onclick="otvorDoklad(${idx})">${esc(f.cislo||"—")}</div><div class="c-main" onclick="otvorDoklad(${idx})">${esc(f.odberatel||"—")}</div><div class="acol-muted c-date" onclick="otvorDoklad(${idx})">${fmtDatum(f.datum||f.vystavenie)}</div><div class="acol-sum c-sum" onclick="otvorDoklad(${idx})">${eur(+f.spolu||0)}</div><div class="c-stav" ${st.stav!=="overene"?`onclick="event.stopPropagation();otvorVyberPlatby('faktura','${esc(fk)}')"`:`onclick="otvorDoklad(${idx})"`} style="${st.stav!=="overene"?"cursor:pointer":""}" title="${esc((st.text||'')+(st.stav!=="overene"?" · ťuknutím priradíte platbu z banky":""))}"><span style="display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:600;color:${fb.f}">${fb.ic}${fb.tichy?'':' '+fb.n}</span></div><div class="c-act" style="display:flex;gap:5px;align-items:center">${!uhradena?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vyberSposobUhrady(null,_s=>{oznacDokladUhradeny('faktura','${esc(fk)}',_s);appFaktury();})" title="Označiť ako uhradené">✓</button>`:((st.zdroj==='rucne'||st.zdroj==='legacy')?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();zrusDokladUhradu('faktura','${esc(fk)}');appFaktury()" title="Zrušiť potvrdenie úhrady">✕</button>`:'')}<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();exportFakturaPDF(${idx})" title="${f.originalSubor?'Stiahnuť pôvodný PDF':'Vygenerovať PDF faktúry'}">${f.originalSubor?'📎':'PDF'}</button><button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();exportEFakturaUBL(${idx})" title="E-faktúra UBL 2.1 / Peppol (povinné od 2027)">e-fa</button><button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();kopirujFakturu(${idx})" title="Vytvoriť kópiu — nové číslo a dátum, ostatné prevzaté">⧉</button></div></div>`;}).join(''):prazdnyAleboFilter(!(d.faktury||[]).length,
         "Zatiaľ nemáte žiadnu faktúru. Vystavte prvú — číslo, dátumy aj DPH doplní appka podľa nastavení.",
         {popis:"＋ Nová faktúra", kod:"editFaktura()"},
         "fFilter='vsetky';_hladaj.faktury='';appFaktury()")}
     </div>`;
   setCrumb(`${fak.length} faktúr · ${eur(spolu)}`);
+}
+// ═══════════════════════════════════════════════════════════════
+//  PRÍJMOVÝ DOKLAD (kap. 87.3)
+//  Príjem v hotovosti, ktorý nemá faktúru — tréner, ktorý dostane zaplatené
+//  na ruku. Je to FAKTÚRA s druhom „prijmovy", nie tretie pole v dátach:
+//  príjem sa počíta na desiatkach miest a tretí zdroj by znamenal tretiu
+//  vetvu v každom z nich, pričom jednu by sme zabudli (kap. 85, 16).
+//
+//  Vlastný číselný rad `P2026001`. Nesmie miešať poradie faktúr — medzery
+//  v číslovaní vyšlých faktúr sú kontrola, ktorá by inak hlásila nezmysly.
+//  Prefix „P" zároveň spôsobí, že `dalsieCisloFaktury` ich nevidí (hľadá
+//  čísla začínajúce rokom), takže tam netreba nič meniť.
+// ═══════════════════════════════════════════════════════════════
+function jePrijmovyDoklad(f){ return !!(f && f.typDokladu==="prijmovy"); }
+// Zoznam faktúr obsahuje oba druhy dokladu. Klik musí otvoriť ten editor,
+// ktorý k dokladu patrí — faktúrový formulár nad príjmovým dokladom by
+// pýtal odberateľa, splatnosť a položky, ktoré tam nemajú čo hľadať.
+function otvorDoklad(idx){
+  const f=(firmaData.faktury||[])[idx];
+  if(jePrijmovyDoklad(f)) editPrijmovyDoklad(idx); else editFaktura(idx);
+}
+// Vlastný, zámerne KRÁTKY formulár. Faktúrový editor má odberateľa, adresu,
+// IČ DPH, položky, splatnosť, druh plnenia a oddiel KV — pri dvadsiatich eurách
+// za tréning je to prekážka, nie pomoc. Vetviť ten veľký formulár by znamenalo
+// desiatku podmienok v šablóne, ktorá už teraz má vyše dvesto riadkov.
+function editPrijmovyDoklad(idx){
+  const nova=idx==null;
+  const f=nova
+    ? {typDokladu:"prijmovy", cislo:dalsieCisloPrijmoveho(), datum:new Date().toISOString().slice(0,10),
+       popis:"", odberatel:"", spolu:""}
+    : Object.assign({}, firmaData.faktury[idx]);
+  const S=firmaData.settings||{};
+  const sadzba = jePlatcaDPH() ? (S.sadzbaDPH!=null ? +S.sadzbaDPH : 0.23) : 0;
+  openModal(nova?"Príjem v hotovosti":"Upraviť príjmový doklad", `
+    <div class="mrow2">
+      <div class="mfield"><label>Číslo dokladu</label><input id="pd_cislo" value="${esc(f.cislo||"")}"></div>
+      <div class="mfield"><label>Dátum</label><input id="pd_datum" type="date" value="${esc(String(f.datum||"").slice(0,10))}"></div>
+    </div>
+    <div class="mfield"><label>Prijatá suma (€)</label>
+      <input id="pd_spolu" type="number" step="0.01" inputmode="decimal" value="${esc(f.spolu||"")}" oninput="pdPozn()">
+      <div class="ocr-hint" id="pd_pozn"></div>
+    </div>
+    <div class="mfield"><label>Za čo <span style="font-weight:400;color:var(--ink-soft)">(objaví sa v evidencii)</span></label>
+      <input id="pd_popis" value="${esc(f.popis||"")}" placeholder="napr. Tréning — 2 hodiny"></div>
+    <div class="mfield"><label>Od koho <span style="font-weight:400;color:var(--ink-soft)">(nepovinné)</span></label>
+      <input id="pd_odberatel" value="${esc(typeof f.odberatel==="string"?f.odberatel:"")}" placeholder="meno alebo firma"></div>
+    <div class="ocr-hint" style="margin-top:8px">${jePlatcaDPH()
+      ? ("Zadáva sa suma, ktorú ste dostali. DPH "+Math.round(sadzba*100)+" % sa z nej vypočíta. "
+         +(S.maEkasa
+            ? "Do kontrolného výkazu pôjde do oddielu <b>D.1</b> (tržby cez eKasu, súhrnne)."
+            : "Do kontrolného výkazu pôjde do oddielu <b>D.2</b>. Ak tržby evidujete cez eKasu, zapnite to v Nastaveniach."))
+      : "Nie ste platiteľ DPH, doklad je bez dane."}</div>
+    <div class="ocr-hint">Doklad je hotovostný a zaplatený okamihom vzniku — nevstupuje do pohľadávok a započíta sa do zostatku pokladne.</div>`,
+  ()=>{
+    const suma=r2(parseFloat(String(val("pd_spolu")).replace(",","."))||0);
+    if(!(suma>0)){ alert("Zadajte prijatú sumu."); return false; }
+    const dat=val("pd_datum")||new Date().toISOString().slice(0,10);
+    if(!strazUzavierku(dat.slice(0,7), "Príjmový doklad")) return false;
+    const bez=r2(suma/(1+sadzba));
+    const o=Object.assign({}, f, {
+      typDokladu:"prijmovy",
+      cislo:val("pd_cislo")||dalsieCisloPrijmoveho(),
+      datum:dat, dodanie:dat,
+      popis:val("pd_popis")||"",
+      odberatel:val("pd_odberatel")||"",
+      bez, dph:r2(suma-bez), spolu:suma,
+      polozky:[{nazov:val("pd_popis")||"Prijatá platba", mn:1, mj:"ks", cena:bez}],
+      // `zaplatena` sa NEnastavuje: `faktJeUhradena` odpovedá podľa typu
+      // dokladu a druhý zdroj tej istej pravdy by sa raz rozišiel.
+      uhrada:UHRADA_SPOSOBY.hotovost
+    });
+    if(!o.id) o.id="f"+Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+    if(!firmaData.faktury) firmaData.faktury=[];
+    if(nova) firmaData.faktury.push(o); else firmaData.faktury[idx]=o;
+    poZmene(); obnovPoEditacii("faktury");
+  },
+  nova?null:()=>{
+    if(!strazUzavierku(String(f.datum||"").slice(0,7), "Zmazanie príjmového dokladu")) return;
+    firmaData.faktury.splice(idx,1); poZmene(); obnovPoEditacii("faktury"); });
+  pdPozn();
+}
+// Rozpad prijatej sumy na základ a DPH. Ukazuje sa hneď pri písaní — kto berie
+// hotovosť, myslí v sume „na ruku" a základ dane v hlave nepočíta.
+function pdPozn(){
+  const p=document.getElementById("pd_pozn"); if(!p) return;
+  const S=firmaData.settings||{};
+  const sadzba = jePlatcaDPH() ? (S.sadzbaDPH!=null ? +S.sadzbaDPH : 0.23) : 0;
+  const suma=r2(parseFloat(String(val("pd_spolu")).replace(",","."))||0);
+  if(!(suma>0)){ p.textContent=""; return; }
+  if(!sadzba){ p.innerHTML="Do príjmov sa započíta <b>"+eur(suma)+"</b>."; return; }
+  const bez=r2(suma/(1+sadzba));
+  p.innerHTML="Z toho základ <b>"+eur(bez)+"</b> · DPH "+Math.round(sadzba*100)+" % <b>"+eur(r2(suma-bez))+"</b>.";
+}
+function dalsieCisloPrijmoveho(rok){
+  rok=rok||new Date().getFullYear();
+  const prefix="P"+String(rok); let maxPor=0;
+  (firmaData.faktury||[]).forEach(f=>{ const c=String(f.cislo||"");
+    if(c.startsWith(prefix)){ const por=parseInt(c.slice(prefix.length),10); if(!isNaN(por)&&por>maxPor) maxPor=por; } });
+  return prefix+String(maxPor+1).padStart(3,"0");
 }
 function dalsieCisloFaktury(rok){
   rok=rok||new Date().getFullYear();
@@ -14636,7 +14735,8 @@ function appPohladavky(){
   // dal otvoriť, označiť uhradený a upomienkovať (kap. 45.7)
   const _pfIdx=new Map((d.faktury||[]).map((x,i)=>[x,i]));
   const _pvIdx=new Map((d.vydavky||[]).map((x,i)=>[x,i]));
-  const pohl=(d.faktury||[]).filter(f=>String(f.datum||f.vystavenie||"").slice(0,4)===pzRok).map(f=>{
+  const pohl=(d.faktury||[]).filter(f=>!jePrijmovyDoklad(f)
+      && String(f.datum||f.vystavenie||"").slice(0,4)===pzRok).map(f=>{
     const uhr=faktJeUhradena(f); const dni=uhr?0:dniPoSplatnosti(f.splatnost);
     const partner=(typeof f.odberatel==="string")?f.odberatel:((f.odberatel&&f.odberatel.nazov)||"");
     return {idx:_pfIdx.get(f),kluc:dokladKluc(f),cislo:f.cislo,partner,vznik:f.datum||f.vystavenie,splatnost:f.splatnost,suma:(+f.spolu||+f.bez||0),uhradena:uhr,poSplat:!uhr&&dni>0,dni,neupominat:!!f.neupominat};
@@ -19745,6 +19845,14 @@ ${lines}
 
 // klasifikuj vyšlú faktúru do oddielu KV DPH
 function dphOddielFaktura(f){
+  // Hotovostný príjem: cez eKasu ide do D.1 súhrnne, bez nej do D.2 ako
+  // zjednodušená faktúra. Rozhoduje NASTAVENIE FIRMY, nie otázka pri každom
+  // doklade — zlá odpoveď posiela tržbu do zlého oddielu výkazu (kap. 87.5).
+  //
+  // Oddiel D.1 mala appka obslúžený od začiatku — názov, vysvetlenie, súhrnný
+  // riadok aj výnimku z povinného IČ DPH —, ale nič ho nikdy nenaplnilo.
+  // Toto je jeho prvý zdroj.
+  if(jePrijmovyDoklad(f)) return ((firmaData.settings||{}).maEkasa) ? "D1" : "D2";
   // Plnenie, ktoré do kontrolného výkazu vôbec nevstupuje (služba pre firmu v EÚ,
   // vývoz, oslobodené plnenie), tam nepatrí ani ako oprava — dobropis k takej
   // faktúre nemá čo opravovať v oddiele C.1.
@@ -26454,8 +26562,10 @@ function pokladnaPrvyMinus(){
 function knihaDokladov(typ, rok, kuDnu){
   const R=String(rok||new Date().getFullYear());
   const den=String(kuDnu||"").slice(0,10) || (R+"-12-31");
+  // Príjmový doklad pohľadávkou nikdy nebol — zaplatený na mieste. Rovnaký
+  // dôvod, prečo do knihy záväzkov nepatrí bloček (kap. 86.3, 87.3).
   const zoznam = typ==="faktura"
-    ? (firmaData.faktury||[])
+    ? (firmaData.faktury||[]).filter(f=>!jePrijmovyDoklad(f))
     : (firmaData.vydavky||[]).filter(x=>String(x.druh||"")==="Došlá faktúra");
   const riadky=[];
   zoznam.forEach(d=>{
@@ -26622,7 +26732,12 @@ function dokladJeUhradeny(typ, cislo){
   const s=uhradaStav(typ, cislo);
   return s.stav==="overene"||s.stav==="rucne"||s.stav==="uhradene"||s.stav==="zaplatene";
 }
-function faktJeUhradena(f){ return !!(f && dokladJeUhradeny("faktura", dokladKluc(f))); }
+// Príjmový doklad je zaplatený z definície — peniaze boli na stole v okamihu
+// jeho vzniku. Bez tejto vetvy by visel medzi neuhradenými navždy (kap. 87.3).
+function faktJeUhradena(f){
+  if(jePrijmovyDoklad(f)) return true;
+  return !!(f && dokladJeUhradeny("faktura", dokladKluc(f)));
+}
 // Bod 3 – akcia „označiť ako uhradené" zo zoznamu (drží aj starý príznak v sync).
 // Spôsob úhrady sa pýta PRED označením — doklad zaplatený kartou sa vo výpise
 // objaví pod iným názvom (CardPay) než prevod, a hotovosť sa neobjaví nikdy.
