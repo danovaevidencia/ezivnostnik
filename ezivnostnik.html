@@ -1311,7 +1311,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.06-JY";  // príjmový doklad — hotovostný príjem bez faktúry
+const APP_VERZIA = "2026.09.06-JZ";  // peňažný denník — dáta a kontrola úplnosti reťaze
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -26543,6 +26543,175 @@ function pokladnaPrvyMinus(){
     if(stav < -0.005) return {datum:p.datum, stav, doklad:p.cislo, pohybov:P.length};
   }
   return null;
+}
+// ═══════════════════════════════════════════════════════════════
+//  PEŇAŽNÝ DENNÍK (kap. 88)
+//  Chronologický záznam pohybu peňazí s priebežným zostatkom — banka aj
+//  pokladňa. Riadky sú POHYBY, nie doklady: doklad zaplatený z účtu sa
+//  objaví raz, ako bankový pohyb. Zdvojiť sa nemôže, lebo
+//  `jeHotovostnyDoklad` vracia false všade, kde je väzba na banku.
+//
+//  NIE je to kniha jednoduchého účtovníctva — to je v projekte zamietnuté
+//  (kap. 45.3). Denník odpovedá na otázku „kde sú peniaze a odkiaľ sa tam
+//  vzali", nie „aký je základ dane"; na tú má appka daňovú evidenciu.
+// ═══════════════════════════════════════════════════════════════
+
+// Kotvy: dni, ku ktorých KONCU poznáme zostatok na účte.
+//
+// Poradie pohybov v rámci dňa notifikácia neprezradí — určuje ho až zostatok.
+// Koncový stav dňa je preto ten zostatok, pred ktorým sedí iný zostatok toho
+// istého dňa. Bez tohto pravidla vznikol pri prvom meraní falošný rozdiel
+// 5 093,50 € (kap. 88.4).
+function dennikKotvy(){
+  const poDnoch={};
+  (firmaData.vypis||[]).forEach(t=>{
+    if(!t || t.skryty) return;
+    const d=String(t.datum||"").slice(0,10); if(!d) return;
+    (poDnoch[d]=poDnoch[d]||[]).push({
+      delta:(t.smer==="prijem"?1:-1)*r2(+t.suma||0),
+      zost: t.zostatok!=null ? r2(+t.zostatok) : null });
+  });
+  const out={};
+  Object.keys(poDnoch).forEach(den=>{
+    const k=poDnoch[den].filter(t=>t.zost!=null);
+    if(!k.length) return;
+    if(k.length===1){ out[den]=k[0].zost; return; }
+    const posledny=k.find(t=>k.some(o=>o!==t && r2(t.zost-t.delta)===o.zost));
+    out[den]= posledny ? posledny.zost : Math.max.apply(null, k.map(t=>t.zost));
+  });
+  // Zostatky z výpisu majú prednosť — sú jednoznačné, notifikácia nie.
+  (firmaData.vypisy||[]).forEach(z=>{
+    const K=z && z.kontrola; if(!K) return;
+    if(K.koniec!=null && z.do) out[String(z.do).slice(0,10)]=r2(+K.koniec);
+  });
+  return out;
+}
+
+// Kontrola úplnosti: medzi dvoma susednými kotvami sa musí zmena zostatku
+// rovnať súčtu pohybov. Keď sa nerovná, appke CHÝBA POHYB — a to je vec,
+// ktorú inak nemá ako zistiť. Toto je celý zmysel zostavy (kap. 88.5).
+//
+// Beží vždy nad CELÝM dostupným rozsahom, nie len nad zobrazeným obdobím:
+// inak by mesačný denník nevidel dieru, ktorá vznikla o mesiac skôr.
+function dennikKontrolaRetaze(){
+  const kotvy=dennikKotvy();
+  const dniKotiev=Object.keys(kotvy).sort();
+  if(dniKotiev.length<2) return {kotiev:dniKotiev.length, useky:[], nalezy:[]};
+  const poDnoch={};
+  (firmaData.vypis||[]).forEach(t=>{
+    if(!t || t.skryty) return;
+    const d=String(t.datum||"").slice(0,10); if(!d) return;
+    poDnoch[d]=r2((poDnoch[d]||0)+(t.smer==="prijem"?1:-1)*r2(+t.suma||0));
+  });
+  const useky=[], nalezy=[];
+  for(let i=1;i<dniKotiev.length;i++){
+    const od=dniKotiev[i-1], doo=dniKotiev[i];
+    let zmena=0, pocet=0;
+    Object.keys(poDnoch).forEach(den=>{ if(den>od && den<=doo){ zmena=r2(zmena+poDnoch[den]); pocet++; } });
+    const ocakavane=r2(kotvy[od]+zmena);
+    const rozdiel=r2(ocakavane-kotvy[doo]);
+    const u={od, do:doo, dni:pocet, zmena, ocakavane, hlasene:kotvy[doo], rozdiel,
+      sedi:Math.abs(rozdiel)<0.005};
+    useky.push(u);
+    if(!u.sedi) nalezy.push(u);
+  }
+  return {kotiev:dniKotiev.length, useky, nalezy};
+}
+
+// Riadky denníka. `obdobie` je "RRRR" alebo "RRRR-MM"; `co` je "oboje",
+// "banka" alebo "pokladna". Dni bez pohybu sa vynechávajú (rozhodnutie
+// Romana, 88.10) — prázdny riadok nie je informácia.
+function penazyDennik(obdobie, co, kuDnu){
+  const O=String(obdobie||new Date().getFullYear());
+  const den=String(kuDnu||"").slice(0,10);
+  const vObdobi=d=>d.startsWith(O) && (!den || d<=den);
+  const chce=k=>!co || co==="oboje" || co===k;
+  const riadky=[];
+
+  if(chce("banka")) (firmaData.vypis||[]).forEach(t=>{
+    if(!t || t.skryty) return;
+    const d=String(t.datum||"").slice(0,10);
+    if(!d || !vObdobi(d)) return;
+    // Doklad, ktorý pohyb uhrádza — Romanova priorita (88.10/3).
+    const dok=(t.uhrady||[]).map(u=>String(u.cislo||"")).filter(Boolean);
+    riadky.push({datum:d, ucet:"banka", doklad:dok.join(", "),
+      popis:String(t.proti||t.popis||"").slice(0,60),
+      prijem:t.smer==="prijem"?r2(+t.suma||0):0,
+      vydaj:t.smer==="vydaj"?r2(+t.suma||0):0,
+      doZakladu:dennikDoZakladu(t, dok)});
+  });
+
+  if(chce("pokladna")) pokladnaPohyby().forEach(p=>{
+    if(!vObdobi(p.datum)) return;
+    riadky.push({datum:p.datum, ucet:"pokladna", doklad:p.cislo,
+      popis:p.smer==="prijem"?"Príjem v hotovosti":"Platba v hotovosti",
+      prijem:p.smer==="prijem"?p.suma:0, vydaj:p.smer==="vydaj"?p.suma:0,
+      doZakladu:"áno"});
+  });
+
+  riadky.sort((a,b)=>a.datum.localeCompare(b.datum) || (a.ucet<b.ucet?-1:1));
+
+  // ── PRIEBEŽNÝ ZOSTATOK BANKY ──────────────────────────────────────────
+  // Prvá verzia sa ukotvila na najstaršej kotve a počítala dopredu. Na ostrých
+  // dátach to bolo zlé: medzi dvoma kotvami chýbal pohyb 5 088,50 €, chyba sa
+  // niesla ďalej celým rokom a prvý riadok vyšiel −8 730,95 €. V zostave pre
+  // daňovú kontrolu to vyzerá ako chyba appky, nie ako chýbajúci pohyb.
+  //
+  // Preto: zostatok sa kreslí LEN v ukotvenom rozsahu a pri každej kotve sa
+  // vracia na hodnotu, ktorú hlási banka. Pred prvou kotvou zostáva prázdny —
+  // tam ho appka nemá o čo oprieť a vymyslené číslo je horšie než prázdno
+  // (tá istá zásada ako pri zostatkoch výpisu, 85.2).
+  const kotvy=dennikKotvy();
+  const dniKotiev=Object.keys(kotvy).sort();
+  const prvaKotva=dniKotiev[0]||null, poslednaKotva=dniKotiev[dniKotiev.length-1]||null;
+  let stavB=null;
+  if(prvaKotva){
+    // stav na začiatku prvého ukotveného dňa = kotva mínus pohyby toho dňa
+    let denPohyb=0;
+    (firmaData.vypis||[]).forEach(t=>{ if(!t||t.skryty) return;
+      if(String(t.datum||"").slice(0,10)!==prvaKotva) return;
+      denPohyb=r2(denPohyb+(t.smer==="prijem"?1:-1)*r2(+t.suma||0)); });
+    stavB=r2(kotvy[prvaKotva]-denPohyb);
+  }
+  const S=firmaData.settings||{};
+  let stavP=r2(+S.pokladnaZaciatok||0);
+  // pokladňa: dobehni pohyby pred obdobím
+  pokladnaPohyby().forEach(p=>{ if(riadky.length && p.datum<riadky[0].datum)
+    stavP=r2(stavP + (p.smer==="prijem"?p.suma:-p.suma)); });
+
+  riadky.forEach((r,i)=>{
+    const vRozsahu = prvaKotva && r.datum>=prvaKotva && r.datum<=poslednaKotva;
+    if(r.ucet==="banka" && stavB!=null && vRozsahu) stavB=r2(stavB+r.prijem-r.vydaj);
+    if(r.ucet==="pokladna") stavP=r2(stavP+r.prijem-r.vydaj);
+    r.zostatokBanka = vRozsahu ? stavB : null;
+    r.zostatokPokladna = stavP;
+    // Posledný riadok ukotveného dňa: vrátiť sa na to, čo hlási banka.
+    // Rozdiel sa neschová — riadok sa označí a kontrola reťaze povie prečo.
+    const posledniVDni = !riadky[i+1] || riadky[i+1].datum!==r.datum;
+    if(vRozsahu && posledniVDni && kotvy[r.datum]!=null){
+      if(Math.abs(r2(stavB-kotvy[r.datum]))>=0.005) r.skokZostatku=r2(kotvy[r.datum]-stavB);
+      stavB=kotvy[r.datum];
+      r.zostatokBanka=stavB;
+      r.kotva=true;
+    }
+  });
+
+  const sum=(k,u)=>r2(riadky.reduce((a,r)=>a+((!u||r.ucet===u)?r[k]:0),0));
+  return {obdobie:O, co:co||"oboje", kuDnu:den, riadky,
+    maZostatokBanky: prvaKotva!=null, odKotvy:prvaKotva, poKotvu:poslednaKotva,
+    sumy:{prijem:sum("prijem"), vydaj:sum("vydaj"),
+      prijemBanka:sum("prijem","banka"), vydajBanka:sum("vydaj","banka"),
+      prijemPokladna:sum("prijem","pokladna"), vydajPokladna:sum("vydaj","pokladna")},
+    kontrola:dennikKontrolaRetaze()};
+}
+// Vstupuje pohyb do základu dane? Suma sa zámerne NEuvádza — pri čiastočnom
+// párovaní by to bola domnienka. „?" pri nespárovanom pohybe je pravdivá
+// odpoveď a zároveň zoznam práce (kap. 88.6).
+function dennikDoZakladu(t, doklady){
+  const kl=(typeof klasifikujPohyb==="function") ? klasifikujPohyb(t) : null;
+  if(kl && /odvod|dan|dph/i.test(String(kl.druh||""))) return "nie";
+  if(!doklady || !doklady.length) return "?";
+  return "áno";
 }
 // ═══════════════════════════════════════════════════════════════
 //  KNIHA POHĽADÁVOK A KNIHA ZÁVÄZKOV (kap. 86)
