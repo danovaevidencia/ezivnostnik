@@ -1341,7 +1341,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.06-KM";  // počiatočný zostatok výpisu je tiež kotva; opakovaný import záznam aktualizuje
+const APP_VERZIA = "2026.09.06-KN";  // počiatočný zostatok výpisu je tiež kotva; opakovaný import záznam aktualizuje
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -3178,8 +3178,18 @@ function jePlatbaStatu(x){
 // rok ("2026") aj mesiac ("2026-10"). Mesačný výpočet dovtedy sociálne odvody
 // z banky nevidel a bral ich len z nastavenia; zdravotné pritom už roky
 // uprednostňovalo skutočnú platbu. Jeden zdroj pre obe (kap. 83).
+// Zaplatené odvody za rok. Poradie zdrojov je poradím dôveryhodnosti:
+//
+//   1. ZAPÍSANÝ ROK — číslo z podaného priznania. Pri uzavretom roku je to
+//      fakt; odhad z dnešných nastavení je len odhad. Migrácia roku 2025
+//      to odhalila: appka počítala preddavok ZP × 12 = 3 075 €, kým
+//      v priznaní bolo 1 287 €, a základ dane vyšiel o 1 788 € nižší.
+//   2. POHYBY — skutočné platby z výpisu za bežný rok.
+//   3. odhad z nastavení (rieši volajúci).
 function zaplateneOdvodyRok(rok, druhOdvodu){
   const R=String(rok);
+  const zap=(((firmaData.settings||{}).odvodyRoky||{})[R]||{})[druhOdvodu];
+  if(zap!=null && zap!=="") return {suma:r2(+zap||0), pocet:1, zdroj:"priznanie"};
   const zpDruh = druhOdvodu==="zp" ? "odvodZP" : "odvodSP";
   const zPohybov=new Set();
   let suma=0, pocet=0;
@@ -3202,7 +3212,7 @@ function zaplateneOdvodyRok(rok, druhOdvodu){
 function zaplateneZPRok(rok){
   const S=firmaData.settings||{};
   const Z=zaplateneOdvodyRok(rok, "zp");
-  if(Z.pocet>0) return {suma:Z.suma, zdroj:"vypis", pocet:Z.pocet};
+  if(Z.pocet>0) return {suma:Z.suma, zdroj:Z.zdroj||"vypis", pocet:Z.pocet};
   const preddavok=(+S.preddavokZP||0);
   let mesiacov=0;
   for(let mi=0;mi<12;mi++){ const mk=rok+"-"+String(mi+1).padStart(2,"0");
@@ -5864,6 +5874,16 @@ function nastVydavkyRezimHtml(){
     </div>
     <div class="ob-hint" style="margin-top:8px">Paušál: 60 % z príjmov, najviac 20 000 € ročne. Odvody sa uplatňujú navyše. Nedá sa kombinovať so skutočnými výdavkami — platí pre celý rok, a volí sa na každý rok zvlášť.${inyRok?" Zapísané roky: "+inyRok+".":""}</div>
     ${platca?`<div class="ob-hint warn" style="margin-top:8px">V roku ${rok} ste boli platiteľom DPH po celý rok, preto paušál nie je možný. Zákon ho dovoľuje aj platiteľovi, ale len v roku, v ktorom sa ním stal (§ 6 ods. 10). Ak ste sa registrovali počas niektorého roka, doplňte dátum nižšie.</div>`:""}
+    ${rok<new Date().getFullYear()?`<div class="ob-field" style="margin-top:10px;max-width:420px">
+      <label>Zaplatené poistné v roku ${rok}</label>
+      <div style="display:flex;gap:8px">
+        <input type="number" step="0.01" placeholder="zdravotné" value="${esc(((S.odvodyRoky||{})[String(rok)]||{}).zp ?? "")}"
+          onchange="nastavOdvodyRoka(${rok},'zp',this.value)" style="flex:1">
+        <input type="number" step="0.01" placeholder="sociálne" value="${esc(((S.odvodyRoky||{})[String(rok)]||{}).sp ?? "")}"
+          onchange="nastavOdvodyRoka(${rok},'sp',this.value)" style="flex:1">
+      </div>
+      <div class="ob-hint">Suma z podaného priznania. Pri uzavretom roku je to fakt — appka ju uprednostní pred odhadom z dnešných nastavení aj pred pohybmi z výpisu.</div>
+    </div>`:""}
     ${jePlatcaDPH()?`<div class="ob-field" style="margin-top:10px;max-width:420px"><label>Platiteľom DPH od</label>
       <input type="date" value="${esc(S.dphPlatcaOd||"")}" onchange="nastavDphPlatcaOd(this.value)">
       <div class="ob-hint">Rozhoduje o paušále v roku registrácie. Kým je prázdny, appka predpokladá celý rok a paušál nepripustí.</div></div>`:""}
@@ -5881,6 +5901,19 @@ function nastavVydavkyRezim(rezim, rok){
   if(y===new Date().getFullYear()) firmaData.settings.vydavkyRezim=r;
   poZmene();
   appData();                                 // prekresli nastavenia (porovnanie + prepínač)
+}
+function nastavOdvodyRoka(rok, druh, hodnota){
+  firmaData.settings=firmaData.settings||{};
+  firmaData.settings.odvodyRoky=firmaData.settings.odvodyRoky||{};
+  const R=String(rok);
+  firmaData.settings.odvodyRoky[R]=firmaData.settings.odvodyRoky[R]||{};
+  const v=String(hodnota||"").trim();
+  // Prázdno znamená „neviem" a musí sa dať vrátiť — nie nulu, tá je tvrdenie.
+  if(v==="") delete firmaData.settings.odvodyRoky[R][druh];
+  else firmaData.settings.odvodyRoky[R][druh]=r2(parseFloat(v.replace(",","."))||0);
+  if(!Object.keys(firmaData.settings.odvodyRoky[R]).length) delete firmaData.settings.odvodyRoky[R];
+  poZmene();
+  appData();
 }
 function nastavDphPlatcaOd(d){
   firmaData.settings=firmaData.settings||{};
