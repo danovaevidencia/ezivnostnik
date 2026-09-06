@@ -1341,7 +1341,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.06-KD";  // knihy cez sprievodcu, s kontrolným krokom
+const APP_VERZIA = "2026.09.06-KE";  // upomienka cez sprievodcu — vidno, čo klient dostane
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -14916,6 +14916,7 @@ function appPohladavky(){
       </select>
     </div>
     <div style="margin:2px 0 12px"><div id="knBox">${knSprievodcaHtml()}</div></div>
+    <div style="margin:0 0 12px"><div id="upBox">${upSprievodcaHtml()}</div></div>
     <div class="amini">
       <div class="aminbox"><div class="al">Otvorené pohľadávky</div><div class="av ${sumaOtvP?'warn':'pos'}">${eur(sumaOtvP)}</div></div>
       <div class="aminbox"><div class="al">Po splatnosti</div><div class="av ${poSplat.length?'neg':'pos'}">${poSplat.length}</div></div>
@@ -27343,6 +27344,95 @@ function knihaXLSX(typ, rok, kuDnu){
       (typ==="faktura"?"kniha_pohladavok_":"kniha_zavazkov_")+K.rok+".xlsx");
   }).catch(e=>{ console.error("kniha do XLSX:", e);
     alert("Knižnicu na export sa nepodarilo načítať. Skontrolujte pripojenie."); });
+}
+// ═══════════════════════════════════════════════════════════════
+//  SPRIEVODCA UPOMIENKOU (kap. 88.9)
+//  Jediný výstup, ktorý ide ZÁKAZNÍKOVI. Doteraz: vyberieš odberateľa
+//  a rovno spadne PDF — nevidel si, čo si klient prečíta, ani že sa
+//  generuje druhá alebo tretia upomienka.
+//
+//  Kontrolný krok tu má iný zmysel než inde. Nepýta sa „sedia dáta", ale
+//  „je toto naozaj po splatnosti a je to suma, ktorú chcem poslať". Chyba
+//  v tomto dokumente nie je len môj problém — číta ju obchodný partner.
+// ═══════════════════════════════════════════════════════════════
+let upOdberatel="";
+function upNastav(v){ upOdberatel=v; upPrekresli(); }
+function upPrekresli(){ const el=document.getElementById("upBox"); if(el) el.innerHTML=upSprievodcaHtml(); }
+_zostavaPrekresli.up=upPrekresli;
+// Odberatelia, ktorí majú aspoň jednu neuhradenú faktúru po splatnosti.
+function upomienkaOdberatelia(){
+  const dnes=new Date().toISOString().slice(0,10);
+  const mapa=new Map();
+  (firmaData.faktury||[]).forEach(f=>{
+    if(jePrijmovyDoklad(f)) return;
+    const n=(typeof f.odberatel==="string")?f.odberatel:((f.odberatel&&f.odberatel.nazov)||"");
+    if(!n) return;
+    if(!mapa.has(n)) mapa.set(n, {odberatel:n, pocet:0, suma:0, dni:0, vylucenych:0});
+    const z=mapa.get(n);
+    if(f.neupominat){ z.vylucenych++; return; }
+    if(faktJeUhradena(f)) return;
+    const spl=String(f.splatnost||"").slice(0,10);
+    if(!spl || spl>=dnes) return;
+    z.pocet++;
+    z.suma=r2(z.suma + r2(dokladZostava("faktura", dokladKluc(f))));
+    z.dni=Math.max(z.dni, dniPoSplatnosti(spl));
+  });
+  return [...mapa.values()].filter(z=>z.pocet>0).sort((a,b)=>b.dni-a.dni);
+}
+function upSprievodcaHtml(){
+  const zoznam=upomienkaOdberatelia();
+  if(!zoznam.length) return `<div class="ocr-hint">Žiadny odberateľ nemá faktúru po splatnosti. Upomienka sa nemá komu poslať — a to je dobrá správa.</div>`;
+  if(!upOdberatel || !zoznam.some(z=>z.odberatel===upOdberatel)) upOdberatel=zoznam[0].odberatel;
+  const Z=zoznam.find(z=>z.odberatel===upOdberatel);
+  const dnes=new Date().toISOString().slice(0,10);
+  let kand=[]; try{ kand=upomienkaKandidati(upOdberatel, dnes)||[]; }catch(e){ console.error("kandidáti upomienky:", e); }
+  const stupen=kand.length ? upomienkaStupenPre(kand.map(f=>f.cislo)) : 1;
+  const NAZOV={1:"prvá upomienka", 2:"DRUHÁ upomienka", 3:"TRETIA upomienka"};
+  const m=firmaData.meta||{};
+
+  const nalezy=[];
+  if(stupen>1) nalezy.push({typ:stupen>=3?"chyba":"pozor",
+    text:"Pošle sa "+NAZOV[stupen],
+    detail:stupen>=3 ? "Tretia upomienka býva posledný krok pred vymáhaním. Skontrolujte, či medzitým platba naozaj neprišla."
+                     : "Tomuto odberateľovi ste už raz upomínali tie isté faktúry."});
+  if(Z.vylucenych) nalezy.push({typ:"pozor",
+    text:Z.vylucenych+" "+sklon(Z.vylucenych,"faktúra je vylúčená","faktúry sú vylúčené","faktúr je vylúčených")+" z upomienok",
+    detail:"Označili ste ich 🔕 v zozname pohľadávok, takže do tejto upomienky nepôjdu."});
+  const ciast=kand.filter(f=>Math.abs(r2(f.zostatok)-r2(+f.spolu||0))>0.005);
+  if(ciast.length) nalezy.push({typ:"pozor",
+    text:ciast.length+" "+sklon(ciast.length,"faktúra je","faktúry sú","faktúr je")+" čiastočne uhradená",
+    detail:"Upomína sa nedoplatok. QR kód na platbu sa nepridá — niesol by plnú sumu a klient by zaplatil zle."});
+  if(!String(m.adresa||"").trim()) nalezy.push({typ:"chyba",
+    text:"Vaša firma nemá v Nastaveniach adresu",
+    detail:"Na upomienke, ktorá ide obchodnému partnerovi, by chýbala."});
+
+  const def={kroky:[
+    {n:"Komu", stav:()=>({text:upOdberatel.slice(0,28)}),
+     telo:()=>`<div class="atool" style="padding-top:11px">
+        <select onchange="upNastav(this.value)" style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:13px;max-width:100%">
+          ${zoznam.map(z=>`<option value="${esc(z.odberatel)}" ${z.odberatel===upOdberatel?'selected':''}>${esc(z.odberatel)} — ${eur(z.suma)}, ${z.dni} dní</option>`).join("")}
+        </select></div>
+      <div class="ocr-hint">Ponúkajú sa len odberatelia s neuhradenou faktúrou po splatnosti.</div>`},
+
+    {n:"Čo sa pošle",
+     stav:()=>nalezy.length ? {text:NAZOV[stupen], cls:stupen>=3?"neg":"warn"} : {text:NAZOV[stupen], cls:"pos"},
+     telo:()=>`<div style="padding-top:11px">${zostavaNalezyHtml(nalezy)}</div>`},
+
+    {n:"Náhľad",
+     stav:()=>({text:kand.length+" "+sklon(kand.length,"faktúra","faktúry","faktúr")+" · "+eur(Z.suma)}),
+     telo:()=>`<div style="padding-top:11px"><div class="znahlad"><table>
+        <tr><th>Faktúra</th><th>Splatnosť</th><th>Dní po</th><th>Suma</th><th>Zostáva</th></tr>
+        ${kand.map(f=>`<tr class="zvyraz"><td>${esc(f.cislo||"—")}</td><td>${fmtDatum(f.splatnost)}</td>
+          <td class="c">${dniPoSplatnosti(f.splatnost)}</td><td class="c">${eur(+f.spolu||0)}</td>
+          <td class="c">${eur(f.zostatok)}</td></tr>`).join("")}
+      </table></div>
+      <div class="ocr-hint" style="margin-top:7px">Klient dostane nadpis <b>${esc(NAZOV[stupen].toUpperCase())}</b>, tieto riadky a sumu na úhradu <b>${eur(Z.suma)}</b>.</div></div>`},
+
+    {n:"Vygenerovať", stav:()=>({text:"PDF"}),
+     telo:()=>`<button class="abtn pri" style="width:100%;margin-top:11px" onclick="upomienkaPDF(${JSON.stringify(upOdberatel).replace(/"/g,'&quot;')})">📨 Vytvoriť upomienku</button>
+      <div class="ocr-hint" style="margin-top:7px">Stupeň sa zapíše do denníka upomienok až po vytvorení PDF — keby generovanie zlyhalo, ďalšia by nastúpila o stupeň vyššie bez toho, aby prvá existovala.</div>`}
+  ]};
+  return zostavaSprievodcaHtml("up", def);
 }
 // ── Sprievodca knihami (kap. 86, 88.9) ────────────────────────────────────
 // Kontrolný krok zhŕňa to, čo dnes stojí roztrúsené po riadkoch: koľko
