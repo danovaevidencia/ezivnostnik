@@ -1341,7 +1341,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.06-KI";  // počiatočný zostatok výpisu je tiež kotva; opakovaný import záznam aktualizuje
+const APP_VERZIA = "2026.09.06-KJ";  // počiatočný zostatok výpisu je tiež kotva; opakovaný import záznam aktualizuje
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -18132,9 +18132,7 @@ function xkNalezy(){
   // reťaz zostatkov — nález, ktorý ostatné kontroly nepoznajú
   try{
     const K=dennikKontrolaRetaze();
-    K.nalezy.forEach(u=>out.push({typ:"chyba",
-      text:"Medzi "+fmtDatum(u.od)+" a "+fmtDatum(u.do)+" chýba pohyb "+eur(Math.abs(u.rozdiel)),
-      detail:"Banka na konci "+fmtDatum(u.do)+" hlási "+eur(u.hlasene)+", z evidencie vychádza "+eur(u.ocakavane)+"."}));
+    K.nalezy.forEach(u=>out.push(dennikNalezText(u)));
   }catch(e){ console.error("kontrola reťaze pred exportom:", e); }
   return out;
 }
@@ -18558,19 +18556,24 @@ function notifPolia(text){
       const koniec=p+s.length+m[0].length;
       // prekrytie s už nájdeným (dlhším) štítkom
       if(najdene.some(n=>p<n.koniec && koniec>n.zaciatok)) continue;
-      najdene.push({kluc, zaciatok:p, koniec});
+      najdene.push({kluc, stitok:s, zaciatok:p, koniec});
     }
   });
   najdene.sort((a,b)=>a.zaciatok-b.zaciatok);
 
-  const polia={};
+  const polia={}, stitky={};
   najdene.forEach((n,i)=>{
     let do_ = i+1<najdene.length ? najdene[i+1].zaciatok : plocha.length;
     const odstavec=konceOdstavcov.find(x=>x>=n.koniec);
     if(odstavec!=null && odstavec<do_) do_=odstavec;
-    if(!(n.kluc in polia)) polia[n.kluc]=plocha.slice(n.koniec, do_).trim();
+    if(!(n.kluc in polia)){ polia[n.kluc]=plocha.slice(n.koniec, do_).trim(); stitky[n.kluc]=n.stitok; }
   });
-  return polia;
+  // Ktorý štítok sa trafil, je pri zostatku ROZHODUJÚCE, nie kozmetika:
+  // „zostatok po transakcii" je účtovný stav, „disponibilný zostatok" je
+  // o blokácie nižší. Reťaz zostatkov porovnáva kotvu z notifikácie s kotvou
+  // z výpisu, a tá je vždy účtovná — miešať ich znamená hlásiť chýbajúci
+  // pohyb tam, kde je len neúčtovaná platba kartou (kap. 88.5).
+  return {polia, stitky};
 }
 
 // Rozoberie notifikáciu. Vracia buď údaje o pohybe, alebo `{chyba:"…"}` —
@@ -18582,7 +18585,7 @@ function parseNotifikaciu(telo, odKoho, predmet){
 
   const odosielatel=notifOdosielatel(text, odKoho);
   const banka=notifBanka(odosielatel, text);
-  const polia=notifPolia(text);
+  const {polia, stitky}=notifPolia(text);
   const daj=(kluc)=>polia[kluc]||"";
 
   // Smer: najprv podľa toho, ktoré pole sumy banka použila, potom podľa
@@ -18638,7 +18641,8 @@ function parseNotifikaciu(telo, odKoho, predmet){
     // prostriedky sa pri povolenom prečerpaní líšia o konštantu a miešať ich
     // by reťaz rozbilo na každom kroku.
     zostatok: zostatok!=null ? r2(zostatok) : (vlastne!=null ? r2(vlastne) : null),
-    zostatokPole: zostatok!=null ? "disponibilny" : (vlastne!=null ? "vlastne" : null),
+    zostatokPole: zostatok!=null ? (stitky.zostatok||"zostatok")
+                                 : (vlastne!=null ? "vlastne prostriedky" : null),
   };
 }
 
@@ -18770,8 +18774,12 @@ function vypisPrima(riadky){
   const mojIban=(spolu.match(/IBAN\s+(SK[\d\s]{20,28})/i)||[])[1];
   const kr=spolu.match(/Počet kreditných položiek\s+(\d+)\s+v sume spolu\s+([\d,\.]+)/i);
   const de=spolu.match(/Počet debetných položiek\s+(\d+)\s+v sume spolu\s+-?([\d,\.]+)/i);
-  const zac=spolu.match(/mal zostatok\s+(-?[\d,\.]+)/i);
+  const zac=spolu.match(/zo dňa\s+(\d{2}\.\s?\d{2}\.\s?\d{4})\s+mal zostatok\s+(-?[\d,\.]+)/i);
   const kon=spolu.match(/Nový zostatok na vašom účte\s+(-?[\d,\.]+)/i);
+  // Dátum, ku ktorému konečný zostatok platí, je v riadku s obdobím výpisu —
+  // a je to iný deň než posledný pohyb. Bez neho kotva sedí o pár dní vedľa
+  // (kap. 88.5). Pri počiatočnom ho banka píše priamo k sume.
+  const obd=spolu.match(/za obdobie:\s*(\d{2}\.\s?\d{2}\.\s?\d{4})\s*-\s*(\d{2}\.\s?\d{2}\.\s?\d{4})/i);
   const txns=[]; let cur=null;
   const ZAC=/^(\d{2}\.\d{2}\.\d{4})\s+(\d{2}\.\d{2}\.\d{4})\s+(.+?)\s+(-?[\d,]+\.\d{2})$/;
   riadky.forEach(r=>{
@@ -18788,7 +18796,8 @@ function vypisPrima(riadky){
        && !/^\d/.test(r) && r.length>2) cur.proti=r;
   });
   return { banka:"Prima banka", mojIban:(mojIban||"").replace(/\s/g,""), txns,
-    kontrola:{ zaciatok:pdfSumaEn(zac&&zac[1]), koniec:pdfSumaEn(kon&&kon[1]),
+    kontrola:{ zaciatok:pdfSumaEn(zac&&zac[2]), koniec:pdfSumaEn(kon&&kon[1]),
+      zaciatokDatum:pdfDatum(zac&&zac[1])||null, koniecDatum:pdfDatum(obd&&obd[2])||null,
       prijem:pdfSumaEn(kr&&kr[2]), vydaj:pdfSumaEn(de&&de[2]),
       pocetPrijem:kr?+kr[1]:null, pocetVydaj:de?+de[1]:null } };
 }
@@ -18922,13 +18931,26 @@ function parseVypis(xmlText){
     const smer=((b.getElementsByTagName("CdtDbtInd")[0]||{}).textContent||"").trim();
     return r2(smer==="DBIT" ? -v : v);
   };
-  let zaciatok=null, koniec=null;
+  // Ku každému zostatku patrí DÁTUM a výpis ho nesie. Dosiaľ sa nečítal
+  // a kotva sa vešala na posledný pohyb v súbore — čo je o niekoľko dní skôr
+  // než koniec obdobia. Na Romanových dátach to bolo 26. 3. namiesto 31. 3.,
+  // 24. 4. namiesto 30. 4. a 28. 8. namiesto 31. 8. Nevadilo to len preto,
+  // že sa v tých medzerách nič nepohlo; prvý pohyb v nich by vyrobil falošný
+  // nález. Výpis je autorita — treba ho čítať celý (kap. 88.5).
+  const balDatum=b=>{
+    const d=b.getElementsByTagName("Dt")[0];
+    const t=d ? String(d.textContent||"").trim().slice(0,10) : "";
+    return /^\d{4}-\d{2}-\d{2}$/.test(t) ? t : null;
+  };
+  let zaciatok=null, koniec=null, zaciatokDatum=null, koniecDatum=null;
   const baly=stmt.getElementsByTagName("Bal");
   for(let i=0;i<baly.length;i++){
     const b=baly[i];
     const kod=((b.getElementsByTagName("Cd")[0]||{}).textContent||"").trim().toUpperCase();
-    if((kod==="OPBD"||kod==="PRCD") && zaciatok===null) zaciatok=balSuma(b);
-    else if(kod==="CLBD") koniec=balSuma(b);
+    // CLAV je disponibilný konečný stav, CLBD účtovný. Berie sa CLBD —
+    // reťaz porovnáva účtovné stavy a disponibilný je o blokácie nižší.
+    if((kod==="OPBD"||kod==="PRCD") && zaciatok===null){ zaciatok=balSuma(b); zaciatokDatum=balDatum(b); }
+    else if(kod==="CLBD"){ koniec=balSuma(b); koniecDatum=balDatum(b); }
   }
   const sumBlok=tag=>{
     const el=stmt.getElementsByTagName(tag)[0];
@@ -18938,7 +18960,7 @@ function parseVypis(xmlText){
     return {pocet:isNaN(p)?null:p, suma:isNaN(s)?null:r2(s)};
   };
   const kr=sumBlok("TtlCdtNtries"), de=sumBlok("TtlDbtNtries");
-  return {mojIban, txns, kontrola:{ zaciatok, koniec,
+  return {mojIban, txns, kontrola:{ zaciatok, koniec, zaciatokDatum, koniecDatum,
     prijem:kr.suma, vydaj:de.suma, pocetPrijem:kr.pocet, pocetVydaj:de.pocet }};
 }
 
@@ -26903,6 +26925,21 @@ function zostavaNalezyHtml(nalezy){
 // Koncový stav dňa je preto ten zostatok, pred ktorým sedí iný zostatok toho
 // istého dňa. Bez tohto pravidla vznikol pri prvom meraní falošný rozdiel
 // 5 093,50 € (kap. 88.4).
+// Aký zostatok notifikácia hlási. Výpis uvádza vždy ÚČTOVNÝ stav; notifikácia
+// môže uviesť disponibilný, ktorý je o neúčtované blokácie na karte nižší.
+// Porovnať tie dva znamená hlásiť chýbajúci pohyb tam, kde je len platba
+// kartou, ktorá sa ešte nezaúčtovala — a falošný poplach je drahší než žiadny
+// (kap. 16). Rozlíšiť sa to dá až odkedy si `zostatokPole` pamätá skutočný
+// štítok; staršie pohyby ho majú vyplnený nasledkom starej chyby ako
+// "disponibilny" bez ohľadu na to, čo v maile stálo.
+function notifZdrojKotvy(pole){
+  if(pole==null) return "vypis-pohyb";        // zostatok priamo z výpisu
+  const n=String(pole).toLowerCase();
+  if(!n) return "notifikacia";
+  if(n.indexOf("disponibiln")>=0 || n.indexOf("vlastne")>=0) return "disponibilny";
+  return "notifikacia";
+}
+
 function dennikKotvy(){
   const poDnoch={};
   // Skryté sa POČÍTAJÚ: skrytie je voľba zobrazenia v Banke, nie tvrdenie,
@@ -26912,15 +26949,18 @@ function dennikKotvy(){
     const d=String(t.datum||"").slice(0,10); if(!d) return;
     (poDnoch[d]=poDnoch[d]||[]).push({
       delta:(t.smer==="prijem"?1:-1)*r2(+t.suma||0),
-      zost: t.zostatok!=null ? r2(+t.zostatok) : null });
+      zost: t.zostatok!=null ? r2(+t.zostatok) : null,
+      pole: t.zdroj==="mail" ? String(t.zostatokPole||"") : null });
   });
   const out={};
   Object.keys(poDnoch).forEach(den=>{
     const k=poDnoch[den].filter(t=>t.zost!=null);
     if(!k.length) return;
-    if(k.length===1){ out[den]=k[0].zost; return; }
+    const kot=(t)=>({suma:t.zost, zdroj:notifZdrojKotvy(t.pole)});
+    if(k.length===1){ out[den]=kot(k[0]); return; }
     const posledny=k.find(t=>k.some(o=>o!==t && r2(t.zost-t.delta)===o.zost));
-    out[den]= posledny ? posledny.zost : Math.max.apply(null, k.map(t=>t.zost));
+    out[den]= posledny ? kot(posledny)
+      : kot(k.reduce((a,b)=>b.zost>a.zost?b:a));
   });
   // Zostatky z výpisu majú prednosť — sú jednoznačné, notifikácia nie.
   //
@@ -26929,20 +26969,28 @@ function dennikKotvy(){
   // ostal nezakotvený — jeho pohyby nemal proti čomu overiť. Kotvíme ho
   // na deň PRED prvým pohybom výpisu: výpis pokrýva celé obdobie, takže
   // medzi jeho začiatkom a prvým pohybom sa nič nestalo (kap. 88.3).
+  // Dátum kotvy sa berie Z DOKUMENTU. Odvodiť ho z prvého a posledného pohybu
+  // je odhad, a bol o niekoľko dní vedľa: augustový výpis hlási konečný stav
+  // k 31. 8., posledný pohyb v ňom je z 28. 8. Nevadilo to len preto, že sa
+  // v tej medzere nič nepohlo — prvý pohyb v nej by vyrobil falošný nález.
+  // Odhad zostáva ako náhrada pre staršie záznamy, ktoré dátumy nenesú.
+  const denPredtym=d=>{
+    const x=new Date(String(d).slice(0,10)+"T00:00:00Z");
+    if(isNaN(x)) return null;
+    x.setUTCDate(x.getUTCDate()-1);
+    return x.toISOString().slice(0,10);
+  };
   (firmaData.vypisy||[]).forEach(z=>{
-    const K=z && z.kontrola; if(!K) return;
-    if(K.zaciatok!=null && z.od){
-      const d=new Date(String(z.od).slice(0,10)+"T00:00:00Z");
-      if(!isNaN(d)){
-        d.setUTCDate(d.getUTCDate()-1);
-        const den=d.toISOString().slice(0,10);
-        if(!poDnoch[den]) out[den]=r2(+K.zaciatok);
-      }
-    }
+    const K=z && z.kontrola; if(!K || K.zaciatok==null) return;
+    // Počiatočný stav platí ku koncu dňa, ktorý výpis uvádza; keď ho neuvádza,
+    // ku koncu dňa pred prvým pohybom.
+    const den = K.zaciatokDatum || (z.od ? denPredtym(z.od) : null);
+    if(den && !poDnoch[den]) out[den]={suma:r2(+K.zaciatok), zdroj:"vypis"};
   });
   (firmaData.vypisy||[]).forEach(z=>{
-    const K=z && z.kontrola; if(!K) return;
-    if(K.koniec!=null && z.do) out[String(z.do).slice(0,10)]=r2(+K.koniec);
+    const K=z && z.kontrola; if(!K || K.koniec==null) return;
+    const den = K.koniecDatum || (z.do ? String(z.do).slice(0,10) : null);
+    if(den) out[den]={suma:r2(+K.koniec), zdroj:"vypis"};
   });
   return out;
 }
@@ -26968,9 +27016,14 @@ function dennikKontrolaRetaze(){
     const od=dniKotiev[i-1], doo=dniKotiev[i];
     let zmena=0, pocet=0;
     Object.keys(poDnoch).forEach(den=>{ if(den>od && den<=doo){ zmena=r2(zmena+poDnoch[den]); pocet++; } });
-    const ocakavane=r2(kotvy[od]+zmena);
-    const rozdiel=r2(ocakavane-kotvy[doo]);
-    const u={od, do:doo, dni:pocet, zmena, ocakavane, hlasene:kotvy[doo], rozdiel,
+    const ocakavane=r2(kotvy[od].suma+zmena);
+    const rozdiel=r2(ocakavane-kotvy[doo].suma);
+    // Úsek je TVRDÝ len vtedy, keď oba konce hovoria o účtovnom stave. Keď
+    // ktorýkoľvek z nich je disponibilný zostatok, rozdiel môže byť len
+    // neúčtovaná blokácia na karte — nález ostáva, ale netvrdí chýbajúci pohyb.
+    const mekky = kotvy[od].zdroj==="disponibilny" || kotvy[doo].zdroj==="disponibilny";
+    const u={od, do:doo, dni:pocet, zmena, ocakavane, hlasene:kotvy[doo].suma, rozdiel,
+      zdrojOd:kotvy[od].zdroj, zdrojDo:kotvy[doo].zdroj, mekky,
       sedi:Math.abs(rozdiel)<0.005};
     useky.push(u);
     if(!u.sedi) nalezy.push(u);
@@ -27029,10 +27082,12 @@ function penazyDennik(obdobie, co, kuDnu){
   if(prvaKotva){
     // stav na začiatku prvého ukotveného dňa = kotva mínus pohyby toho dňa
     let denPohyb=0;
-    (firmaData.vypis||[]).forEach(t=>{ if(!t||t.skryty) return;
+    // Skryté sa počítajú aj tu — kotva ich zahŕňa, takže odčítať sa musia
+    // rovnaké pohyby, aké do nej banka započítala (kap. 88.4).
+    (firmaData.vypis||[]).forEach(t=>{ if(!t) return;
       if(String(t.datum||"").slice(0,10)!==prvaKotva) return;
       denPohyb=r2(denPohyb+(t.smer==="prijem"?1:-1)*r2(+t.suma||0)); });
-    stavB=r2(kotvy[prvaKotva]-denPohyb);
+    stavB=r2(kotvy[prvaKotva].suma-denPohyb);
   }
   const S=firmaData.settings||{};
   let stavP=r2(+S.pokladnaZaciatok||0);
@@ -27050,8 +27105,8 @@ function penazyDennik(obdobie, co, kuDnu){
     // Rozdiel sa neschová — riadok sa označí a kontrola reťaze povie prečo.
     const posledniVDni = !riadky[i+1] || riadky[i+1].datum!==r.datum;
     if(vRozsahu && posledniVDni && kotvy[r.datum]!=null){
-      if(Math.abs(r2(stavB-kotvy[r.datum]))>=0.005) r.skokZostatku=r2(kotvy[r.datum]-stavB);
-      stavB=kotvy[r.datum];
+      if(Math.abs(r2(stavB-kotvy[r.datum].suma))>=0.005) r.skokZostatku=r2(kotvy[r.datum].suma-stavB);
+      stavB=kotvy[r.datum].suma;
       r.zostatokBanka=stavB;
       r.kotva=true;
     }
@@ -27158,11 +27213,31 @@ function dennikNahladHtml(D){
 }
 // Nálezy kontroly idú DO SÚBORU. Zostava má o svojej medzere hovoriť sama,
 // aj keď ju niekto pošle ďalej bez kontextu (kap. 88.9).
+// Text nálezu je JEDEN — používa ho náhľad pred exportom aj poznámka pod
+// zostavou. Boli to dve takmer rovnaké vety na dvoch miestach a pri prvej
+// zmene by sa rozišli (kap. 16).
+//
+// Tvrdý nález (oba konce úseku sú účtovné zostatky z výpisu) tvrdí, že pohyb
+// chýba. Mäkký (jeden koniec je disponibilný zostatok z notifikácie) tvrdiť
+// nemôže: rozdiel môže byť platba kartou, ktorá je autorizovaná a ešte
+// nezaúčtovaná. Aj tak sa hlási — len nehovorí istotu, ktorú nemá.
+function dennikNalezText(u){
+  const kde="Medzi "+fmtDatum(u.od)+" a "+fmtDatum(u.do);
+  const cisla="Banka na konci "+fmtDatum(u.do)+" hlási "+eur(u.hlasene)
+    +", z evidovaných pohybov vychádza "+eur(u.ocakavane)+".";
+  if(u.mekky) return {typ:"pozor",
+    text:kde+" nesedí zostatok o "+eur(Math.abs(u.rozdiel)),
+    detail:cisla+" Kotva na konci pochádza z notifikácie, ktorá hlási disponibilný "
+      +"zostatok — ten je nižší o platby kartou, ktoré banka ešte nezaúčtovala. "
+      +"Rozdiel teda nemusí znamenať chýbajúci pohyb. Isté to bude z výpisu."};
+  return {typ:"chyba",
+    text:kde+" chýba pohyb "+eur(Math.abs(u.rozdiel)),
+    detail:cisla+" Oba stavy sú z výpisu, takže appke ten pohyb naozaj chýba."};
+}
+
 function dennikPoznamka(D){
   const c=[];
-  D.kontrola.nalezy.forEach(u=>c.push("Medzi "+fmtDatum(u.od)+" a "+fmtDatum(u.do)
-    +" chýba v evidencii pohyb "+eur(Math.abs(u.rozdiel))+" — banka na konci "+fmtDatum(u.do)
-    +" hlási "+eur(u.hlasene)+", z evidovaných pohybov vychádza "+eur(u.ocakavane)+"."));
+  D.kontrola.nalezy.forEach(u=>{ const N=dennikNalezText(u); c.push(N.text+" — "+N.detail); });
   if(!D.maZostatokBanky) c.push("Zostatok banky sa nekreslí: žiadny výpis ani notifikácia nenesie stav účtu.");
   else c.push("Zostatok banky je doložený od "+fmtDatum(D.odKotvy)+" do "+fmtDatum(D.poKotvu)+".");
   const skr=(firmaData.vypis||[]).filter(t=>t && t.skryty).length;
