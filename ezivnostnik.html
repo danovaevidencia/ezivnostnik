@@ -1341,7 +1341,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.06-KE";  // upomienka cez sprievodcu — vidno, čo klient dostane
+const APP_VERZIA = "2026.09.06-KF";  // modul Účtovné knihy, kniha jázd samostatne
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -1743,7 +1743,7 @@ const PLANY = {
     popis:"Pre živnostníka, ktorý nie je platiteľ DPH",
     limity:{ faktury:0, odberatelia:0, doklady:0, bankaImporty:0, ulozisko:2000 },
     moduly:["faktury","vykazy","pohladavky","vydavky","banka","kalendar",
-            "jazdy","majetok","dokumenty","dovolenka","priznania","priznanieB","prognoza"]
+            "jazdy","majetok","dokumenty","dovolenka","knihy","priznania","priznanieB","prognoza"]
   },
   profi: {
     kod:"profi", nazov:"Profi", farba:"var(--ink-pos)",
@@ -1751,7 +1751,7 @@ const PLANY = {
     popis:"Pre platiteľa DPH — vrátane podaní",
     limity:{ faktury:0, odberatelia:0, doklady:0, bankaImporty:0, ulozisko:0 },
     moduly:["faktury","vykazy","pohladavky","vydavky","banka","kalendar",
-            "jazdy","majetok","dokumenty","dovolenka","priznania","priznanieB","prognoza","dph"]
+            "jazdy","majetok","dokumenty","dovolenka","knihy","priznania","priznanieB","prognoza","dph"]
   },
   // Plán, ktorý platí ÚČTOVNÍK za svojich klientov (kap. 38.11). Klientova
   // firma ostáva na Free a účtovník v nej robí KV DPH, priznania a párovanie;
@@ -1778,7 +1778,7 @@ const PLANY = {
     popis:"Vy účtujete, klient nahráva doklady. Jeden účet, dve role.",
     limity:{ faktury:0, odberatelia:0, doklady:0, bankaImporty:0, ulozisko:0, firmy:10 },
     moduly:["faktury","vykazy","pohladavky","vydavky","banka","kalendar",
-            "jazdy","majetok","dokumenty","dovolenka","priznania","priznanieB","prognoza","dph"]
+            "jazdy","majetok","dokumenty","dovolenka","knihy","priznania","priznanieB","prognoza","dph"]
   }
 };
 // jednorazové doplnky
@@ -1895,7 +1895,8 @@ const MODUL_KATEGORIA={
   vydavky:"vydavky",
   banka:"banka", cashflow:"banka",
   dph:"dph", priznania:"priznanie", priznanieB:"priznanie", prognoza:"priznanie",
-  jazdy:"jazdy", majetok:"jazdy", dokumenty:"jazdy", dovolenka:"jazdy"
+  jazdy:"jazdy", majetok:"jazdy", dokumenty:"jazdy", dovolenka:"jazdy",
+  knihy:"knihy"
 };
 function modulPovolenyPreModul(m){
   const kat=MODUL_KATEGORIA[m];
@@ -5402,6 +5403,7 @@ const APPS={
   vydavky:  {n:"Výdavky",         ic:"€", c:"var(--m-vydavky)", d:"Bločky, došlé faktúry, kategórie"},
   banka:    {n:"Banka",           ic:"🏦",c:"var(--m-banka)", d:"Pohyby na účte, párovanie"},
   pohladavky:{n:"Pohľadávky",     ic:"⇌", c:"var(--m-prijmy)", d:"Neuhradené faktúry, záväzky, po splatnosti"},
+  knihy:     {n:"Účtovné knihy", ic:"📚", c:"var(--m-neutral)", d:"Kniha pohľadávok, kniha záväzkov, peňažný denník"},
   prognoza: {n:"Prognóza",        ic:"◔", c:"var(--m-podania)", d:"Odhad roka, čo odložiť na dane"},
   priznania:{n:"Priznania",       ic:"§", c:"var(--m-podania)", d:"Import priznaní, porovnanie rokov"},
   priznanieB:{n:"Priznanie B",     ic:"✎", c:"var(--m-podania)", d:"Sprievodca daňovým priznaním"},
@@ -5422,10 +5424,12 @@ const SKUPINY=[
   {id:"vydavky", n:"Výdavky",         ic:"🧾", c:"var(--m-vydavky)", dd:"čo som minul a komu dlžím",     moduly:["vydavky"]},
   {id:"banka",   n:"Banka",           ic:"🏦", c:"var(--m-banka)", dd:"čo reálne pretieklo účtom",     moduly:["banka"]},
   {id:"podania", n:"Podania",         ic:"§",  c:"var(--m-podania)", dd:"čo posielam Finančnej správe",  moduly:["dph","priznania","priznanieB","prognoza","uzavierka"]},
-  {id:"agenda",  n:"Firemná agenda",  ic:"🚗", c:"var(--m-neutral)", dd:"auto, majetok, papiere",        moduly:["jazdy","majetok","dokumenty","dovolenka","zdielanie"]},
+  {id:"agenda",  n:"Firemná agenda",  ic:"🗂", c:"var(--m-neutral)", dd:"knihy, majetok, papiere",       moduly:["knihy","majetok","dokumenty","dovolenka","zdielanie"]},
 ];
 // samostatné (mimo skupín): kalendar (prierezový), data (nastavenia v hlavičke)
-const SKUPINA_SAMOSTATNE=["kalendar","clanky"];
+// Kniha jázd stojí samostatne: zapisuje sa týždenne, kým majetok a papiere
+// párkrát do roka. Schovať dennú prácu o úroveň nižšie stojí ťuk zakaždým.
+const SKUPINA_SAMOSTATNE=["jazdy","kalendar","clanky"];
 
 function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function fmtDatum(dt){
@@ -5959,6 +5963,7 @@ function renderAppModul(id){
   if(id==="vydavky") return appVydavky();
   if(id==="banka") return appBanka();
   if(id==="pohladavky") return appPohladavky();
+  if(id==="knihy") return appKnihy();
   if(id==="prognoza") return appPrognoza();
   if(id==="priznania") return appPriznania();
   if(id==="priznanieB") return appPriznanieB();
@@ -11766,11 +11771,6 @@ function appUzavierka(){
         <div class="csub" style="margin-bottom:12px">Súhrn pre daňové priznanie v podobe, ktorú viete vytlačiť alebo poslať účtovníkovi.</div>
         <div id="ruBox">${ruSprievodcaHtml()}</div>
       </div>`
-    + `<div class="card" style="margin-top:14px">
-        <h2 style="font-size:16px;margin-bottom:4px">📒 Peňažný denník</h2>
-        <div class="csub" style="margin-bottom:12px">Chronologický záznam pohybu peňazí s priebežným zostatkom — banka aj pokladňa. Nie je to kniha jednoduchého účtovníctva; odpovedá na otázku, kde sú peniaze a odkiaľ sa tam vzali.</div>
-        <div id="dennikBox">${dennikHtml()}</div>
-      </div>`
     + skryteNalezyHtml();
 }
 
@@ -14915,8 +14915,7 @@ function appPohladavky(){
         ${roky.map(r=>`<option value="${r}" ${r===pzRok?'selected':''}>${r}</option>`).join('')}
       </select>
     </div>
-    <div style="margin:2px 0 12px"><div id="knBox">${knSprievodcaHtml()}</div></div>
-    <div style="margin:0 0 12px"><div id="upBox">${upSprievodcaHtml()}</div></div>
+    <div style="margin:2px 0 12px"><div id="upBox">${upSprievodcaHtml()}</div></div>
     <div class="amini">
       <div class="aminbox"><div class="al">Otvorené pohľadávky</div><div class="av ${sumaOtvP?'warn':'pos'}">${eur(sumaOtvP)}</div></div>
       <div class="aminbox"><div class="al">Po splatnosti</div><div class="av ${poSplat.length?'neg':'pos'}">${poSplat.length}</div></div>
@@ -27433,6 +27432,32 @@ function upSprievodcaHtml(){
       <div class="ocr-hint" style="margin-top:7px">Stupeň sa zapíše do denníka upomienok až po vytvorení PDF — keby generovanie zlyhalo, ďalšia by nastúpila o stupeň vyššie bez toho, aby prvá existovala.</div>`}
   ]};
   return zostavaSprievodcaHtml("up", def);
+}
+// ═══════════════════════════════════════════════════════════════
+//  MODUL ÚČTOVNÉ KNIHY
+//  Tri zostavy, ktoré Roman priniesol z KROSu, patria k sebe: kniha
+//  pohľadávok, kniha záväzkov a peňažný denník. Predtým boli v dvoch
+//  rôznych moduloch — knihy v Pohľadávkach (kde kniha ZÁVÄZKOV nedávala
+//  zmysel) a denník v Uzávierke.
+//
+//  Upomienka sem ZÁMERNE nepatrí. Nie je to zostava, ktorú ideš vytlačiť,
+//  ale akcia proti konkrétnemu odberateľovi v momente, keď v zozname vidíš,
+//  že je po splatnosti. Zostáva v Pohľadávkach.
+// ═══════════════════════════════════════════════════════════════
+function appKnihy(){
+  if(prekresliVRamci("knihy")) return;   // rámec super apky (GY)
+  document.getElementById("appScreen").innerHTML=appHlavicka("knihy","")
+    + pasIbaCitanie("knihy")
+    + `<div class="card">
+        <h2 style="font-size:16px;margin-bottom:4px">📗 Kniha pohľadávok a záväzkov</h2>
+        <div class="csub" style="margin-bottom:12px">Stav k zvolenému dňu vrátane položiek prenesených z minulého roka. Úhrady po tom dni sa nezapočítavajú.</div>
+        <div id="knBox">${knSprievodcaHtml()}</div>
+      </div>
+      <div class="card" style="margin-top:14px">
+        <h2 style="font-size:16px;margin-bottom:4px">📒 Peňažný denník</h2>
+        <div class="csub" style="margin-bottom:12px">Chronologický záznam pohybu peňazí s priebežným zostatkom — banka aj pokladňa. Nie je to kniha jednoduchého účtovníctva; odpovedá na otázku, kde sú peniaze a odkiaľ sa tam vzali.</div>
+        <div id="dennikBox">${dennikHtml()}</div>
+      </div>`;
 }
 // ── Sprievodca knihami (kap. 86, 88.9) ────────────────────────────────────
 // Kontrolný krok zhŕňa to, čo dnes stojí roztrúsené po riadkoch: koľko
