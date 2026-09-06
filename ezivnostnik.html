@@ -1341,7 +1341,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.06-KB";  // kompletný XLSX cez sprievodcu: voľby, kontrola, náhľad
+const APP_VERZIA = "2026.09.06-KC";  // ročná uzávierka ako dokument, cez sprievodcu
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -11265,15 +11265,119 @@ function appDPH(){
 }
 
 // ROČNÁ UZÁVIERKA — súhrn pre daňové priznanie
-function uzavierkaHtml(rok){
+// Čísla ročnej uzávierky na JEDNOM mieste. Obrazovka aj PDF zostava z toho
+// istého — dve kópie by sa rozišli a človek by mal v ruke dokument, ktorý
+// tvrdí niečo iné než appka (kap. 16).
+function rocnaZostavaData(rok){
   const su=deRocnySuhrn(rok);
   const dan=deDanovyVypocet(rok);   // rešpektuje zvolený režim (skutočné/paušál)
   const odpis=odpisRokCelkom(rok);
   const jazdyRok=jazdyRoka(rok);
   const kmRok=kmSpolu(jazdyRok), kmRokPodnik=kmPodnik(jazdyRok), kmRokSukr=kmSukromne(jazdyRok);
   const NAH=nahradyObdobie(rok);
-  const pocFakt=(firmaData.faktury||[]).filter(f=>faktVRoku(f, rok)).length;
-  const pocVyd=(firmaData.vydavky||[]).filter(x=>vydavokVRoku(x, rok)).length;
+  return {rok:String(rok), su, dan, odpis, NAH,
+    kmRok, kmRokPodnik, kmRokSukr,
+    pocFakt:(firmaData.faktury||[]).filter(f=>faktVRoku(f, rok)).length,
+    pocVyd:(firmaData.vydavky||[]).filter(x=>vydavokVRoku(x, rok)).length};
+}
+// ── Riadky ročnej zostavy do dokumentu (kap. 88.9) ────────────────────────
+// Dvojstĺpcová tabuľka, nie voľný text: `vykresliZostavu` je tabuľkový
+// renderer a ročná uzávierka sa doň zmestí bez druhej šablóny. Prázdny
+// riadok oddeľuje bloky — v zostave pre kontrolu je dôležitejšie, aby sa
+// dala prečítať po blokoch, než aby bola krátka.
+function rocnaZostavaRiadky(rok){
+  const Z=rocnaZostavaData(rok), su=Z.su, dan=Z.dan;
+  const r=[], pridaj=(p,s)=>r.push({polozka:p, suma:s});
+  pridaj("Príjmy (bez DPH)", eur(su.prijmy));
+  pridaj("Výdavky (bez odpisu)", eur(su.vydavkySkut||su.vydavky||0));
+  pridaj("Odpisy majetku", eur(Z.odpis));
+  if(su.vyradenie) pridaj("Vyradený majetok — do výdavkov", eur(su.vyradenie));
+  if(Z.NAH.aktivne && Z.NAH.spolu) pridaj("Náhrady za km — do výdavkov", eur(Z.NAH.spolu));
+  if(su.lux && su.lux.pripocitat) pridaj("Úprava pri aute nad "+eur(ODPIS_LUX_LIMIT), "+"+eur(su.lux.pripocitat));
+  pridaj("Odvody (ZP + SP)", eur(dan.odvodyRok));
+  r.push({polozka:"", suma:""});
+  pridaj("Základ dane", eur(dan.zaklad));
+  pridaj("Nezdaniteľné časti", "−"+eur(dan.nczd));
+  pridaj("Daň z príjmov", eur(dan.dan));
+  r.push({polozka:"", suma:""});
+  pridaj("Faktúr / dokladov", Z.pocFakt+" / "+Z.pocVyd);
+  pridaj("Najazdené km"+(Z.kmRokSukr?" (podnikateľské)":""),
+    Math.round(Z.kmRokSukr?Z.kmRokPodnik:Z.kmRok).toLocaleString("sk")+" km");
+  // výdavky po kategóriách — to, čo účtovník hľadá ako prvé
+  let K=null; try{ K=kategorieRoka(rok); }catch(e){ console.error("kategórie do zostavy:", e); }
+  const zoz=(K && (K.zoznam||K.riadky)) || [];
+  if(zoz.length){
+    r.push({polozka:"", suma:""});
+    r.push({polozka:"Výdavky podľa kategórií — do základu dane", suma:""});
+    zoz.forEach(k=>r.push({polozka:"   "+((KATEGORIE_VYDAVKOV[k.kluc]||{}).n || k.kluc || "—"),
+      suma:eur(k.doZakladu!=null?k.doZakladu:0)}));
+  }
+  return {rok:String(rok), riadky:r, dan};
+}
+async function rocnaZostavaPDF(rok){
+  const Z=rocnaZostavaRiadky(rok);
+  const FP=await fakturaPdfModul(); await ensureJsPDF();
+  const { jsPDF }=window.jspdf;
+  const m=firmaData.meta||{};
+  const nalezy=(function(){ try{ return rocnaKontrola(rok)||[]; }catch(e){ return []; } })();
+  const chyb=nalezy.filter(n=>n.zavaznost==="chyba").length;
+  const doc=FP.vykresliZostavu(jsPDF, {
+    nadpis:"Ročná uzávierka "+Z.rok, kuDnu:"",
+    firma:{nazov:m.nazov||"", ico:m.ico||"", icdph:m.icdph||""},
+    stlpce:[{k:"polozka", n:"Položka", w:60},{k:"suma", n:"Suma", w:22, zar:"r"}],
+    riadky:Z.riadky,
+    poznamka: nalezy.length
+      ? ("Ročná kontrola našla "+nalezy.length+" "+sklon(nalezy.length,"nález","nálezy","nálezov")
+         +(chyb?(", z toho "+chyb+" "+sklon(chyb,"chybu","chyby","chýb")):"")
+         +". Zoznam je v appke v module Uzávierka.")
+      : "Ročná kontrola nenašla žiadne nezrovnalosti."
+  });
+  doc.save("rocna_uzavierka_"+Z.rok+".pdf");
+}
+// ── Sprievodca ročnou uzávierkou ──────────────────────────────────────────
+// Najlacnejší zo všetkých: obrazovka UŽ JE náhľad a `rocnaKontrola` UŽ JE
+// kontrolný krok. Chýbalo posledné tlačidlo.
+let ruRok=null;
+function rocnaZostavaRok(){ return ruRok || String(new Date().getFullYear()); }
+function ruNastav(v){ ruRok=v; ruPrekresli(); }
+function ruPrekresli(){ const el=document.getElementById("ruBox"); if(el) el.innerHTML=ruSprievodcaHtml(); }
+_zostavaPrekresli.ru=ruPrekresli;
+function ruSprievodcaHtml(){
+  const rok=rocnaZostavaRok();
+  const Z=rocnaZostavaRiadky(rok);
+  const roky=xkDostupneRoky();
+  if(!roky.length) roky.push(rok);
+  let nalezy=[]; try{ nalezy=(rocnaKontrola(rok)||[]).map(x=>({
+    typ:x.zavaznost==="chyba"?"chyba":"pozor", text:x.t, detail:x.d})); }catch(e){}
+  const chyb=nalezy.filter(n=>n.typ==="chyba").length;
+  const def={kroky:[
+    {n:"Rok", stav:()=>({text:rok}),
+     telo:()=>`<div class="atool" style="padding-top:11px">
+        <select onchange="ruNastav(this.value)" style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:13px">
+          ${roky.map(r=>`<option value="${r}" ${r===rok?'selected':''}>rok ${r}</option>`).join("")}
+        </select></div>`},
+    {n:"Ročná kontrola",
+     stav:()=>nalezy.length ? {text:nalezy.length+" "+sklon(nalezy.length,"nález","nálezy","nálezov"), cls:chyb?"neg":"warn"}
+        : {text:"bez nálezov", cls:"pos"},
+     telo:()=>`<div style="padding-top:11px">${zostavaNalezyHtml(nalezy.slice(0,8))}
+        ${nalezy.length>8?`<div class="ocr-hint" style="margin-top:6px">Zobrazených prvých 8 z ${nalezy.length}. Celý zoznam je vyššie na tejto obrazovke.</div>`:""}</div>`},
+    {n:"Náhľad",
+     stav:()=>({text:eur(Z.dan.dan)+" daň"}),
+     telo:()=>`<div style="padding-top:11px"><div class="znahlad"><table>
+        ${Z.riadky.map(x=>x.polozka
+          ? `<tr><td>${esc(x.polozka)}</td><td class="c">${esc(x.suma)}</td></tr>`
+          : `<tr><td colspan="2" style="height:6px;border:0"></td></tr>`).join("")}
+      </table></div></div>`},
+    {n:"Generovať", stav:()=>({text:"PDF"}),
+     telo:()=>`<button class="abtn pri" style="width:100%;margin-top:11px" onclick="rocnaZostavaPDF('${rok}')">📄 Stiahnuť ročnú uzávierku</button>`}
+  ]};
+  return zostavaSprievodcaHtml("ru", def);
+}
+function uzavierkaHtml(rok){
+  const Z=rocnaZostavaData(rok);
+  const su=Z.su, dan=Z.dan, odpis=Z.odpis, NAH=Z.NAH;
+  const kmRok=Z.kmRok, kmRokPodnik=Z.kmRokPodnik, kmRokSukr=Z.kmRokSukr;
+  const pocFakt=Z.pocFakt, pocVyd=Z.pocVyd;
   return `<div class="card" style="margin-top:14px">
     <h2 style="font-size:16px;margin-bottom:4px">📋 Ročná uzávierka ${rok}</h2>
     <div class="csub" style="margin-bottom:12px">Súhrn pre daňové priznanie — všetko na jednom mieste.</div>
@@ -11657,6 +11761,11 @@ function appUzavierka(){
         proti dokladu, ktorý sa omylom uloží spätne do obdobia, za ktoré ste už podali.
       </div>`
     + riadky.join("")
+    + `<div class="card" style="margin-top:14px">
+        <h2 style="font-size:16px;margin-bottom:4px">📋 Ročná uzávierka ako dokument</h2>
+        <div class="csub" style="margin-bottom:12px">Súhrn pre daňové priznanie v podobe, ktorú viete vytlačiť alebo poslať účtovníkovi.</div>
+        <div id="ruBox">${ruSprievodcaHtml()}</div>
+      </div>`
     + `<div class="card" style="margin-top:14px">
         <h2 style="font-size:16px;margin-bottom:4px">📒 Peňažný denník</h2>
         <div class="csub" style="margin-bottom:12px">Chronologický záznam pohybu peňazí s priebežným zostatkom — banka aj pokladňa. Nie je to kniha jednoduchého účtovníctva; odpovedá na otázku, kde sú peniaze a odkiaľ sa tam vzali.</div>
