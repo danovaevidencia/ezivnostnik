@@ -262,6 +262,27 @@ button,input,select,textarea{font-variant-numeric:inherit}
    popiska — v oboch témach nad 4,5. Cieľ má 44 px zápornými marginmi, takže
    riadok neporastie. */
 .idFirma{color:var(--ink);font-weight:600;font-size:14px}
+/* Globálne hľadanie. Žiadna farba natvrdo — všetko cez tokeny, aby platilo
+   v oboch témach (FC, test_tema). Výsledky sú na 390 px zoznam, nie mriežka:
+   pevný grid by sa nezmestil a overflow by obsah odrezal. */
+.ghPole{display:flex;gap:8px;align-items:center;margin:0 0 12px}
+.ghPole input{max-width:none}
+.ghVys{display:flex;flex-direction:column;gap:10px;margin:8px 0 14px}
+.ghSkup{border:1px solid var(--line);border-radius:11px;overflow:hidden;background:var(--paper)}
+.ghHlav{display:flex;align-items:center;gap:7px;padding:9px 12px;cursor:pointer;
+  background:var(--bg);border-bottom:1px solid var(--line-soft);font-size:13px}
+.ghHlav:hover{background:var(--brand-lite)}
+.ghPocet{color:var(--ink-soft);font-size:12px}
+.ghGo{margin-left:auto;color:var(--ink-soft);font-size:15px}
+.ghRiadok{display:flex;align-items:baseline;gap:8px;padding:8px 12px;cursor:pointer;font-size:12.5px;
+  border-bottom:1px solid var(--line-soft)}
+.ghRiadok:last-child{border-bottom:0}
+.ghRiadok:hover{background:var(--bg)}
+.ghCo{font-weight:600;color:var(--ink)}
+.ghKto{color:var(--ink-soft);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ghSuma{margin-left:auto;color:var(--ink);white-space:nowrap}
+.ghOrez{padding:7px 12px;font-size:11.5px;color:var(--ink-soft);cursor:pointer;background:var(--bg)}
+.ghPrazdne{font-size:12.5px;color:var(--ink-soft);margin:8px 2px 14px;line-height:1.5}
 button.idPrep{background:none;border:0;font-family:inherit;cursor:pointer;
   display:inline-flex;align-items:center;gap:5px;text-align:left;
   margin:-13px -8px;padding:13px 8px;max-width:100%}
@@ -1314,6 +1335,12 @@ html[data-jazda] .jazdapruh{display:flex}
       </div>
       <div id="homeStrip"></div>
 
+      <!-- Globálne hľadanie. Pole je viditeľné rovno, nie pod ikonou: pravidlo
+           „trvalý prvok, ktorý väčšinou hlási nič, nezaberá miesto“ sa naň
+           nevzťahuje — hľadanie nič nehlási, je to nástroj, ktorý človek
+           otvára s úmyslom (45.6/GL, 90.6). -->
+      <div id="globalHladanie"></div>
+
       <!-- launcher: super apky navrchu (rýchla navigácia) -->
       <div class="dashtitle" id="launcherTitle">Vaše aplikácie</div>
       <div class="launcher" id="launcher"></div>
@@ -1403,7 +1430,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.07-KV";  // počiatočný zostatok výpisu je tiež kotva; opakovaný import záznam aktualizuje
+const APP_VERZIA = "2026.09.07-KW";  // počiatočný zostatok výpisu je tiež kotva; opakovaný import záznam aktualizuje
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -2642,6 +2669,7 @@ function zobrazFirmu(){
   // v demo režime a po importe nevykreslil vôbec a človek s jednou firmou
   // by na ploche nevidel, čie dáta pozerá.
   vykresliPrepinacFiriem();
+  renderGlobalHladanie();
   renderHero();
   vykresliDashboard();
   renderLauncher();
@@ -14477,7 +14505,7 @@ function appMajetok(){
       <div class="aminbox"><div class="al">Odpis ${rok}</div><div class="av">${eur(odpisTohtoRoka)}</div></div>
       <div class="aminbox"><div class="al">Odpis/mes</div><div class="av">${eur(odpisTohtoRoka/12)}</div></div>
     </div>
-    ${maj.length>6?`<div class="atool" style="align-items:center">${hladatkoHtml('majetok','appMajetok','🔍 Názov majetku…')}</div>`:''}
+    ${(maj.length>6 || (_hladaj.majetok||"").trim())?`<div class="atool" style="align-items:center">${hladatkoHtml('majetok','appMajetok','🔍 Názov majetku…')}</div>`:''}
     ${majZobraz.length?majZobraz.map(m=>{
       const pl=odpisPlan(m);
       const jeDrobny=m.typMajetku==="drobny";
@@ -18728,14 +18756,103 @@ function hladajInput(id, rerender){
     window[rerender](); const el=document.getElementById("hl_"+id);
     if(el){ el.focus(); if(pos!=null) el.setSelectionRange(pos,pos); } }, 250);
 }
-function hladatkoHtml(id, rerender, placeholder){
+// `siroke` je pre globálne hľadanie: v module je pole jedno z viacerých vecí
+// v nástrojovom páse a strop 300 px mu sedí, na ploche je to hlavný vchod
+// a strop by ho na 375 px nechal trčať v dvoch tretinách. Parameter namiesto
+// `!important` v CSS — inline štýl by sa inak prebíjal a ďalší, kto pole
+// použije, by nevedel prečo.
+function hladatkoHtml(id, rerender, placeholder, siroke){
   // Pole je viditeľné rovno, nie schované pod ikonou: hľadanie je nástroj,
   // ktorý používateľ otvára s úmyslom, a klik navyše pred každým dopytom je
   // daň, ktorú platí zakaždým. ✕ pribudne, až keď je čo vymazať.
   const v=_hladaj[id]||"";
-  return `<input id="hl_${id}" value="${esc(v)}" oninput="_hladaj['${id}']=this.value;hladajInput('${id}','${rerender}')" placeholder="${esc(placeholder||'🔍 Hľadať…')}" style="flex:1;min-width:150px;max-width:300px;border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:13px">`
+  return `<input id="hl_${id}" value="${esc(v)}" oninput="_hladaj['${id}']=this.value;hladajInput('${id}','${rerender}')" placeholder="${esc(placeholder||'🔍 Hľadať…')}" style="flex:1;min-width:150px;max-width:${siroke?"none":"300px"};border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:13px">`
     + (v ? `<span class="achip" onclick="delete _hladaj['${id}'];${rerender}()" title="Zrušiť hľadanie">✕</span>` : "");
 }
+// ═══ GLOBÁLNE HĽADANIE (kap. 90.6, krok 5) ═════════════════════════════════
+//
+// Prvý krok redizajnu, ktorý nie je čisto prezentačný. Podmienky z 90.6:
+// jedna normalizácia (`hladajZhoda`, nie vlastné porovnávanie), hľadá sa nad
+// CELÝM poľom a orez sa priznáva vetou, pole je viditeľné rovno, výsledok
+// otvorí modul s predvyplneným `_hladaj[modul]` — žiadny druhý stav hľadania.
+//
+// Zdrojom smie byť LEN modul, ktorý `_hladaj` naozaj číta. `jazdy` ho nečíta
+// (pole hľadania tam nie je, hoci prázdny stav ho resetuje), takže by sa
+// otvorili nefiltrované a človek by hľadal, kde je jeho výsledok. Nájsť
+// doklad a naraziť na zamknuté dvere je horšie než ho nenájsť.
+const GLOBAL_ZDROJE=[
+  {modul:"faktury",   nazov:"Faktúry",   ic:"💰", pole:d=>d.faktury||[],
+   polia:f=>[f.cislo,f.odberatel,f.vs,f.popis,f.spolu],
+   riadok:f=>({co:f.cislo||"bez čísla", kto:f.odberatel||"", suma:+f.spolu||0, den:f.datum||f.vystavenie||""})},
+  {modul:"vydavky",   nazov:"Výdavky",   ic:"🧾", pole:d=>d.vydavky||[],
+   polia:x=>[x.cislo,x.partner,x.popis,x.variabilny,x.spolu],
+   riadok:x=>({co:x.cislo||x.popis||"bez čísla", kto:x.partner||"", suma:+x.spolu||0, den:x.datum||""})},
+  {modul:"banka",     nazov:"Banka",     ic:"🏦", pole:d=>d.vypis||[],
+   polia:t=>[t.proti,t.partner,t.vs,t.popis,t.suma,t.ibanProti],
+   riadok:t=>({co:t.popis||t.vs||"pohyb", kto:t.proti||t.partner||"", suma:+t.suma||0, den:t.datum||""})},
+  {modul:"majetok",   nazov:"Majetok",   ic:"🏗", pole:d=>d.majetok||[],
+   polia:m=>[m.nazov],
+   riadok:m=>({co:m.nazov||"—", kto:"", suma:+m.vstupnaCena||0, den:m.datumZaradenia||""})},
+  {modul:"dokumenty", nazov:"Dokumenty", ic:"🗂", pole:d=>d.dokumenty||[],
+   polia:x=>[x.nazov,x.typ,x.poznamka],
+   riadok:x=>({co:x.nazov||"—", kto:x.typ||"", suma:null, den:x.platnostDo||""})}
+];
+const GLOBAL_UKAZ=3;          // koľko riadkov na modul; zvyšok sa PRIZNÁ vetou
+function globalHladajVysledky(dopyt){
+  const q=String(dopyt||"").trim();
+  if(q.length<2 || !firmaData) return [];
+  return GLOBAL_ZDROJE
+    .filter(z=>modulPovolenyPreModul(z.modul))
+    .map(z=>{
+      // nad celým poľom, nie nad orezom (45.6) — orez je až pri zobrazení
+      const najdene=z.pole(firmaData).filter(x=>hladajZhoda(q, ...z.polia(x)));
+      return {...z, celkom:najdene.length, ukazky:najdene.slice(0, GLOBAL_UKAZ).map(z.riadok),
+        ibaCitanie:!mozemPisat(z.modul)};
+    })
+    .filter(z=>z.celkom>0);
+}
+// Výsledok otvorí modul s predvyplneným hľadaním — jediný stav, žiadna kópia.
+function globalOtvor(modul){
+  const q=(_hladaj.global||"").trim();
+  if(q) _hladaj[modul]=q;
+  otvorApp(modul);
+}
+function renderGlobalHladanie(){
+  const host=document.getElementById("globalHladanie");
+  if(!host) return;
+  if(!firmaData){ host.innerHTML=""; return; }
+  const q=(_hladaj.global||"").trim();
+  const R=globalHladajVysledky(q);
+  const spolu=R.reduce((a,z)=>a+z.celkom,0);
+  let vysledok="";
+  if(q.length>=2){
+    vysledok = R.length
+      ? `<div class="ghVys">`+R.map(z=>{
+          const zobrazene=z.ukazky.length;
+          return `<div class="ghSkup">
+            <div class="ghHlav" onclick="globalOtvor('${z.modul}')">
+              <span>${z.ic}</span><b>${esc(z.nazov)}</b>
+              <span class="ghPocet">${z.celkom}</span>
+              ${z.ibaCitanie?`<span class="apill" title="Do tohto modulu nemáte právo zapisovať">len na čítanie</span>`:""}
+              <span class="ghGo">›</span>
+            </div>
+            ${z.ukazky.map(u=>`<div class="ghRiadok" onclick="globalOtvor('${z.modul}')">
+              <span class="ghCo">${esc(u.co)}</span>
+              ${u.kto?`<span class="ghKto">${esc(String(u.kto).slice(0,26))}</span>`:""}
+              ${u.suma!=null?`<span class="ghSuma">${eur(u.suma)}</span>`:""}
+            </div>`).join("")}
+            ${z.celkom>zobrazene
+              ? `<div class="ghOrez" onclick="globalOtvor('${z.modul}')">Zobrazené ${zobrazene} z ${z.celkom} · otvoriť ${esc(z.nazov)}</div>`
+              : ""}
+          </div>`;
+        }).join("")+`</div>`
+      : `<div class="ghPrazdne">Nič sa nenašlo. Hľadá sa v faktúrach, výdavkoch, pohyboch v banke, majetku a dokumentoch.</div>`;
+  }
+  host.innerHTML=`<div class="ghPole">${hladatkoHtml("global","renderGlobalHladanie","🔍 Hľadať vo všetkom — číslo, partner, suma…", true)}</div>`
+    + (q.length>=2 && spolu ? `<div class="csub" style="margin:6px 2px 0">${spolu} ${sklon(spolu,"výsledok","výsledky","výsledkov")}</div>` : "")
+    + vysledok;
+}
+
 // Orezaný zoznam musí povedať, že je orezaný — používateľ si inak myslí,
 // že vidí všetko. Klik limit rozšíri, hľadanie vždy beží nad celým poľom.
 const _zobrazLimit={};
