@@ -113,6 +113,13 @@
      #f0e0c8) na piatich miestach, takže v tmavej téme ostal svetlý rámik
      okolo tmavej plochy a okno „Vyžaduje pozornosť“ sa rozpadlo. */
   --line-warn:#f0c98a;--line-warn-soft:#f0e0c8;
+  /* Rýchle akcie (návrh §5.2). Plocha nesie rodinu modulu, ikona je kresba,
+     nie emoji. Hodnoty svetlej sú z návrhu; tmavé vznikli primiešaním sýteho
+     odtieňa rodiny do podkladu karty, aby si plocha udržala FARBU — obyčajné
+     stmavenie pastelu z nich spravilo tri na nerozoznanie rovnaké sivé. */
+  --qa-doklad:#f8ece4;--qa-doklad-ink:#a84a22;
+  --qa-jazda:#e9eef4;--qa-jazda-ink:#3f4a5a;
+  --qa-faktura:#e4edf8;--qa-faktura-ink:#1f5fa8;
   /* Obálky: na čo sa fakturovaná suma rozpadne. Tri tlmené odtiene, nie
      stavové farby — nič tu nie je dobré ani zlé, je to rozdelenie. */
   --ob-tvoje:#5c9c80;--ob-dph:#8d7ec0;--ob-odvody:#c99a5e;
@@ -166,6 +173,9 @@
   --sfc-warn:#2a2318;--sfc-pos:#16281f;--sfc-info:#172433;--sfc-neg:#2b1a1f;
   --ink-warn:#e0b878;--ink-pos:#6cc79a;--ink-neg:#f09090;--ink-info:#8ab4e0;
   --line-warn:#6b5528;--line-warn-soft:#3d3220;
+  --qa-doklad:#56352d;--qa-doklad-ink:#ff733e;    /* 1,46 / 4,00 */
+  --qa-jazda:#353e4a;--qa-jazda-ink:#8c9fba;      /* 1,46 / 4,01 */
+  --qa-faktura:#1e3e64;--qa-faktura-ink:#35a2ff;  /* 1,45 / 4,03 */
   --ob-tvoje:#6fb894;--ob-dph:#a394d8;--ob-odvody:#d9ab6e;
   --shadow:0 1px 0 rgba(0,0,0,.30),0 14px 34px -16px rgba(0,0,0,.70);
 }
@@ -582,6 +592,18 @@ h1,h2,h3,h4,.chead,.wbig,.sbox .sn,.sp-title b,.splittitle{text-wrap:balance}
 /* Apky ako čipy. `grid-column:1/-1` preto, že `.launcher` je mriežka a pás
    ju musí preklenúť; vnútri vlastná mriežka po piatich, aby riadok sedel
    so spodnou lištou. Pevná šírka by sa na 390 px nezmestila (FE). */
+/* Rýchle akcie: tri stĺpce, štítok 34 px s kreslenou ikonou a text POD ňou.
+   Terč je celý stĺpec (≥44 px), nie samotný štítok — na 390 px je 34 px
+   plochy málo a človek by míňal. Žiadne veľké vyplnené obdĺžniky (§5.2). */
+.qaRad{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;
+  border-top:1px solid var(--line);margin:12px 0 14px;padding-top:12px}
+.qaIt{display:flex;flex-direction:column;align-items:center;gap:6px;
+  padding:7px 4px;min-height:44px;justify-content:center;cursor:pointer;
+  background:none;border:0;font-family:inherit;border-radius:10px;transition:.14s}
+.qaIt:hover{background:var(--bg)}
+.qaIt[data-w]{opacity:.45;cursor:not-allowed}
+.qaSt{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;flex:none}
+.qaN{font-size:11px;font-weight:600;color:var(--ink);text-align:center;line-height:1.25}
 .saMini{grid-column:1/-1;display:grid;grid-template-columns:repeat(5,1fr);gap:7px}
 @media(max-width:360px){ .saMini{grid-template-columns:repeat(4,1fr)} }
 .saMiniIt{position:relative;display:flex;flex-direction:column;align-items:center;
@@ -1390,6 +1412,10 @@ html[data-jazda] .jazdapruh{display:flex}
         <p id="helloSub">Vaša kancelária je pripravená.</p>
       </div>
 
+      <!-- Rýchle akcie (návrh §5.2). Tri veci, ktoré človek na ploche
+           naozaj robí, pod menom a oddelené linkou. -->
+      <div id="rychleAkcie"></div>
+
       <!-- pás: aktuálny plán + inštalácia do telefónu -->
       <div id="verziaPruh" style="display:none;align-items:center;gap:10px;background:var(--brand);color:var(--on-brand);
      border-radius:11px;padding:10px 13px;margin:-4px 0 14px;font-size:13px;line-height:1.4">
@@ -1501,7 +1527,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.07-LC";  // počiatočný zostatok výpisu je tiež kotva; opakovaný import záznam aktualizuje
+const APP_VERZIA = "2026.09.07-LD";  // počiatočný zostatok výpisu je tiež kotva; opakovaný import záznam aktualizuje
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -2740,6 +2766,7 @@ function zobrazFirmu(){
   // v demo režime a po importe nevykreslil vôbec a človek s jednou firmou
   // by na ploche nevidel, čie dáta pozerá.
   vykresliPrepinacFiriem();
+  renderRychleAkcie();
   renderGlobalHladanie();
   renderLista();
   renderHero();
@@ -6326,6 +6353,41 @@ function nastavDphPlatcaOd(d){
   appData();
 }
 
+// ═══ RÝCHLE AKCIE (návrh §5.2) ═══════════════════════════════════════════
+//
+// Tri veci, ktoré človek na ploche naozaj robí. Doteraz boli len ako emoji
+// v hornej lište — tam sa zmestili, ale nepovedali, čo sú: 📷 a 📍 vedľa
+// zvončeka a oka vyzerali ako nastavenia, nie ako práca.
+//
+// Ikony sú KRESBY, nie emoji: emoji vykreslí každý systém inak a v pásme
+// U+2300–U+27BF ich Android nemá vôbec (43.29). SVG vyzerá všade rovnako.
+//
+// Právo sa NEKONTROLUJE tu — `jazdaSpusti` aj `rychlyDoklad` si ho overujú
+// samy, lebo vstupov je viac. Tu sa len STLMÍ, aby človek nekliknil naslepo.
+const QA_IKONY={
+  doklad:`<path d="M3 8.5h3.2l1.4-2.2h6.8l1.4 2.2H19a1.5 1.5 0 0 1 1.5 1.5v7a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 17v-7A1.5 1.5 0 0 1 5 8.5Z"/><circle cx="11" cy="13" r="3.1"/>`,
+  jazda:`<path d="M11 21s6.2-6.1 6.2-10.2A6.2 6.2 0 0 0 4.8 10.8C4.8 14.9 11 21 11 21Z"/><circle cx="11" cy="10.6" r="2.3"/>`,
+  faktura:`<path d="M6 3.5h6.5L17.5 8.5V19a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 19V5A1.5 1.5 0 0 1 6 3.5Z"/><path d="M12.5 3.5v5h5"/><path d="M8 13h6M8 16.5h4"/>`
+};
+function rychleAkcieHtml(){
+  const A=[
+    {k:"doklad",  n:"Doklad",           akcia:"rychlyDoklad(this)", modul:"vydavky"},
+    {k:"jazda",   n:"Spustiť jazdu",    akcia:"jazdaSpusti()",      modul:"jazdy",
+     skryZaPlanom:true},
+    {k:"faktura", n:"Vytvoriť faktúru", akcia:"editFaktura()",      modul:"faktury"}
+  ].filter(a=>!a.skryZaPlanom || modulPovolenyPreModul(a.modul));
+  if(!A.length) return "";
+  return `<div class="qaRad">` + A.map(a=>
+    `<button class="qaIt" onclick="${a.akcia}"${zam(a.modul)}>
+       <span class="qaSt" style="background:var(--qa-${a.k})">
+         <svg viewBox="0 0 22 24" width="19" height="19" fill="none" stroke="var(--qa-${a.k}-ink)"
+              stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${QA_IKONY[a.k]}</svg></span>
+       <span class="qaN">${a.n}</span></button>`).join("") + `</div>`;
+}
+function renderRychleAkcie(){
+  const el=document.getElementById("rychleAkcie");
+  if(el) el.innerHTML=firmaData ? rychleAkcieHtml() : "";
+}
 function renderLauncher(){
   const el=document.getElementById("launcher");
   const d=firmaData||{};
