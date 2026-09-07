@@ -234,8 +234,6 @@ button,input,select,textarea{font-variant-numeric:inherit}
 .topbar .sp{flex:1}
 /* Prepínač firiem je pri jednej firme skrytý, pri viacerých potrebuje šírku —
    ale na úzkom displeji nesmie vytlačiť tlačidlá z lišty. */
-.tbFirma{width:auto;max-width:170px;padding:0 8px;font-size:12.5px}
-@media(max-width:520px){ .tbFirma{max-width:104px} }
 .syncchip{font-size:12px;color:var(--pos);font-weight:600;display:flex;align-items:center;gap:6px}
 .syncchip.saving{color:var(--warn)}
 .syncchip.offline{color:var(--ink-soft)}
@@ -259,6 +257,16 @@ button,input,select,textarea{font-variant-numeric:inherit}
 .hello h1{font-family:var(--serif);font-weight:600;font-size:clamp(24px,4vw,30px);letter-spacing:-.01em}
 .hello h1 i{font-style:normal;color:var(--brand)}
 .hello p{color:var(--ink-soft);font-size:14px;margin-top:4px}
+/* Riadok identity. Názov firmy je pri jednej firme len text; pri dvoch a viac
+   je to tlačidlo s ▾. Farbou `--ink` (nie `--ink-soft`), lebo je to údaj, nie
+   popiska — v oboch témach nad 4,5. Cieľ má 44 px zápornými marginmi, takže
+   riadok neporastie. */
+.idFirma{color:var(--ink);font-weight:600;font-size:14px}
+button.idPrep{background:none;border:0;font-family:inherit;cursor:pointer;
+  display:inline-flex;align-items:center;gap:5px;text-align:left;
+  margin:-13px -8px;padding:13px 8px;max-width:100%}
+button.idPrep span{color:var(--ink-soft);font-size:12px}
+button.idPrep:hover{color:var(--brand)}
 
 /* placeholder dashboard */
 .ph{background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);padding:40px;text-align:center;color:var(--ink-soft)}
@@ -1237,7 +1245,10 @@ html[data-jazda] .jazdapruh{display:flex}
       <b>e<i>živnostník</i></b>
     </div>
     <div class="sp"></div>
-    <select id="firmaPrepinac" class="usermenu tbFirma" style="display:none" onchange="prepniFirmu(this.value)" title="Prepnúť firmu"></select>
+    <!-- Prepínač firmy tu bol `<select>`, ktorý sa na 390 px zmestil do 36 px,
+         kým názov firmy potreboval 271 px — človek nevidel, v ktorej firme je
+         (merané 7. 9. 2026). Presunutý do riadku identity na ploche, kde má
+         celú šírku; z iných obrazoviek cezeň vedie položka v účtovom menu (kap. 90.5/1). -->
     <div class="syncchip" id="syncChip" onclick="syncInfo()" title="Stav ukladania do cloudu (klepnite pre detail)" style="cursor:pointer">✓ uložené</div>
     <button class="usermenu" id="quickDoklad" onclick="rychlyDoklad(this)" title="Načítať doklad (foto alebo PDF)">📷</button>
     <!-- Jazda sa spúšťa pri nastupovaní do auta, nie pri prezeraní knihy jázd.
@@ -1285,6 +1296,10 @@ html[data-jazda] .jazdapruh{display:flex}
     <div id="homeView">
       <div class="hello">
         <h1>Dobrý deň<span id="helloName"></span>.</h1>
+        <!-- Riadok identity. Do KV tu stála veta „Vaša kancelária je
+             pripravená.“ — výplň, ktorá nepovedala nič. Teraz je na jej mieste
+             názov firmy; pri dvoch a viac firmách je to zároveň prepínač.
+             Keď firma názov nemá, vráti sa pôvodná veta, aby riadok nezel. -->
         <p id="helloSub">Vaša kancelária je pripravená.</p>
       </div>
 
@@ -1388,7 +1403,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.07-KU";  // počiatočný zostatok výpisu je tiež kotva; opakovaný import záznam aktualizuje
+const APP_VERZIA = "2026.09.07-KV";  // počiatočný zostatok výpisu je tiež kotva; opakovaný import záznam aktualizuje
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -2442,11 +2457,40 @@ async function spracujPozvanku(){
   }catch(e){ alert("Pozvánku sa nepodarilo prijať: "+e.message); return false; }
 }
 
+// Riadok identity na ploche. Meranie 7. 9. 2026 na 375 px: prepínač firiem bol
+// `<select>` v hornej lište široký 36 px, kým názov firmy potreboval 271 px —
+// človek s dvoma firmami nevidel, v ktorej práve je. Názov firmy sa pritom na
+// ploche nenachádzal vôbec; namiesto neho tam stála výplňová veta.
+//
+// Prepnutie firmy musí ostať dosiahnuteľné aj mimo plochy (predtým bolo v lište,
+// teda všade) — preto je druhým vchodom položka v ⚙ menu. Obidva vchody
+// otvárajú to isté menu a zapisuje jediná funkcia `prepniFirmu`.
+function firmaNazovAktualnej(){
+  const f=firmyZoznam.find(x=>x.id===firmaId);
+  return (f && f.nazov) || ((firmaData&&firmaData.meta&&firmaData.meta.nazov)||"");
+}
 function vykresliPrepinacFiriem(){
-  const el=document.getElementById("firmaPrepinac"); if(!el) return;
-  if(firmyZoznam.length<2){ el.style.display="none"; return; }
-  el.innerHTML=firmyZoznam.map(f=>`<option value="${f.id}" ${f.id===firmaId?'selected':''}>${esc(f.nazov||"Bez názvu")}</option>`).join("");
-  el.style.display="";
+  const el=document.getElementById("helloSub"); if(!el) return;
+  const nazov=firmaNazovAktualnej();
+  if(!nazov){ el.textContent="Vaša kancelária je pripravená."; return; }
+  el.innerHTML = firmyZoznam.length<2
+    ? `<span class="idFirma">${esc(nazov)}</span>`
+    : `<button class="idFirma idPrep" onclick="otvorFirmaMenu(this)" title="Prepnúť firmu">${esc(nazov)} <span aria-hidden="true">▾</span></button>`;
+}
+// Jedno menu, dva vchody: riadok identity na ploche a ⚙ z ktorejkoľvek
+// obrazovky. Pozicovanie rieši `tbMenu` — druhá kópia by sa na 390 px rozišla.
+function otvorFirmaMenu(btn){
+  if(firmyZoznam.length<2) return;
+  tbMenu("firmaMenu", btn, `
+    <div style="padding:11px 15px;border-bottom:1px solid var(--line)">
+      <div style="font-size:11px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.04em">Firma</div>
+    </div>`
+    + firmyZoznam.map(f=>`<button onclick="firmaVyber('${esc(f.id)}')" style="${TB_POLOZKA}">${f.id===firmaId?"● ":"○ "}${esc(f.nazov||"Bez názvu")}</button>`).join(TB_CIARA),
+    250);
+}
+function firmaVyber(id){
+  const m=document.getElementById("firmaMenu"); if(m) m.remove();
+  prepniFirmu(id);
 }
 
 async function prepniFirmu(id){
@@ -2594,6 +2638,10 @@ function zobrazFirmu(){
   renderNotifBadge();
   nastavTlacidloJazdy();
   renderPasSumy();
+  // Riadok identity sa kreslí tu, nie len v `nacitajFirmu` — inak by sa
+  // v demo režime a po importe nevykreslil vôbec a človek s jednou firmou
+  // by na ploche nevidel, čie dáta pozerá.
+  vykresliPrepinacFiriem();
   renderHero();
   vykresliDashboard();
   renderLauncher();
@@ -25417,6 +25465,7 @@ function otvorUctoMenu(btn){
       <div style="font-size:13px;font-weight:600;margin-top:2px" id="uctoEmail">${esc(_uctoEmail||"prihlásený")}</div>
       <div style="font-size:11.5px;color:var(--ink-soft);margin-top:3px">${esc(stav)}</div>
     </div>
+    ${firmyZoznam.length>1?`<button onclick="uctoVyber('firma')" style="${TB_POLOZKA}">↔ Prepnúť firmu<div style="font-size:11.5px;color:var(--ink-soft);margin-top:2px">${esc(firmaNazovAktualnej()||"—")}</div></button>${TB_CIARA}`:""}
     <button onclick="uctoVyber('tema')" style="${TB_POLOZKA}">${jeTmavy()?"☀ Svetlý režim":"🌙 Tmavý režim"}</button>
     ${TB_CIARA}
     <button onclick="uctoVyber('zakryte')" style="${TB_POLOZKA}">${jeZakryte()?"◉ Odkryť čísla":"◎ Zakryť čísla"}</button>
@@ -25439,6 +25488,9 @@ function otvorUctoMenu(btn){
 let _uctoEmail="";
 function uctoVyber(co){
   const m=document.getElementById("uctoMenu"); if(m) m.remove();
+  // Vchod do prepínania firmy z ktorejkoľvek obrazovky — riadok identity je
+  // len na ploche a v module by človek bez tohto firmu prepnúť nevedel.
+  if(co==="firma"){ otvorFirmaMenu(document.getElementById("userMenu")); return; }
   if(co==="tema"){ prepniTemu(); return; }
   if(co==="zakryte"){ prepniZakrytie(); return; }
   if(co==="nastavenia") otvorApp("data");
