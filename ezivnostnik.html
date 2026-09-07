@@ -130,8 +130,11 @@
   /* Výška spodnej lišty. Jedno číslo pre odsadenie obsahu aj pre výšku
      panelov splitu — dve by sa rozišli a rozišli sa hneď (krok 8). */
   --lista-v:53px;
-  /* Výška hornej lišty. Lepiaci pás rýchlych akcií sa o ňu opiera; dve
-     čísla pre jednu vec sa už raz rozišli (krok 8), preto token. */
+  /* Výška hornej lišty. Lepiaci pás rýchlych akcií sa o ňu opiera.
+     Táto hodnota je len ZÁLOHA, kým sa nespustí JS — skutočnú výšku zmeria
+     `nastavVyskuListy()`. Napísaná natvrdo bola 59, nameraná je 58,8 a tie
+     dve desatiny stačili na to, aby pás pri rolovaní poskakoval o pixel:
+     prehliadač zaokrúhľuje podpixely pri každom posune inak. */
   --topbar-v:59px;
   --radius:16px;--shadow:0 1px 0 rgba(19,28,43,.04),0 14px 34px -16px rgba(19,28,43,.30);
 }
@@ -1378,12 +1381,11 @@ html[data-jazda] .jazdapruh{display:flex}
          (merané 7. 9. 2026). Presunutý do riadku identity na ploche, kde má
          celú šírku; z iných obrazoviek cezeň vedie položka v účtovom menu (kap. 90.5/1). -->
     <div class="syncchip" id="syncChip" onclick="syncInfo()" title="Stav ukladania do cloudu (klepnite pre detail)" style="cursor:pointer">✓ uložené</div>
-    <button class="usermenu" id="quickDoklad" onclick="rychlyDoklad(this)" title="Načítať doklad (foto alebo PDF)">📷</button>
-    <!-- Jazda sa spúšťa pri nastupovaní do auta, nie pri prezeraní knihy jázd.
-         Preto je to v lište vedľa fotenia dokladu — dve klepnutia navyše cez
-         menu znamenajú, že sa človek nespustí a km si potom vymyslí.
-         Keď jazda beží, tlačidlo otvára jej panel (rieši `jazdaSpusti`). -->
-    <button class="usermenu" id="quickJazda" onclick="jazdaSpusti()" title="Zaznamenať jazdu do knihy jázd">📍</button>
+    <!-- 📷 a 📍 tu boli, kým nebolo kam inam. Odišli do lepiaceho pásu rýchlych
+         akcií na ploche (návrh §5.1): ten je na domovskej obrazovke stále pod
+         hornou lištou, takže „jedno klepnutie, keď nastupujem do auta" platí
+         ďalej. Hlavička je identita a stav — nie práca. -->
+
     <button class="usermenu notifbtn" id="notifBtn" onclick="otvorNotifikacie()" title="Notifikácie">🔔<span id="notifBadge" class="notifbadge" style="display:none">0</span></button>
     <!-- Zapnúť sa to musí jedným klepnutím, práve keď ľudia vchádzajú do
          miestnosti — nie tromi cez menu. Preto ikona v lište, nie iba položka
@@ -1546,7 +1548,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.07-LF";  // počiatočný zostatok výpisu je tiež kotva; opakovaný import záznam aktualizuje
+const APP_VERZIA = "2026.09.07-LG";  // počiatočný zostatok výpisu je tiež kotva; opakovaný import záznam aktualizuje
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -2823,7 +2825,7 @@ function spustiSkratku(){
     if(typeof jazdaSpusti==="function") setTimeout(jazdaSpusti, 60);
     return;
   }
-  const btn=document.getElementById("quickDoklad");
+  const btn=document.querySelector(".qaIt");
   if(typeof rychlyDoklad==="function") setTimeout(()=>rychlyDoklad(btn), 60);
 }
 
@@ -6391,7 +6393,8 @@ const QA_IKONY={
 function rychleAkcieHtml(){
   const A=[
     {k:"doklad",  n:"Doklad",           akcia:"rychlyDoklad(this)", modul:"vydavky"},
-    {k:"jazda",   n:"Spustiť jazdu",    akcia:"jazdaSpusti()",      modul:"jazdy",
+    {k:"jazda",   n:(typeof _jazda!=="undefined" && _jazda) ? "Prebieha jazda" : "Spustiť jazdu",
+     akcia:"jazdaSpusti()", modul:"jazdy",
      skryZaPlanom:true},
     {k:"faktura", n:"Vytvoriť faktúru", akcia:"editFaktura()",      modul:"faktury"}
   ].filter(a=>!a.skryZaPlanom || modulPovolenyPreModul(a.modul));
@@ -6406,7 +6409,20 @@ function rychleAkcieHtml(){
 function renderRychleAkcie(){
   const el=document.getElementById("rychleAkcie");
   if(el) el.innerHTML=firmaData ? rychleAkcieHtml() : "";
+  nastavVyskuListy();
 }
+// Lepiaci pás sa opiera o výšku hornej lišty. Napísaná natvrdo (59 px) sa
+// líšila od nameranej (58,8 px) a pás pri rolovaní poskakoval o pixel —
+// prehliadač zaokrúhľuje podpixely pri každom posune inak. Meria sa teda,
+// nehádá: výška sa mení aj s textom loga, ktorý na úzkom displeji ustúpi.
+function nastavVyskuListy(){
+  const tb=document.querySelector(".topbar"); if(!tb) return;
+  const v=tb.getBoundingClientRect().height;
+  if(v>0) document.documentElement.style.setProperty("--topbar-v", v+"px");
+}
+// `setTimeout`, nie `requestAnimationFrame` — v neaktívnej karte rAF nebeží
+// a pás by ostal opretý o zálohu (48.6e).
+window.addEventListener("resize", ()=>setTimeout(nastavVyskuListy, 0));
 function renderLauncher(){
   const el=document.getElementById("launcher");
   const d=firmaData||{};
@@ -14222,8 +14238,10 @@ function gpsChyba(e){
 // Nestačí to samo o sebe: `jazdaSpusti` kontroluje plán aj tak, lebo vstupov
 // je viac (skratka na ploche, kniha jázd) a schované tlačidlo nie je obrana.
 function nastavTlacidloJazdy(){
-  const b=document.getElementById("quickJazda"); if(!b) return;
-  b.style.display = modulPovolenyPreModul("jazdy") ? "" : "none";
+  // Tlačidlo 📍 v lište zaniklo; jazdu ponúka lepiaci pás rýchlych akcií,
+  // ktorý si plán filtruje sám pri vykreslení. Funkcia ostáva ako jediné
+  // miesto, kde sa viditeľnosť jazdy rieši — volá sa z `zobrazFirmu`.
+  renderRychleAkcie();
 }
 
 function jazdaSpusti(){
@@ -14354,7 +14372,11 @@ function jazdaPanel(){
 }
 function jazdaZahod(){
   if(!_jazda) return;
-  if(!confirm("Zahodiť jazdu?\n\nNameraných "+jazdaKm()+" km sa neuloží a nedá sa to vrátiť.")) return;
+  // Pri omylom spustenej jazde je nameraných 0,0 km a veta „nedá sa to vrátiť"
+  // znie hrozivejšie, než čo sa naozaj deje. Pýtať sa treba úmerne k tomu,
+  // čo sa stratí.
+  const km=parseFloat(String(jazdaKm()).replace(",","."))||0;
+  if(km>=0.1 && !confirm("Zahodiť jazdu?\n\nNameraných "+jazdaKm()+" km sa neuloží a nedá sa to vrátiť.")) return;
   gpsZdroj.stop(); jazdaUvolniLock();
   if(_jazdaTik){ clearInterval(_jazdaTik); _jazdaTik=null; }
   jazdaZmazStav(); closeModal();
@@ -14643,6 +14665,10 @@ function jazdaZaver(){
         <input type="checkbox" id="m_sukromna" style="width:auto"><b>Súkromná jazda</b></label>
       <div style="font-size:11.5px;color:var(--ink-soft);margin-top:5px;line-height:1.5">
         Zaškrtnite pri ceste, ktorá s podnikaním nesúvisí. Kilometre ostanú v knihe, len sa neuplatnia.</div>
+    </div>
+    <div style="text-align:center;margin-top:14px;padding-top:12px;border-top:1px solid var(--line-soft)">
+      <button type="button" class="aabtn" style="font-size:12px;color:var(--neg)" onclick="jazdaZahod()">Zahodiť jazdu</button>
+      <div style="font-size:11px;color:var(--ink-soft);margin-top:6px">Omylom spustená jazda — nič sa nezapíše.</div>
     </div>`,
   ()=>{
     if(!strazZapis("jazdy")) return false;
@@ -25876,7 +25902,7 @@ function rychlyDoklad(zdroj){
   // sa pozicuje podľa toho, čo ho naozaj otvorilo — nie natvrdo do rohu.
   const btn = zdroj
     || (typeof event!=="undefined" && event && (event.currentTarget||event.target))
-    || document.getElementById("quickDoklad");
+    || document.querySelector(".qaIt");   // prvá rýchla akcia — 📷 v lište už nie je
   const cak=(typeof cakajuceNove==="function" && cakajuceNove()) || 0;
   tbMenu("rdMenu", btn, `
     <button onclick="rdVyber('foto')" style="${TB_POLOZKA}">📷 Odfotiť bloček / doklad</button>
