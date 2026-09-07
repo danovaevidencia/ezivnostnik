@@ -1388,7 +1388,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.07-KT";  // počiatočný zostatok výpisu je tiež kotva; opakovaný import záznam aktualizuje
+const APP_VERZIA = "2026.09.07-KU";  // počiatočný zostatok výpisu je tiež kotva; opakovaný import záznam aktualizuje
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -4436,7 +4436,10 @@ function renderWidget(wkey){
   const metrika=kat.metriky.find(m=>m.k===mkey)||kat.metriky[0];
   const viacero=kat.metriky.length>1;
   const aktIdx=kat.metriky.findIndex(m=>m.k===mkey);
-  const prepinac=viacero?`<span class="wdots" onclick="event.stopPropagation();dashPrepniMetriku('${wkey}')" title="${esc(metrika.l)} · ťuknite pre ďalšiu metriku" style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin-left:6px">${kat.metriky.map((m,i)=>`<i style="width:6px;height:6px;border-radius:50%;background:${i===aktIdx?'var(--brand)':'var(--line)'};display:inline-block;transition:background .2s"></i>`).join("")}</span>`:"";
+  // Bodky sú 6 px vysoké a sedia vnútri dlaždice, ktorá celá otvára appku —
+  // netrafený ťuk teda neurobí nič, ale ODNAVIGUJE. Vizuál zostáva, hitbox
+  // rastie zápornými marginmi na ~44 px, čo nestojí ani pixel rozloženia.
+  const prepinac=viacero?`<span class="wdots" onclick="event.stopPropagation();dashPrepniMetriku('${wkey}')" title="${esc(metrika.l)} · ťuknite pre ďalšiu metriku" style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin:-14px -8px -14px 0;padding:14px 8px 14px 6px">${kat.metriky.map((m,i)=>`<i style="width:6px;height:6px;border-radius:50%;background:${i===aktIdx?'var(--brand)':'var(--line)'};display:inline-block;transition:background .2s"></i>`).join("")}</span>`:"";
   // ovládanie priamo v dlaždici: ⋮ menu (prepni metriku, skry)
   const ovladanie=`<span class="wmenu" onclick="event.stopPropagation();dashTileMenu('${wkey}',event)" title="Možnosti dlaždice" style="cursor:pointer;color:var(--ink-soft);font-size:16px;padding:0 2px;line-height:1;user-select:none">⋮</span>`;
   let telo="";
@@ -4453,15 +4456,21 @@ function renderWidget(wkey){
     const vedlajsie=(r.vedlajsie&&r.vedlajsie.length)?`<div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid var(--line-soft)">${r.vedlajsie.map(x=>`<div><div style="font-size:15px;font-weight:700;color:${x.cls?'var(--'+x.cls+')':'var(--ink)'}">${x.v}</div><div style="font-size:10.5px;color:var(--ink-soft)">${x.l}</div></div>`).join("")}</div>`:"";
     telo=`<div class="wbig ${r.cls||''}">${r.v}</div><div class="wmeta">${r.m||''}</div>${vedlajsie}`;
   }
-  // v režime úprav: len tlačidlo skryť (celá dlaždica je úchyt, telo skryté)
+  // v režime úprav: skryť (×). Ťahá sa za úchyt vľavo, nie za celú dlaždicu —
+  // inak sa dashboard nedá posunúť bez toho, aby sa dlaždice preusporiadali.
   const editControls=dashEditMode
     ? `<span class="whide" onclick="event.stopPropagation();dashToggleWidget('${wkey}')" title="Skryť dlaždicu" style="cursor:pointer;color:var(--neg);font-size:18px;font-weight:700;line-height:1;padding:0 4px">×</span>`
     : ovladanie;
+  // Úchyt existoval v kóde (`querySelector(".wdrag")`), ale nikdy sa nevykreslil —
+  // fallback `||tile` teda vždy vyhral a ťahala sa celá dlaždica. Tu vzniká.
+  const uchyt=dashEditMode
+    ? `<span class="wdrag" title="Potiahnutím zmeníte poradie" style="cursor:grab;color:var(--ink-soft);font-size:15px;line-height:1;margin:-12px 0 -12px -10px;padding:12px 6px 12px 10px;touch-action:none;user-select:none">⠿</span>`
+    : "";
   // signál, že dlaždica je vstup do appky (jemná šípka)
   const vstupSipka = (!dashEditMode && WIDGET_APP_MAP[wkey]) ? `<span class="wenter" style="color:var(--line);font-size:15px;margin-left:4px;transition:color .2s">›</span>` : "";
   return `<div class="w ${kat.velkost} ${dashEditMode?'wediting':''}" data-wkey="${wkey}" data-app="${kat.app||wkey}" draggable="${dashEditMode?'true':'false'}">
-    <div class="wl" style="display:flex;align-items:center;gap:6px">${kat.ic} ${kat.nazov}${dashEditMode?'':prepinac}<span style="margin-left:auto;display:flex;align-items:center;gap:6px">${dashEditMode?'':vstupSipka}${editControls}</span></div>
-    ${dashEditMode?'':(viacero?`<div style="font-size:10.5px;color:var(--ink-soft);margin:-2px 0 6px">${esc(metrika.l)}</div>`:'')}
+    <div class="wl" style="display:flex;align-items:center;gap:6px">${uchyt}${kat.ic} ${kat.nazov}${dashEditMode?'':prepinac}<span style="margin-left:auto;display:flex;align-items:center;gap:6px">${dashEditMode?'':vstupSipka}${editControls}</span></div>
+    ${dashEditMode?'':(viacero?`<div class="wdots" onclick="event.stopPropagation();dashPrepniMetriku('${wkey}')" title="Ťuknite pre ďalšiu metriku" style="font-size:10.5px;color:var(--ink-soft);margin:-2px 0 2px;padding:4px 0 8px;cursor:pointer">${esc(metrika.l)} ↻</div>`:'')}
     ${dashEditMode?'':telo}
   </div>`;
 }
@@ -5447,7 +5456,18 @@ function vykresliDashboard(){
   }
 }
 
-// HTML5 drag & drop + touch presúvanie dlaždíc
+// ═══ PRESÚVANIE DLAŽDÍC ═══
+//
+// Meranie 7. 9. 2026 na 375 px našlo tri veci naraz:
+//   • ťahalo sa za CELÚ dlaždicu, takže v režime úprav sa dashboard nedal
+//     posunúť — pokus o scroll preusporiadal dlaždice;
+//   • jeden ťah presunul dlaždicu len o jedno miesto (dragEl sa nuloval
+//     a prekreslenie uprostred gesta odpojilo pôvodný cieľ udalostí);
+//   • touchmove bol pasívny, takže stránka sa posúvala pod prstom.
+//
+// Preto sa počas gesta NEPREKRESĽUJE: dlaždice sa presúvajú v DOM
+// (insertBefore) a poradie sa zapíše až po pustení prsta.
+
 let _dragWkey=null;
 function nastavDragDrop(dash){
   const tiles=[...dash.querySelectorAll(".w[data-wkey]")];
@@ -5455,42 +5475,75 @@ function nastavDragDrop(dash){
     tile.addEventListener("dragstart", e=>{ _dragWkey=tile.dataset.wkey; tile.style.opacity=".4"; e.dataTransfer.effectAllowed="move"; });
     tile.addEventListener("dragend", e=>{ tile.style.opacity=""; _dragWkey=null; });
     tile.addEventListener("dragover", e=>{ e.preventDefault(); e.dataTransfer.dropEffect="move"; });
-    tile.addEventListener("drop", e=>{ e.preventDefault(); const cieĺ=tile.dataset.wkey; if(_dragWkey && cieĺ && _dragWkey!==cieĺ) dashPresun(_dragWkey, cieĺ); });
+    tile.addEventListener("drop", e=>{ e.preventDefault(); const ciel=tile.dataset.wkey; if(_dragWkey && ciel && _dragWkey!==ciel) dashPresun(_dragWkey, ciel); });
   });
-  // touch (mobil): dlhé podržanie + ťah
   nastavTouchDrag(dash, tiles);
 }
-function dashPresun(zWkey, naWkey){
+
+// JEDINÝ zapisovač poradia. Berie poradie VIDITEĽNÝCH dlaždíc; skryté
+// (mimo katalógu alebo mimo plánu) ostávajú na svojich indexoch, inak by sa
+// človeku po zmene plánu rozhádzalo rozloženie, ktorého sa ani nedotkol.
+// Zmluva: preusporiada PRESNE tie položky, ktorých kľúče prišli, a ostatných
+// sa nedotkne. Kľúč, ktorý v konfigurácii nie je, sa do nej nedostane — mapa
+// ide po `cfg.widgety`, nie po vstupe. Poistka na počet tu bola, ale nemala
+// pozorovateľný účinok (`dashToggleWidget` duplicity nepripúšťa, takže `k`
+// dĺžku vstupu nikdy nepresiahne) — a mŕtva poistka je horšia než žiadna,
+// lebo vyzerá ako ochrana. Stráži to test, nie `if`.
+function dashUlozPoradie(viditelneVPoradi){
   const cfg=dashKonfig();
-  const arr=cfg.widgety.slice();
-  const zi=arr.indexOf(zWkey), ni=arr.indexOf(naWkey);
-  if(zi<0||ni<0) return;
-  arr.splice(zi,1);
-  arr.splice(arr.indexOf(naWkey) + (ni>zi?1:0), 0, zWkey);
+  const jeViditelna=new Set(viditelneVPoradi);
+  let k=0;
+  const arr=cfg.widgety.map(w=>jeViditelna.has(w) ? viditelneVPoradi[k++] : w);
   cfg.widgety=arr;
   firmaDirty=true; ulozNastavenieDebounced();
   vykresliDashboard();
 }
+
+// Presun jednej dlaždice na miesto druhej (desktop drop aj klávesnica).
+function dashPresun(zWkey, naWkey){
+  const vid=dashViditelneKluce();
+  const zi=vid.indexOf(zWkey), ni=vid.indexOf(naWkey);
+  if(zi<0||ni<0||zi===ni) return;
+  vid.splice(zi,1);
+  vid.splice(vid.indexOf(naWkey) + (ni>zi?1:0), 0, zWkey);
+  dashUlozPoradie(vid);
+}
+function dashViditelneKluce(){
+  const cfg=dashKonfig(), kat=dashWidgetKatalog();
+  return cfg.widgety.filter(w=>kat[w] && dashWidgetPovoleny(w));
+}
+
 function nastavTouchDrag(dash, tiles){
-  let dragEl=null, placeholder=null;
+  let dragEl=null;
   tiles.forEach(tile=>{
-    const handle=tile.querySelector(".wdrag")||tile;
+    const handle=tile.querySelector(".wdrag");
+    if(!handle) return;          // bez úchytu sa neťahá — dashboard sa musí dať posunúť
     handle.addEventListener("touchstart", e=>{
       dragEl=tile; tile.style.opacity=".5";
-    }, {passive:true});
+      e.preventDefault();        // gesto patrí ťahaniu, nie posunu stránky
+    }, {passive:false});
   });
   dash.addEventListener("touchmove", e=>{
     if(!dragEl) return;
+    e.preventDefault();          // bez toho sa stránka posúva pod prstom
     const t=e.touches[0];
     const pod=document.elementFromPoint(t.clientX, t.clientY);
-    const cieĺTile=pod&&pod.closest(".w[data-wkey]");
-    if(cieĺTile && cieĺTile!==dragEl){
-      const cieĺ=cieĺTile.dataset.wkey, zdroj=dragEl.dataset.wkey;
-      if(cieĺ&&zdroj&&cieĺ!==zdroj){ dashPresun(zdroj, cieĺ); dragEl=null; }
-    }
-  }, {passive:true});
-  dash.addEventListener("touchend", ()=>{ if(dragEl){ dragEl.style.opacity=""; dragEl=null; } }, {passive:true});
+    const cielTile=pod&&pod.closest(".w[data-wkey]");
+    if(!cielTile || cielTile===dragEl || cielTile.parentNode!==dash) return;
+    // presuň v DOM, nie v dátach — gesto tým prežije a môže ísť ďalej
+    const dole=cielTile.compareDocumentPosition(dragEl) & Node.DOCUMENT_POSITION_PRECEDING;
+    dash.insertBefore(dragEl, dole ? cielTile.nextSibling : cielTile);
+  }, {passive:false});
+  const pusti=()=>{
+    if(!dragEl) return;
+    dragEl.style.opacity="";
+    dragEl=null;
+    dashUlozPoradie([...dash.querySelectorAll(".w[data-wkey]")].map(x=>x.dataset.wkey));
+  };
+  dash.addEventListener("touchend", pusti, {passive:true});
+  dash.addEventListener("touchcancel", pusti, {passive:true});
 }
+
 
 // dialóg konfigurácie dashboardu — výber dlaždíc
 function dashKonfigDialog(){
