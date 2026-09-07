@@ -101,6 +101,9 @@
      Kontrast textu na podklade je overený v test_tema.js, obe témy. */
   --sfc-warn:#fdf6ec;--sfc-pos:#eef7f0;--sfc-info:#eef4fb;--sfc-neg:#fbe7ec;
   --ink-warn:#8a5a18;--ink-pos:#1f7a52;--ink-neg:#a03050;--ink-info:#2b5c96;
+  /* Obálky: na čo sa fakturovaná suma rozpadne. Tri tlmené odtiene, nie
+     stavové farby — nič tu nie je dobré ani zlé, je to rozdelenie. */
+  --ob-tvoje:#5c9c80;--ob-dph:#8d7ec0;--ob-odvody:#c99a5e;
   --line-soft:#e6ecf4;
   /* Horná lišta je priesvitná (backdrop-filter), takže potrebuje rgba, nie
      hex — inak sa rozmazanie pod ňou nemá cez čo prejaviť. */
@@ -124,6 +127,7 @@
   --topbar:rgba(21,26,33,.92);
   --sfc-warn:#2a2318;--sfc-pos:#16281f;--sfc-info:#172433;--sfc-neg:#2b1a1f;
   --ink-warn:#e0b878;--ink-pos:#6cc79a;--ink-neg:#f09090;--ink-info:#8ab4e0;
+  --ob-tvoje:#6fb894;--ob-dph:#a394d8;--ob-odvody:#d9ab6e;
   --shadow:0 1px 0 rgba(0,0,0,.30),0 14px 34px -16px rgba(0,0,0,.70);
 }
 /* Obrázky a mapy v tmavom režime svietia — stlmíme ich, kým na ne používateľ
@@ -499,6 +503,30 @@ h1,h2,h3,h4,.chead,.wbig,.sbox .sn,.sp-title b,.splittitle{text-wrap:balance}
 @media(min-width:700px){ .grptiles{grid-template-columns:repeat(3,1fr)} }
 
 /* ═══ FÁZA 2: hybridný prehľad — hero + akcie ═══ */
+/* PÁS SO SUMAMI (kap. 90.7 krok 1) — na čo sa fakturovaná suma rozpadne.
+   Plochý biely pás, nie farebná dlaždica: v teste dizajnu modrá plocha
+   „príliš kričala“ a hero nad ňou je modré už teraz. */
+.pasSumy{background:var(--paper);border:1px solid var(--line);border-radius:13px;
+  padding:12px 14px 13px;margin-bottom:10px}
+.pasSumy-hlav{display:flex;align-items:center;gap:8px;margin-bottom:5px}
+.pasSumy-lbl{font-weight:600;font-size:10px;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--ink-soft)}
+/* Výška podľa `.aabtn` (37 px), nie podľa 44 px z návrhu: appka nemá 44 px
+   nikde a jeden nový prvok o sedem pixelov vyšší než všetky ostatné by bol
+   nekonzistentný. Terče sú vec, ktorá sa rieši naraz, nie po jednom. */
+.pasSumy-mes{margin-left:auto;border:1px solid var(--line);border-radius:999px;
+  background:var(--bg);color:var(--brand-deep);font:600 11.5px/1 inherit;padding:10px 12px;
+  font-family:inherit;cursor:pointer;min-height:37px}
+.pasSumy-suma{display:flex;align-items:baseline;gap:8px}
+.pasSumy-cislo{font-family:var(--serif);font-weight:600;font-size:26px;color:var(--ink)}
+.pasSumy-zmena{font-weight:600;font-size:11px}
+.pasSumy-bar{display:flex;height:4px;border-radius:999px;overflow:hidden;background:var(--bg);
+  max-width:210px;margin:7px 0 5px}
+.pasSumy-bar i{display:block;height:100%}
+.pasSumy-rozpad{font-size:10.5px;color:var(--ink-soft);line-height:1.45}
+.pasSumy-rozpad b{font-weight:600;color:var(--ink)}
+.pasSumy-teg{display:inline-block;width:7px;height:7px;border-radius:2px;margin-right:4px;
+  vertical-align:baseline}
 .hero{background:linear-gradient(140deg,#1f5fa8,#164883);color:#fff;border-radius:18px;padding:18px;margin-bottom:10px;box-shadow:0 8px 24px -12px rgba(31,95,168,.5);cursor:pointer;transition:.16s}
 .hero:hover{transform:translateY(-2px);box-shadow:0 12px 30px -12px rgba(31,95,168,.6)}
 .hero-lbl{font-size:12px;opacity:.85}
@@ -1260,6 +1288,7 @@ html[data-jazda] .jazdapruh{display:flex}
       <!-- dashboard: dáta a štatistiky pod navigáciou -->
       <div id="dashTitle" class="dashtitle hidden" style="margin-top:24px">Váš prehľad</div>
       <!-- FÁZA 2: pevná časť prehľadu (hero + akcie) -->
+      <div id="pasSumy"></div>
       <div id="heroFixed"></div>
       <div id="dashEditBar" class="dasheditbar"></div>
       <div class="dash hidden" id="dashboard"></div>
@@ -1341,7 +1370,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.07-KQ";  // počiatočný zostatok výpisu je tiež kotva; opakovaný import záznam aktualizuje
+const APP_VERZIA = "2026.09.07-KR";  // počiatočný zostatok výpisu je tiež kotva; opakovaný import záznam aktualizuje
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -2546,6 +2575,7 @@ function zobrazFirmu(){
   renderHomeStrip();
   renderNotifBadge();
   nastavTlacidloJazdy();
+  renderPasSumy();
   renderHero();
   vykresliDashboard();
   renderLauncher();
@@ -2883,7 +2913,8 @@ function danZoZakladu(zaklad, rok, prijmy, S){
 //  pre bežný rok sa oproti starému výpočtu nič nemení.
 // ═══════════════════════════════════════════════════════════════
 let firmaDataVerzia=0;
-let nastRezimRok=null;      // ktorý rok sa práve nastavuje v Nastaveniach   // rastie pri každej zmene dát (poZmene) — kľúč cache
+let nastRezimRok=null;      // ktorý rok sa práve nastavuje v Nastaveniach
+let pasMesiac=null;         // mesiac zobrazený v páse so sumami   // rastie pri každej zmene dát (poZmene) — kľúč cache
 // Register sprievodcov zostavou (kap. 88.9). Musí byť TU, nie pri komponente:
 // jednotlivé zostavy sa doň registrujú na úrovni skriptu a niektoré z nich
 // stoja v súbore vyššie než komponent — deklarácia nižšie by znamenala
@@ -5088,6 +5119,93 @@ function renderHomeStrip(){
   host.innerHTML = html;
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  PÁS SO SUMAMI — na čo sa fakturovaná suma rozpadne (kap. 90.7, krok 1)
+//
+//  Hero nad ním hovorí o ROKU a o tom, koľko si odložiť. Tento pás hovorí
+//  o MESIACI a o tom, čo z fakturovaného ostane. Sú to dve rôzne otázky,
+//  preto stoja vedľa seba; obdobie je v oboch napísané, aby sa nedali
+//  zameniť.
+//
+//  Čísla sa NEPOČÍTAJÚ znova. Daň a odvody idú z `calcDanRow` — tá istá
+//  funkcia, z ktorej počíta čistý výnos faktúry (kap. 82) aj daňový
+//  prehľad. Druhý vzorec pre to isté by sa rozišiel (kap. 16).
+// ═══════════════════════════════════════════════════════════════
+function pasSumyMesiace(){
+  const m=new Set();
+  (firmaData.faktury||[]).forEach(f=>{ const k=faktObdobie(f); if(/^\d{4}-\d{2}$/.test(k)) m.add(k); });
+  return [...m].sort().reverse();
+}
+function pasSumyData(mk){
+  if(!/^\d{4}-\d{2}$/.test(String(mk||""))) return null;
+  const rok=+mk.slice(0,4), mi=+mk.slice(5,7)-1;
+  let spolu=0, dph=0, pocet=0;
+  (firmaData.faktury||[]).forEach(f=>{
+    if(faktObdobie(f)!==mk) return;
+    const x=faktSumy(f)||{};
+    spolu=r2(spolu+(+x.spolu||0)); dph=r2(dph+(+x.dph||0)); pocet++;
+  });
+  let C=null;
+  // Keď daňový výpočet zlyhá, odvody sa NEUKÁŽU ako nula — to by bolo
+  // tvrdenie, že sa neplatí nič. Pás v tom prípade povie, že ich nevie.
+  try{ C=memoRok("pasSumy:"+mk, ()=>calcDanRow(mi, rok, firmaData.settings||{})); }
+  catch(e){ console.error("pás so sumami — daňový výpočet za "+mk+":", e); }
+  const neznameOdvody=!C;
+  const dan=C?r2(+C.dan||0):0, zdrav=C?r2(+C.zdrav||0):0, soc=C?r2(+C.soc||0):0;
+  const odvody=r2(dan+zdrav+soc);
+  const tvoje=neznameOdvody ? r2(spolu-dph) : r2(spolu-dph-odvody);
+  // Predošlý mesiac na porovnanie — len ten, ktorý v evidencii naozaj je.
+  const d=new Date(rok, mi-1, 1);
+  const predMk=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
+  let predSpolu=0, predBol=false;
+  (firmaData.faktury||[]).forEach(f=>{
+    if(faktObdobie(f)!==predMk) return;
+    predSpolu=r2(predSpolu+(+(faktSumy(f)||{}).spolu||0)); predBol=true;
+  });
+  const zmena = (predBol && predSpolu>0) ? Math.round((spolu-predSpolu)/predSpolu*100) : null;
+  return {mk, pocet, spolu, dph, odvody, tvoje, dan, zdrav, soc, zmena, predMk, neznameOdvody};
+}
+function pasSumyNastav(mk){ pasMesiac=mk; renderPasSumy(); }
+function renderPasSumy(){
+  const host=document.getElementById("pasSumy");
+  if(!host) return;
+  // Prvok, ktorý väčšinou hlási nič, nezaberá miesto: bez jedinej faktúry
+  // sa pás nekreslí vôbec.
+  const mesiace=pasSumyMesiace();
+  if(!firmaData || !mesiace.length){ host.innerHTML=""; return; }
+  if(!pasMesiac || mesiace.indexOf(pasMesiac)<0) pasMesiac=mesiace[0];
+  const D=pasSumyData(pasMesiac);
+  if(!D){ host.innerHTML=""; return; }
+  // Podiely na páse: záporné sa nekreslia (odvody môžu prevýšiť fakturované
+  // v mesiaci, keď sa fakturovalo málo) — číslo pod pásom ostáva pravdivé.
+  const kladne=x=>Math.max(0,x);
+  const zaklad=kladne(D.tvoje)+kladne(D.dph)+kladne(D.odvody);
+  const pct=x=>zaklad>0 ? (kladne(x)/zaklad*100) : 0;
+  const teg=(v)=>'<span class="pasSumy-teg" style="background:'+v+'"></span>';
+  const zmenaHtml = D.zmena==null ? "" :
+    '<span class="pasSumy-zmena" style="color:var(--ink-'+(D.zmena>=0?"pos":"neg")+')">'
+    +(D.zmena>=0?"+":"")+D.zmena+' %</span>';
+  host.innerHTML=
+    '<div class="pasSumy">'
+    +'<div class="pasSumy-hlav"><span class="pasSumy-lbl">Fakturované</span>'
+    +'<select class="pasSumy-mes" onchange="pasSumyNastav(this.value)" '
+    +'title="Mesiac, za ktorý je rozpad počítaný">'
+    +mesiace.map(m=>'<option value="'+m+'"'+(m===pasMesiac?' selected':'')+'>'+mesiacLabel(m)+'</option>').join("")
+    +'</select></div>'
+    +'<div class="pasSumy-suma"><span class="pasSumy-cislo">'+eur0(D.spolu)+'</span>'+zmenaHtml+'</div>'
+    +'<div class="pasSumy-bar" aria-hidden="true">'
+    +'<i style="width:'+pct(D.tvoje)+'%;background:var(--ob-tvoje)"></i>'
+    +'<i style="width:'+pct(D.dph)+'%;background:var(--ob-dph)"></i>'
+    +'<i style="width:'+pct(D.odvody)+'%;background:var(--ob-odvody)"></i>'
+    +'</div>'
+    +'<div class="pasSumy-rozpad">'
+    +teg("var(--ob-tvoje)")+'tvoje <b>'+eur0(D.tvoje)+'</b>'
+    +(D.dph>0 ? ' · '+teg("var(--ob-dph)")+'DPH <b>'+eur0(D.dph)+'</b>' : '')
+    +(D.neznameOdvody
+        ? ' · <span style="color:var(--ink-warn)">odvody a daň sa nepodarilo spočítať</span>'
+        : ' · '+teg("var(--ob-odvody)")+'odvody a daň <b>'+eur0(D.odvody)+'</b>')
+    +'</div></div>';
+}
 function renderHero(){
   const host=document.getElementById("heroFixed");
   if(!host) return;
