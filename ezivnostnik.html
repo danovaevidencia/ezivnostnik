@@ -1341,7 +1341,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.06-KO";  // počiatočný zostatok výpisu je tiež kotva; opakovaný import záznam aktualizuje
+const APP_VERZIA = "2026.09.07-KP";  // počiatočný zostatok výpisu je tiež kotva; opakovaný import záznam aktualizuje
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -19559,27 +19559,49 @@ function prenesStavPohybu(zo, na){
 // bránou: „smie sa to založiť samo?"
 const DOKLAD_BEZ_ROZHODOVANIA=new Set(
   ["preddavokZP","preddavokSP","zuctovanieZP","odvodDPH","preddavokDan","doplatokDan","danMotor"]);
-function zaloziDokladySamé(pohyby){
-  let vzniklo=0;
-  (pohyby||[]).forEach(tx=>{
-    if(!tx || tx.smer!=="vydaj" || tx.skryty) return;
-    if(pohybMaVydavok(tx)) return;                 // pýtame sa pri KAŽDOM, nie raz
-    const n=vydavokZPohybuNavrh(tx);
-    if(!n || !DOKLAD_BEZ_ROZHODOVANIA.has(n.kategoria)) return;
+// Založí doklad k jednému pohybu a priradí ho. `kategoriaVynutena` je voľba
+// človeka pri spornom pohybe — vtedy sa pochybnosť neberie do úvahy, lebo
+// práve ju rozhodol. Jedna cesta pre dávku aj pre ručnú voľbu: dve kópie
+// toho istého sa vždy rozídu (kap. 16).
+function zalozDokladZPohybu(tx, kategoriaVynutena){
+  if(!tx || tx.smer!=="vydaj" || tx.skryty) return null;
+  if(pohybMaVydavok(tx)) return null;              // pýtame sa pri KAŽDOM, nie raz
+  const n=vydavokZPohybuNavrh(tx);
+  if(!n) return null;
+  if(kategoriaVynutena){
+    n.kategoria=kategoriaVynutena;
+    n.kategoriaRucne=true;                         // rozhodol človek, nie odhad
+  } else {
+    if(!DOKLAD_BEZ_ROZHODOVANIA.has(n.kategoria)) return null;
     // Keď appka o zaradení sama pochybuje (suma sedí skôr na nedoplatok než na
     // preddavok), doklad nezakladá. Otázku sa v dávke položiť nedá a tichá
     // odpoveď na spornú otázku je horšia než ponechanie človeku.
-    if(n._pochybnost) return;
-    delete n._pochybnost;
-    n.id="v"+Date.now()+Math.random().toString(36).slice(2,6);
-    n.zalozeneAutomaticky=true;                    // musí byť rozoznateľné
-    firmaData.vydavky=(firmaData.vydavky||[]);
-    firmaData.vydavky.push(n);
-    try{ pridajUhradu(tx, "vydavok", dokladKluc(n), null); }
-    catch(e){ console.error("priradenie automatického dokladu:", e); }
-    vzniklo++;
-  });
+    if(n._pochybnost) return null;
+  }
+  delete n._pochybnost;
+  n.id="v"+Date.now()+Math.random().toString(36).slice(2,6);
+  n.zalozeneAutomaticky=!kategoriaVynutena;        // musí byť rozoznateľné
+  firmaData.vydavky=(firmaData.vydavky||[]);
+  firmaData.vydavky.push(n);
+  try{ pridajUhradu(tx, "vydavok", dokladKluc(n), null); }
+  catch(e){ console.error("priradenie automatického dokladu:", e); }
+  return n;
+}
+function zaloziDokladySamé(pohyby){
+  let vzniklo=0;
+  (pohyby||[]).forEach(tx=>{ if(zalozDokladZPohybu(tx, null)) vzniklo++; });
   return vzniklo;
+}
+// Ručné rozhodnutie spornej platby — z karty vo Výdavkoch.
+function rozhodniOdvod(txIdVal, kategoria){
+  if(!strazZapis("vydavky")) return;
+  const tx=(firmaData.vypis||[]).find(t=>txId(t)===txIdVal);
+  if(!tx){ alert("Pohyb sa nenašiel."); return; }
+  const n=zalozDokladZPohybu(tx, kategoria);
+  if(!n){ alert("Doklad sa nepodarilo založiť — možno už existuje."); return; }
+  poZmene();
+  appVydavky();
+  cloudMsg("Doklad založený: "+((KATEGORIE_VYDAVKOV[kategoria]||{}).n||kategoria), "ok");
 }
 // ═══════════════════════════════════════════════════════════════
 //  ODVODY A DANE, KTORÉ BANKA POZNÁ A VÝDAVKY NIE (kap. 84)
@@ -19601,9 +19623,15 @@ function odvodyBezDokladu(){
     let n=null; try{ n=vydavokZPohybuNavrh(tx); }catch(e){ return; }
     if(!n || !DOKLAD_BEZ_ROZHODOVANIA.has(n.kategoria)) return;
     const p={tx, kategoria:n.kategoria, datum:tx.datum||"", suma:r2(+tx.suma||0)};
-    // Pochybnosť sa v dávke rozhodnúť nedá (napr. suma sedí skôr na nedoplatok
-    // než na preddavok) — taký pohyb ostáva človeku v Banke.
-    if(n._pochybnost){ sporne.push(p); return; }
+    // Pochybnosť sa v DÁVKE rozhodnúť nedá — ale appka vie, medzi čím váha,
+    // a to sa nesmie zahodiť. Bez toho zostane človeku veta „čaká v Banke",
+    // ktorá ho pošle preč a nepovie, čo tam má urobiť (Roman, 6. 9. 2026).
+    if(n._pochybnost){
+      p.pochybnost=n._pochybnost;
+      p.ine=n._pochybnost.ine||"";
+      p.nazovIne=n._pochybnost.nazovIne||"";
+      sporne.push(p); return;
+    }
     hotove.push(p);
     podla[n.kategoria]=(podla[n.kategoria]||0)+1;
   });
@@ -19613,10 +19641,32 @@ function odvodyBezDokladu(){
 function odvodyDoplnitHtml(){
   let O=null; try{ O=odvodyBezDokladu(); }catch(e){ return ""; }
   if(!O || (!O.hotove.length && !O.sporne.length)) return "";
-  const menoKat=k=>(KATEGORIE_VYDAVKOV[k]||{}).n||k;
+  const menoKat=k=>(KATEGORIE_VYDAVKOV[k]||{}).n||k||"—";
   const ram="background:var(--sfc-warn,var(--bg));border:1px solid var(--line);border-radius:11px;padding:11px 13px;margin:10px 0";
+  // Sporná platba dostane riadok s OBOMA možnosťami. Appka vie, medzi čím
+  // váha (napr. mesačný preddavok 256,25 vs. ročné zúčtovanie 5 067,30) —
+  // ponúknuť to na jedno ťuknutie je vždy lepšie než veta „čaká v Banke",
+  // ktorá pošle preč a nepovie čo tam. Neistota sa ukazuje AJ S TÝM, čo appka
+  // tuší; skryť ju za odkaz inam je horšie než ju priznať (kap. 84).
   const spornyRiadok=O.sporne.length
-    ? `<div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px">Ďalších ${O.sporne.length} appka sama nezaloží — pri nich si nie je istá zaradením. Tie čakajú v <b>Banke</b>.</div>`
+    ? `<div style="margin-top:10px;border-top:1px solid var(--line);padding-top:9px">
+        <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:7px">${O.sporne.length===1?"Jedna platba sa":"${O.sporne.length} platieb sa"} nedá zaradiť automaticky — suma nesedí na obvyklú. Rozhodnite ju vy:</div>
+        ${O.sporne.map(p=>{
+          const kluc=esc(txId(p.tx));
+          const menoA=menoKat(p.kategoria);
+          const menoB=p.nazovIne||menoKat(p.ine);
+          const bezne=p.pochybnost&&p.pochybnost.bezne;
+          return `<div style="margin-bottom:9px">
+            <div style="display:flex;justify-content:space-between;gap:8px;font-size:12.5px">
+              <span>${fmtDatum(p.datum)} · ${esc(String(p.tx.proti||"").slice(0,28))}</span>
+              <b style="white-space:nowrap">${eur(p.suma)}</b></div>
+            ${bezne?`<div style="font-size:11px;color:var(--ink-soft);margin-top:2px">obvykle ${eur(bezne)} — preto si appka nie je istá</div>`:""}
+            <div style="display:flex;gap:6px;margin-top:5px;flex-wrap:wrap">
+              <button class="aabtn" style="padding:5px 10px;font-size:11.5px" onclick="rozhodniOdvod('${kluc}','${esc(p.kategoria)}')">${esc(menoA)}</button>
+              ${p.ine?`<button class="aabtn" style="padding:5px 10px;font-size:11.5px" onclick="rozhodniOdvod(\'${kluc}\',\'${esc(p.ine)}\')">${esc(menoB)}</button>`:""}
+            </div></div>`;
+        }).join("")}
+      </div>`
     : "";
   if(!O.hotove.length) return `<div style="${ram}"><b>Platby odvodov a daní z banky</b>${spornyRiadok}</div>`;
   const rozpis=Object.keys(O.podla).map(k=>menoKat(k)+" ×"+O.podla[k]).join(" · ");
