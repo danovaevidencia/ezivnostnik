@@ -1388,7 +1388,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.07-KS";  // počiatočný zostatok výpisu je tiež kotva; opakovaný import záznam aktualizuje
+const APP_VERZIA = "2026.09.07-KT";  // počiatočný zostatok výpisu je tiež kotva; opakovaný import záznam aktualizuje
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -5335,7 +5335,7 @@ function renderSuperDashboard(){
     </div>
     ${kontroly.length?`<div class="card" style="margin-bottom:16px;border-left:3px solid var(--accent)">
       <div style="font-weight:700;font-size:13.5px;color:var(--accent-deep);margin-bottom:8px">⚠ Na pozornosť (${kontroly.length})</div>
-      <div style="display:flex;flex-direction:column;gap:6px">${kontroly.map(c=>`<div style="font-size:12.5px;display:flex;gap:8px"><span>${c.ic}</span><span>${c.text}</span></div>`).join("")}</div>
+      <div style="display:flex;flex-direction:column;gap:6px">${kontroly.map(c=>`<div style="font-size:12.5px;display:flex;gap:8px;align-items:flex-start"><span>${c.ic}</span><span style="flex:1">${c.text}</span>${c.akcia?`<button class="aabtn" style="padding:4px 9px;font-size:11.5px;flex-shrink:0" onclick="${c.akcia}">${esc(c.akciaText||"Otvoriť")}</button>`:""}</div>`).join("")}</div>
     </div>`:''}
     <div class="card" style="margin-bottom:16px">
       <div class="chead" style="margin-bottom:4px">Príjmy a čistý zisk po mesiacoch</div>
@@ -5433,7 +5433,7 @@ function vykresliDashboard(){
       const vw=document.createElement("div");
       vw.className="w w-s8"; vw.style.borderColor="#f0c98a"; vw.style.background="#fdf9f2";
       vw.innerHTML=`<div class="wl" style="color:var(--accent-deep)"><span class="dt" style="background:var(--accent)"></span>Vyžaduje pozornosť</div>`+
-        varovania.map(v=>`<div ${v.akcia?`onclick="${v.akcia}" `:''}style="font-size:13px;padding:6px 0;border-bottom:1px solid #f0e0c8;display:flex;gap:8px${v.akcia?';cursor:pointer':''}"><span>${v.ic}</span><span>${v.text}</span></div>`).join("");
+        varovania.map(v=>`<div style="font-size:13px;padding:6px 0;border-bottom:1px solid #f0e0c8;display:flex;gap:8px;align-items:flex-start"><span>${v.ic}</span><span style="flex:1">${v.text}</span>${v.akcia?`<button class="aabtn" style="padding:4px 9px;font-size:11.5px;flex-shrink:0" onclick="event.stopPropagation();${v.akcia}">${esc(v.akciaText||"Otvoriť")}</button>`:""}</div>`).join("");
       dash.appendChild(vw);
     }
   }
@@ -5519,26 +5519,85 @@ function dashToggleWidget(wkey){
 }
 
 // kontroly (prenesené z dashChecks starej appky)
+// ═══════════════════════════════════════════════════════════════
+//  VYŽADUJE POZORNOSŤ — každý nález má akciu, ktorá ho VYRIEŠI
+//  (kap. 90.7, krok 2)
+//
+//  Dovtedy mal akciu jediný nález z piatich; ostatné boli veta a nič viac,
+//  niektoré aj s návodom v zátvorke („Nastavenia → Dáta“). Návod v zátvorke
+//  je práca prehodená na človeka na mieste, kde ju appka vie spraviť sama.
+//
+//  Akcia nie je preklik do modulu, ale krok, po ktorom nález ZMIZNE:
+//  stiahnutie zálohy, doplnenie dátumov, vytvorenie upomienky. Kde sa nález
+//  vyriešiť NEDÁ (prekročený obrat sa odrobiť nedá), akcia sa nevymýšľa —
+//  ponúkne sa nanajvýš detail, a len ak je modul v pláne.
+// ═══════════════════════════════════════════════════════════════
 function dashKontroly(){
   const d=firmaData, out=[];
   const dnes=new Date();
   // rozpory v úhradách (ručné tvrdenie vs. bankový výpis)
   const rozp=(typeof rucneRozpory==="function")?rucneRozpory():[];
-  if(rozp.length) out.push({ic:"⚠", akcia:"rozporyModal()", text:`<b>${rozp.length}</b> ${rozp.length===1?'doklad má':'dokladov má'} rozpor v úhrade — označené ako uhradené, no výpis platbu nepotvrdzuje. <span style="color:var(--brand);text-decoration:underline">Zobraziť</span>`});
-  // faktúry po splatnosti
-  (d.faktury||[]).filter(f=>!faktJeUhradena(f) && f.splatnost && new Date(f.splatnost)<dnes).slice(0,4).forEach(f=>{
-    out.push({ic:"⏰", text:`Faktúra <b>${esc(f.cislo||"?")}</b> je po splatnosti (${fmtDatum(f.splatnost)}).`});
+  if(rozp.length) out.push({ic:"⚠", akcia:"rozporyModal()", akciaText:"Zobraziť",
+    text:`<b>${rozp.length}</b> ${rozp.length===1?'doklad má':'dokladov má'} rozpor v úhrade — označené ako uhradené, no výpis platbu nepotvrdzuje.`});
+  // Faktúry po splatnosti. Tie, pri ktorých človek rozhodol „nepripomínať“
+  // (odklad, spor, dohoda), sa NEHLÁSIA — rozhodnutie už padlo a opakovaná
+  // výzva k nemu je falošný poplach. Je to tá istá podmienka, akú používa
+  // `upomienkaKandidati`.
+  (d.faktury||[]).filter(f=>!faktJeUhradena(f) && !f.neupominat
+      && f.splatnost && new Date(f.splatnost)<dnes).slice(0,4).forEach(f=>{
+    const odb=(typeof f.odberatel==="string")?f.odberatel:((f.odberatel&&f.odberatel.nazov)||"");
+    out.push({ic:"⏰",
+      akcia: odb ? "upomienkaPDF("+JSON.stringify(odb).replace(/"/g,"&quot;")+")" : null,
+      akciaText: odb ? "Upomienka" : null,
+      text:`Faktúra <b>${esc(f.cislo||"?")}</b> je po splatnosti (${fmtDatum(f.splatnost)}).`});
   });
   // doklady bez dátumu
   const bez=dokladyBezDatumu();
-  if(bez.spolu) out.push({ic:"⚠", text:`<b>${bez.spolu}</b> ${bez.spolu===1?'doklad':'dokladov'} bez dátumu sa nezapočítava do daňovej evidencie.`});
-  // obrat pre povinnú registráciu za platiteľa DPH (len neplatiteľ)
+  if(bez.spolu) out.push({ic:"⚠", akcia:"otvorDokladyBezDatumu()", akciaText:"Doplniť dátumy",
+    text:`<b>${bez.spolu}</b> ${bez.spolu===1?'doklad':'dokladov'} bez dátumu sa nezapočítava do daňovej evidencie.`});
+  // Obrat pre povinnú registráciu (len neplatiteľ). Prekročený obrat sa
+  // vyriešiť nedá — akcia je preto len tam, kde niečo urobiť JE: pri „už ste
+  // platiteľom“ chýba appke IČ DPH, a bez neho o tom nevie.
   const ob=obratStav(new Date().getFullYear());
-  if(ob && ob.uroven!=="ok") out.push({ic:ob.uroven==="err"?"⛔":"📈", text:`<b>${esc(ob.nadpis)}</b> ${esc(ob.text)}`});
-  // upozornenie na zálohu
+  if(ob && ob.uroven!=="ok"){
+    let ak=null, akT=null;
+    if(ob.uroven==="err"){ ak="otvorApp('data')"; akT="Doplniť IČ DPH"; }
+    else if(modulPovolenyPreModul("uzavierka")){ ak="otvorApp('uzavierka')"; akT="Zobraziť obrat"; }
+    out.push({ic:ob.uroven==="err"?"⛔":"📈", akcia:ak, akciaText:akT,
+      text:`<b>${esc(ob.nadpis)}</b> ${esc(ob.text)}`});
+  }
+  // Záloha — jediný nález, ktorý zmizne priamo tým tlačidlom.
   const bkp=backupOverdue();
-  if(bkp.overdue) out.push({ic:"💾", text:bkp.dni==null?`Odporúčame stiahnuť zálohu dát (Nastavenia → Dáta).`:`Zálohu ste sťahovali pred <b>${bkp.dni} dňami</b> — odporúčame novú (Nastavenia → Dáta).`});
+  if(bkp.overdue) out.push({ic:"💾", akcia:"exportFirmu()", akciaText:"Stiahnuť zálohu",
+    text:bkp.dni==null?`Zálohu dát ste ešte nesťahovali.`:`Zálohu ste sťahovali pred <b>${bkp.dni} dňami</b> — odporúčame novú.`});
   return out;
+}
+
+// Doplnenie chýbajúcich dátumov na jednom mieste. Doklad bez dátumu sa
+// nezapočítava do evidencie, takže ho appka nikde inde neukáže — a človek
+// ho hľadá v module, kde nie je vidieť. Rieši sa preto TU, nie preklikom.
+function otvorDokladyBezDatumu(){
+  if(!strazZapis("vydavky")) return;
+  const BD=dokladyBezDatumu();
+  if(!BD.spolu){ alert("Všetky doklady majú dátum."); return; }
+  const riadok=(x,typ,i)=>`<div class="mfield" style="margin-bottom:9px">
+    <label>${typ==="faktura"?"Faktúra":"Výdavok"} ${esc(x.cislo||"bez čísla")}
+      <span style="font-weight:400;color:var(--ink-soft)">· ${esc(String(x.partner||x.odberatel||"")).slice(0,28)} · ${eur(+x.spolu||0)}</span></label>
+    <input type="date" id="bd_${typ}_${i}" value=""></div>`;
+  const telo=`<div class="csub" style="margin-bottom:12px">Doklad bez dátumu sa nezapočítava do daňovej evidencie ani do DPH — appka nevie, do ktorého obdobia patrí. Doplňte dátum; prázdne polia sa preskočia.</div>`
+    + BD.fak.map((f,i)=>riadok(f,"faktura",i)).join("")
+    + BD.vyd.map((x,i)=>riadok(x,"vydavok",i)).join("");
+  openModal("Doplniť chýbajúce dátumy", telo, ()=>{
+    let n=0;
+    BD.fak.forEach((f,i)=>{ const v=val("bd_faktura_"+i); if(!v) return;
+      f.datum=v; if(!f.vystavenie) f.vystavenie=v; n++; });
+    BD.vyd.forEach((x,i)=>{ const v=val("bd_vydavok_"+i); if(!v) return;
+      x.datum=v; x.mesiac=v.slice(0,7); n++; });
+    if(!n){ alert("Nevyplnili ste ani jeden dátum — nič sa nezmenilo."); return false; }
+    poZmene();
+    if(typeof zobrazFirmu==="function") zobrazFirmu();
+    cloudMsg(n+" "+sklon(n,"doklad dostal","doklady dostali","dokladov dostalo")+" dátum.","ok");
+  });
 }
 
 // Bod 5 – zoznam dokladov s rozporom v úhrade (preklik z dlaždice „Vyžaduje pozornosť").
