@@ -243,7 +243,30 @@ button,input,select,textarea{font-variant-numeric:inherit}
 /* Tlačidlá v lište majú spoločný rozostup — nie každé svoj `margin-right`,
    ktorý sa pri pridaní ďalšieho zabudne. */
 .topbar>.usermenu+.usermenu, .topbar>.syncchip+.usermenu{margin-left:6px}
-.wrap{max-width:1180px;margin:0 auto;padding:20px 16px 60px}
+/* Spodné odsadenie musí uvoľniť miesto lište, inak posledný riadok obsahu
+   leží pod ňou a nedá sa naň klepnúť. Odsadenie systémovej lišty rieši
+   KONTAJNER, nie WebView (75.9, edge-to-edge od targetSdk 35). */
+.wrap{max-width:1180px;margin:0 auto;padding:20px 16px calc(78px + env(safe-area-inset-bottom,0px))}
+/* Spodná lišta: SKRATKA, mriežka zostáva úplným zoznamom (90.5/4).
+   Tvar je `.atab` — linka na hrane, lebo lišta PREPÍNA OBRAZOVKU. Pilulka
+   `.achip` znamená filter a zmiešať to dvoje je presne to, pred čím varuje
+   fáza A5. Päť stĺpcov cez 1fr, nie pevná šírka: pevný grid sa na 390 px
+   nezmestí a overflow by obsah odrezal (FE). */
+.lista{position:fixed;left:0;right:0;bottom:0;z-index:40;background:var(--paper);
+  border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px)}
+.listaIn{max-width:1180px;margin:0 auto;display:grid;grid-template-columns:repeat(5,1fr)}
+.listaIt{display:flex;flex-direction:column;align-items:center;gap:3px;
+  padding:7px 2px 6px;cursor:pointer;font-size:10.5px;color:var(--ink-soft);
+  border-top:2.5px solid transparent;margin-top:-1px;overflow:hidden}
+/* Aktívna položka sa farbí `--brand`, NIE farbou rodiny. Tvar je `.atab`,
+   takže aj farba: `.atab.on` je brand. Modulová farba je IDENTITA (48.6d B4)
+   a linka pod ikonou hovorí STAV — ktorá obrazovka je otvorená. Keby niesla
+   farbu rodiny, ten istý kanál by hovoril obe veci naraz.
+   `.saTab.on` farbu rodiny má, ale tam sú všetky záložky JEDNA rodina;
+   v lište je každá položka iná. */
+.listaIt.on{color:var(--brand);border-top-color:var(--brand)}
+.listaIc{font-size:19px;line-height:1.15}
+.listaN{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* A1 — šírka podľa obsahu (kap. 48.4). Dovtedy malo 1180 px VŠETKO: na
    monitore 2000 px sa dlhší názov odberateľa orezal na „…", hoci vpravo
    ostalo 800 px prázdnej plochy — a v Článkoch mal riadok cez 130 znakov.
@@ -1371,6 +1394,11 @@ html[data-jazda] .jazdapruh{display:flex}
     <!-- ═══ FÁZA 4: SPLIT SCREEN ═══ -->
     <div id="splitScreen" class="hidden"></div>
   </div>
+
+  <!-- Spodná lišta. SKRATKA k štyrom apkám + Domov; úplným zoznamom zostáva
+       mriežka na ploche (90.5/4). Podržaním prsta sa slot vymení. Je vnútri
+       #appView, takže sa neukáže na prihlasovacej obrazovke. -->
+  <div class="lista" id="listaApiek"></div>
 </div>
 
 <!-- skryté: file inputy -->
@@ -1430,7 +1458,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.07-KW";  // počiatočný zostatok výpisu je tiež kotva; opakovaný import záznam aktualizuje
+const APP_VERZIA = "2026.09.07-KX";  // počiatočný zostatok výpisu je tiež kotva; opakovaný import záznam aktualizuje
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -2670,6 +2698,7 @@ function zobrazFirmu(){
   // by na ploche nevidel, čie dáta pozerá.
   vykresliPrepinacFiriem();
   renderGlobalHladanie();
+  renderLista();
   renderHero();
   vykresliDashboard();
   renderLauncher();
@@ -6257,11 +6286,7 @@ function renderLauncher(){
   };
   let html="";
   // skupiny ako super apky (klikacie karty)
-  SKUPINY.forEach(g=>{
-    let moduly=g.moduly.filter(m=>APPS[m]);
-    if(!jePlatcaDPH()) moduly=moduly.filter(m=>m!=="dph");
-    moduly=moduly.filter(m=>modulPovolenyPreModul(m));
-    if(!moduly.length) return;
+  skupinyDostupne().forEach(({g, moduly})=>{
     // súčet badge cez podsekcie
     const pocet=moduly.reduce((a,m)=>a+(badge[m]||0),0);
     const b=pocet>0?`<span class="tbadge">${pocet}</span>`:"";
@@ -6324,6 +6349,94 @@ function otvorApp(id){
   renderApp(id);
 }
 // otvor super apku (skupinu) — zoskupené moduly so záložkami / split
+// Ktoré skupiny sú pre túto firmu dostupné a s akými modulmi. JEDEN zdroj pre
+// mriežku aj pre spodnú lištu — 90.6 to má ako prvé pravidlo, lebo druhý zoznam
+// ikon už raz stál dve rozídené identity Výdavkov (48.6d B0).
+function skupinyDostupne(){
+  const out=[];
+  SKUPINY.forEach(g=>{
+    let moduly=g.moduly.filter(m=>APPS[m]);
+    if(!jePlatcaDPH()) moduly=moduly.filter(m=>m!=="dph");
+    moduly=moduly.filter(m=>modulPovolenyPreModul(m));
+    if(!moduly.length) return;
+    out.push({g, moduly});
+  });
+  return out;
+}
+
+// ═══ SPODNÁ LIŠTA (kap. 90.7, krok 6; rozhodnutie 90.5/4) ═══════════════════
+//
+// „Apka je v mriežke VŽDY, v lište navyše." Návrh chcel opak — apka práve na
+// jednom mieste a plná lišta presun odmietne. Obrátené preto, že mriežka je
+// jediné miesto s úplným inventárom: keby z nej apka pri presune zmizla, úplný
+// zoznam by neexistoval nikde a modul mimo lišty aj mriežky by bol
+// NEDOSIAHNUTEĽNÝ. Duplicita robí tú chybu štrukturálne nemožnou.
+//
+// Tvar je `.atab`, nie `.achip`: lišta PREPÍNA OBRAZOVKU, nefiltruje. Preto
+// linka na hrane, nie pilulka (fáza A5).
+const LISTA_SLOTOV=4;                       // + Domov = 5 stĺpcov
+function listaKatalog(){
+  const out=[];
+  skupinyDostupne().forEach(({g, moduly})=>{
+    const jedna=skupinaPocetTabov(g.id, moduly)===1;
+    out.push({id:"g:"+g.id, n:g.n, ic:g.ic, c:g.c,
+      akcia: jedna ? `otvorApp('${moduly[0]}')` : `otvorSuperApku('${g.id}')`,
+      aktivna: ()=> aktualnaSuperApka===g.id || (jedna && aktualnaApp===moduly[0])});
+  });
+  SKUPINA_SAMOSTATNE.filter(m=>APPS[m] && modulPovolenyPreModul(m)).forEach(id=>{
+    const a=APPS[id];
+    out.push({id:"m:"+id, n:a.n, ic:a.ic, c:a.c, akcia:`otvorApp('${id}')`,
+      aktivna: ()=> aktualnaApp===id});
+  });
+  return out;
+}
+// Uložený výber sa najprv OČISTÍ o to, čo dnes nie je dostupné (zmena plánu,
+// odchod účtovníka), a potom doplní katalógom. Bez očistenia by v lište ostal
+// slot, ktorý nikam nevedie.
+function listaVyber(){
+  const kat=listaKatalog();
+  const ulozene=(((firmaData&&firmaData.settings)||{}).listaApiek||[])
+    .filter(id=>kat.some(k=>k.id===id));
+  const doplnok=kat.filter(k=>!ulozene.includes(k.id)).map(k=>k.id);
+  return ulozene.concat(doplnok).slice(0, LISTA_SLOTOV);
+}
+function renderLista(){
+  const host=document.getElementById("listaApiek");
+  if(!host) return;
+  if(!firmaData){ host.innerHTML=""; return; }
+  const kat=listaKatalog();
+  const vyber=listaVyber().map(id=>kat.find(k=>k.id===id)).filter(Boolean);
+  const domovAktivny = !aktualnaApp && !aktualnaSuperApka;
+  const polozka=(ic,n,akcia,on,drz)=>
+    `<div class="listaIt${on?" on":""}" onclick="${akcia}"${drz||""} title="${esc(n)}">
+       <span class="listaIc">${ic}</span><span class="listaN">${esc(n)}</span></div>`;
+  host.innerHTML=`<div class="listaIn">`
+    + polozka("🏠","Domov","domov()",domovAktivny)
+    + vyber.map((k,i)=>polozka(k.ic,k.n,k.akcia,k.aktivna(),
+        ` oncontextmenu="event.preventDefault();listaMenu(${i},event)"`)).join("")
+    + `</div>`;
+}
+// Výmena slotu. Mriežka sa tým nemení — apka z nej nikdy nezmizne (90.5/4),
+// takže sa tu nedá stratiť prístup k ničomu.
+function listaMenu(pozicia, ev){
+  const kat=listaKatalog();
+  const teraz=listaVyber();
+  zobrazMiniMenu(ev, kat.map(k=>({
+    label:(k.id===teraz[pozicia]?"● ":"○ ")+k.n,
+    fn:()=>listaNastav(pozicia, k.id)
+  })));
+}
+function listaNastav(pozicia, id){
+  const S=firmaData.settings||(firmaData.settings={});
+  const nove=listaVyber().slice();
+  const kde=nove.indexOf(id);
+  if(kde>=0 && kde!==pozicia) nove[kde]=nove[pozicia];   // vymeň, nezduplikuj
+  nove[pozicia]=id;
+  S.listaApiek=nove;
+  firmaDirty=true; ulozNastavenieDebounced();
+  renderLista();
+}
+
 function otvorSuperApku(skupinaId, zalozka){
   const g=SKUPINY.find(s=>s.id===skupinaId); if(!g) return;
   let moduly=g.moduly.filter(m=>APPS[m]);
@@ -6342,6 +6455,13 @@ function otvorSuperApku(skupinaId, zalozka){
 }
 function domov(){
   aktualnaApp=null;
+  // `aktualnaSuperApka` sa tu nikdy nenulovala. Nikto ju na ploche nečítal,
+  // takže to nebolo vidieť — spodná lišta je prvý čitateľ a svietila na
+  // skupine, z ktorej človek práve odišiel. Nie je to len kozmetika:
+  // `clankyPrekresli` by pri dorazení článku počas pobytu na ploche zavolal
+  // `prepniZalozku` a ODNAVIGOVAL by človeka do super apky, ktorú zavrel.
+  aktualnaSuperApka=null;
+  aktualnaZalozka=null;
   nastavSirku(null);
   document.getElementById("appScreen").classList.add("hidden");
   document.getElementById("homeView").classList.remove("hidden");
@@ -6379,6 +6499,9 @@ function renderApp(id){
   nastavSirku(SIRKA_MODULU[id]||null);
   renderAppModul(id);
   clankyPasVloz(id);
+  // Zvýraznenie v spodnej lište sa mení pri KAŽDOM prepnutí obrazovky. Tu,
+  // lebo cez `renderApp` prejde každý modul — vrátane záložiek super apiek.
+  renderLista();
 }
 function renderAppModul(id){
   // Modul Cashflow zanikol (kap. 49 etapa 7) — jeho obsah je v Banke.
