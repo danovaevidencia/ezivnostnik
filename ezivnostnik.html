@@ -579,19 +579,20 @@ h1,h2,h3,h4,.chead,.wbig,.sbox .sn,.sp-title b,.splittitle{text-wrap:balance}
 /* ═══ super apky: launcher — kompaktný riadok navrchu ═══ */
 .launcher{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:8px}
 .saCard .tbadge{position:absolute;top:6px;right:6px;font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:20px;background:var(--brand-lite);color:var(--brand)}
-/* Jeden riadok drobných apiek pod hlavnými skupinami. `grid-column:1/-1`
-   preto, že leží v tej istej mriežke ako dlaždice a musí ju preklenúť.
-   Terč má 44 px na výšku — čip je menší vizuálne, nie na dotyk. */
-.saMini{grid-column:1/-1;display:flex;gap:6px;flex-wrap:wrap;margin-top:2px}
-.saMiniIt{flex:1 1 0;min-width:64px;display:flex;flex-direction:column;align-items:center;
-  gap:3px;padding:8px 4px;min-height:44px;justify-content:center;cursor:pointer;
-  background:var(--paper);border:1px solid var(--line);border-radius:10px;transition:.14s}
+/* Apky ako čipy. `grid-column:1/-1` preto, že `.launcher` je mriežka a pás
+   ju musí preklenúť; vnútri vlastná mriežka po piatich, aby riadok sedel
+   so spodnou lištou. Pevná šírka by sa na 390 px nezmestila (FE). */
+.saMini{grid-column:1/-1;display:grid;grid-template-columns:repeat(5,1fr);gap:7px}
+@media(max-width:360px){ .saMini{grid-template-columns:repeat(4,1fr)} }
+.saMiniIt{position:relative;display:flex;flex-direction:column;align-items:center;
+  gap:4px;padding:9px 3px;min-height:56px;justify-content:center;cursor:pointer;
+  background:var(--paper);border:1px solid var(--line);border-radius:11px;transition:.14s}
 .saMiniIt:hover{border-color:var(--brand)}
-.saMiniIc{font-size:17px;line-height:1}
+.saMiniIc{font-size:20px;line-height:1}
 .saMiniN{font-size:10px;font-weight:600;color:var(--ink-soft);max-width:100%;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.saMiniVsetky{background:var(--bg);border-style:dashed}
-.saMiniVsetky .saMiniN{color:var(--brand)}
+.saMiniPocet{position:absolute;top:3px;right:4px;font-size:9px;font-weight:700;
+  color:var(--brand);background:var(--brand-lite);border-radius:20px;padding:0 4px;line-height:1.5}
 @media(max-width:820px){ .launcher{grid-template-columns:repeat(3,1fr)} }
 @media(max-width:420px){ .launcher{grid-template-columns:repeat(3,1fr);gap:8px} }
 .grpsec{margin-bottom:20px}
@@ -1500,7 +1501,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.07-LB";  // počiatočný zostatok výpisu je tiež kotva; opakovaný import záznam aktualizuje
+const APP_VERZIA = "2026.09.07-LC";  // počiatočný zostatok výpisu je tiež kotva; opakovaný import záznam aktualizuje
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -6334,69 +6335,36 @@ function renderLauncher(){
     const b=badge[id]!=null&&badge[id]>0?`<span class="tbadge">${badge[id]}</span>`:"";
     return `<div class="gtile" style="--_c:${a.c}" onclick="otvorApp('${id}')"><div class="gti">${a.ic}</div>${b}<div class="gtn">${a.n}</div></div>`;
   };
-  let html="";
-  // Hlavné skupiny ako veľké karty; `druhotna` idú dole do zbaleného riadku.
-  const druhotneSkupiny=[];
-  skupinyDostupne().forEach(({g, moduly})=>{
-    if(g.druhotna){ druhotneSkupiny.push({g, moduly}); return; }
-    // súčet badge cez podsekcie
-    const pocet=moduly.reduce((a,m)=>a+(badge[m]||0),0);
-    const b=pocet>0?`<span class="tbadge">${pocet}</span>`:"";
-    // ak má skupina jedinú ZÁLOŽKU, klik otvorí modul; inak super apku
-    const akcia = skupinaPocetTabov(g.id, moduly)===1 ? `otvorApp('${moduly[0]}')` : `otvorSuperApku('${g.id}')`;
-    html+=`<div class="saCard" style="--_c:${g.c}" onclick="${akcia}">
-      ${b}
-      <div class="saCardIc">${g.ic}</div>
-      <div class="saCardName">${g.n}</div>
-    </div>`;
-  });
-  // Samostatné moduly. Filtruje sa aj tu, nielen pri skupinách — dlho sa to
-  // nerobilo a Kniha jázd svietila na ploche aj v pláne Free, kde nie je.
-  // Kalendár a Články v MODUL_KATEGORIA nie sú, takže prejdú vždy (kap. 90.8).
+  // Všetky apky sú drobné čipy — žiadne veľké dlaždice.
   //
-  // Zbalené sú JEDEN riadok drobných čipov, nie plné dlaždice: pri deviatich
-  // kartách zatlačili štyri hlavné skupiny pod prehyb a plocha prestala
-  // odpovedať na otázku „kam mám ísť". Nič sa neskrýva — čip je rovnako
-  // klikací ako dlaždica, len menší; rozbalenie ich vráti na plné karty.
-  // Druhotné: skupina „Firemná agenda" + samostatné moduly. Spolu tvoria
-  // jeden riadok — pri deviatich plných kartách zatlačili štyri hlavné
-  // skupiny pod prehyb a plocha prestala odpovedať na otázku „kam mám ísť".
-  const druhotne=[
-    ...druhotneSkupiny.map(({g, moduly})=>({
-      id:g.id, n:g.n, ic:g.ic, c:g.c,
-      akcia: skupinaPocetTabov(g.id, moduly)===1 ? `otvorApp('${moduly[0]}')` : `otvorSuperApku('${g.id}')`})),
-    ...SKUPINA_SAMOSTATNE.filter(m=>APPS[m] && modulPovolenyPreModul(m))
-      .map(id=>({id, n:APPS[id].n, ic:APPS[id].ic, c:APPS[id].c, akcia:`otvorApp('${id}')`}))
-  ];
-  if(druhotne.length){
-    const rozbalene=!!((firmaData&&firmaData.settings)||{}).apkyRozbalene;
-    // Čip NIE JE skrytie: je rovnako klikací ako dlaždica, len menší.
-    // Nič sa z plochy nestráca, takže poistka proti osirenému modulu platí.
-    if(rozbalene) druhotne.forEach(x=>{
-      html+=`<div class="saCard" style="--_c:${x.c}" onclick="${x.akcia}">
-        <div class="saCardIc">${x.ic}</div>
-        <div class="saCardName">${x.n}</div>
-      </div>`;
-    });
-    html+=`<div class="saMini">`
-      + (rozbalene ? "" : druhotne.map(x=>
-          `<div class="saMiniIt" onclick="${x.akcia}" title="${esc(x.n)}">
-            <span class="saMiniIc">${x.ic}</span><span class="saMiniN">${esc(NAZOV_KRATKY[x.id]||x.n)}</span></div>`).join(""))
-      + `<div class="saMiniIt saMiniVsetky" onclick="apkyRozbal()" title="${rozbalene?"Zbaliť do jedného riadku":"Zobraziť ako dlaždice"}">
-          <span class="saMiniIc">${rozbalene?"⌃":"⌄"}</span><span class="saMiniN">${rozbalene?"Zbaliť":"Všetky"}</span></div>`
-      + `</div>`;
-  }
+  // Deväť plných kariet zatlačilo pás so sumami pod prehyb a štyri hlavné
+  // skupiny sa navyše opakovali v spodnej lište, takže na jednej obrazovke
+  // stáli dvakrát. Čip je rovnako klikací, len menší: nič sa nestráca, ale
+  // plocha prestala kričať a pod prehyb sa zmestí to, kvôli čomu sa otvára.
+  //
+  // Poradie ostáva: najprv tok peňazí (skupiny), potom `druhotna` a
+  // samostatné moduly. Badge sa zachová — je to jediný údaj, ktorý dlaždica
+  // niesla navyše oproti názvu.
+  const apky=[];
+  skupinyDostupne().forEach(({g, moduly})=>{
+    apky.push({
+      id:g.id, n:g.n, ic:g.ic, druhotna:!!g.druhotna,
+      pocet:moduly.reduce((a,m)=>a+(badge[m]||0),0),
+      akcia: skupinaPocetTabov(g.id, moduly)===1 ? `otvorApp('${moduly[0]}')` : `otvorSuperApku('${g.id}')`});
+  });
+  SKUPINA_SAMOSTATNE.filter(m=>APPS[m] && modulPovolenyPreModul(m)).forEach(id=>{
+    apky.push({id, n:APPS[id].n, ic:APPS[id].ic, druhotna:true,
+      pocet:badge[id]||0, akcia:`otvorApp('${id}')`});
+  });
+  // hlavné pred druhotnými, inak sa poradie nemení
+  apky.sort((a,b)=>(a.druhotna?1:0)-(b.druhotna?1:0));
+  let html=`<div class="saMini">` + apky.map(x=>
+    `<div class="saMiniIt" onclick="${x.akcia}" title="${esc(x.n)}">
+      ${x.pocet>0?`<span class="saMiniPocet">${x.pocet}</span>`:""}
+      <span class="saMiniIc">${x.ic}</span>
+      <span class="saMiniN">${esc(NAZOV_KRATKY[x.id]||x.n)}</span></div>`).join("") + `</div>`;
   el.innerHTML=pasRolyPlocha()+html;
 }
-// Voľba zobrazenia, nie údaj — ide do `settings` ako rozloženie lišty
-// a dlaždíc, takže prežije zavretie a je rovnaká na všetkých zariadeniach.
-function apkyRozbal(){
-  const S=firmaData.settings||(firmaData.settings={});
-  S.apkyRozbalene=!S.apkyRozbalene;
-  firmaDirty=true; ulozNastavenieDebounced();
-  renderLauncher();
-}
-
 // Pás nad dlaždicami. Rola `nahlad` nesmie zapisovať nikde, vlastník s účtovníkom
 // len v štyroch účtovníckych moduloch — a to je rozdiel, ktorý sa oplatí povedať
 // dopredu, nie až keď používateľ klikne na stlmené tlačidlo.
