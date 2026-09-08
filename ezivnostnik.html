@@ -1817,7 +1817,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.08-MI";  // faktúra zabalená v obálke SBDH sa konečne prečíta
+const APP_VERZIA = "2026.09.08-MJ";  // e-faktúra: odberateľ z faktúry, Peppol identita 0245
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -21435,20 +21435,79 @@ function ublJednotka(mj){ const m=String(mj||"").toLowerCase();
   if(/mesiac|month/.test(m)) return "MON";
   return "C62"; // jednotka (default)
 }
+// Rozklad jednoriadkovej adresy na ulicu, číslo, PSČ a mesto.
+// Číta to ISDOC aj UBL. Kým to bol pomocník vnútri `isdocXml`, UBL rozklad
+// nemalo a celú adresu strkalo do `StreetName` — mesto ani PSČ v doklade
+// neboli vôbec. Dve kópie toho istého rozkladu by sa rozišli pri prvej úprave.
+// Čiarka za číslom domu je NEPOVINNÁ. Kým bola povinná, jediná adresa
+// v ostrých dátach — ulica, číslo, PSČ a mesto za sebou bez čiarky — sa
+// nerozložila a celá spadla do ulice; doklad išiel bez mesta a PSČ a nebolo
+// to nikde vidieť, lebo v ulici to opticky sedelo.
+function rozlozAdresu(a){
+  const mm=String(a||"").match(/^(.+?)\s+([\d/]+)[,\s]\s*(\d{3}\s?\d{2})\s+(.+)$/);
+  if(mm) return {ulica:mm[1].trim(),cislo:mm[2].trim(),psc:mm[3].replace(/\s/g,""),mesto:mm[4].trim()};
+  return {ulica:String(a||""),cislo:"",psc:"",mesto:""};
+}
+// ADRESA ODBERATEĽA PRE EXPORT DOKLADU.
+//
+// Berie sa z faktúry. Keď na nej nie je — a v ostrých dátach nie je na 7 z 8 —
+// doplní sa z INEJ faktúry tej istej firmy. To je stále údaj z faktúr.
+// Do 8. 9. 2026 ju UBL doťahovalo zo `settings.odberatelAdresa`, čo je
+// odberateľ VÝKAZOV a s touto faktúrou nemusí mať nič spoločné. Nevidno to,
+// keď má človek jedného odberateľa a v oboch miestach je tá istá firma —
+// presne to je prípad, ktorý chybu držal štyri mesiace v tichosti.
+function adresaOdberatela(f){
+  const vlastna=String((f&&f.adresa)||"").trim();
+  if(vlastna) return vlastna;
+  const ico=String((f&&f.ico)||"").replace(/\s/g,"");
+  const nazov=String((f&&f.odberatel)||"").trim().toLowerCase();
+  let najdena="";
+  (firmaData.faktury||[]).forEach(x=>{
+    if(najdena || x===f) return;
+    const a=String(x.adresa||"").trim();
+    if(!a) return;
+    if((ico && String(x.ico||"").replace(/\s/g,"")===ico) ||
+       (nazov && String(x.odberatel||"").trim().toLowerCase()===nazov)) najdena=a;
+  });
+  return najdena;
+}
+// PEPPOL IDENTITA SLOVENSKÉHO SUBJEKTU JE 0245:DIČ.
+//
+// Appka vyhlasovala schému 0208, čo je BELGICKÉ podnikové číslo, a plnila ju
+// naším IČOm. Doklad vyzeral správne a sieť by ho nedoručila. Našiel to až
+// verejný validátor Verteca (7. 9. 2026); čítaním kódu sa to nájsť nedalo —
+// číslo bolo v poriadku, nesprávna bola schéma, ktorou sa vyhlasuje.
+//
+// Hodnota je DIČ, nie IČO. Keď DIČ chýba, odvodí sa z IČ DPH: slovenské
+// IČ DPH je SK + DIČ. Medzery sa odstraňujú, lebo ostré dáta ich obsahujú
+// (IČO býva v nastaveniach zapísané s medzerami po trojiciach) a taký
+// identifikátor sieť nenájde.
+var PEPPOL_SCHEMA_SK="0245";
+function peppolUcastnik(dic, icdph){
+  const cistit=v=>String(v||"").replace(/\s/g,"");
+  return cistit(dic) || cistit(icdph).replace(/^SK/i,"");
+}
 function exportEFakturaUBL(idx){
-  const f=firmaData.faktury[idx]; const m=firmaData.meta||{}; const S=firmaData.settings||{};
+  const f=firmaData.faktury[idx]; const m=firmaData.meta||{};
   if(!f){ alert("Faktúra sa nenašla."); return; }
   const s=faktSumy(f);
   const sadzbaPct=Math.round((s.sadzba||0.23)*100);
-  const odbNazov = typeof f.odberatel==="string"?f.odberatel:((f.odberatel&&f.odberatel.nazov)||S.odberatelNazov||"");
-  const odbIco = (f.odberatel&&f.odberatel.ico)||S.odberatelIco||"";
-  const odbIcDph = (f.odberatel&&f.odberatel.icdph)||S.odberatelIcDph||"";
-  const odbAdresa = (f.odberatel&&f.odberatel.adresa)||S.odberatelAdresa||"";
+  // Odberateľ sa berie Z FAKTÚRY. `f.odberatel` je REŤAZEC s názvom, takže
+  // `f.odberatel.ico` bolo vždy `undefined` a hodnota prepadla do
+  // `S.odberatelIco` — čo je odberateľ z nastavení VÝKAZOV, teda spravidla
+  // úplne iná firma. Validátor to nezachytí: doklad je formálne bezchybný
+  // a vecne nesprávny. Faktúra nesie identifikátory v `ico`, `icdph`, `dic`
+  // a adresu v `adresa` — píše ich editor faktúry a číta ich aj ISDOC.
+  const odbNazov = typeof f.odberatel==="string"?f.odberatel:((f.odberatel&&f.odberatel.nazov)||"");
+  const odbIco = f.ico||"";
+  const odbIcDph = f.icdph||"";
+  const oa=rozlozAdresu(adresaOdberatela(f));
+  const da=rozlozAdresu(m.adresa||"");
+  const dodEndpoint=peppolUcastnik(m.dic, m.icdph);
+  const odbEndpoint=peppolUcastnik(f.dic, f.icdph);
   const datVyst=ublDatum(f.datum||f.vystavenie);
   const datDod=ublDatum(f.dodanie||f.datum||f.vystavenie);   // rozhodujúci pre DPH
   const datSplat=ublDatum(f.splatnost||f.datum||f.vystavenie);
-  const mojePeppol=S.mojePeppolId||("0208:"+(m.ico||""));   // 0208 = SK IČO schéma
-  const odbPeppol=(f.odberatel&&f.odberatel.peppolId)||S.odberatelPeppolId||("0208:"+(odbIco||""));
   const pol=(f.polozky&&f.polozky.length)?f.polozky:[{nazov:"Fakturované plnenie", mn:1, mj:"ks", cena:s.bez}];
   // riadky faktúry
   let lineXml="", lineTotal=0;
@@ -21486,10 +21545,12 @@ function exportEFakturaUBL(idx){
   <cbc:BuyerReference>${ubl(f.vs||f.cislo||"")}</cbc:BuyerReference>
   <cac:AccountingSupplierParty>
     <cac:Party>
-      <cbc:EndpointID schemeID="0208">${ubl(m.ico||"")}</cbc:EndpointID>
+      <cbc:EndpointID schemeID="${PEPPOL_SCHEMA_SK}">${ubl(dodEndpoint)}</cbc:EndpointID>
       <cac:PartyName><cbc:Name>${ubl(m.nazov||"")}</cbc:Name></cac:PartyName>
       <cac:PostalAddress>
-        <cbc:StreetName>${ubl(m.adresa||"")}</cbc:StreetName>
+        <cbc:StreetName>${ubl((da.ulica+" "+da.cislo).trim())}</cbc:StreetName>
+        <cbc:CityName>${ubl(da.mesto)}</cbc:CityName>
+        <cbc:PostalZone>${ubl(da.psc)}</cbc:PostalZone>
         <cac:Country><cbc:IdentificationCode>SK</cbc:IdentificationCode></cac:Country>
       </cac:PostalAddress>
       <cac:PartyTaxScheme>
@@ -21498,25 +21559,27 @@ function exportEFakturaUBL(idx){
       </cac:PartyTaxScheme>
       <cac:PartyLegalEntity>
         <cbc:RegistrationName>${ubl(m.nazov||"")}</cbc:RegistrationName>
-        <cbc:CompanyID schemeID="0208">${ubl(m.ico||"")}</cbc:CompanyID>
+        <cbc:CompanyID>${ubl(String(m.ico||"").replace(/\s/g,""))}</cbc:CompanyID>
       </cac:PartyLegalEntity>
     </cac:Party>
   </cac:AccountingSupplierParty>
   <cac:AccountingCustomerParty>
     <cac:Party>
-      <cbc:EndpointID schemeID="0208">${ubl(odbIco||"")}</cbc:EndpointID>
+      <cbc:EndpointID schemeID="${PEPPOL_SCHEMA_SK}">${ubl(odbEndpoint)}</cbc:EndpointID>
       <cac:PartyName><cbc:Name>${ubl(odbNazov)}</cbc:Name></cac:PartyName>
       <cac:PostalAddress>
-        <cbc:StreetName>${ubl(odbAdresa)}</cbc:StreetName>
+        <cbc:StreetName>${ubl((oa.ulica+" "+oa.cislo).trim())}</cbc:StreetName>
+        <cbc:CityName>${ubl(oa.mesto)}</cbc:CityName>
+        <cbc:PostalZone>${ubl(oa.psc)}</cbc:PostalZone>
         <cac:Country><cbc:IdentificationCode>SK</cbc:IdentificationCode></cac:Country>
       </cac:PostalAddress>
       ${odbIcDph?`<cac:PartyTaxScheme>
-        <cbc:CompanyID>${ubl(odbIcDph)}</cbc:CompanyID>
+        <cbc:CompanyID>${ubl(String(odbIcDph).replace(/\s/g,""))}</cbc:CompanyID>
         <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
       </cac:PartyTaxScheme>`:""}
       <cac:PartyLegalEntity>
         <cbc:RegistrationName>${ubl(odbNazov)}</cbc:RegistrationName>
-        ${odbIco?`<cbc:CompanyID schemeID="0208">${ubl(odbIco)}</cbc:CompanyID>`:""}
+        ${odbIco?`<cbc:CompanyID>${ubl(String(odbIco).replace(/\s/g,""))}</cbc:CompanyID>`:""}
       </cac:PartyLegalEntity>
     </cac:Party>
   </cac:AccountingCustomerParty>
@@ -21548,7 +21611,16 @@ function exportEFakturaUBL(idx){
   const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
   a.download="efaktura_"+String(f.cislo||"").replace(/[^\w.-]+/g,"_")+".xml"; a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href),1000);
-  setTimeout(()=>alert("E-faktúra (UBL 2.1) vygenerovaná.\n\nOd 1.1.2027 je elektronická fakturácia povinná. Tento XML nahráte svojmu Digitálnemu poštárovi (certifikovaný poskytovateľ Peppol), ktorý ho doručí odberateľovi a oznámi FS. V roku 2026 to môžete testovať dobrovoľne."),150);
+  // Bez identifikátora účastníka doklad v sieti nemá kam ísť. Súbor sa
+  // vygeneruje aj tak — kto ho chce len vidieť, nech ho má — ale musí byť
+  // povedané, čo chýba a kde sa to dopĺňa. Ticho by to prišlo najavo až
+  // odmietnutím u poštára, teda po odoslaní.
+  const chyba=[];
+  if(!dodEndpoint) chyba.push("tvoje DIČ (Nastavenia → Firma)");
+  if(!odbEndpoint) chyba.push("DIČ alebo IČ DPH odberateľa (úprava faktúry)");
+  setTimeout(()=>alert(chyba.length
+    ? "E-faktúra (UBL 2.1) vygenerovaná, ale sieť Peppol ju takto nedoručí.\n\nChýba: "+chyba.join(", ")+".\n\nÚčastník sa v sieti hľadá podľa DIČ; bez neho poštár nevie, komu doklad patrí."
+    : "E-faktúra (UBL 2.1) vygenerovaná.\n\nOd 1.1.2027 je elektronická fakturácia povinná. Tento XML nahráte svojmu Digitálnemu poštárovi (certifikovaný poskytovateľ Peppol), ktorý ho doručí odberateľovi a oznámi FS. V roku 2026 to môžete testovať dobrovoľne."),150);
 }
 
 // PayBySquare QR (slovenský platobný štandard)
@@ -21648,16 +21720,15 @@ function isdocXml(idx){
   const esc=x=>String(x==null?"":x).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
   const n2=v=>(+v||0).toFixed(2);
   const sadzbaPct=Math.round(s.sadzba*100);
-  const parseAdr=(a)=>{ const mm=String(a||"").match(/^(.+?)\s+([\d/]+),\s*(\d{3}\s?\d{2})\s+(.+)$/);
-    if(mm) return {ulica:mm[1].trim(),cislo:mm[2].trim(),psc:mm[3].replace(/\s/g,""),mesto:mm[4].trim()};
-    return {ulica:String(a||""),cislo:"",psc:"",mesto:""}; };
-  const da=parseAdr(m.adresa);
+  const da=rozlozAdresu(m.adresa);
   // Odberateľ: názov aj adresa sa čítajú rovnako ako v PDF a UBL — jeden zdroj,
-  // inak by tri exporty tej istej faktúry niesli tri rôzne adresy.
-  const S=firmaData.settings||{};
+  // inak by tri exporty tej istej faktúry niesli tri rôzne adresy. Do 8. 9. 2026
+  // to tak nebolo: UBL bralo odberateľa z `settings` (odberateľ z výkazov, iná
+  // firma) a rozklad adresy mal len ISDOC. Zdroj je FAKTÚRA — záloha
+  // z nastavení sem nepatrí, lebo mlčky podstrčí cudzie údaje.
   const odbNazov = typeof f.odberatel==="string" ? f.odberatel
-                 : ((f.odberatel&&f.odberatel.nazov)||S.odberatelNazov||"");
-  const oa=parseAdr(f.adresa || (f.odberatel&&f.odberatel.adresa) || S.odberatelAdresa || "");
+                 : ((f.odberatel&&f.odberatel.nazov)||"");
+  const oa=rozlozAdresu(adresaOdberatela(f));
   const lines=(f.polozky||[]).map((p,i)=>{
     const lineBez=r2((+p.mn||0)*(+p.cena||0)), lineDph=r2(lineBez*s.sadzba);
     return `      <InvoiceLine>
