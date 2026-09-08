@@ -1809,7 +1809,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.08-MA";  // dno terča 37 px na triedach; žiadny ovládací prvok už nepadá pod vlastný štandard
+const APP_VERZIA = "2026.09.08-MB";  // sadzba DPH je vlastnosť dokladu, nie dnešných nastavení
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -8836,12 +8836,42 @@ function dalsieCisloFaktury(rok){
     if(c.startsWith(prefix)){ const por=parseInt(c.slice(prefix.length),10); if(!isNaN(por)&&por>maxPor) maxPor=por; } });
   return prefix+String(maxPor+1).padStart(4,"0");
 }
-function faktSumy(f){
-  // neplatiteľ DPH fakturuje bez DPH; inak nastavená sadzba (default 23 %)
+// SADZBA DPH JE VLASTNOSŤ DOKLADU, NIE DNEŠNÝCH NASTAVENÍ.
+//
+// Kým sa brala z `jePlatcaDPH()`, appka prepisovala staré faktúry dneškom.
+// Zmerané 8. 9. 2026 na ostrých dátach: faktúra 20250001 má uložené
+// bez 7 350 / DPH 0 / spolu 7 350, banka za ňu zaplatila 7 350 — a pás so
+// sumami za jan 2025 ukazoval 9 040,50 vrátane „DPH 1 690,50". Firma vtedy
+// platiteľom nebola; stala sa ním v polovici roka. Dotklo sa to piatich
+// faktúr a 6 601 € vymyslenej dane, a rovnaké číslo by vyšlo aj do PDF
+// a do e-faktúry.
+//
+// Je to kap. 89.3 z druhej strany: údaj, ktorý sa mení rok čo rok, nesmie
+// byť jedna aktuálna hodnota. Platiteľstvo DPH sa mení v čase rovnako ako
+// sadzba — doklad si teda nesie svoju vlastnú.
+//
+// Poradie zdrojov sadzby: zapísaná na doklade → odvodená z jeho uložených
+// súm → až nakoniec dnešné nastavenie (a to len pri doklade, ktorý ešte
+// žiadne sumy nemá, teda pri novom).
+function faktSadzba(f){
+  // POZOR NA JEDNOTKY. `sadzba` NA DOKLADE je v percentách (23), kým appka
+  // vnútri počíta podielom (0,23). To isté meno, dve jednotky — overené na
+  // ostrých dátach: 13 z 22 faktúr má uložené 23 alebo 0, výdavky aj 19.
+  // Bez prevodu by faktúra za 7 000 € vyšla na 161 000 €; prvá verzia tejto
+  // funkcie to spravila a chytil to až test pásu so sumami.
+  const ul=(f||{}).sadzba;
+  if(ul!=null && +ul>=0) return +ul>1 ? r2(+ul/100) : +ul;
+  const bez=+((f||{}).bez)||0, dph=+((f||{}).dph)||0;
+  if(bez>0) return r2(dph/bez);
   const S=firmaData.settings||{};
-  const sadzba = jePlatcaDPH() ? (S.sadzbaDPH!=null ? +S.sadzbaDPH : 0.23) : 0;
+  return jePlatcaDPH() ? (S.sadzbaDPH!=null ? +S.sadzbaDPH : 0.23) : 0;
+}
+function faktSumy(f){
+  const sadzba=faktSadzba(f);
   const pol=f.polozky||[];
   if(pol.length){
+    // Základ sa počíta z položiek — tie sú údaj dokladu a nemenia sa v čase.
+    // Daň už len sadzbou TOHO dokladu.
     const bez=r2(pol.reduce((a,p)=>a+(+p.mn||0)*(+p.cena||0),0));
     const dph=r2(bez*sadzba); return {bez,dph,spolu:r2(bez+dph),sadzba};
   }
@@ -9379,7 +9409,11 @@ function feModal(idx, nova){
     f.druhPlnenia=val("m_plnenie")||"tuzemsko";
     f.tovarKod=val("m_tovarKod")||""; f.tovarDruh=val("m_tovarDruh")||"";
     f.tovarMn=val("m_tovarMn")||"";   f.tovarMJ=val("m_tovarMJ")||"";
-    const s=faktSumy(f); f.bez=s.bez; f.dph=s.dph; f.spolu=s.spolu;
+    // Sadzba sa zapisuje V PERCENTÁCH — tak ju drží zvyšok dát (rozpis
+    // sadzieb ponúka 23/19/10/5) a tak ju čaká `faktSadzba`. `faktSumy`
+    // vracia podiel, preto ×100; bez toho by v dátach ležali dve jednotky
+    // pod jedným menom.
+    const s=faktSumy(f); f.bez=s.bez; f.dph=s.dph; f.spolu=s.spolu; f.sadzba=r2(s.sadzba*100);
     if(!firmaData.faktury) firmaData.faktury=[];
     if(nova) firmaData.faktury.push(f); else firmaData.faktury[idx]=f;
     // Checkbox „Uhradená" ide cez tie isté funkcie ako zoznam — žiadny priamy
