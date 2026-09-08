@@ -1809,7 +1809,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.08-MC";  // DPH na odpočet a výdavky z tých istých zdrojov ako modul
+const APP_VERZIA = "2026.09.08-MD";  // fakturované za obdobie: jedna funkcia, tri pomenované otázky
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -4802,8 +4802,18 @@ function _dashWidgetKatalogVypocet(){
     faktury: {
       nazov:"Faktúry", ic:"▤", velkost:"w-s4",
       metriky:[
-        {k:"vystavene", l:"Vystavené (rok)", val:()=>{const f=(d.faktury||[]).filter(x=>String(x.datum||x.vystavenie||"").slice(0,4)===String(rok));const uhr=f.filter(x=>faktJeUhradena(x));const neuhr=f.filter(x=>!faktJeUhradena(x));return {v:eur0(f.reduce((a,x)=>a+(+x.spolu||0),0)), m:f.length+" faktúr vystavených", cls:"pos", vedlajsie:[{l:"uhradené",v:eur(uhr.reduce((a,x)=>a+(+x.spolu||0),0)),cls:"pos"},{l:"neuhradené",v:eur(neuhr.reduce((a,x)=>a+(+x.spolu||0),0)),cls:neuhr.length?"neg":""}]};}},
-        {k:"bezDph", l:"Bez DPH (rok)", val:()=>{const f=(d.faktury||[]).filter(x=>String(x.datum||x.vystavenie||"").slice(0,4)===String(rok));return {v:eur0(f.reduce((a,x)=>a+(+x.bez||0),0)), m:"základ dane", cls:"", vedlajsie:[{l:"s DPH",v:eur(f.reduce((a,x)=>a+(+x.spolu||0),0))},{l:"DPH",v:eur(f.reduce((a,x)=>a+(+x.dph||0),0))}]};}}
+        {k:"vystavene", l:"Vystavené (rok)", val:()=>{
+          const f=faktZaObdobie("vystavenie", rok);
+          const sum=arr=>eur(arr.reduce((a,x)=>a+(+((faktSumy(x)||{}).spolu)||0),0));
+          const uhr=f.filter(x=>faktJeUhradena(x)), neuhr=f.filter(x=>!faktJeUhradena(x));
+          const S=faktSucet("vystavenie", rok);
+          return {v:eur0(S.spolu), m:f.length+" faktúr · "+S.popis, cls:"pos",
+            vedlajsie:[{l:"uhradené",v:sum(uhr),cls:"pos"},
+                       {l:"neuhradené",v:sum(neuhr),cls:neuhr.length?"neg":""}]};}},
+        {k:"bezDph", l:"Bez DPH (rok)", val:()=>{
+          const S=faktSucet("vystavenie", rok);
+          return {v:eur0(S.bez), m:"základ dane · "+S.popis, cls:"",
+            vedlajsie:[{l:"s DPH",v:eur(S.spolu)},{l:"DPH",v:eur(S.dph)}]};}}
       ]
     },
     vydavky: {
@@ -4904,9 +4914,9 @@ function dashMesacne(rok, typ){
   for(let mi=0;mi<12;mi++){
     const mk=rok+"-"+String(mi+1).padStart(2,"0");
     let v=0;
-    if(typ==="prijmy") v=(d.faktury||[]).filter(f=>faktObdobieDane(f)===mk).reduce((a,f)=>a+(+f.bez||0),0);
+    if(typ==="prijmy") v=faktSucet("uhrada", mk).bez;
     else if(typ==="vydavky") v=(d.vydavky||[]).filter(x=>vydavokObdobieDane(x)===mk).reduce((a,x)=>a+(+x.bez||0),0);
-    else if(typ==="dph") v=(d.faktury||[]).filter(f=>faktObdobie(f)===mk).reduce((a,f)=>a+(+f.dph||0),0);
+    else if(typ==="dph") v=faktSucet("dodanie", mk).dph;
     else if(typ==="km") v=(d.jazdy||[]).filter(j=>jazdaMonthKey(j)===mk).reduce((a,j)=>a+(+j.km||0),0);
     out.push(v);
   }
@@ -5695,13 +5705,8 @@ function pasSumyMesiace(){
 // Fakturované za jeden mesiac. JEDINÉ miesto, kde sa to sčítava — volá ho
 // rozpad, porovnanie s predošlým mesiacom aj sparkline.
 function pasSumyFakturovane(mk){
-  let spolu=0, dph=0, pocet=0;
-  (firmaData.faktury||[]).forEach(f=>{
-    if(faktObdobie(f)!==mk) return;
-    const x=faktSumy(f)||{};
-    spolu=r2(spolu+(+x.spolu||0)); dph=r2(dph+(+x.dph||0)); pocet++;
-  });
-  return {spolu, dph, pocet};
+  // Pás hovorí o DODANÍ — je to pohľad na DPH, nie na daň z príjmov.
+  return faktSucet("dodanie", mk);
 }
 // Posledných N mesiacov po `mk` vrátane, aj tie bez jedinej faktúry —
 // vynechaný prázdny mesiac by zo sparkline spravil klamstvo o priebehu.
@@ -8686,8 +8691,7 @@ function appFaktury(){
   const roky=[...new Set(vsetky.map(f=>faktObdobieDane(f).slice(0,4)).filter(r=>/^\d{4}$/.test(r)))].sort().reverse();
   if(!fRok && roky.length) fRok=roky[0];
   if(fRok && !roky.includes(fRok)) fRok=roky[0]||"";
-  let fak=fRok ? vsetky.filter(f=>faktObdobieDane(f).slice(0,4)===fRok) : vsetky;
-  if(fMesiac) fak=fak.filter(f=>faktObdobieDane(f)===fMesiac);
+  let fak=fMesiac ? faktZaObdobie("uhrada", fMesiac) : faktZaObdobie("uhrada", fRok);
   const mesiace=[...new Set(vsetky.filter(f=>faktObdobieDane(f).slice(0,4)===fRok)
     .map(f=>faktObdobieDane(f)).filter(m=>/^\d{4}-\d{2}$/.test(m)))].sort().reverse();
   const spolu=fak.reduce((a,f)=>a+(+f.spolu||0),0);
@@ -8887,6 +8891,50 @@ function faktSumy(f){
     const dph=r2(bez*sadzba); return {bez,dph,spolu:r2(bez+dph),sadzba};
   }
   const bez=+f.bez||0, dph=+f.dph||0; return {bez,dph,spolu:+f.spolu||r2(bez+dph),sadzba};
+}
+// ═══════════════════════════════════════════════════════════════
+//  FAKTUROVANÉ ZA OBDOBIE — JEDNA FUNKCIA, TRI POMENOVANÉ OTÁZKY
+//
+//  To isté číslo sa počítalo na piatich miestach tromi vzorcami a popisky
+//  ten rozdiel neniesli. Namerané 8. 9. 2026 za rok 2026:
+//
+//    hero „fakturované 2026"        73 782 €   úhrada · bez DPH
+//    dlaždica „Vystavené (rok)"     81 711 €   vystavenie · s DPH
+//    modul Faktúry „Fakturované"    90 751 €   úhrada · s DPH
+//
+//  Všetky tri sú SPRÁVNE odpovede — na tri rôzne otázky. Chýbalo im
+//  pomenovanie, nie oprava. Preto sa obdobie vyberá kľúčom: kto si píše
+//  vlastné `f.datum.slice(0,7)`, napíše to zakaždým trochu inak, a nikto
+//  z výsledku nevyčíta, ktorú otázku si vlastne položil.
+//
+//  Sumy idú cez `faktSumy` — tá od MB rešpektuje sadzbu dokladu, takže sa
+//  konečne dá použiť všade. Dovtedy to bola tretia možnosť, ako sa rozísť.
+// ═══════════════════════════════════════════════════════════════
+const FAKT_OBDOBIE = {
+  uhrada:     f => faktObdobieDane(f),                                  // kedy prišli peniaze — daň z príjmov (kap. 85.3)
+  dodanie:    f => faktObdobie(f),                                      // kedy sa plnilo — DPH
+  vystavenie: f => String(f.datum||f.vystavenie||"").slice(0,7)         // kedy bol doklad vystavený
+};
+const FAKT_OBDOBIE_POPIS = { uhrada:"podľa úhrady", dodanie:"podľa dodania", vystavenie:"podľa vystavenia" };
+// `kluc` je rok ("2026") alebo mesiac ("2026-08"). Prázdny = všetko.
+function faktZaObdobie(obdobie, kluc){
+  const vyber=FAKT_OBDOBIE[obdobie];
+  // Nie tichý fallback: preklep v kľúči by ticho vrátil prázdny zoznam
+  // a plocha by hlásila nulu namiesto chyby.
+  if(!vyber) throw new Error("neznáme obdobie faktúry: "+obdobie);
+  const k=String(kluc||"");
+  return (firmaData.faktury||[]).filter(f=>{
+    if(!k) return true;
+    const o=vyber(f)||"";
+    return k.length===4 ? o.slice(0,4)===k : o===k;
+  });
+}
+function faktSucet(obdobie, kluc){
+  let bez=0, dph=0, spolu=0;
+  const f=faktZaObdobie(obdobie, kluc);
+  f.forEach(x=>{ const v=faktSumy(x)||{};
+    bez=r2(bez+(+v.bez||0)); dph=r2(dph+(+v.dph||0)); spolu=r2(spolu+(+v.spolu||0)); });
+  return {bez, dph, spolu, pocet:f.length, popis:FAKT_OBDOBIE_POPIS[obdobie]};
 }
 // odberatelia z histórie
 function odberateliaHistoria(){
