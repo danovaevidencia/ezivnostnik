@@ -1817,7 +1817,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.08-MJ";  // e-faktúra: odberateľ z faktúry, Peppol identita 0245
+const APP_VERZIA = "2026.09.08-MK";  // adresa odberateľa aj na tlačenom doklade
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -16303,7 +16303,7 @@ async function upomienkaPDF(odberatel){
   if(zoz.length===1 && Math.abs(zoz[0].zostatok-(+zoz[0].spolu||0))<0.005){
     try{ qrDataUrl=await generujPayBySquareQR(zoz[0], m); }catch(e){ console.error("QR do upomienky:", e); }
   }
-  const model=FP.modelUpomienky(zoz, m, dnes);
+  const model=FP.modelUpomienky(zoz.map(fakturaPreTlac), m, dnes);
   model.stupen=stupen;
   const doc=FP.vykresliUpomienku(jsPDF, model, { qrDataUrl });
   doc.save("upomienka"+(stupen>1?stupen:"")+"_"+String(odberatel).replace(/[^\w-]+/g,"_").slice(0,40)+"_"+dnes+".pdf");
@@ -21456,6 +21456,18 @@ function rozlozAdresu(a){
 // odberateľ VÝKAZOV a s touto faktúrou nemusí mať nič spoločné. Nevidno to,
 // keď má človek jedného odberateľa a v oboch miestach je tá istá firma —
 // presne to je prípad, ktorý chybu držal štyri mesiace v tichosti.
+// Faktúra pripravená na tlač: s doplnenou adresou odberateľa.
+//
+// Modul PDF o ostatných faktúrach nevie a vedieť nemá — nesiaha na `firmaData`,
+// aby ho vedela použiť aj edge funkcia. Doplniť adresu teda musí appka.
+// Bez toho tlačil odberateľa BEZ ADRESY všade, kde ju faktúra nemá, a v ostrých
+// dátach ju nemá 7 z 8. UBL to dovtedy maskovalo záložnou hodnotou z nastavení
+// výkazov (kap. 92.1), PDF žiadnu nemalo — takže tam bola diera vidieť rovno
+// na papieri a aj tak si jej nikto nevšimol.
+function fakturaPreTlac(f){
+  const a=adresaOdberatela(f);
+  return (a && a!==f.adresa) ? Object.assign({}, f, {adresa:a}) : f;
+}
 function adresaOdberatela(f){
   const vlastna=String((f&&f.adresa)||"").trim();
   if(vlastna) return vlastna;
@@ -21666,7 +21678,7 @@ async function exportFakturaPDF(idx){
   // QR sa vyrába TU a podáva sa modulu hotový — modul zámerne nesiaha na sieť,
   // inak by ho edge funkcia nevedela použiť.
   const qrDataUrl=await generujPayBySquareQR(f, m);
-  const doc=FP.vykresliFakturu(jsPDF, FP.modelZakaznickejFaktury(f, m, s, S), { qrDataUrl, isdoc:true });
+  const doc=FP.vykresliFakturu(jsPDF, FP.modelZakaznickejFaktury(fakturaPreTlac(f), m, s, S), { qrDataUrl, isdoc:true });
   const nazov="faktura_"+(f.cislo||"export")+".pdf";
   // jsPDF nevie vkladať prílohy — ISDOC XML preto prilepíme cez pdf-lib.
   // Bez toho PDF tvrdí „obsahuje e-faktúru (ISDOC)", ale žiadnu neobsahuje
