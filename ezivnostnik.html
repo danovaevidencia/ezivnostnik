@@ -1817,7 +1817,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.08-MO";  // archív s viacerými dokladmi sa naimportuje celý
+const APP_VERZIA = "2026.09.08-MP";  // dobropis a ťarchopis v e-faktúre, sprievodný text
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -12521,6 +12521,26 @@ const DRUHY_PLNENIA = {
                p:"Napríklad prenájom nehnuteľnosti bez dane, poisťovacie alebo vzdelávacie služby."}
 };
 function druhPlnenia(f){ return DRUHY_PLNENIA[String(f&&f.druhPlnenia||"").trim()] ? f.druhPlnenia.trim() : "tuzemsko"; }
+// Opravný doklad. Pravidlo je JEDNO — číta ho kontrolný výkaz (oddiel C.1)
+// aj export e-faktúry. Keby stálo na dvoch miestach, rozišlo by sa: doklad by
+// v jednom bol oprava a v druhom bežná faktúra.
+//
+// V sieti Peppol nejde len o iný kód, ale o INÝ DOKUMENT:
+//   dobropis  → CreditNote s kódom 381 a odkazom na pôvodný doklad
+//   ťarchopis → faktúra s kódom 383 a tým istým odkazom
+// Záporná faktúra 380 sa nepoužíva (sieť ju odmieta pravidlom
+// PEPPOL-EN16931-R120) a kód 384 je pre slovenské strany zakázaný
+// (PEPPOL-EN16931-P0112 ho povoľuje len medzi nemeckými subjektmi).
+// Obe overené proti verejnému validátoru 8. 9. 2026.
+function faktOprava(f){
+  const cislo=String((f||{}).cislo||"");
+  const opravuje=String((f||{}).opravujeDoklad||"").trim();
+  const znak = opravuje || (+((f||{}).bez)||0)<0 || /dobropis|opravn|ťarchopis|tarchopis/i.test(cislo);
+  if(!znak) return null;
+  // Ťarchopis dvíha sumu nahor; poznať sa dá len z čísla dokladu, inde to
+  // appka nemodeluje. Všetko ostatné je dobropis.
+  return { opravuje, tarchopis: /ťarchopis|tarchopis/i.test(cislo) };
+}
 
 const DPH_ODDIELY = {
   A1:"A.1 – Dodanie tovaru a služby (bežný režim)",
@@ -21651,6 +21671,13 @@ function exportEFakturaUBL(idx){
   const sadzbaPct=Math.round(sadzba*100);
   const dodIcDph=String(m.icdph||"").replace(/\s/g,"");
   const kat=ublKategoriaDPH(f, sadzba, dodIcDph);
+  // ── DRUH DOKLADU ──
+  // Dobropis nie je faktúra so záporným znamienkom: je to INÝ DOKUMENT
+  // (`CreditNote`) s vlastnou schémou — iné poradie prvkov, iné názvy riadkov
+  // a `DueDate` v nej NEEXISTUJE. Musí sa vedieť skôr, než sa skladajú riadky.
+  const opr=faktOprava(f);
+  const jeDobropis=!!opr && !opr.tarchopis;
+  const KOREN=jeDobropis?"CreditNote":"Invoice";
   const katPercent=kat.bezSadzby ? "" : `
         <cbc:Percent>${sadzbaPct}</cbc:Percent>`;
   const katDovod=kat.dovod ? `
@@ -21677,9 +21704,9 @@ function exportEFakturaUBL(idx){
   pol.forEach((p,i)=>{
     const mn=+p.mn||1, cena=+p.cena||0, sumaR=r2(mn*cena); lineTotal=r2(lineTotal+sumaR);
     lineXml+=`
-  <cac:InvoiceLine>
+  <cac:${KOREN}Line>
     <cbc:ID>${i+1}</cbc:ID>
-    <cbc:InvoicedQuantity unitCode="${ublJednotka(p.mj)}">${mn}</cbc:InvoicedQuantity>
+    <cbc:${jeDobropis?"Credited":"Invoiced"}Quantity unitCode="${ublJednotka(p.mj)}">${mn}</cbc:${jeDobropis?"Credited":"Invoiced"}Quantity>
     <cbc:LineExtensionAmount currencyID="EUR">${sumaR.toFixed(2)}</cbc:LineExtensionAmount>
     <cac:Item>
       <cbc:Name>${ubl(p.nazov||"Položka")}</cbc:Name>
@@ -21689,7 +21716,7 @@ function exportEFakturaUBL(idx){
       </cac:ClassifiedTaxCategory>
     </cac:Item>
     <cac:Price><cbc:PriceAmount currencyID="EUR">${cena.toFixed(2)}</cbc:PriceAmount></cac:Price>
-  </cac:InvoiceLine>`;
+  </cac:${KOREN}Line>`;
   });
   const bez=r2(lineTotal||s.bez), dph=r2(bez*sadzba), spolu=r2(bez+dph);
   // Odberateľova krajina bola natvrdo SK. Pri službe do EÚ, dodaní tovaru do EÚ
@@ -21701,19 +21728,38 @@ function exportEFakturaUBL(idx){
     <cbc:ActualDeliveryDate>${datDod}</cbc:ActualDeliveryDate>
     <cac:DeliveryLocation><cac:Address><cac:Country><cbc:IdentificationCode>${odbKrajina}</cbc:IdentificationCode></cac:Country></cac:Address></cac:DeliveryLocation>
   </cac:Delivery>` : "";
+  // Odkaz na opravovaný doklad patrí ZA `BuyerReference` (schéma to povedala
+  // chybou cvc-complex-type.2.4.a). Bez neho dobropis nespadne v kontrolnom
+  // výkaze do oddielu C.2.
+  const odkazNaPovodny = (opr && opr.opravuje) ? `
+  <cac:BillingReference>
+    <cac:InvoiceDocumentReference><cbc:ID>${ubl(opr.opravuje)}</cbc:ID></cac:InvoiceDocumentReference>
+  </cac:BillingReference>` : "";
+  // Sprievodný text faktúry. ISDOC ho nesie od začiatku, UBL nie — doklad
+  // u odberateľa tak prišiel bez vety, ktorá vysvetľuje, za čo je.
+  // Peppol povoľuje NAJVIAC JEDNU poznámku (PEPPOL-EN16931-R002).
+  const poznamka = String(f.popis||"").trim() ? `
+  <cbc:Note>${ubl(String(f.popis).trim())}</cbc:Note>` : "";
+  // Hlavička sa medzi faktúrou a dobropisom líši poradím aj názvom kódu:
+  // faktúra má DueDate a InvoiceTypeCode pred TaxPointDate, dobropis nemá
+  // DueDate vôbec a CreditNoteTypeCode ide až ZA TaxPointDate.
+  const hlavicka = jeDobropis ? `
+  <cbc:IssueDate>${datVyst}</cbc:IssueDate>
+  <cbc:TaxPointDate>${datDod}</cbc:TaxPointDate>
+  <cbc:CreditNoteTypeCode>381</cbc:CreditNoteTypeCode>${poznamka}` : `
+  <cbc:IssueDate>${datVyst}</cbc:IssueDate>
+  <cbc:DueDate>${datSplat}</cbc:DueDate>
+  <cbc:InvoiceTypeCode>${opr?"383":"380"}</cbc:InvoiceTypeCode>${poznamka}
+  <cbc:TaxPointDate>${datDod}</cbc:TaxPointDate>`;
   const xml=`<?xml version="1.0" encoding="UTF-8"?>
-<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+<${KOREN} xmlns="urn:oasis:names:specification:ubl:schema:xsd:${KOREN}-2"
          xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
          xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
   <cbc:CustomizationID>urn:cen.eu:en16931:2017#compliant#urn:fdc:peppol.eu:2017:poacc:billing:3.0</cbc:CustomizationID>
   <cbc:ProfileID>urn:fdc:peppol.eu:2017:poacc:billing:01:1.0</cbc:ProfileID>
-  <cbc:ID>${ubl(f.cislo||"")}</cbc:ID>
-  <cbc:IssueDate>${datVyst}</cbc:IssueDate>
-  <cbc:DueDate>${datSplat}</cbc:DueDate>
-  <cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>
-  <cbc:TaxPointDate>${datDod}</cbc:TaxPointDate>
+  <cbc:ID>${ubl(f.cislo||"")}</cbc:ID>${hlavicka}
   <cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>
-  <cbc:BuyerReference>${ubl(f.vs||f.cislo||"")}</cbc:BuyerReference>
+  <cbc:BuyerReference>${ubl(f.vs||f.cislo||"")}</cbc:BuyerReference>${odkazNaPovodny}
   <cac:AccountingSupplierParty>
     <cac:Party>
       <cbc:EndpointID schemeID="${PEPPOL_SCHEMA_SK}">${ubl(dodEndpoint)}</cbc:EndpointID>
@@ -21756,7 +21802,7 @@ function exportEFakturaUBL(idx){
   </cac:AccountingCustomerParty>${dodavka}
   <cac:PaymentMeans>
     <cbc:PaymentMeansCode>30</cbc:PaymentMeansCode>
-    <cbc:PaymentID>${ubl(f.vs||f.cislo||"")}</cbc:PaymentID>
+    <cbc:PaymentID>/VS${ubl(String(f.vs||f.cislo||"").replace(/\s/g,""))}/</cbc:PaymentID>
     <cac:PayeeFinancialAccount><cbc:ID>${ubl(String(m.iban||"").replace(/\s/g,""))}</cbc:ID></cac:PayeeFinancialAccount>
   </cac:PaymentMeans>
   <cac:TaxTotal>
@@ -21777,7 +21823,7 @@ function exportEFakturaUBL(idx){
     <cbc:TaxInclusiveAmount currencyID="EUR">${spolu.toFixed(2)}</cbc:TaxInclusiveAmount>
     <cbc:PayableAmount currencyID="EUR">${spolu.toFixed(2)}</cbc:PayableAmount>
   </cac:LegalMonetaryTotal>${lineXml}
-</Invoice>`;
+</${KOREN}>`;
   const blob=new Blob([xml],{type:"application/xml"});
   const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
   a.download="efaktura_"+String(f.cislo||"").replace(/[^\w.-]+/g,"_")+".xml"; a.click();
@@ -22004,10 +22050,9 @@ function dphOddielFaktura(f){
   // faktúre nemá čo opravovať v oddiele C.1.
   const dpF=DRUHY_PLNENIA[druhPlnenia(f)];
   if(dpF && dpF.oddiel==="") return "X";
-  // Oprava (dobropis/ťarchopis) sa pozná podľa toho, že opravuje inú faktúru,
-  // podľa zápornej sumy alebo podľa slova v čísle dokladu.
-  if(String(f.opravujeDoklad||"").trim()) return "C1";
-  if((+f.bez||0)<0 || /dobropis|opravn|ťarchopis|tarchopis/i.test(f.cislo||"")) return "C1";
+  // Oprava (dobropis/ťarchopis) — pravidlo je v `faktOprava`, aby ho kontrolný
+  // výkaz aj e-faktúra čítali z jedného miesta.
+  if(faktOprava(f)) return "C1";
   // Druh plnenia má prednosť — faktúra bez slovenskej DPH do oddielov A vôbec nepatrí.
   const dp=DRUHY_PLNENIA[druhPlnenia(f)];
   if(dp && dp.oddiel!=="A1") return dp.oddiel || "X";
