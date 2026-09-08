@@ -1620,7 +1620,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.08-LO";  // počiatočný zostatok výpisu je tiež kotva; opakovaný import záznam aktualizuje
+const APP_VERZIA = "2026.09.08-LP";  // počiatočný zostatok výpisu je tiež kotva; opakovaný import záznam aktualizuje
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -2268,7 +2268,7 @@ let firmyZoznam = [];
 function resetStavuModulov(){
   firmaData=null; firmaId=null; firmaVerzia=null; firmaConfig=null; firmaDirty=false;
   pristupyFirmy=[];   // prístupy sú PER FIRMU — inak by platili oprávnenia predošlej
-  fFilter="vsetky"; fakVybrane=new Set(); fakPoslednyList=[];
+  fFilter="vsetky"; fRok=""; fMesiac=""; fakVybrane=new Set(); fakPoslednyList=[];
   vFilter="vsetky"; vRok=""; vMesiac=""; vydVybrane=new Set(); vydPoslednyList=[];
   bFilter="vsetky"; bMesiac=""; vypisRozbaleny=null;
   kjMesiac=""; kjZlucit=false; kjTriedenie="datum"; kjHladaj="";
@@ -8248,7 +8248,7 @@ function icsToggle(gi){ if(_icsEvents[gi]){ _icsEvents[gi].zahrnut=!_icsEvents[g
 function icsOznac(v){ _icsEvents.forEach(e=>{ if(e.start&&!e.start.allDay) e.zahrnut=v; }); prekresliModal(icsSprievodca); }
 
 // ── FAKTÚRY ──
-let fFilter="vsetky";
+let fFilter="vsetky", fRok="", fMesiac="";
 // Bod 4 – výber a hromadné akcie v zozname faktúr.
 let fakVybrane=new Set(), fakPoslednyList=[];
 function fakToggleVyber(cislo, on){ if(on) fakVybrane.add(String(cislo)); else fakVybrane.delete(String(cislo)); appFaktury(); }
@@ -8288,7 +8288,20 @@ function fakHromadneZrusit(){
 function appFaktury(){
   if(prekresliVRamci("faktury")) return;   // rámec super apky (GY)
   const d=firmaData, c=APPS.faktury.c;
-  const fak=(d.faktury||[]).slice().sort((a,b)=>String(b.datum||b.vystavenie||"").localeCompare(String(a.datum||a.vystavenie||"")));
+  const vsetky=(d.faktury||[]).slice().sort((a,b)=>String(b.datum||b.vystavenie||"").localeCompare(String(a.datum||a.vystavenie||"")));
+  // Rok a mesiac podľa obdobia DANE, nie podľa dátumu faktúry — rovnako ako
+  // vo Výdavkoch (kap. 81). Inak by súčet na tejto obrazovke nesedel s tým,
+  // čo appka počíta do základu dane, a človek by hľadal doklad v roku, kde
+  // nie je. Pri faktúre rozhoduje dátum úplnej úhrady; keď úhrada nie je,
+  // padá to na obdobie faktúry — preto faktúra 12/2025 uhradená v 1/2026
+  // stojí v roku 2026, kam patrí jej príjem.
+  const roky=[...new Set(vsetky.map(f=>faktObdobieDane(f).slice(0,4)).filter(r=>/^\d{4}$/.test(r)))].sort().reverse();
+  if(!fRok && roky.length) fRok=roky[0];
+  if(fRok && !roky.includes(fRok)) fRok=roky[0]||"";
+  let fak=fRok ? vsetky.filter(f=>faktObdobieDane(f).slice(0,4)===fRok) : vsetky;
+  if(fMesiac) fak=fak.filter(f=>faktObdobieDane(f)===fMesiac);
+  const mesiace=[...new Set(vsetky.filter(f=>faktObdobieDane(f).slice(0,4)===fRok)
+    .map(f=>faktObdobieDane(f)).filter(m=>/^\d{4}-\d{2}$/.test(m)))].sort().reverse();
   const spolu=fak.reduce((a,f)=>a+(+f.spolu||0),0);
   const uhr=fak.filter(faktJeUhradena).length;
   const neuhrSum=fak.filter(f=>!faktJeUhradena(f)).reduce((a,f)=>a+(+f.spolu||0),0);
@@ -8309,7 +8322,17 @@ function appFaktury(){
       <div class="aminbox"><div class="al">Neuhradené</div><div class="av ${neuhrSum?'warn':''}">${eur(neuhrSum)}</div></div>
       <div class="aminbox"><div class="al">Priemer</div><div class="av">${eur(priem)}</div></div>
     </div>
-    <div class="atool" style="align-items:center">${['vsetky|Všetky','uhradene|Uhradené','neuhradene|Neuhradené'].map(x=>{const[k,l]=x.split('|');return `<span class="achip ${fFilter===k?'on':''}" onclick="fFilter='${k}';appFaktury()">${l}</span>`}).join('')}${hladatkoHtml('faktury','appFaktury','🔍 Číslo, odberateľ, VS, suma…')}</div>
+    <div class="atool" style="flex-wrap:wrap;gap:8px">
+      <select onchange="fRok=this.value;fMesiac='';appFaktury()" style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:13px">
+        ${roky.map(r=>`<option value="${r}" ${r===fRok?'selected':''}>${r}</option>`).join('')}
+      </select>
+      <select onchange="fMesiac=this.value;appFaktury()" style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:13px">
+        <option value="">celý rok</option>
+        ${mesiace.map(m=>`<option value="${m}" ${m===fMesiac?'selected':''}>${mesiacLabel(m)}</option>`).join('')}
+      </select>
+      <div style="flex-basis:100%;height:0"></div>
+      ${['vsetky|Všetky','uhradene|Uhradené','neuhradene|Neuhradené'].map(x=>{const[k,l]=x.split('|');return `<span class="achip ${fFilter===k?'on':''}" onclick="fFilter='${k}';appFaktury()">${l}</span>`}).join('')}${hladatkoHtml('faktury','appFaktury','🔍 Číslo, odberateľ, VS, suma…')}
+    </div>
     <div style="background:var(--sfc-info);border-left:3px solid var(--brand);border-radius:8px;padding:10px 13px;margin:0 2px 12px;font-size:12px">
       <b>Od 1.1.2027 povinná e-fakturácia.</b> Platitelia DPH budú musieť tuzemské faktúry vystavovať v štruktúrovanom formáte (UBL 2.1 / Peppol) a posielať cez Digitálneho poštára. Tlačidlom <b>e-faktúra</b> vygenerujete XML už teraz — v 2026 dobrovoľne na testovanie. <span onclick="efakturaInfo()" style="color:var(--brand);cursor:pointer;text-decoration:underline">Viac</span></div>
     ${fakVybrane.size?`<div style="position:sticky;top:0;z-index:5;display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:var(--brand-lite);border:1px solid var(--line);border-radius:9px;padding:8px 12px;margin-bottom:10px">
@@ -8324,9 +8347,11 @@ function appFaktury(){
       ${list.length?list.map(f=>{const idx=_fIdx.get(f);const fk=dokladKluc(f);const st=uhradaStav("faktura", fk);const fb=UHRADA_FARBY[st.stav]||UHRADA_FARBY.neznamy;const uhradena=faktJeUhradena(f);return `<div class="arow rdok rf"><div class="c-cb"><input type="checkbox" ${fakVybrane.has(fk)?'checked':''} onclick="event.stopPropagation();fakToggleVyber('${esc(fk)}',this.checked)" style="cursor:pointer"></div><div class="acol-strong c-sub" style="color:${c}" onclick="otvorDoklad(${idx})">${esc(f.cislo||"—")}</div><div class="c-main" onclick="otvorDoklad(${idx})">${esc(f.odberatel||"—")}</div><div class="acol-muted c-date" onclick="otvorDoklad(${idx})">${fmtDatum(f.datum||f.vystavenie)}</div><div class="acol-sum c-sum" onclick="otvorDoklad(${idx})">${eur(+f.spolu||0)}</div><div class="c-stav" ${st.stav!=="overene"?`onclick="event.stopPropagation();otvorVyberPlatby('faktura','${esc(fk)}')"`:`onclick="otvorDoklad(${idx})"`} style="${st.stav!=="overene"?"cursor:pointer":""}" title="${esc((st.text||'')+(st.stav!=="overene"?" · ťuknutím priradíte platbu z banky":""))}"><span style="display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:600;color:${fb.f}">${fb.ic}${fb.tichy?'':' '+fb.n}</span></div><div class="c-act" style="display:flex;gap:5px;align-items:center">${!uhradena?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vyberSposobUhrady(null,_s=>{oznacDokladUhradeny('faktura','${esc(fk)}',_s);appFaktury();})" title="Označiť ako uhradené">✓</button>`:((st.zdroj==='rucne'||st.zdroj==='legacy')?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();zrusDokladUhradu('faktura','${esc(fk)}');appFaktury()" title="Zrušiť potvrdenie úhrady">✕</button>`:'')}<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();exportFakturaPDF(${idx})" title="${f.originalSubor?'Stiahnuť pôvodný PDF':'Vygenerovať PDF faktúry'}">${f.originalSubor?'📎':'PDF'}</button><button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();exportEFakturaUBL(${idx})" title="E-faktúra UBL 2.1 / Peppol (povinné od 2027)">e-fa</button><button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();kopirujFakturu(${idx})" title="Vytvoriť kópiu — nové číslo a dátum, ostatné prevzaté">⧉</button></div></div>`;}).join(''):prazdnyAleboFilter(!(d.faktury||[]).length,
         "Zatiaľ nemáte žiadnu faktúru. Vystavte prvú — číslo, dátumy aj DPH doplní appka podľa nastavení.",
         {popis:"＋ Nová faktúra", kod:"editFaktura()"},
-        "fFilter='vsetky';_hladaj.faktury='';appFaktury()")}
+        "fFilter='vsetky';fRok='';fMesiac='';_hladaj.faktury='';appFaktury()")}
     </div>`;
-  setCrumb(`${fak.length} faktúr · ${eur(spolu)}`);
+  // Bez obdobia bol drobček zavádzajúci: „22 faktúr · 192 128,84 €" znelo ako
+  // ročný obrat, hoci to bol súčet od začiatku evidencie.
+  setCrumb(`${fak.length} ${sklon(fak.length,"faktúra","faktúry","faktúr")} · ${fRok}${fMesiac?' · '+mesiacLabel(fMesiac):''} · ${eur(spolu)}`);
 }
 // ═══════════════════════════════════════════════════════════════
 //  PRÍJMOVÝ DOKLAD (kap. 87.3)
