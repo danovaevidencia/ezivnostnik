@@ -465,7 +465,7 @@ h1,h2,h3,h4,.chead,.wbig,.sbox .sn,.sp-title b,.splittitle{text-wrap:balance}
 .wbig{font-size:22px;font-weight:700;font-family:var(--serif);letter-spacing:-.01em;line-height:1.05}
 .wbig.pos{color:var(--pos)}.wbig.warn{color:var(--warn)}.wbig.neg{color:var(--neg)}
 .wmeta{font-size:11.5px;color:var(--ink-soft);margin-top:4px}
-.wchart{display:flex;align-items:flex-end;gap:7px;height:100px;margin-top:18px}
+.wchart{display:flex;align-items:flex-end;gap:7px;height:100px;margin:18px 0 16px}
 .wbar{flex:1;background:linear-gradient(180deg,var(--brand),var(--brand-deep));border-radius:5px 5px 2px 2px;position:relative;min-height:5px}
 .wbar.cur{background:linear-gradient(180deg,var(--accent),var(--accent-deep))}
 .wbar b{position:absolute;top:-15px;left:50%;transform:translateX(-50%);font-size:9.5px;font-weight:700;color:var(--ink-soft);white-space:nowrap}
@@ -1789,7 +1789,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.08-LY";  // plán je na ploche raz — v čipe, ktorý sa dá ťuknúť
+const APP_VERZIA = "2026.09.08-LZ";  // dátum poslednej zálohy sa ukladá a berie sa novší; popisky mesiacov nevisia von
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -31105,13 +31105,32 @@ function exportFirmu(){
   if(!firmaData.settings) firmaData.settings={};
   firmaData.settings.poslednaZaloha=new Date().toISOString();
   try{ localStorage.setItem("eziv_poslednaZaloha", firmaData.settings.poslednaZaloha); }catch(_){}
+  // Bez tohto zostal čas len v pamäti karty a v `localStorage` — cloud sa oň
+  // nedozvedel a po najbližšom načítaní zvíťazila stará hodnota.
+  firmaDirty=true; ulozNastavenieDebounced();
   cloudMsg("Záloha stiahnutá.","ok");
 }
 // upozornenie: dlho nebola stiahnutá záloha (dní od poslednej)
 function backupOverdue(){
-  const posl=(firmaData.settings&&firmaData.settings.poslednaZaloha)||localStorage.getItem("eziv_poslednaZaloha");
+  // Zdroje sú dva a ROZCHÁDZAJÚ SA: `settings` cestuje cloudom medzi
+  // zariadeniami, `localStorage` ostáva na tom, kde sa zálohovalo. Kým sa
+  // bralo prvé neprázdne, stará hodnota z cloudu prebila čerstvú miestnu
+  // a appka pýtala zálohu, ktorú človek pred dvoma dňami stiahol.
+  // Zálohoval sa NAPOSLEDY ten neskorší z tých dvoch časov.
+  const casy=[];
+  const a=(firmaData.settings||{}).poslednaZaloha;
+  if(a) casy.push(new Date(a).getTime());
+  // `localStorage` vie hodiť v súkromnom okne alebo pri zakázaných dátach
+  // stránky — pôvodná verzia ho čítala bez poistky a vzala by so sebou celú
+  // plochu. Chyba sa nezhltne: bez nej by sa hlásenie o zálohe len ticho
+  // opieralo o jeden zdroj a nikto by nevedel prečo.
+  try{
+    const b=localStorage.getItem("eziv_poslednaZaloha");
+    if(b) casy.push(new Date(b).getTime());
+  }catch(e){ console.error("posledná záloha z localStorage:", e); }
+  const posl=casy.filter(x=>x>0 && !isNaN(x)).sort((x,y)=>y-x)[0];
   if(!posl) return {overdue:true, dni:null};
-  const dni=Math.floor((Date.now()-new Date(posl).getTime())/86400000);
+  const dni=Math.floor((Date.now()-posl)/86400000);
   return {overdue:dni>=30, dni};
 }
 
