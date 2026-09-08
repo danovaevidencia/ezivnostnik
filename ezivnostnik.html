@@ -1765,7 +1765,7 @@ html[data-jazda] .jazdapruh{display:flex}
 <input type="file" id="vypisInput" accept=".xml,.zip,text/xml,application/xml,application/zip" style="display:none" onchange="spracujVypis(event)">
 <input type="file" id="ocrInput" accept="image/*,application/pdf" capture="environment" style="display:none" onchange="spracujOCR(event)">
 <input type="file" id="ocrInputFile" accept="image/*,application/pdf" style="display:none" onchange="spracujOCR(event)">
-<input type="file" id="faktPdfInput" accept="application/pdf,application/xml,text/xml,.xml" multiple style="display:none" onchange="faktPdfSpracuj(event)">
+<input type="file" id="faktPdfInput" accept="application/pdf,application/xml,text/xml,.xml,.isdoc,.zip,application/zip" multiple style="display:none" onchange="faktPdfSpracuj(event)">
 <input type="file" id="gpxInput" accept=".gpx,.csv,.xml,text/csv" style="display:none" onchange="spracujGPX(event)">
 <input type="file" id="vwInput" accept=".xlsx,.xls" style="display:none" onchange="spracujVW(event)">
 <input type="file" id="zseInput" accept=".txt,.csv,.pdf,text/plain,application/pdf" style="display:none" onchange="spracujZse(event)">
@@ -1817,7 +1817,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.08-MK";  // adresa odberateľa aj na tlačenom doklade
+const APP_VERZIA = "2026.09.08-MO";  // archív s viacerými dokladmi sa naimportuje celý
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -20763,6 +20763,57 @@ async function zipVytiahniXml(subor, heslo){
   } finally { try{ await rd.close(); }catch(_){} }
 }
 
+// ── ARCHÍV S VIACERÝMI DOKLADMI (položka N8) ──────────────────────────────
+// `zipVytiahniXml` vyššie berie PRVÝ XML. Bankovému výpisu to stačí — banka
+// posiela jeden — ale archívu faktúr nie: z desiatich by sa naimportovala
+// jedna a zvyšok by ticho zmizol. Tichá strata deviatich dokladov vyzerá ako
+// úspešný import.
+//
+// Takéto archívy naozaj existujú: Verteco má export „Originály XML (.zip) —
+// podpísané originály tak, ako prešli sieťou Peppol" (PLAN_EFAKTURA §3.2).
+const ZIP_DOKLAD_PRIPONA=/\.(xml|isdoc|isdocx|pdf|jpe?g|png|webp)$/i;
+function zipTypSuboru(meno){
+  const p=(String(meno).split(".").pop()||"").toLowerCase();
+  if(p==="pdf") return "application/pdf";
+  if(p==="xml"||p==="isdoc"||p==="isdocx") return "text/xml";
+  if(p==="png") return "image/png";
+  if(p==="webp") return "image/webp";
+  if(p==="jpg"||p==="jpeg") return "image/jpeg";
+  return "";
+}
+async function zipDoklady(subor, heslo){
+  const zip=await nacitajZipLib();
+  const rd=new zip.ZipReader(new zip.BlobReader(subor), heslo ? { password:heslo } : {});
+  try{
+    const polozky=(await rd.getEntries())
+      .filter(x=>!x.directory && ZIP_DOKLAD_PRIPONA.test(x.filename)
+                 // macOS pribaľuje do archívov `__MACOSX/._nazov` — sú to
+                 // metadáta, nie doklady, a parser by na nich hlásil chybu.
+                 && !/(^|\/)__MACOSX\//.test(x.filename) && !/(^|\/)\._/.test(x.filename));
+    const von=[];
+    for(const p of polozky){
+      const blob=await p.getData(new zip.BlobWriter());
+      // Meno bez cesty: v archíve býva „2026/faktury/FA001.xml" a do náhľadu
+      // patrí súbor, nie priečinok.
+      const meno=String(p.filename).split("/").pop();
+      von.push(new File([blob], meno, { type: zipTypSuboru(meno) }));
+    }
+    return von;
+  } finally { try{ await rd.close(); }catch(_){} }
+}
+// Rozbalí archívy na začiatku importu, aby zvyšok slučky vôbec nevedel, že
+// nejaký ZIP existoval. Inak by sa logika importu rozdvojila na dve vetvy
+// a tie sa rozídu.
+async function rozbalArchivy(files){
+  const von=[];
+  for(const f of files){
+    const bajty=new Uint8Array(await f.slice(0,8).arrayBuffer());
+    if(jeZipBajty(bajty)) von.push(...await zipDoklady(f));
+    else von.push(f);
+  }
+  return von;
+}
+
 // Heslo k výpisom. Zámerne `localStorage`, nie `firmaData`: to sa synchronizuje
 // do cloudu a heslo by skončilo vedľa archívu, ktorý odomyká.
 const zipHesloKluc = () => "eziv_vypis_heslo_"+(firmaId||"local");
@@ -21285,14 +21336,48 @@ function parseUBLFaktura(xmlText){
   // strany: supplier (dodávateľ) a customer (odberateľ)
   const supplier=local(root,"AccountingSupplierParty");
   const partnerNazov = supplier?(txt(supplier,"RegistrationName")||txt(supplier,"Name")):"";
-  let partnerIcDph="", partnerIco="";
+  let partnerIcDph="", partnerIco="", partnerDic="", kodKrajiny="";
   if(supplier){
-    const taxSch=local(supplier,"PartyTaxScheme"); if(taxSch) partnerIcDph=txt(taxSch,"CompanyID");
+    // PartyTaxScheme môže byť viackrát: jedno s TaxScheme VAT (IČ DPH), druhé
+    // s iným (DIČ). Rovnaká úvaha ako v ISDOC parseri — jedno pravidlo.
+    localAll(supplier,"PartyTaxScheme").forEach(pts=>{
+      const cid=txt(pts,"CompanyID"); if(!cid) return;
+      const sch=txt(pts,"ID").toUpperCase();   // prvé ID pod PartyTaxScheme je TaxScheme/ID
+      if(sch==="VAT" || /^[A-Z]{2}\d/.test(cid)){ if(!partnerIcDph) partnerIcDph=cid.toUpperCase(); }
+      else if(!partnerDic) partnerDic=cid;
+    });
     const legal=local(supplier,"PartyLegalEntity"); if(legal) partnerIco=txt(legal,"CompanyID");
+    // Slovenská Peppol identita JE DIČ (schéma 0245). Keď druhé PartyTaxScheme
+    // chýba — a v Peppol BIS spravidla chýba — je EndpointID jediný zdroj.
+    const ep=local(supplier,"EndpointID");
+    if(!partnerDic && ep && String((ep.getAttribute&&ep.getAttribute("schemeID"))||"")==="0245")
+      partnerDic=(ep.textContent||"").trim();
+    const krajEl=local(supplier,"Country");
+    if(krajEl) kodKrajiny=txt(krajEl,"IdentificationCode").toUpperCase();
   }
+  const zahranicny = !!kodKrajiny && kodKrajiny!=="SK";
   const cislo=txt(root,"ID");  // prvý ID = číslo faktúry
-  const datum=txt(root,"IssueDate");
+  // O období DPH rozhoduje DÁTUM DODANIA, nie vystavenia — TaxPointDate (BT-7),
+  // inak skutočné dodanie (BT-72). ISDOC to tak robí od začiatku (`faktDatumDodania`,
+  // kap. 46); UBL parser čítal len IssueDate, takže faktúra vystavená v inom
+  // mesiaci než dodaná spadla do zlého obdobia kontrolného výkazu.
+  const datum=txt(root,"TaxPointDate")||txt(root,"ActualDeliveryDate")||txt(root,"IssueDate");
   const splatnost=txt(root,"DueDate");
+  const mena=txt(root,"DocumentCurrencyCode")||"EUR";
+  // Oprava pôvodného dokladu: dobropis nesie odkaz naň a bez neho nespadne
+  // v kontrolnom výkaze do oddielu C.2.
+  const bref=local(root,"BillingReference");
+  const opravujeDoklad=bref?txt(bref,"ID"):"";
+  // ── PLATOBNÉ ÚDAJE ──
+  // Bez nich stráca párovanie s bankou 70 zo 140 bodov (`parSkore`): VS 40,
+  // IBAN 30. Doklad prijatý cez Peppol by bol horší než ISDOC vytiahnutý z PDF.
+  const pm=local(root,"PaymentMeans");
+  const ucet=pm?local(pm,"PayeeFinancialAccount"):null;
+  const iban=ucet?txt(ucet,"ID").replace(/\s/g,"").toUpperCase():"";
+  // BT-83 nesie v slovenskej praxi tvar /VS…/SS…/KS… (konvencia výrobcov,
+  // PLAN_EFAKTURA §1.6); holé číslo je rovno variabilný symbol.
+  const platRef=pm?txt(pm,"PaymentID"):"";
+  const vsRef=(platRef.match(/\/VS(\d+)/i)||[])[1] || (/^\d+$/.test(platRef)?platRef:"");
   // sumy z LegalMonetaryTotal
   const mon=local(root,"LegalMonetaryTotal");
   const bez=mon?numT(mon,"TaxExclusiveAmount"):0;
@@ -21310,16 +21395,37 @@ function parseUBLFaktura(xmlText){
   // položky
   const lines=localAll(root, jeDobropis?"CreditNoteLine":"InvoiceLine");
   const polozky=lines.map(ln=>{ const item=local(ln,"Item"); const price=local(ln,"Price");
-    return { nazov:item?txt(item,"Name"):"", mn:numT(ln, jeDobropis?"CreditedQuantity":"InvoicedQuantity")||1, cena:price?numT(price,"PriceAmount"):0 };
+    return { nazov:item?txt(item,"Name"):"", mn:numT(ln, jeDobropis?"CreditedQuantity":"InvoicedQuantity")||1,
+      cena:price?numT(price,"PriceAmount"):0, bez:r2(numT(ln,"LineExtensionAmount")) };
   });
-  return {
-    druh:"Došlá faktúra", zdroj:"efaktura-ubl", jeDobropis,
-    partner:partnerNazov, cislo, datum:(datum||"").slice(0,10), splatnost:(splatnost||"").slice(0,10),
-    bez:r2(bez), dph:r2(dph), spolu:r2(spolu), sadzba,
-    dodavatelIco:partnerIco, dodavatelIcDph:partnerIcDph,
+  // Prenesenie daňovej povinnosti sa pozná podľa kategórie AE. Ktorý druh to je,
+  // povie krajina dodávateľa: slovenský dodávateľ s AE je § 69 ods. 12, cudzí
+  // je služba zo zahraničia — čo je zároveň predvolba, ktorú appka používa
+  // (`samozdDruh`), takže sa tu nič nedomýšľa nad rámec jej vlastného pravidla.
+  const katKod=taxCat?txt(taxCat,"ID").toUpperCase():"";
+  const samozdanenieTyp = katKod==="AE" ? (zahranicny?"sluzba":"tuzemsky") : "";
+  const popisHlavicky=txt(root,"Note");
+  const R={
+    druh:"Došlá faktúra", zdroj:"efaktura-ubl", jeDobropis, mena,
+    partner:partnerNazov, cislo, vs: vsRef||cislo,
+    datum:(datum||"").slice(0,10), splatnost:(splatnost||"").slice(0,10),
+    bez:r2(bez), dph:r2(dph), spolu:r2(spolu), sadzba, iban,
+    ico:partnerIco, icdph:partnerIcDph,
+    dodavatelIco:partnerIco, dodavatelIcDph:partnerIcDph, dodavatelDic:partnerDic,
+    zahranicny, kodKrajiny, samozdanenieTyp, opravujeDoklad,
     rozpis: rozpis.length>1?rozpis:null,
+    viacSadzieb: rozpis.length>1,
     polozky: polozky.length?polozky:null,
+    popis: popisHlavicky ? popisHlavicky.slice(0,120)
+         : (polozky.length ? String(polozky[0].nazov||"").slice(0,120) : ""),
+    _efaktura:true, _ubl:true,
   };
+  // Poistka: ak je dodávateľom naša vlastná firma, ide o NAŠU vystavenú faktúru,
+  // nie o výdavok. ISDOC parser ju má; UBL ju nemal, takže vlastná faktúra
+  // prijatá späť by sa zaevidovala ako cudzí náklad.
+  const mojeIco=String((firmaData.meta||{}).ico||"").replace(/\s/g,"");
+  if(mojeIco && String(partnerIco).replace(/\s/g,"")===mojeIco) R._vlastnaFaktura=true;
+  return R;
 }
 // ═══ ISDOC 6.x — príloha vnorená v PDF (KROS, Money, Pohoda) ═══
 // ISDOC nie je UBL: má vlastný namespace, "TaxSubTotal" (veľké T), IČO v
@@ -21499,11 +21605,56 @@ function peppolUcastnik(dic, icdph){
   const cistit=v=>String(v||"").replace(/\s/g,"");
   return cistit(dic) || cistit(icdph).replace(/^SK/i,"");
 }
+// Kategória DPH podľa EN 16931 sa NEODVODZUJE zo sadzby, ale z DRUHU PLNENIA —
+// ten už faktúra nesie (`DRUHY_PLNENIA`). Požiadavky každej kategórie sú
+// OVERENÉ proti verejnému validátoru siete 8. 9. 2026, nie prevzaté z
+// dokumentácie; pravidlo v zátvorke je to, ktoré doklad zhodilo:
+//
+//   S   bežná sadzba       sadzba > 0, dôvod sa neuvádza
+//   AE  prenos povinnosti  dôvod POVINNÝ (BR-AE-10)
+//   E   oslobodené         dôvod POVINNÝ (BR-E-10)
+//   G   vývoz mimo EÚ      dôvod POVINNÝ (BR-G-10)
+//   K   dodanie do EÚ      dôvod + KRAJINA DODANIA (BR-IC-12)
+//   Z   nulová sadzba      dôvod ZAKÁZANÝ (BR-Z-10)
+//   O   mimo DPH           na riadku BEZ sadzby (BR-O-05), dôvod povinný
+//                          (BR-O-10) a IČ DPH tam NESMIE byť (BR-O-02)
+//
+// Dôvod sa nevymýšľa — berie sa názov druhu plnenia, ktorý už nesie paragraf.
+function ublKategoriaDPH(f, sadzba, icdphDodavatela){
+  // Neplatiteľ DPH nefakturuje daň vôbec. Doteraz mu export vyhlásil kategóriu
+  // `S` s prázdnym IČ DPH, čo sieť odmieta (PEPPOL-EN16931-R008).
+  if(!String(icdphDodavatela||"").trim())
+    return {kod:"O", dovod:"Dodávateľ nie je platiteľ DPH", bezSadzby:true, bezIcDph:true};
+  const dp=druhPlnenia(f);
+  const MAPA={prenos69:"AE", eu_sluzba:"AE", eu_tovar:"K", vyvoz:"G", oslobodene:"E"};
+  if(MAPA[dp]) return {kod:MAPA[dp], dovod:(DRUHY_PLNENIA[dp]||{}).n||"", cudzia:dp!=="prenos69"};
+  // Tuzemské plnenie s nulovou sadzbou: prečo je nulová, appka nevie, a dôvod
+  // si vymýšľať nesmie. `Z` je jediná kategória, ktorá dôvod ZAKAZUJE.
+  if(!(+sadzba>0)) return {kod:"Z"};
+  return {kod:"S"};
+}
+// Krajina sa berie z predpony IČ DPH — to je údaj, ktorý appka má. Adresa je
+// voľný text bez krajiny, takže hádať sa z nej nedá.
+function ublKrajina(icdph){
+  const m=String(icdph||"").trim().toUpperCase().match(/^([A-Z]{2})/);
+  return m ? m[1] : "SK";
+}
 function exportEFakturaUBL(idx){
   const f=firmaData.faktury[idx]; const m=firmaData.meta||{};
   if(!f){ alert("Faktúra sa nenašla."); return; }
   const s=faktSumy(f);
-  const sadzbaPct=Math.round((s.sadzba||0.23)*100);
+  // ŽIADNY `||0.23`. `faktSadzba` po oprave 91.3 vracia nulu legitímne
+  // (neplatiteľ DPH, oslobodené plnenie) a `0||0.23` z nej spravilo 23 % —
+  // faktúra na 500 € odchádzala do siete ako 615 € s daňou, ktorú nikto
+  // neúčtoval. Nula je odpoveď, nie chýbajúca hodnota.
+  const sadzba=+s.sadzba||0;
+  const sadzbaPct=Math.round(sadzba*100);
+  const dodIcDph=String(m.icdph||"").replace(/\s/g,"");
+  const kat=ublKategoriaDPH(f, sadzba, dodIcDph);
+  const katPercent=kat.bezSadzby ? "" : `
+        <cbc:Percent>${sadzbaPct}</cbc:Percent>`;
+  const katDovod=kat.dovod ? `
+        <cbc:TaxExemptionReason>${ubl(kat.dovod)}</cbc:TaxExemptionReason>` : "";
   // Odberateľ sa berie Z FAKTÚRY. `f.odberatel` je REŤAZEC s názvom, takže
   // `f.odberatel.ico` bolo vždy `undefined` a hodnota prepadla do
   // `S.odberatelIco` — čo je odberateľ z nastavení VÝKAZOV, teda spravidla
@@ -21533,15 +21684,23 @@ function exportEFakturaUBL(idx){
     <cac:Item>
       <cbc:Name>${ubl(p.nazov||"Položka")}</cbc:Name>
       <cac:ClassifiedTaxCategory>
-        <cbc:ID>S</cbc:ID>
-        <cbc:Percent>${sadzbaPct}</cbc:Percent>
+        <cbc:ID>${kat.kod}</cbc:ID>${katPercent}
         <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
       </cac:ClassifiedTaxCategory>
     </cac:Item>
     <cac:Price><cbc:PriceAmount currencyID="EUR">${cena.toFixed(2)}</cbc:PriceAmount></cac:Price>
   </cac:InvoiceLine>`;
   });
-  const bez=r2(lineTotal||s.bez), dph=r2(bez*(s.sadzba||0.23)), spolu=r2(bez+dph);
+  const bez=r2(lineTotal||s.bez), dph=r2(bez*sadzba), spolu=r2(bez+dph);
+  // Odberateľova krajina bola natvrdo SK. Pri službe do EÚ, dodaní tovaru do EÚ
+  // a vývoze je odberateľ z definície inde — a pri kategórii K sieť krajinu
+  // dodania priamo vyžaduje (BR-IC-12).
+  const odbKrajina=ublKrajina(odbIcDph);
+  const dodavka=(kat.kod==="K") ? `
+  <cac:Delivery>
+    <cbc:ActualDeliveryDate>${datDod}</cbc:ActualDeliveryDate>
+    <cac:DeliveryLocation><cac:Address><cac:Country><cbc:IdentificationCode>${odbKrajina}</cbc:IdentificationCode></cac:Country></cac:Address></cac:DeliveryLocation>
+  </cac:Delivery>` : "";
   const xml=`<?xml version="1.0" encoding="UTF-8"?>
 <Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
          xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
@@ -21565,10 +21724,10 @@ function exportEFakturaUBL(idx){
         <cbc:PostalZone>${ubl(da.psc)}</cbc:PostalZone>
         <cac:Country><cbc:IdentificationCode>SK</cbc:IdentificationCode></cac:Country>
       </cac:PostalAddress>
-      <cac:PartyTaxScheme>
-        <cbc:CompanyID>${ubl(m.icdph||"")}</cbc:CompanyID>
+      ${dodIcDph?`<cac:PartyTaxScheme>
+        <cbc:CompanyID>${ubl(dodIcDph)}</cbc:CompanyID>
         <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
-      </cac:PartyTaxScheme>
+      </cac:PartyTaxScheme>`:""}
       <cac:PartyLegalEntity>
         <cbc:RegistrationName>${ubl(m.nazov||"")}</cbc:RegistrationName>
         <cbc:CompanyID>${ubl(String(m.ico||"").replace(/\s/g,""))}</cbc:CompanyID>
@@ -21583,9 +21742,9 @@ function exportEFakturaUBL(idx){
         <cbc:StreetName>${ubl((oa.ulica+" "+oa.cislo).trim())}</cbc:StreetName>
         <cbc:CityName>${ubl(oa.mesto)}</cbc:CityName>
         <cbc:PostalZone>${ubl(oa.psc)}</cbc:PostalZone>
-        <cac:Country><cbc:IdentificationCode>SK</cbc:IdentificationCode></cac:Country>
+        <cac:Country><cbc:IdentificationCode>${odbKrajina}</cbc:IdentificationCode></cac:Country>
       </cac:PostalAddress>
-      ${odbIcDph?`<cac:PartyTaxScheme>
+      ${(odbIcDph && !kat.bezIcDph)?`<cac:PartyTaxScheme>
         <cbc:CompanyID>${ubl(String(odbIcDph).replace(/\s/g,""))}</cbc:CompanyID>
         <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
       </cac:PartyTaxScheme>`:""}
@@ -21594,7 +21753,7 @@ function exportEFakturaUBL(idx){
         ${odbIco?`<cbc:CompanyID>${ubl(String(odbIco).replace(/\s/g,""))}</cbc:CompanyID>`:""}
       </cac:PartyLegalEntity>
     </cac:Party>
-  </cac:AccountingCustomerParty>
+  </cac:AccountingCustomerParty>${dodavka}
   <cac:PaymentMeans>
     <cbc:PaymentMeansCode>30</cbc:PaymentMeansCode>
     <cbc:PaymentID>${ubl(f.vs||f.cislo||"")}</cbc:PaymentID>
@@ -21606,8 +21765,8 @@ function exportEFakturaUBL(idx){
       <cbc:TaxableAmount currencyID="EUR">${bez.toFixed(2)}</cbc:TaxableAmount>
       <cbc:TaxAmount currencyID="EUR">${dph.toFixed(2)}</cbc:TaxAmount>
       <cac:TaxCategory>
-        <cbc:ID>S</cbc:ID>
-        <cbc:Percent>${sadzbaPct}</cbc:Percent>
+        <cbc:ID>${kat.kod}</cbc:ID>${kat.bezSadzby?"":`
+        <cbc:Percent>${sadzbaPct}</cbc:Percent>`}${katDovod}
         <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
       </cac:TaxCategory>
     </cac:TaxSubtotal>
@@ -26957,8 +27116,14 @@ async function spracujDokladSubor(file, setStav, qrVopred){
   return R;
 }
 async function faktPdfSpracuj(e){
-  const files=[...e.target.files]; e.target.value="";
+  let files=[...e.target.files]; e.target.value="";
   if(!files.length) return;
+  // Archív sa rozbalí ešte pred otvorením okna, aby počet v hlavičke sedel
+  // s tým, čo sa naozaj spracuje: „Spracúvam 1 súbor" pri archíve s desiatimi
+  // faktúrami je horšie než žiadny údaj.
+  try{ files=await rozbalArchivy(files); }
+  catch(err){ alert("Archív sa nepodarilo otvoriť: "+(err&&err.message||err)); return; }
+  if(!files.length){ alert("V archíve nie sú žiadne doklady — hľadám XML, ISDOC, PDF alebo obrázok."); return; }
   const stav=()=>document.getElementById("faktPdfProg");
   openModal("Import faktúr", `<div style="text-align:center;padding:30px"><div style="font-size:15px;margin-bottom:8px">Spracúvam ${files.length} ${files.length===1?'súbor':'súborov'}…</div><div class="csub" id="faktPdfProg">Čítam e-faktúry (XML) a PDF doklady.</div></div>`, null);
   _faktPdfData=[];
@@ -27865,7 +28030,7 @@ function otvorOcrVysledok(R){
                     "Naozaj uložiť s týmito litrami?")) return false;
       }
     }
-    const obj={druh:druh,partner:val("m_partner"),cislo:val("m_cislo")||"",variabilny:val("m_vs")||"",popis:val("m_popis"),datum:datum,bez:parseFloat(val("m_bez"))||0,dph:parseFloat(val("m_dph"))||0,spolu:parseFloat(val("m_spolu"))||0,mesiac:datum.slice(0,7),zdroj:R.ekasaId?"ekasa":"ocr",
+    const obj={druh:druh,partner:val("m_partner"),cislo:val("m_cislo")||"",variabilny:val("m_vs")||"",popis:val("m_popis"),datum:datum,bez:parseFloat(val("m_bez"))||0,dph:parseFloat(val("m_dph"))||0,spolu:parseFloat(val("m_spolu"))||0,mesiac:datum.slice(0,7),zdroj:R.ekasaId?"ekasa":(R.zdroj||"ocr"),
       dodavatelIco:val("m_dodIco")||"", dodavatelIcDph:dodIcDph,
       zahranicny:jeZahr, kodKrajiny:val("m_kodKrajiny")||""};
     // Polia, ktoré formulár od zjednotenia ponúka aj pri importe. Bez ich
@@ -27874,8 +28039,37 @@ function otvorOcrVysledok(R){
     vydavokDoplnkovePolia(obj);
     if(R.ekasaId){ obj.ekasaId=R.ekasaId; obj.cislo=obj.cislo||R.ekasaId; }
     if(litre>0) obj.litre=litre;
-    // ulož originál dokladu do cloudu
-    if(_ocrFile){ try{ const cesta=await dokladUpload(_ocrFile,"vydavok"); if(cesta) obj.doklad=cesta; }catch(_){} _ocrFile=null; }
+    // ── ORIGINÁL DOKLADU DO ÚLOŽISKA ──
+    // Pri fotke bločka je to pohodlie. Pri e-faktúre je to zákonná povinnosť:
+    // § 76 zákona o DPH žiada uchovať doklad 10 rokov V PÔVODNOM FORMÁTE
+    // a poštár ho neuchováva — Verteco obsah predvolene maže 14 dní po
+    // doručení (PLAN_EFAKTURA §1.4). Sme jediní, kto originál drží.
+    //
+    // Preto sa tu chyba NESMIE zhltnúť prázdnou vetvou catch: výdavok by sa
+    // uložil, používateľ by nič nespozoroval a originál by bol nenávratne preč.
+    // Vlastný prefix `efaktura` je preto, aby sa archív dal v úložisku nájsť.
+    if(_ocrFile){
+      const jeEf=!!R._efaktura;
+      let cesta=null, chyba="";
+      try{ cesta=await dokladUpload(_ocrFile, jeEf?"efaktura":"vydavok"); }
+      catch(e){ chyba=(e&&e.message)||String(e); console.error("archív dokladu:",e); }
+      if(cesta){ obj.doklad=cesta; _ocrFile=null; }
+      else if(jeEf && localMode){
+        // Lokálny režim nie je porucha — cloud tam nie je vôbec. Nemá zmysel
+        // pýtať sa; stačí, aby človek vedel, že originál si musí odložiť sám.
+        if(typeof cloudMsg==="function") cloudMsg("Originál e-faktúry sa neuložil — v lokálnom režime nie je archív. Odložte si XML sami.","warn");
+        _ocrFile=null;
+      }
+      else if(jeEf){
+        if(!confirm("⚠ Originál e-faktúry sa NEULOŽIL do archívu.\n\n"
+          +(chyba?"Dôvod: "+chyba+"\n\n":"")
+          +"Zákon žiada uchovať doklad 10 rokov v pôvodnom formáte a digitálny poštár\n"
+          +"ho neuchováva — obsah zvyčajne maže do 14 dní. Odložte si XML sami.\n\n"
+          +"Uložiť výdavok aj tak?")) return false;   // _ocrFile ostáva, dá sa skúsiť znova
+        _ocrFile=null;
+      }
+      else _ocrFile=null;
+    }
     if(!firmaData.vydavky) firmaData.vydavky=[];
     // kontrola: doklad z iného mesiaca? (chytí OCR chybu v roku/dátume)
     if(!overMesiacDokladu(datum)) return false;
