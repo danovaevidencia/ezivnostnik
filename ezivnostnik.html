@@ -511,6 +511,23 @@ h1,h2,h3,h4,.chead,.wbig,.sbox .sn,.sp-title b,.splittitle{text-wrap:balance}
   .dash .w-poz{grid-column:1/-1;order:2}
   .dash.dvojstlpec .w-poz{grid-column:1/span 20}
   .dash.dvojstlpec .w[data-wkey="graf"]{grid-column:span 16;order:3}
+  /* ── PÁS SO SUMAMI (§5b.3) ──────────────────────────────────────────
+     Zostáva pásom. Nezväčšuje sa na hero dlaždicu len preto, že je miesto —
+     hero je priamo pod ním a dve veľké plochy nad sebou si konkurujú. */
+  .pasSumy{display:flex;align-items:center;gap:26px;padding:13px 26px}
+  .pasSumy-lavo{flex:none}
+  .pasSumy-hlav{margin-bottom:2px}
+  .pasSumy-cislo{font-size:28px}
+  .pasSumy-obalky{flex:1;min-width:0;max-width:340px}
+  .pasSumy-bar{height:5px;max-width:320px;margin:0 0 6px}
+  /* Legenda v riadku, nie textový rozpad s bodkami (§5b.3). */
+  .pasSumy-rozpad{display:flex;flex-wrap:wrap;gap:6px 14px}
+  .pasSumy-sep{display:none}
+  .pasSumy-spark{flex:none;margin-left:auto;text-align:right}
+  .pasSumy-sparStlpce{display:flex;align-items:flex-end;gap:4px;height:34px}
+  .pasSumy-sparStlpce i{width:7px;border-radius:2px 2px 1px 1px;
+    background:var(--line);display:block}
+  .pasSumy-sparLbl{font-size:10px;color:var(--ink-soft);margin-top:5px;white-space:nowrap}
 }
 /* V dvojstĺpci má hlavička 143 px na názov, značku a ovládanie. Šípka
    „vstup do appky" je najslabší z tých prvkov — dlaždica je klikacia aj
@@ -1744,7 +1761,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.08-LS";  // Prehľad na širokej obrazovke: štyri stĺpce a dvojstĺpec pozornosť/graf
+const APP_VERZIA = "2026.09.08-LT";  // pás so sumami v riadku; sparkline piatich mesiacov nad 1000 px
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -5616,15 +5633,32 @@ function pasSumyMesiace(){
   (firmaData.faktury||[]).forEach(f=>{ const k=faktObdobie(f); if(/^\d{4}-\d{2}$/.test(k)) m.add(k); });
   return [...m].sort().reverse();
 }
-function pasSumyData(mk){
-  if(!/^\d{4}-\d{2}$/.test(String(mk||""))) return null;
-  const rok=+mk.slice(0,4), mi=+mk.slice(5,7)-1;
+// Fakturované za jeden mesiac. JEDINÉ miesto, kde sa to sčítava — volá ho
+// rozpad, porovnanie s predošlým mesiacom aj sparkline.
+function pasSumyFakturovane(mk){
   let spolu=0, dph=0, pocet=0;
   (firmaData.faktury||[]).forEach(f=>{
     if(faktObdobie(f)!==mk) return;
     const x=faktSumy(f)||{};
     spolu=r2(spolu+(+x.spolu||0)); dph=r2(dph+(+x.dph||0)); pocet++;
   });
+  return {spolu, dph, pocet};
+}
+// Posledných N mesiacov po `mk` vrátane, aj tie bez jedinej faktúry —
+// vynechaný prázdny mesiac by zo sparkline spravil klamstvo o priebehu.
+function pasSumyRad(mk, n){
+  const rok=+mk.slice(0,4), mi=+mk.slice(5,7)-1, out=[];
+  for(let i=n-1;i>=0;i--){
+    const d=new Date(rok, mi-i, 1);
+    const k=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
+    out.push({mk:k, spolu:pasSumyFakturovane(k).spolu});
+  }
+  return out;
+}
+function pasSumyData(mk){
+  if(!/^\d{4}-\d{2}$/.test(String(mk||""))) return null;
+  const rok=+mk.slice(0,4), mi=+mk.slice(5,7)-1;
+  const {spolu, dph, pocet}=pasSumyFakturovane(mk);
   let C=null;
   // Keď daňový výpočet zlyhá, odvody sa NEUKÁŽU ako nula — to by bolo
   // tvrdenie, že sa neplatí nič. Pás v tom prípade povie, že ich nevie.
@@ -5637,12 +5671,8 @@ function pasSumyData(mk){
   // Predošlý mesiac na porovnanie — len ten, ktorý v evidencii naozaj je.
   const d=new Date(rok, mi-1, 1);
   const predMk=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
-  let predSpolu=0, predBol=false;
-  (firmaData.faktury||[]).forEach(f=>{
-    if(faktObdobie(f)!==predMk) return;
-    predSpolu=r2(predSpolu+(+(faktSumy(f)||{}).spolu||0)); predBol=true;
-  });
-  const zmena = (predBol && predSpolu>0) ? Math.round((spolu-predSpolu)/predSpolu*100) : null;
+  const P=pasSumyFakturovane(predMk);
+  const zmena = (P.pocet && P.spolu>0) ? Math.round((spolu-P.spolu)/P.spolu*100) : null;
   return {mk, pocet, spolu, dph, odvody, tvoje, dan, zdrav, soc, zmena, predMk, neznameOdvody};
 }
 function pasSumyNastav(mk){ pasMesiac=mk; renderPasSumy(); }
@@ -5665,26 +5695,48 @@ function renderPasSumy(){
   const zmenaHtml = D.zmena==null ? "" :
     '<span class="pasSumy-zmena" style="color:var(--ink-'+(D.zmena>=0?"pos":"neg")+')">'
     +(D.zmena>=0?"+":"")+D.zmena+' %</span>';
+  // Oddeľovač položiek rozpadu. Na mobile je to bodka v texte, nad 1000 px
+  // sa skryje a položky sa rozostúpia medzerou (§5b.3).
+  const sep='<span class="pasSumy-sep" aria-hidden="true"> · </span>';
+  // Sparkline sa počíta LEN keď je vidieť. Skrytý prvok, ktorý sa napriek
+  // tomu ráta, je práca navyše pri každom prekreslení plochy.
+  let sparkline="";
+  if(typeof window!=="undefined" && window.innerWidth>=1000){
+    const rad=pasSumyRad(pasMesiac, 5);
+    const max=Math.max(...rad.map(x=>x.spolu), 0);
+    sparkline='<div class="pasSumy-spark">'
+      +'<div class="pasSumy-sparStlpce">'
+      +rad.map((x,i)=>'<i style="height:'+(max>0?Math.max(6, x.spolu/max*100):6)+'%'
+          +(i===rad.length-1?';background:var(--brand)':'')+'" title="'
+          +esc(mesiacLabel(x.mk)+" · "+eur0(x.spolu))+'"></i>').join("")
+      +'</div><div class="pasSumy-sparLbl">'
+      +esc(mesiacLabel(rad[0].mk))+' – '+esc(mesiacLabel(rad[rad.length-1].mk))+'</div></div>';
+  }
   host.innerHTML=
     '<div class="pasSumy">'
+    +'<div class="pasSumy-lavo">'
     +'<div class="pasSumy-hlav"><span class="pasSumy-lbl">Fakturované</span>'
     +'<select class="pasSumy-mes" onchange="pasSumyNastav(this.value)" '
     +'title="Mesiac, za ktorý je rozpad počítaný">'
     +mesiace.map(m=>'<option value="'+m+'"'+(m===pasMesiac?' selected':'')+'>'+mesiacLabel(m)+'</option>').join("")
     +'</select></div>'
     +'<div class="pasSumy-suma"><span class="pasSumy-cislo">'+eur0(D.spolu)+'</span>'+zmenaHtml+'</div>'
+    +'</div>'
+    +'<div class="pasSumy-obalky">'
     +'<div class="pasSumy-bar" aria-hidden="true">'
     +'<i style="width:'+pct(D.tvoje)+'%;background:var(--ob-tvoje)"></i>'
     +'<i style="width:'+pct(D.dph)+'%;background:var(--ob-dph)"></i>'
     +'<i style="width:'+pct(D.odvody)+'%;background:var(--ob-odvody)"></i>'
     +'</div>'
     +'<div class="pasSumy-rozpad">'
-    +teg("var(--ob-tvoje)")+'tvoje <b>'+eur0(D.tvoje)+'</b>'
-    +(D.dph>0 ? ' · '+teg("var(--ob-dph)")+'DPH <b>'+eur0(D.dph)+'</b>' : '')
+    +'<span class="pasSumy-pol">'+teg("var(--ob-tvoje)")+'tvoje <b>'+eur0(D.tvoje)+'</b></span>'
+    +(D.dph>0 ? sep+'<span class="pasSumy-pol">'+teg("var(--ob-dph)")+'DPH <b>'+eur0(D.dph)+'</b></span>' : '')
     +(D.neznameOdvody
-        ? ' · <span style="color:var(--ink-warn)">odvody a daň sa nepodarilo spočítať</span>'
-        : ' · '+teg("var(--ob-odvody)")+'odvody a daň <b>'+eur0(D.odvody)+'</b>')
-    +'</div></div>';
+        ? sep+'<span class="pasSumy-pol" style="color:var(--ink-warn)">odvody a daň sa nepodarilo spočítať</span>'
+        : sep+'<span class="pasSumy-pol">'+teg("var(--ob-odvody)")+'odvody a daň <b>'+eur0(D.odvody)+'</b></span>')
+    +'</div></div>'
+    +sparkline
+    +'</div>';
 }
 function renderHero(){
   const host=document.getElementById("heroFixed");
@@ -6724,7 +6776,8 @@ function renderRychleAkcie(){
 // Zmena šírky prekročí zlom — akcie aj umiestnenie ovládania sa musia
 // prekresliť, inak ostane po zväčšení okna horná lišta prázdna a hlavička
 // bez ovládania.
-window.addEventListener("resize", ()=>setTimeout(renderRychleAkcie, 0));
+function prekresliPodlaSirky(){ renderRychleAkcie(); renderPasSumy(); }
+window.addEventListener("resize", ()=>setTimeout(prekresliPodlaSirky, 0));
 // Lepiaci pás sa opiera o výšku hornej lišty. Napísaná natvrdo (59 px) sa
 // líšila od nameranej (58,8 px) a pás pri rolovaní poskakoval o pixel —
 // prehliadač zaokrúhľuje podpixely pri každom posune inak. Meria sa teda,
