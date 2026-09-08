@@ -1129,7 +1129,9 @@ h1,h2,h3,h4,.chead,.wbig,.sbox .sn,.sp-title b,.splittitle{text-wrap:balance}
 .modalcard.siroky{max-width:860px}
 .modalhd{display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--paper)}
 .modalhd h3{font-family:var(--sans);font-weight:700;font-size:16px}
-.modalx{width:32px;height:32px;border-radius:9px;border:1px solid var(--line);background:var(--bg);cursor:pointer;font-size:15px;color:var(--ink-soft)}
+/* 37 px ako všetko ostatné (kap. 90.14). Zatvorenie modálu je terč, ktorý sa
+   trafí naslepo — človek mieri palcom do rohu, nie na ikonu. */
+.modalx{width:37px;height:37px;border-radius:9px;border:1px solid var(--line);background:var(--bg);cursor:pointer;font-size:15px;color:var(--ink-soft)}
 .modalbd{padding:20px 22px}
 .mfield{margin-bottom:13px}
 .mfield label{display:block;font-size:12px;font-weight:600;color:var(--ink-soft);margin-bottom:5px}
@@ -1815,7 +1817,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.08-MG";  // doklad nad hranicou ide do výdavkov, kým sa nezaradí do majetku
+const APP_VERZIA = "2026.09.08-MH";  // upozornenie nad 1 700 € a rozhodnutie majetok/výdavok
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -4661,6 +4663,50 @@ function stravneSuhrn(rok){
   return {sadzba, dniRok, sumaRok:r2(dniRok*sadzba), byMonth};
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  DOKLADY NAD HRANICOU, PRI KTORÝCH ROZHODNUTIE EŠTE NEPADLO
+//
+//  Pravidlo (Roman, 8. 9. 2026): nad 1 700 € sa UPOZORNÍ, ale kým sa majetok
+//  nezaradí, doklad ostáva vo výdavkoch; po zaradení sa riadi odpismi podľa
+//  odpisovej skupiny. Appka rozhodnúť nemôže — o hmotnom majetku rozhoduje aj
+//  doba použiteľnosti nad rok, a tú z dokladu nevyčíta.
+//
+//  `nieJeMajetok` je ZÁZNAM ROZHODNUTIA, nie nastavenie. Bez neho by sa
+//  každý drahší nákup pýtal donekonečna a človek by nález prestal čítať —
+//  falošný poplach je drahší než žiadny (kap. 16).
+// ═══════════════════════════════════════════════════════════════
+function dokladyNaRozhodnutie(){
+  return (firmaData.vydavky||[]).filter(x=>
+    (+x.bez||0) > HM_HRANICA && !x.zaradenyMajetokId && !x.nieJeMajetok);
+}
+// „Nie je majetok" — doklad ostáva vo výdavkoch a appka sa už nepýta.
+// Rozhodnutie sa dá vziať späť na karte výdavku; preto sa nič nemaže.
+function oznacNieJeMajetok(idx){
+  const vyd=(firmaData.vydavky||[])[idx];
+  if(!vyd) return;
+  vyd.nieJeMajetok=true;
+  vyd.nieJeMajetokKedy=new Date().toISOString();
+  poZmene();
+  if(typeof vykresliDashboard==="function") vykresliDashboard();
+  if(aktualnaApp==="vydavky") appVydavky();
+}
+// Zoznam na rozhodnutie. Rovnaký tvar ako `rozporyModal` — dve tlačidlá
+// pri každom doklade, aby sa rozhodlo tam, kde sa o tom človek dozvedel.
+function otvorMajetokNaRozhodnutie(){
+  if(!strazZapis("vydavky")) return;
+  const zoz=dokladyNaRozhodnutie();
+  if(!zoz.length){ alert("Žiadny doklad nad "+eur0(HM_HRANICA)+" nečaká na rozhodnutie."); return; }
+  const V=firmaData.vydavky||[];
+  const telo=`<div class="csub" style="margin-bottom:12px">Nad ${eur0(HM_HRANICA)} môže ísť o hmotný majetok — rozhoduje doba použiteľnosti. Nad jeden rok sa odpisuje, do roka je to bežný výdavok. Kým sa nerozhodne, doklad ostáva vo výdavkoch.</div>`
+    + zoz.map(x=>{ const i=V.indexOf(x); return `<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:9px">
+        <div style="font-weight:600;font-size:13px">${esc(x.partner||x.popis||"—")}</div>
+        <div class="csub" style="margin:2px 0 8px">${fmtDatum(x.datum)} · ${eur(+x.bez||0)} bez DPH${x.cislo?" · "+esc(x.cislo):""}</div>
+        <div style="display:flex;gap:7px;flex-wrap:wrap">
+          <button class="aabtn pri" onclick="closeModal();vydavokDoMajetku(${i})">Zaradiť do majetku</button>
+          <button class="aabtn" onclick="oznacNieJeMajetok(${i});otvorMajetokNaRozhodnutie()">Nie je majetok</button>
+        </div></div>`; }).join("");
+  openModal("Majetok, alebo výdavok?", telo);
+}
 // zaradenie výdavku do majetku
 function vydavokDoMajetku(idx){
   const vyd=firmaData.vydavky[idx];
@@ -4685,8 +4731,8 @@ function vydavokDoMajetku(idx){
     <div id="zarNovy">
     <div style="background:${jeDrobny?'var(--brand-lite)':'var(--sfc-warn)'};color:${jeDrobny?'var(--brand-deep)':'var(--accent-deep)'};font-size:12.5px;padding:10px 13px;border-radius:9px;margin-bottom:14px">
       ${jeDrobny
-        ? `Cena ${eur(cena)} je do ${eur(HM_HRANICA)} — <b>drobný majetok</b>. Môže ostať vo výdavkoch jednorazovo (zníži daň hneď) + vediete ho v evidencii.`
-        : `Cena ${eur(cena)} je nad ${eur(HM_HRANICA)} — <b>hmotný majetok, ktorý sa musí odpisovať</b>. Výdavok sa nahradí ročnými odpismi (nemôže ísť do nákladov naraz).`}
+        ? `Cena ${eur(cena)} je do ${eur0(HM_HRANICA)} — <b>drobný majetok</b>. Môže ostať vo výdavkoch jednorazovo (zníži daň hneď) + vediete ho v evidencii.`
+        : `Cena ${eur(cena)} je nad ${eur0(HM_HRANICA)} — <b>môže ísť o hmotný majetok</b>. Rozhoduje aj doba použiteľnosti: nad jeden rok sa musí odpisovať, do roka je to bežný výdavok. Kým ho nezaradíte, ostáva vo výdavkoch.`}
     </div>
     <div class="mfield"><label>Názov majetku</label><input id="m_nazov" value="${esc(vyd.popis||vyd.partner||'')}"></div>
     <div class="mrow2">
@@ -6208,6 +6254,14 @@ function dashKontroly(){
     out.push({ic:ob.uroven==="err"?"⛔":"📈", akcia:ak, akciaText:akT,
       text:`<b>${esc(ob.nadpis)}</b> ${esc(ob.text)}`});
   }
+  // Doklady nad hranicou, pri ktorých rozhodnutie ešte nepadlo. Viazané na
+  // dôkaz: doklad nad 1 700 €, ktorý nie je zaradený ani odmietnutý. Keď sa
+  // rozhodne, nález zmizne sám.
+  try{
+    const M=dokladyNaRozhodnutie();
+    if(M.length) out.push({ic:"🏛", akcia:"otvorMajetokNaRozhodnutie()", akciaText:"Rozhodnúť",
+      text:`<b>${M.length}</b> ${sklon(M.length,"doklad je","doklady sú","dokladov je")} nad ${eur0(HM_HRANICA)} — môže ísť o majetok. Kým sa nerozhodne, ${M.length===1?"počíta sa":"počítajú sa"} do výdavkov.`});
+  }catch(e){ console.error("kontrola dokladov nad hranicou majetku:", e); }
   // Nespárované pohyby v banke. Split je desktopová odpoveď na párovanie
   // (§5b.4): dva zoznamy vedľa seba sú celý dôvod, prečo split existuje.
   // Na mobile sa vedľa seba prečítať nedajú, takže tam vedie do Banky.
