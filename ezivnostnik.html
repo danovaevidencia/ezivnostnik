@@ -979,6 +979,11 @@ h1,h2,h3,h4,.chead,.wbig,.sbox .sn,.sp-title b,.splittitle{text-wrap:balance}
    Dva rôzne tvary sa nedajú zameniť ani periférnym videním. */
 .achip{border:1px solid var(--line);background:var(--bg);border-radius:999px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;color:var(--ink-soft)}
 .achip.on{background:var(--brand);color:var(--on-brand);border-color:var(--brand)}
+/* Nedostupná voľba sa NESKRÝVA, len stlmí (návrh §6.3). Skrytý modul
+   vyzerá, že neexistuje, a človek ho hľadá; stlmený s dôvodom povie,
+   prečo sa ponúknuť nedá. `cursor:default`, nie `not-allowed` — nie je to
+   zákaz, je to vlastnosť modulu. */
+.achip.off{opacity:.5;cursor:default;font-weight:500}
 /* Pás záložiek nie je nástrojová karta — nemá rám ani papier, len linku,
    na ktorej aktívna záložka sedí. */
 .atool.atabs{background:none;border:none;border-radius:0;border-bottom:1.5px solid var(--line);
@@ -1784,7 +1789,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.08-LW";  // rozpor v úhrade je vidieť v riadku zoznamu, nie až v modáli
+const APP_VERZIA = "2026.09.08-LX";  // výber dvojice: odporúčaná kombinácia hore, nedostupné moduly stlmené
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -30520,18 +30525,30 @@ function splitOdoberUhradu(txIdVal, typ, cislo){
 function splitVyberModuly(){
   // moduly, ktoré split vie vykresliť ako náhľad (zoznamové)
   const PODPOROVANE=SPLIT_MODULY_IDS;
-  const modulChip=(strana, id, aktualny)=>{
-    const m=splitModulInfo(id); if(!m) return "";
+  // Návrh píše „sú to grafy a sprievodcovia". Merané v appke to nesedí: stlmené
+  // vyšli aj Uzávierka a Zdieľanie firmy, čo nie je ani graf, ani sprievodca.
+  // Dôvod musí platiť pre VŠETKO, čo ním appka označí, inak je to nepravda
+  // v nástroji — a rozhoduje jediná vlastnosť: modul nemá zoznam.
+  const DOVOD="Tieto moduly nemajú zoznam, ktorý by sa dal postaviť vedľa druhého panela.";
+  const modulChip=(strana, id, aktualny, vypnuty)=>{
+    const m=splitModulInfo(id)||APPS[id]; if(!m) return "";
+    if(vypnuty) return `<span class="achip off" title="${esc(DOVOD)}">${m.ic} ${esc(m.n)}</span>`;
     return `<span class="achip ${aktualny===id?'on':''}" onclick="splitPickTmp('${strana}','${id}')">${m.ic} ${m.n}</span>`;
   };
   const skupinaBlok=(strana, aktualny)=>{
     let html="";
+    let bolStlmeny=false;
     SKUPINY.forEach(g=>{
-      let moduly=g.moduly.filter(id=>PODPOROVANE.includes(id) && modulPovolenyPreModul(id));
-      if(!moduly.length) return;
+      const vSkupine=g.moduly.filter(id=>APPS[id] && modulPovolenyPreModul(id));
+      const moduly=vSkupine.filter(id=>PODPOROVANE.includes(id));
+      const mimo=vSkupine.filter(id=>!PODPOROVANE.includes(id));
+      if(!moduly.length && !mimo.length) return;
+      if(mimo.length) bolStlmeny=true;
       html+=`<div style="margin-bottom:9px">
-        <div style="font-size:11px;font-weight:700;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.04em;margin-bottom:5px">${g.ic} ${g.n}</div>
-        <div style="display:flex;flex-wrap:wrap;gap:6px">${moduly.map(id=>modulChip(strana,id,aktualny)).join("")}</div>
+        <div style="font-size:11px;font-weight:700;color:${g.c};text-transform:uppercase;letter-spacing:.04em;margin-bottom:5px">${g.ic} ${g.n}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          ${moduly.map(id=>modulChip(strana,id,aktualny)).join("")}
+          ${mimo.map(id=>modulChip(strana,id,aktualny,true)).join("")}</div>
       </div>`;
     });
     // samostatné: kalendár + doklady (párovanie)
@@ -30539,11 +30556,25 @@ function splitVyberModuly(){
       ${modulChip(strana,'kalendar',aktualny)}
       <span class="achip ${aktualny==='doklady'&&strana==='p'?'on':''}" onclick="splitPickTmp('${strana}','doklady')">▤ Doklady (na párovanie)</span>
     </div>`;
+    // `title` na dotyku neexistuje — dôvod musí byť napísaný.
+    if(bolStlmeny) html+=`<div style="font-size:11px;color:var(--ink-soft);margin-top:7px;line-height:1.4">${esc(DOVOD)}</div>`;
     return html;
   };
   window.__splTmpL=splitLavy; window.__splTmpP=splitPravy;
-  openModal("Rozdeliť obrazovku", `
-    <div class="csub" style="margin-bottom:14px">Vyberte dva panely — na mobile pod sebou, na tablete/PC vedľa seba. Kombinácia <b>Banka + Doklady</b> zapne párovanie platieb.</div>
+  let odporucanie="";
+  try{
+    if(modulPovolenyPreModul("banka") && modulPovolenyPreModul("vydavky")){
+      const V=bankaVedra();
+      const koniec = V.caka>0 ? " · "+V.caka+" "+sklonPohyb(V.caka)+" "+sklon(V.caka,"čaká","čakajú","čaká") : "";
+      odporucanie=`<div onclick="splitOdporucanu()" style="display:flex;align-items:center;gap:10px;cursor:pointer;
+        background:var(--brand-lite);border:1px solid var(--brand);border-radius:10px;padding:10px 13px;margin-bottom:14px">
+        <span style="font-size:17px">⊟</span>
+        <span style="flex:1;font-size:12.5px;line-height:1.35"><b>Banka + Výdavky</b> — zapne párovanie${esc(koniec)}</span>
+        <span style="color:var(--brand);font-weight:700">›</span></div>`;
+    }
+  }catch(e){ console.error("odporúčaná dvojica splitu:", e); }
+  openModal("Rozdeliť obrazovku", odporucanie + `
+    <div class="csub" style="margin-bottom:14px">Alebo si vyberte dva panely — na mobile pod sebou, na tablete/PC vedľa seba.</div>
     <div class="mfield"><label>Ľavý / horný panel</label><div id="splL">${skupinaBlok('l', splitLavy)}</div></div>
     <div class="mfield" style="margin-top:14px"><label>Pravý / dolný panel</label><div id="splP">${skupinaBlok('p', splitPravy)}</div></div>
   `, ()=>{
@@ -30551,6 +30582,14 @@ function splitVyberModuly(){
     splitVybranyPohyb=null;
     otvorSplit(l, pr);
   });
+}
+// Odporúčaná dvojica je SKRATKA, nie predvyplnenie: zavrie výber a otvorí
+// split rovno. Predvyplnenie by človeka nechalo potvrdzovať to, na čo práve
+// klikol.
+function splitOdporucanu(){
+  if(typeof closeModal==="function") closeModal();
+  splitVybranyPohyb=null;
+  otvorSplit("banka","vydavky");
 }
 function splitPickTmp(strana, id){
   if(strana==='l'){ window.__splTmpL=id; } else { window.__splTmpP=id; }
