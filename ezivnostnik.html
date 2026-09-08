@@ -1817,7 +1817,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.08-MH";  // upozornenie nad 1 700 € a rozhodnutie majetok/výdavok
+const APP_VERZIA = "2026.09.08-MI";  // faktúra zabalená v obálke SBDH sa konečne prečíta
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -9146,15 +9146,17 @@ function parseOdoslanaEFaktura(xmlText){
   let doc;
   try{ doc=new DOMParser().parseFromString(xmlText,"text/xml"); }catch(_){ return null; }
   if(!doc || (doc.getElementsByTagName&&doc.getElementsByTagName("parsererror").length)) return null;
-  const root=doc.documentElement;
+  // Tá istá obálka SBDH ako pri prijatej faktúre — a ten istý dôsledok, keby
+  // sa ignorovala. Preto spoločná funkcia, nie druhá kópia podmienky.
+  const root=ublKorenFaktury(doc);
   if(!root || !/Invoice/i.test(root.localName||root.nodeName)) return null;
-  const local=(parent,name)=>{ const els=(parent||doc).getElementsByTagName("*"); for(let i=0;i<els.length;i++){ if(els[i].localName===name) return els[i]; } return null; };
-  const localAll=(parent,name)=>{ const out=[]; const els=(parent||doc).getElementsByTagName("*"); for(let i=0;i<els.length;i++){ if(els[i].localName===name) out.push(els[i]); } return out; };
+  const local=(parent,name)=>{ const els=(parent||root).getElementsByTagName("*"); for(let i=0;i<els.length;i++){ if(els[i].localName===name) return els[i]; } return null; };
+  const localAll=(parent,name)=>{ const out=[]; const els=(parent||root).getElementsByTagName("*"); for(let i=0;i<els.length;i++){ if(els[i].localName===name) out.push(els[i]); } return out; };
   const txt=(parent,name)=>{ const el=local(parent,name); return el?el.textContent.trim():""; };
   const numT=(parent,name)=>{ const v=parseFloat(txt(parent,name)); return isNaN(v)?0:v; };
   const jeIsdoc=/isdoc/i.test(root.namespaceURI||"") || /isdoc/i.test(xmlText.slice(0,400));
   // ODBERATEĽ = zákazník
-  const customer = local(doc,"AccountingCustomerParty");
+  const customer = local(root,"AccountingCustomerParty");
   let odberatel="", odbIco="", odbIcDph="";
   if(customer){
     odberatel = txt(customer,"RegistrationName")||txt(customer,"Name");
@@ -9168,17 +9170,17 @@ function parseOdoslanaEFaktura(xmlText){
   const cislo=jeIsdoc ? (txt(doc,"ID")||txt(doc,"DocumentID")||txt(doc,"InvoiceNumber")) : txt(doc,"ID");
   const datum=(txt(doc,"IssueDate")||txt(doc,"TaxPointDate")).slice(0,10);
   const splatnost=(txt(doc,"DueDate")||"").slice(0,10);
-  const mon=local(doc,"LegalMonetaryTotal")||local(doc,"AnticipatedMonetaryTotal");
+  const mon=local(root,"LegalMonetaryTotal")||local(root,"AnticipatedMonetaryTotal");
   let bez=mon?numT(mon,"TaxExclusiveAmount"):0;
   let spolu=mon?numT(mon,"TaxInclusiveAmount")||numT(mon,"PayableAmount"):0;
-  const taxTotal=local(doc,"TaxTotal");
+  const taxTotal=local(root,"TaxTotal");
   let dph=taxTotal?numT(taxTotal,"TaxAmount"):r2(spolu-bez);
   if(jeIsdoc){ // ISDOC: TaxTotalCurr / TaxInclusiveAmount
-    if(!bez){ const tt=local(doc,"TaxTotal"); }
+    if(!bez){ const tt=local(root,"TaxTotal"); }
     if(!spolu) spolu=numT(doc,"TaxInclusiveAmount")||spolu;
   }
   // človekodni z položiek
-  const lines=localAll(doc,"InvoiceLine");
+  const lines=localAll(root,"InvoiceLine");
   let dni=0;
   const polozky=lines.map(ln=>{ const item=local(ln,"Item"); const price=local(ln,"Price");
     const mn=numT(ln,"InvoicedQuantity")||1;
@@ -21234,45 +21236,79 @@ async function ulozCezObal(blob, nazov){
 // ── PRIJATIE E-FAKTÚRY: parsovanie UBL 2.1 XML (povinné prijímať od 2027) ──
 // Prečíta prijatú e-faktúru (UBL Invoice) a vytiahne dáta do výdavku.
 // Doručenie z Peppol siete zabezpečuje Digitálny poštár; appka spracuje XML.
+// KOREŇ FAKTÚRY V UBL DOKUMENTE.
+//
+// Peppol doručuje doklad ZABALENÝ v obálke SBDH (Standard Business Document
+// Header) — koreňom dokumentu je potom `StandardBusinessDocument` a samotná
+// faktúra je až vnútri. Kým sa appka pozerala len na `documentElement`,
+// import ostrého dokladu zo siete ticho zlyhal: parser vrátil `null` a doklad
+// vyzeral, akoby v súbore nebol. Od 2027 sa to týka každého, komu faktúra
+// príde cez Peppol — teda všetkých.
+//
+// Faktúra sa hľadá LEN medzi PRIAMYMI potomkami obálky — tam podľa normy
+// je. Nie je to obrana pred doloženou hrozbou: skúšal som to a s reálnou
+// obálkou dá hľadanie do hĺbky ten istý výsledok (hlavička má `<Type>` s
+// hodnotou „Invoice", nie element menom `Invoice`). Je to lacnejšie
+// a užšie, takže sa tým nič nestráca — ale netvárme sa, že to niečo chytá.
+function ublKorenFaktury(doc){
+  const root=doc && doc.documentElement;
+  if(!root) return null;
+  const meno=el=>el.localName||el.nodeName||"";
+  if(/^(Invoice|CreditNote)$/i.test(meno(root))) return root;
+  if(!/^StandardBusinessDocument$/i.test(meno(root))) return null;
+  for(let i=0;i<root.childNodes.length;i++){
+    const n=root.childNodes[i];
+    if(n.nodeType===1 && /^(Invoice|CreditNote)$/i.test(meno(n))) return n;
+  }
+  return null;
+}
 function parseUBLFaktura(xmlText){
   let doc;
   try{ doc=new DOMParser().parseFromString(xmlText,"text/xml"); }catch(_){ return null; }
   if(!doc || (doc.getElementsByTagName&&doc.getElementsByTagName("parsererror").length)) return null;
-  const root=doc.documentElement;
-  if(!root || !/Invoice|CreditNote/i.test(root.localName||root.nodeName)) return null;
+  const root=ublKorenFaktury(doc);
+  if(!root) return null;
   const jeDobropis=/CreditNote/i.test(root.localName||root.nodeName);
-  // pomocník: nájdi element podľa lokálneho názvu (ignoruj namespace prefix)
-  const local=(parent,name)=>{ const els=(parent||doc).getElementsByTagName("*"); for(let i=0;i<els.length;i++){ if(els[i].localName===name) return els[i]; } return null; };
-  const localAll=(parent,name)=>{ const out=[]; const els=(parent||doc).getElementsByTagName("*"); for(let i=0;i<els.length;i++){ if(els[i].localName===name) out.push(els[i]); } return out; };
+  // Hľadá sa OD FAKTÚRY, nie od dokumentu. Dnes to nič nemení: hlavička SBDH
+  // nemá ani jeden z názvov, ktoré parser hľadá (`ID`, `IssueDate`, sumy) —
+  // má `Identifier`, `InstanceIdentifier`, `Standard`, `Type`. Overené
+  // pokusom: pri hľadaní od `doc` vyjde to isté.
+  //
+  // Zúženie tu je preto, že tá zhoda je NÁHODA dvoch slovníkov, nie pravidlo.
+  // Keby SBDH pribudlo pole s menom, ktoré parser hľadá, doklad by sa ticho
+  // naplnil údajmi obálky — a to je presne trieda chyby, ktorá sa nájde až
+  // u zákazníka.
+  const local=(parent,name)=>{ const els=(parent||root).getElementsByTagName("*"); for(let i=0;i<els.length;i++){ if(els[i].localName===name) return els[i]; } return null; };
+  const localAll=(parent,name)=>{ const out=[]; const els=(parent||root).getElementsByTagName("*"); for(let i=0;i<els.length;i++){ if(els[i].localName===name) out.push(els[i]); } return out; };
   const txt=(parent,name)=>{ const el=local(parent,name); return el?el.textContent.trim():""; };
   const numT=(parent,name)=>{ const v=parseFloat(txt(parent,name)); return isNaN(v)?0:v; };
   // strany: supplier (dodávateľ) a customer (odberateľ)
-  const supplier=local(doc,"AccountingSupplierParty");
+  const supplier=local(root,"AccountingSupplierParty");
   const partnerNazov = supplier?(txt(supplier,"RegistrationName")||txt(supplier,"Name")):"";
   let partnerIcDph="", partnerIco="";
   if(supplier){
     const taxSch=local(supplier,"PartyTaxScheme"); if(taxSch) partnerIcDph=txt(taxSch,"CompanyID");
     const legal=local(supplier,"PartyLegalEntity"); if(legal) partnerIco=txt(legal,"CompanyID");
   }
-  const cislo=txt(doc,"ID");  // prvý ID = číslo faktúry
-  const datum=txt(doc,"IssueDate");
-  const splatnost=txt(doc,"DueDate");
+  const cislo=txt(root,"ID");  // prvý ID = číslo faktúry
+  const datum=txt(root,"IssueDate");
+  const splatnost=txt(root,"DueDate");
   // sumy z LegalMonetaryTotal
-  const mon=local(doc,"LegalMonetaryTotal");
+  const mon=local(root,"LegalMonetaryTotal");
   const bez=mon?numT(mon,"TaxExclusiveAmount"):0;
   const spolu=mon?numT(mon,"TaxInclusiveAmount"):0;
   // DPH z TaxTotal
-  const taxTotal=local(doc,"TaxTotal");
+  const taxTotal=local(root,"TaxTotal");
   const dph=taxTotal?numT(taxTotal,"TaxAmount"):r2(spolu-bez);
   // sadzba z TaxCategory
-  const taxCat=local(doc,"TaxCategory")||local(doc,"ClassifiedTaxCategory");
+  const taxCat=local(root,"TaxCategory")||local(root,"ClassifiedTaxCategory");
   const sadzba=taxCat?numT(taxCat,"Percent"):23;
   // rozpis podľa sadzieb (viac TaxSubtotal = viac sadzieb)
-  const subtotals=localAll(doc,"TaxSubtotal");
+  const subtotals=localAll(root,"TaxSubtotal");
   const rozpis=[];
   subtotals.forEach(st=>{ const zaklad=numT(st,"TaxableAmount"), d=numT(st,"TaxAmount"); const cat=local(st,"TaxCategory"); const pct=cat?numT(cat,"Percent"):sadzba; if(zaklad>0) rozpis.push({sadzba:pct, bez:r2(zaklad), dph:r2(d)}); });
   // položky
-  const lines=localAll(doc, jeDobropis?"CreditNoteLine":"InvoiceLine");
+  const lines=localAll(root, jeDobropis?"CreditNoteLine":"InvoiceLine");
   const polozky=lines.map(ln=>{ const item=local(ln,"Item"); const price=local(ln,"Price");
     return { nazov:item?txt(item,"Name"):"", mn:numT(ln, jeDobropis?"CreditedQuantity":"InvoicedQuantity")||1, cena:price?numT(price,"PriceAmount"):0 };
   });
