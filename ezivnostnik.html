@@ -1887,7 +1887,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.09-MT";  // zabudnutá jazda, názvy z mapy, koniec falošných prerušení
+const APP_VERZIA = "2026.09.09-MU";  // rok povinnosti sa naozaj uloží
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -10598,13 +10598,7 @@ function vydavokFormInit(noveZOcr){
 
 function vydavokDoplnkovePolia(obj){
   const kat=val("m_kategoria"); if(kat) obj.kategoria=kat;
-  // Rok povinnosti sa ukladá LEN pri kategóriách, ktoré ho používajú — inak by
-  // sa hodnota niesla ďalej aj po prepnutí kategórie a ticho posúvala platbu
-  // na iný rok. Prázdne pole znamená „rok úhrady" a to je aj správne prázdno,
-  // nie chýbajúci údaj.
-  const K=KATEGORIE_VYDAVKOV[kat];
-  const zr=parseInt(val("m_zaRok"),10);
-  if(K && K.zaRok && zr>2000) obj.zaRok=zr; else delete obj.zaRok;
+  citajZaRok(obj);
   const vyst=val("m_vystavenie"); if(vyst) obj.vystavenie=vyst;
   const spl=val("m_splatnostVyd"); if(spl) obj.splatnost=spl;
   const ib=String(val("m_ibanVyd")||"").replace(/\s/g,"").toUpperCase(); if(ib) obj.iban=ib;
@@ -10616,7 +10610,10 @@ function vydavokDoplnkovePolia(obj){
   const adr=val("m_autoDruh"); if(adr && obj.autoDoklad) obj.autoDruh=adr;
   // opakovaný doklad
   const op=document.getElementById("m_opakovany");
-  if(op && op.checked){ obj.opakovanie={perioda:val("m_perioda")||"mesacne"}; }
+  // Kľúče periódy sú `mes`/`stvrt`/`polrok`/`rok` (viď PERIODY). Záloha znela
+  // „mesacne", čo v tej tabuľke nie je — taký doklad by z prehľadu opakovaných
+  // ticho vypadol, lebo sa filtruje cez `PERIODY[x.opakovanie.perioda]`.
+  if(op && op.checked){ obj.opakovanie={perioda:val("m_perioda")||"mes"}; }
   citajPodnikPct(obj);
   citajUcetFS(obj);
   citajOsobitnu(obj);
@@ -10633,6 +10630,27 @@ function vydavokDoplnkovePolia(obj){
 // Volá sa až vtedy, keď je objekt hotový: `vydavokMozeKratit` potrebuje
 // kategóriu aj väzbu na auto. Sto percent sa do dát nezapisuje — staré doklady
 // pole nemajú a nové bez krátenia majú vyzerať rovnako.
+// ── ROK POVINNOSTI — JEDEN ČITATEĽ ─────────────────────────────────────────
+// Tá istá pasca ako pri percente osobného použitia, a stala sa druhýkrát:
+// formulár je jeden, ale čítajú ho DVE cesty — editor si objekt skladá inline,
+// import z dokladu volá `vydavokDoplnkovePolia`. Rok povinnosti bol len
+// v druhej, takže sa pole v editore zobrazilo, dalo sa vyplniť a uloženie ho
+// zahodilo. `Object.assign` chýbajúci kľúč nemaže, takže v dátach ticho ostala
+// pôvodná hodnota a človek videl svoj zápis „uložený".
+//
+// 🔴 9. 9. 2026, Romanove ostré dáta: nedoplatok zo zdravotného za 2025 sa
+// nedal prepnúť na rok 2025 ani po niekoľkých pokusoch.
+//
+// Ukladá sa LEN pri kategóriách, ktoré rok povinnosti používajú — inak by sa
+// hodnota niesla ďalej aj po prepnutí kategórie a ticho posúvala platbu na iný
+// rok. Prázdne pole znamená „rok úhrady" a to je správne prázdno, nie chýbajúci
+// údaj.
+function citajZaRok(obj){
+  const K=KATEGORIE_VYDAVKOV[val("m_kategoria")||((obj||{}).kategoria)];
+  const zr=parseInt(val("m_zaRok"),10);
+  if(K && K.zaRok && zr>2000) obj.zaRok=zr; else delete obj.zaRok;
+  return obj;
+}
 function citajPodnikPct(obj){
   const el=document.getElementById("m_podnikPct");
   if(el && vydavokMozeKratit(obj)){
@@ -10965,6 +10983,7 @@ function editVydavok(idx){
       citajPodnikPct(obj);
       citajUcetFS(obj);
       citajOsobitnu(obj);
+      citajZaRok(obj);
       d.vydavky.push(obj);
       zapamatajPartnera(obj);
     } else {
@@ -10973,7 +10992,11 @@ function editVydavok(idx){
       citajPodnikPct(obj);
       citajUcetFS(obj);
       citajOsobitnu(obj);
+      citajZaRok(obj);
       if(obj.podnikPct==null) delete d.vydavky[idx].podnikPct;   // Object.assign staré pole neodstráni
+      // To isté pre rok povinnosti: po prepnutí na kategóriu, ktorá ho nemá,
+      // by starý rok v doklade ostal a ďalej priraďoval platbu inému roku.
+      if(obj.zaRok==null) delete d.vydavky[idx].zaRok;
       d.vydavky[idx]=Object.assign(d.vydavky[idx],obj);
       zapamatajPartnera(d.vydavky[idx]);
     }
@@ -21315,6 +21338,39 @@ const DOKLAD_BEZ_ROZHODOVANIA=new Set(
 // `uhradeneVMesiaci` ho započítala ako preddavok na povinnosť roku 2026 —
 // a hero tvrdilo „odlož si 3 958 €" namiesto 8 771 €. Chyba išla tým
 // nebezpečnejším smerom: appka hlásila, že je zaplatené viac, než bolo.
+// Kategórie, ktoré vysporiadavajú VŽDY skorší rok. Ročné zúčtovanie
+// zdravotného za rok N vykoná poisťovňa v roku N+1; daň na úhradu za rok N sa
+// platí pri podaní priznania, teda tiež v N+1. Pri DPH to neplatí — tá sa za
+// marec platí v apríli toho istého roka —, preto tu nie je.
+const VYSPORIADAVA_SKORSI_ROK=["zuctovanieZP","doplatokDan"];
+// Doklad, ktorý vysporiadava skorší rok, ale tvári sa ako tohtoročná povinnosť.
+// Chýbajúci rok je ten istý prípad: `vydavokZaRok` vtedy padá na rok úhrady.
+function zaRokPodozrivy(x){
+  if(VYSPORIADAVA_SKORSI_ROK.indexOf((x||{}).kategoria)<0) return false;
+  const uhrada=+String((x||{}).datum||"").slice(0,4)||0;
+  if(!uhrada) return false;
+  const za=+((x||{}).zaRok)||0;
+  return za<2000 || za>=uhrada;
+}
+// Zápis do dát, takže sa pýta a vymenuje, čoho sa dotkne. Do ZÁKLADU DANE
+// doklady vstupujú naďalej v roku úhrady (hotovostný princíp) — mení sa len to,
+// ktorú povinnosť vysporiadavajú, teda či sa počítajú ako tohtoročný preddavok.
+function opravZaRokVysporiadania(rok){
+  if(!strazZapis("vydavky")) return;
+  const zoz=(firmaData.vydavky||[]).filter(x=>String(x.datum||"").slice(0,4)===String(rok) && zaRokPodozrivy(x));
+  if(!zoz.length){ alert("Niet čo opraviť — všetky doklady majú rok povinnosti v poriadku."); return; }
+  const popis=zoz.map(x=>{
+    const u=+String(x.datum||"").slice(0,4)||rok;
+    return "· "+fmtDatum(x.datum)+" — "+((KATEGORIE_VYDAVKOV[x.kategoria]||{}).n||x.kategoria)
+         +" "+eur(+x.spolu||0)+"  →  za rok "+(u-1);
+  }).join("\n");
+  if(!confirm("Opraviť rok povinnosti?\n\n"+popis
+    +"\n\nDo základu dane tieto doklady vstupujú naďalej v roku úhrady. Mení sa len to, "
+    +"ktorý rok vysporiadavajú — teda či sa rátajú ako tohtoročná zaplatená povinnosť.")) return;
+  zoz.forEach(x=>{ x.zaRok=(+String(x.datum||"").slice(0,4)||rok)-1; });
+  poZmene();
+  if(typeof cloudMsg==="function") cloudMsg("Rok povinnosti opravený na "+zoz.length+" dokladoch.","ok");
+}
 function spytajSaNaRokPovinnosti(kategoria, rokUhrady){
   const K=KATEGORIE_VYDAVKOV[kategoria]||{};
   if(!K.zaRok) return null;
@@ -23383,6 +23439,29 @@ function rocnaKontrola(rok){
       +"počiatočný stav pokladne v Nastaveniach nižší, než bol v skutočnosti.",
       ["prvý mínus pri doklade "+PM.doklad, "hotovostných dokladov spolu: "+PM.pohybov]);
   }catch(e){ console.error("kontrola pokladne:", e); }
+
+  // ── 1c. Vysporiadanie skoršieho roka označené ako tohtoročné ──
+  // Ročné zúčtovanie zdravotného a daň na úhradu sa PLATIA v roku N+1, ale
+  // vysporiadavajú rok N. Keď má taký doklad rok povinnosti zhodný s rokom
+  // úhrady, appka ho započíta ako tohtoročnú zaplatenú povinnosť a v dlaždici
+  // tvrdí, že je odložené viac, než je. Chyba ide tým nebezpečnejším smerom:
+  // človek si odloží menej, než bude potrebovať.
+  //
+  // 🔴 9. 9. 2026, zmerané na ostrých dátach. Nedoplatok zo zdravotného za 2025
+  // (5 067,30 €) mal rok povinnosti 2026 a hero hlásilo „odlož si 3 958 €"
+  // namiesto ~9 026 €. Appka sa odvtedy pri zaraďovaní pýta (kap. 90), ale
+  // doklady založené PREDTÝM ostali s rokom úhrady — oprava kódu dáta spätne
+  // neprepisuje a nikto sa na ne už nepozrie. Preto kontrola, nie len oprava.
+  try{
+    const zlyRok=vydavky.filter(zaRokPodozrivy);
+    if(zlyRok.length) pridaj("chyba","zaRokVysporiadanie",
+      zlyRok.length+" "+(zlyRok.length===1?"doklad vysporiadava":"dokladov vysporiadava")+" skorší rok, ale je označený ako tohtoročný",
+      "Ročné zúčtovanie zdravotného a daň na úhradu sa platia rok po tom, čo vysporiadavajú. "
+      +"Kým je pri nich rok povinnosti "+R+", appka ich ráta ako zaplatenú povinnosť za "+R+" "
+      +"a v dlaždici „Odlož si na dane“ tvrdí vyššiu zaplatenosť, než je skutočná.",
+      zlyRok.map(x=>((KATEGORIE_VYDAVKOV[x.kategoria]||{}).n||x.kategoria)+" · "+fmtDatum(x.datum)+" · "+eur(+x.spolu||0)),
+      {l:"Opraviť rok povinnosti", fn:"opravZaRokVysporiadania("+rok+")"});
+  }catch(e){ zlyhalo("rok povinnosti", e); }
 
   // ── 2. Faktúra uhradená viac, než je jej suma ──
   // Dva pohyby priradené na tú istú faktúru. Buď dvojitá platba (a treba vrátiť),
