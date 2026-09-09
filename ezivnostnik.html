@@ -1887,7 +1887,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.09-MS";  // limit spravovaných firiem vynucuje server
+const APP_VERZIA = "2026.09.09-MT";  // zabudnutá jazda, názvy z mapy, koniec falošných prerušení
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -14992,6 +14992,7 @@ function mSukromnaPozn(){
 // ═══════════════════════════════════════════════════════════════
 const GPS_KLUC     = "ez_jazda_beh";    // rozbehnutá jazda (toto zariadenie)
 const GPS_MIESTA   = "ez_miesta";       // pomenované miesta (toto zariadenie)
+const GPS_AUTONAZVY= "ez_mapa_auto";    // dopĺňať názvy z mapy samo (toto zariadenie)
 const GPS_PRESNOST = 35;                // m — horší bod sa zahodí
 const GPS_POSUN    = 12;                // m — menší posun je šum stojaceho prijímača
 const GPS_RYCHLOST = 250;               // km/h — väčší skok je chyba merania
@@ -14999,6 +15000,11 @@ const GPS_ZASTAVKA = 10*60*1000;        // 10 min bez pohybu = medzizastávka tr
 const GPS_MIESTO_R = 0.25;              // km — dovtedy je to to isté miesto
 const GPS_MEDZERA  = 90*1000;           // ms ticha, od ktorých je úsek podozrivý
 const GPS_TICHO    = 5*60*1000;         // ms ticha, ktoré samo o sebe stačí na priznanie
+// Pod touto hranicou sa dopočítaný úsek NEHLÁSI. Veta o vzdušnej čiare má
+// človeka priviesť k tomu, aby kilometre upravil — pri sto metroch je taká
+// rada na nič a varovanie, ktoré nemá čo zmeniť, učí preskakovať aj tie pravé.
+// Do `kmOdhad` sa úsek počíta ďalej, len sa o ňom mlčí.
+const GPS_ODHAD_HLASKA = 0.1;           // km
 
 let _jazda=null, _jazdaWatch=null, _jazdaLock=null, _jazdaTik=null, _jazdaVidit=false;
 
@@ -15207,9 +15213,16 @@ function jazdaSledujVidit(){
   if(_jazdaVidit) return; _jazdaVidit=true;
   document.addEventListener("visibilitychange", ()=>{
     if(!_jazda || _jazda.ukoncena) return;
-    // Odchod na pozadie je JEDINÝ spoľahlivý signál, že meranie stálo.
-    // Bez neho by sa riedko chodiace body v popredí tvárili ako výpadok.
-    if(document.visibilityState!=="visible"){ _jazda.bolSkryty=true; jazdaZapis(); return; }
+    // Odchod na pozadie je vo WEBE jediný spoľahlivý signál, že meranie stálo.
+    // V natívnom obale nie je signálom o ničom: tam beží popredná služba a
+    // meria aj so zamknutým telefónom. Označiť tam pozadie za výpadok znamená
+    // protirečiť vete, ktorú appka o dva riadky nižšie hovorí sama
+    // (`jazdaKedyMeria`) — a v aute je displej zhasnutý prakticky vždy, takže
+    // by to platilo pre každú jazdu.
+    if(document.visibilityState!=="visible"){
+      if(!gpsZdroj.jeNativny()){ _jazda.bolSkryty=true; jazdaZapis(); }
+      return;
+    }
     jazdaLock(); jazdaPruhText();
   });
 }
@@ -15222,6 +15235,17 @@ function jazdaKedyMeria(){
   return gpsZdroj.jeNativny()
     ? "Meria sa aj so zamknutým telefónom — v lište beží upozornenie."
     : "Meria sa, kým je appka otvorená. Knihu jázd môžete medzitým pokojne používať — pás hore ostáva.";
+}
+// Priznanie dopočítaného úseku na JEDNOM mieste — panel aj záverečný modál
+// hovorili to isté dvoma textami a jeden z nich sa už rozišiel s pravdou.
+// Dôvod „appka nebola v popredí" platí len vo webe; v obale meria služba.
+function jazdaPrerusenieText(){
+  if(!_jazda || !_jazda.prerusenia) return "";
+  const odhad = +_jazda.kmOdhad || 0;
+  if(odhad < GPS_ODHAD_HLASKA) return "";
+  return `Meranie sa ${_jazda.prerusenia}× prerušilo${gpsZdroj.jeNativny()?"":" (appka nebola v popredí)"}. `
+       + `${odhad.toFixed(1).replace(".",",")} km z toho je dopočítaných vzdušnou čiarou. `
+       + `Skutočná cesta býva dlhšia — kilometre pokojne upravte.`;
 }
 function jazdaTrvanie(){
   if(!_jazda) return "";
@@ -15270,9 +15294,8 @@ function jazdaPanel(){
       <div style="font-size:12.5px;color:var(--ink-soft);margin-top:4px">
         od ${zac.getHours()}:${String(zac.getMinutes()).padStart(2,"0")} · ${jazdaTrvanie()}${z?` · ${z} ${z===1?"zastávka":z<5?"zastávky":"zastávok"}`:""}</div>
     </div>
-    ${_jazda.prerusenia?`<div style="font-size:12px;color:var(--ink-soft);background:var(--bg);border-radius:9px;padding:9px 12px;line-height:1.55">
-      Meranie sa ${_jazda.prerusenia}× prerušilo, lebo appka nebola v popredí. Chýbajúce úseky sú
-      dopočítané vzdušnou čiarou — spolu ${(+_jazda.kmOdhad||0).toFixed(1).replace(".",",")} km.</div>`:""}
+    ${jazdaPrerusenieText()?`<div style="font-size:12px;color:var(--ink-soft);background:var(--bg);border-radius:9px;padding:9px 12px;line-height:1.55">
+      ${esc(jazdaPrerusenieText())}</div>`:""}
     <div style="font-size:12px;color:var(--ink-soft);margin-top:12px;line-height:1.55">
       ${esc(jazdaKedyMeria())}</div>
     <button type="button" class="aabtn pri" style="width:100%;justify-content:center;margin-top:14px" onclick="closeModal();jazdaUkonci()">■ Ukončiť a zapísať</button>
@@ -15370,6 +15393,24 @@ function mapaSuhlas(){
   if(!ok) return false;
   gpsUloz("ez_mapa_suhlas","1"); _mapaVysvetlena=true;
   return true;
+}
+// Automatické dopĺňanie názvov je VYPNUTÉ, kým ho človek sám nezapne — a nie je
+// to opatrnosť pre opatrnosť. `sukromie.html` sľubuje, že appka polohu nikam
+// neposiela sama od seba a že pri názvoch miest odídu súradnice „len na to jedno
+// stlačenie". Zapnutím sa ten sľub mení, takže to musí byť vedomé rozhodnutie
+// a zásady to musia popisovať ako VOĽBU, nie ako správanie appky. Obidva smery
+// stráži `test_pravne.js`.
+//
+// Voľba je na zariadení (`localStorage`), nie vo `firmaData`: je to rozhodnutie
+// o tomto telefóne a o jeho polohe, nie údaj firmy.
+function mapaAutoZapnute(){ return gpsCitaj(GPS_AUTONAZVY)==="1"; }
+function mapaAutoPrepni(el){
+  const chce=!!(el&&el.checked);
+  // Zapnutie prejde cez to isté vysvetlenie ako jednorazové stlačenie. Keď ho
+  // človek odmietne, prepínač sa vráti späť — inak by tvrdil, že je zapnuté
+  // niečo, čo sa nikdy nespustí.
+  if(chce && !mapaSuhlas()){ if(el) el.checked=false; return; }
+  gpsUloz(GPS_AUTONAZVY, chce?"1":null);
 }
 // Trasa „Trnava – Bratislava – Trnava" → ["Trnava","Bratislava","Trnava"].
 // Delí sa na pomlčkách aj spojovníku; ľudia píšu oboje.
@@ -15542,10 +15583,8 @@ function jazdaZaver(){
       <div style="font-size:34px;font-weight:800;letter-spacing:-.5px">${jazdaKm()} <span style="font-size:17px;font-weight:600">km</span></div>
       <div style="font-size:12.5px;color:var(--ink-soft);margin-top:4px">${jazdaTrvanie()} · namerané po trase</div>
     </div>
-    ${_jazda.prerusenia?`<div style="font-size:12px;background:var(--bg);border-radius:9px;padding:9px 12px;margin-bottom:12px;line-height:1.55">
-      ⚠ Meranie sa ${_jazda.prerusenia}× prerušilo (appka nebola v popredí).
-      <b>${(+_jazda.kmOdhad||0).toFixed(1).replace(".",",")} km</b> z toho je dopočítaných vzdušnou čiarou.
-      Skutočná cesta býva dlhšia — kilometre pokojne upravte.</div>`:""}
+    ${jazdaPrerusenieText()?`<div style="font-size:12px;background:var(--bg);border-radius:9px;padding:9px 12px;margin-bottom:12px;line-height:1.55">
+      ⚠ ${esc(jazdaPrerusenieText())}</div>`:""}
     ${(!zn||!cn)?`<div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;line-height:1.55">
       Pomenujte miesto raz a appka ho nabudúce doplní sama. Názvy zostávajú v tomto telefóne.</div>`:""}
     ${poleMiesta("m_miestoZ","Odkiaľ",zn)}
@@ -15555,6 +15594,10 @@ function jazdaZaver(){
       <div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;line-height:1.5">
         Súradnice začiatku a konca sa jednorazovo pošlú mapovej službe, ktorá vráti názov.
         Návrh môžete prepísať.</div>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12px;cursor:pointer">
+        <input type="checkbox" id="m_mapaAuto" style="width:auto"${mapaAutoZapnute()?" checked":""}
+               onchange="mapaAutoPrepni(this)">
+        Dopĺňať názvy automaticky na konci každej meranej jazdy</label>
     </div>`:""}
     <div class="mfield"><label>Trasa</label><input id="m_cesta" value="${esc(jazdaTrasaNavrh()||S.kjTrasaDefault||"")}" placeholder="napr. Trnava – Bratislava – Trnava"></div>
     <div class="mfield"><label>Účel</label><input id="m_ucel" value="${esc(U.ucel)}" placeholder="napr. stretnutie s klientom">
@@ -15596,6 +15639,13 @@ function jazdaZaver(){
     poZmene();
     if(aktualnaApp==="jazdy") appJazdy(); else otvorApp("jazdy");
   });
+  // Automatické dopĺňanie beží až PO vykreslení modálu — `mapaNazvyMiest` píše
+  // do polí, ktoré dovtedy neexistujú. `setTimeout`, nie `requestAnimationFrame`:
+  // v karte bez fokusu rAF vôbec nebeží (kap. 48.6e).
+  //
+  // Pýta sa len na to, čo appka nevie sama: keď sú obidve miesta v registri
+  // zariadenia, von neodíde nič.
+  if((!zn||!cn) && mapaAutoZapnute()) setTimeout(()=>mapaNazvyMiest(null), 0);
 }
 
 // ── MAJETOK ──
