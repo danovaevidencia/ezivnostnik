@@ -1920,7 +1920,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.10-NC";  // Štatistiky: štyri pohľady, Prognóza zlúčená
+const APP_VERZIA = "2026.09.10-ND";  // Doklad k prijatej platbe (388) a odpočet zálohy
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -9507,9 +9507,47 @@ function zalohaOznacZaplatenu(idx){
 }
 // Faktúra, ktorá zálohu vysporiadava. Hľadá sa podľa odkazu, nie podľa čísla:
 // číslo proformy sa dá prepísať, odkaz nie.
-function zalohaMaFakturu(z){
-  const id=(z||{}).id; if(!id) return null;
-  return (firmaData.faktury||[]).find(f=>String(f.zalohaId||"")===String(id)) || null;
+// Doklad k prijatej platbe (Peppol 388) je BEŽNÁ faktúra vo `faktury[]` — je
+// to daňový doklad a počítať sa MÁ (§100.4). Od konečnej faktúry ho odlišuje
+// `typDokladu`, nie číslo ani suma; obidva idú z toho istého číselného radu.
+function jeDokladKPlatbe(f){ return !!(f && f.typDokladu==="zaloha_dd"); }
+// K jednej zálohe môžu viesť DVA doklady a každý znamená niečo iné, preto sa
+// hľadajú naraz: `dd` = doklad k prijatej platbe, `fakt` = konečná faktúra.
+// Hľadá sa podľa odkazu, nie podľa čísla: číslo sa dá prepísať, odkaz nie.
+function zalohaDoklady(z){
+  const id=(z||{}).id; if(!id) return {dd:null, fakt:null};
+  let dd=null, fakt=null;
+  (firmaData.faktury||[]).forEach(f=>{
+    if(String(f.zalohaId||"")!==String(id)) return;
+    if(jeDokladKPlatbe(f)){ if(!dd) dd=f; }
+    else if(!fakt) fakt=f;
+  });
+  return {dd, fakt};
+}
+function zalohaMaFakturu(z){ return zalohaDoklady(z).fakt; }
+function zalohaMaDokladKPlatbe(z){ return zalohaDoklady(z).dd; }
+// Lehota na vyhotovenie dokladu k prijatej platbe: do 15 dní od prijatia
+// platby ALEBO do konca mesiaca prijatia — čo nastane SKÔR (§100.3).
+// Prijatie 28. 6. teda znamená 30. 6., nie 13. 7. Lehota je hmotnoprávna:
+// víkendom ani sviatkom sa NEPREDLŽUJE, preto sa tu nič neposúva.
+//
+// Kým beží, appka mlčí. Keď sa v nej stihne dodať, vystaví sa rovno konečná
+// faktúra a doklad k platbe netreba vôbec — nález v deň, keď peniaze prišli,
+// by bol falošný poplach, a ten naučí preskakovať aj pravé nálezy.
+function zalohaLehota(z){
+  const d=String((z||{}).zaplatene||"").slice(0,10);
+  if(d.length!==10) return "";
+  const t=new Date(d+"T00:00:00"); if(isNaN(t.getTime())) return "";
+  const p15=new Date(t.getTime()); p15.setDate(p15.getDate()+15);
+  const koniec=new Date(t.getFullYear(), t.getMonth()+1, 0);
+  const x = p15<koniec ? p15 : koniec;
+  // Vlastné skladanie namiesto toISOString: to prevádza do UTC a v našom
+  // pásme by posledný deň mesiaca vyšiel o deň skôr.
+  return x.getFullYear()+"-"+String(x.getMonth()+1).padStart(2,"0")+"-"+String(x.getDate()).padStart(2,"0");
+}
+function zalohaPoLehote(z){
+  const l=zalohaLehota(z);
+  return !!l && new Date().toISOString().slice(0,10) > l;
 }
 // Vystaví faktúru z proformy. Doklad sa NEZAKLADÁ sám — otvorí sa editor a
 // človek ho potvrdí. Doklad, ktorý vznikne bez rozhodnutia, je zápis do daňovej
@@ -9523,6 +9561,88 @@ function vystavFakturuZoZalohy(idx){
   const k=faktKopiaPreNovu(z);
   delete k.zaplatene;
   k.zalohaId=z.id||"";
+  // ── ODPOČET UŽ PRIJATEJ ZÁLOHY ────────────────────────────────────────
+  // Dve podoby a NIE sú zameniteľné (§100.3). Rozhoduje jediná otázka:
+  // bola tá záloha už zdanená samostatným dokladom k prijatej platbe?
+  //
+  //   áno (388) → ZÁPORNÝ RIADOK. Základ aj daň konečnej faktúry sú potom
+  //               už len zvyšok. Keby sa použil `PrepaidAmount`, faktúra by
+  //               niesla plnú sumu a k zdanenému preddavku by sa pripočítala
+  //               druhýkrát — príjem aj DPH dvojmo.
+  //   nie       → `PrepaidAmount`. Faktúra nesie plnú sumu a odpočet je len
+  //               na úhrade. Záporný riadok by tu bol horší: `bez` by kleslo
+  //               na zvyšok a prijatá záloha by do príjmov NEVSTÚPILA vôbec,
+  //               lebo proforma vo `faktury[]` nie je (§100.4).
+  //
+  // Obe podoby sieť Peppol prijme (zmerané 10. 9. 2026), takže o výbere
+  // nerozhoduje validátor, ale to, čo appka zo sumy počíta.
+  const _dd=zalohaMaDokladKPlatbe(z);
+  const _prijate=r2(+z.spolu||0);
+  if(zalohaZaplatena(z) && _prijate>0){
+    if(_dd){
+      // Odpočíta sa presne to, čo sa zdanilo — základ z dokladu 388, nie
+      // suma z proformy. Keď odberateľ pošle inú sumu, rozhoduje doklad.
+      k.zalohaOdpocet="zaklad";
+      k.zalohaSuma=r2(+_dd.spolu||_prijate);
+      // Záporné je MNOŽSTVO, nie cena. Peppol to má ako tvrdé pravidlo:
+      // `BR-27` hovorí, že jednotková cena (BT-146) nesmie byť záporná —
+      // doklad so zápornou cenou sieť odmietne, hoci súčet riadka vyjde
+      // rovnako. Zmerané 10. 9. 2026 na XML, ktoré vyrobila appka; ručne
+      // zložená vzorka s množstvom −1 pritom prešla, takže tú chybu nemal
+      // kto ukázať (§100.10).
+      k.polozky=(k.polozky||[]).concat([{
+        nazov:"Odpočet prijatej zálohy "+(z.cislo||""),
+        mn:-1, mj:"ks", cena:r2(+_dd.bez||0)
+      }]);
+    } else {
+      k.zalohaOdpocet="uhrada";
+      k.zalohaSuma=_prijate;
+      // Platiteľ, ktorý stihol dodať v lehote, vystavuje jednu faktúru
+      // s údajmi o prijatí platby aj o dodaní — a daňová povinnosť z prijatej
+      // časti vznikla DŇOM PLATBY (§100.3). Neplatiteľovi sa dodanie
+      // neprepisuje: jeho daň to neurčuje a do obratu pre registráciu
+      // vstupuje dodanie, nie prijatý preddavok.
+      if(jePlatcaDPH()) k.dodanie=String(z.zaplatene||"").slice(0,10)||k.dodanie;
+    }
+  }
+  editFaktura(null, k);
+}
+// Daňový doklad k prijatej platbe (Peppol 388). Vzniká LEN u platiteľa DPH:
+// daňová povinnosť vzniká prijatím platby, takže neplatiteľ nemá čo vykazovať
+// a druhý doklad nevystavuje (§100.3).
+//
+// Prijatá platba UŽ DAŇ OBSAHUJE. Základ sa preto rozpočítava z prijatej sumy
+// a neberie sa z proformy — inak by doklad znel na sumu o daň vyššiu, než
+// koľko peňazí naozaj prišlo.
+function vystavDokladKPlatbe(idx){
+  const z=(firmaData.zalohy||[])[idx];
+  if(!z){ alert("Zálohová faktúra sa nenašla."); return; }
+  if(!jePlatcaDPH()){
+    alert("Doklad k prijatej platbe vystavuje len platiteľ DPH.\n\n"
+      +"Vám stačí po dodaní vystaviť konečnú faktúru — prijatá záloha sa na nej odpočíta.");
+    return;
+  }
+  if(!zalohaZaplatena(z)){
+    alert("Najprv označte zálohu ako zaplatenú.\n\n"
+      +"Doklad sa viaže na deň, keď peniaze prišli — bez neho nemá dátum dodania.");
+    return;
+  }
+  const uz=zalohaMaDokladKPlatbe(z);
+  if(uz && !confirm("K tejto zálohe už doklad k prijatej platbe existuje ("+(uz.cislo||"bez čísla")+").\n\n"
+    +"Vystaviť ďalší?")) return;
+  const sadzba=faktSadzba(z);
+  const prijate=r2(+z.spolu||0);
+  const k=faktKopiaPreNovu(z);
+  delete k.zaplatene;
+  k.typDokladu="zaloha_dd";
+  k.zalohaId=z.id||"";
+  // Dátum dodania = deň prijatia platby. Určuje zdaňovacie obdobie aj to, do
+  // ktorého kontrolného výkazu doklad spadne (§100.3): platba 30. 6.
+  // a vystavenie 2. 7. patria do JÚNA, nie do júla.
+  k.dodanie=String(z.zaplatene||"").slice(0,10)||k.dodanie;
+  k.popis="Daňový doklad k platbe prijatej "+fmtDatum(k.dodanie)+" k zálohovej faktúre "+(z.cislo||"");
+  k.polozky=[{nazov:"Prijatá platba k zálohovej faktúre "+(z.cislo||""),
+    mn:1, mj:"ks", cena:r2(prijate/(1+sadzba))}];
   editFaktura(null, k);
 }
 // Zálohové faktúry za zvolené obdobie. Filtruje sa podľa DÁTUMU dokladu, nie
@@ -9547,11 +9667,13 @@ function zalohySekciaHtml(){
       <div class="c-main" style="min-width:0"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(z.odberatel||"—")}</div></div>
       <div class="acol-muted">${fmtDatum(z.datum)}</div>
       <div class="acol-sum">${eur(+z.spolu||0)}</div>
-      <div class="c-act" style="display:flex;gap:5px;align-items:center">
+      <div class="c-act" style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
         <button class="aabtn" style="padding:5px 9px;font-size:11px${zalohaZaplatena(z)?";color:var(--pos)":""}"
           onclick="event.stopPropagation();zalohaOznacZaplatenu(${i})"
           title="${zalohaZaplatena(z)?"Zaplatená "+esc(fmtDatum(z.zaplatene))+" — ťuknutím zrušíte":"Označiť ako zaplatenú"}">${zalohaZaplatena(z)?"✓":"○"}</button>
-        ${zalohaZaplatena(z)&&!zalohaMaFakturu(z)?`<button class="aabtn pri" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vystavFakturuZoZalohy(${i})" title="Vystaviť faktúru k tejto zálohe">Faktúra</button>`:""}
+        ${zalohaZaplatena(z)&&jePlatcaDPH()&&!zalohaMaDokladKPlatbe(z)&&!zalohaMaFakturu(z)?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vystavDokladKPlatbe(${i})" title="Daňový doklad k prijatej platbe — vystaviť do ${esc(fmtDatum(zalohaLehota(z)))}">K platbe</button>`:""}
+        ${zalohaZaplatena(z)&&!zalohaMaFakturu(z)?`<button class="aabtn pri" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vystavFakturuZoZalohy(${i})" title="Vystaviť konečnú faktúru k tejto zálohe">Faktúra</button>`:""}
+        ${zalohaMaDokladKPlatbe(z)?`<span style="font-size:11px;color:var(--pos)" title="Daň z prijatej platby vykazuje doklad ${esc((zalohaMaDokladKPlatbe(z)||{}).cislo||"")}">daň odvedená</span>`:""}
         ${zalohaMaFakturu(z)?`<span style="font-size:11px;color:var(--pos)" title="Zálohu vysporiadava faktúra ${esc((zalohaMaFakturu(z)||{}).cislo||"")}">vyfakturované</span>`:""}
         <button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();exportZalohaPDF(${i})" title="Vygenerovať PDF zálohovej faktúry">PDF</button>
       </div>
@@ -10353,6 +10475,11 @@ function feModal(idx, nova, kluc){
     // vracia podiel, preto ×100; bez toho by v dátach ležali dve jednotky
     // pod jedným menom.
     const s=faktSumy(f); f.bez=s.bez; f.dph=s.dph; f.spolu=s.spolu; f.sadzba=r2(s.sadzba*100);
+    // Identita sa prideľuje TU, nie až pri budúcom načítaní firmy. `zalohaId`
+    // na konečnej faktúre ukazuje na `id` proformy — keby vzniklo až po
+    // reštarte appky, väzba by v tej istej relácii neexistovala a doklad by
+    // sa k zálohe nepriznal.
+    if(nova && !f.id) f.id=novyIdDokladu();
     if(nova) POLE().push(f); else POLE()[idx]=f;
     // Checkbox „Uhradená" ide cez tie isté funkcie ako zoznam — žiadny priamy
     // zápis príznaku (kap. 45.2). Odškrtnutie ruší len ručné tvrdenie; úhradu
@@ -22810,6 +22937,17 @@ function exportEFakturaUBL(idx){
   </cac:${KOREN}Line>`;
   });
   const bez=r2(lineTotal||s.bez), dph=r2(bez*sadzba), spolu=r2(bez+dph);
+  // Odpočet zálohy, ktorá NEBOLA zdanená samostatným dokladom (podoba
+  // „uhrada", §100.3). Pri podobe „zaklad" je odpočet už v riadkoch a sem sa
+  // nesmie dostať druhýkrát.
+  //
+  // `PrepaidAmount` neznižuje `TaxTotal`, len sumu na úhradu — a znížiť ju
+  // MUSÍ: BR-CO-16 hovorí BT-115 = BT-112 − BT-113 + BT-114, takže doklad
+  // s nezmenenou `PayableAmount` sieť odmietne. Zmerané proti validátoru
+  // 10. 9. 2026 (§100.10) — nie odvodené.
+  const prepaid = String(f.zalohaOdpocet||"")==="uhrada" ? r2(+f.zalohaSuma||0) : 0;
+  const splatit = r2(spolu - prepaid);
+  const prepaidXml = prepaid>0 ? "\n    <cbc:PrepaidAmount currencyID=\"EUR\">"+prepaid.toFixed(2)+"</cbc:PrepaidAmount>" : "";
   // Odberateľova krajina bola natvrdo SK. Pri službe do EÚ, dodaní tovaru do EÚ
   // a vývoze je odberateľ z definície inde — a pri kategórii K sieť krajinu
   // dodania priamo vyžaduje (BR-IC-12).
@@ -22840,7 +22978,7 @@ function exportEFakturaUBL(idx){
   <cbc:CreditNoteTypeCode>381</cbc:CreditNoteTypeCode>${poznamka}` : `
   <cbc:IssueDate>${datVyst}</cbc:IssueDate>
   <cbc:DueDate>${datSplat}</cbc:DueDate>
-  <cbc:InvoiceTypeCode>${opr?"383":"380"}</cbc:InvoiceTypeCode>${poznamka}
+  <cbc:InvoiceTypeCode>${jeDokladKPlatbe(f)?"388":(opr?"383":"380")}</cbc:InvoiceTypeCode>${poznamka}
   <cbc:TaxPointDate>${datDod}</cbc:TaxPointDate>`;
   const xml=`<?xml version="1.0" encoding="UTF-8"?>
 <${KOREN} xmlns="urn:oasis:names:specification:ubl:schema:xsd:${KOREN}-2"
@@ -22911,8 +23049,8 @@ function exportEFakturaUBL(idx){
   <cac:LegalMonetaryTotal>
     <cbc:LineExtensionAmount currencyID="EUR">${bez.toFixed(2)}</cbc:LineExtensionAmount>
     <cbc:TaxExclusiveAmount currencyID="EUR">${bez.toFixed(2)}</cbc:TaxExclusiveAmount>
-    <cbc:TaxInclusiveAmount currencyID="EUR">${spolu.toFixed(2)}</cbc:TaxInclusiveAmount>
-    <cbc:PayableAmount currencyID="EUR">${spolu.toFixed(2)}</cbc:PayableAmount>
+    <cbc:TaxInclusiveAmount currencyID="EUR">${spolu.toFixed(2)}</cbc:TaxInclusiveAmount>${prepaidXml}
+    <cbc:PayableAmount currencyID="EUR">${splatit.toFixed(2)}</cbc:PayableAmount>
   </cac:LegalMonetaryTotal>${lineXml}
 </${KOREN}>`;
   const blob=new Blob([xml],{type:"application/xml"});
@@ -22937,6 +23075,13 @@ async function generujPayBySquareQR(f, m){
     const iban=String(m.iban||"").replace(/\s/g,"");
     if(!iban){ return null; }
     const s=faktSumy(f);
+    // QR nesie sumu, ktorú má odberateľ POSLAŤ. Keď je na faktúre odpočet už
+    // prijatej zálohy (podoba „uhrada"), je to zvyšok — inak by naskenovaný
+    // kód zaplatil zálohu druhýkrát. Keď neostáva nič, QR sa nekreslí vôbec:
+    // platobný príkaz na nula eur je len mätúci.
+    const _odpocet = String(f.zalohaOdpocet||"")==="uhrada" ? r2(+f.zalohaSuma||0) : 0;
+    const _splatit = r2((+s.spolu||0) - _odpocet);
+    if(_splatit<=0) return null;
     const [bysq, QRMod]=await Promise.all([
       import("https://esm.sh/bysquare@4/pay"),
       import("https://esm.sh/qrcode@1.5.4")
@@ -22948,7 +23093,7 @@ async function generujPayBySquareQR(f, m){
       payments:[{
         type:PaymentOptions.PaymentOrder,
         currencyCode:CurrencyCode.EUR,
-        amount:+s.spolu||0,
+        amount:_splatit,
         ...(String(f.splatnost||"").slice(0,10) ? { paymentDueDate:String(f.splatnost).slice(0,10) } : {}),
         variableSymbol:String(f.vs||f.cislo||""),
         paymentNote:"Faktura "+(f.cislo||""),
@@ -22992,7 +23137,22 @@ async function exportFakturaPDF(idx){
   // QR sa vyrába TU a podáva sa modulu hotový — modul zámerne nesiaha na sieť,
   // inak by ho edge funkcia nevedela použiť.
   const qrDataUrl=await generujPayBySquareQR(f, m);
-  const doc=FP.vykresliFakturu(jsPDF, FP.modelZakaznickejFaktury(fakturaPreTlac(f), m, s, S), { qrDataUrl, isdoc:true });
+  const model=FP.modelZakaznickejFaktury(fakturaPreTlac(f), m, s, S);
+  // Doklad k prijatej platbe sa musí pomenovať tým, čím je. „Faktúra" na ňom
+  // by odberateľa nechala hľadať dodanie, ktoré ešte nenastalo.
+  if(jeDokladKPlatbe(f)){
+    model.nadpisDokladu="DAŇOVÝ DOKLAD K PRIJATEJ PLATBE";
+    model.podnadpis="Platba prijatá "+fmtDatum(faktDatumDodania(f));
+    model.pataLabel="Doklad k prijatej platbe č.";
+  }
+  // Odpočet zálohy sa kreslí LEN pri podobe „uhrada". Pri podobe „zaklad" je
+  // záporná položka už v súčte a druhý odpočet by bol tichá chyba (§100.3).
+  if(String(f.zalohaOdpocet||"")==="uhrada" && +f.zalohaSuma>0){
+    const _z=(firmaData.zalohy||[]).find(x=>String(x.id||"")===String(f.zalohaId||""));
+    model.zaloha={ suma:r2(+f.zalohaSuma||0), splatit:r2((+s.spolu||0)-(+f.zalohaSuma||0)),
+      cislo:(_z&&_z.cislo)||"" };
+  }
+  const doc=FP.vykresliFakturu(jsPDF, model, { qrDataUrl, isdoc:true });
   const nazov="faktura_"+(f.cislo||"export")+".pdf";
   // jsPDF nevie vkladať prílohy — ISDOC XML preto prilepíme cez pdf-lib.
   // Bez toho PDF tvrdí „obsahuje e-faktúru (ISDOC)", ale žiadnu neobsahuje
@@ -24206,18 +24366,37 @@ function rocnaKontrola(rok){
       {l:"Opraviť rok povinnosti", fn:"opravZaRokVysporiadania("+rok+")"});
   }catch(e){ zlyhalo("rok povinnosti", e); }
 
-  // ── 1d. Zaplatená záloha, ku ktorej nikto nevystavil faktúru ──
-  // Peniaze prišli, doklad k nim nie. Pri platiteľovi DPH je to navyše daň,
-  // ktorá sa mala odviesť v období prijatia platby. Proforma sama do evidencie
-  // nevstupuje, takže bez tejto kontroly by o nej nepovedal nikto nič.
+  // ── 1d. Zaplatená záloha, ku ktorej nikto nevystavil doklad ──
+  // Peniaze prišli, doklad k nim nie. Pre platiteľa a neplatiteľa je to ale
+  // ÚPLNE INÁ vec a jedna spoločná hláška by jedného z nich klamala:
+  //
+  //   platiteľ   — daň sa mala odviesť v období prijatia platby. Kým beží
+  //                lehota (§100.3), appka MLČÍ: stihnúť sa dá aj jednou
+  //                konečnou faktúrou. Po lehote je to chyba s dopadom na daň.
+  //   neplatiteľ — žiadna lehota neexistuje, faktúra sa vystavuje až dňom
+  //                dodania. Zaplatená a ešte nedodaná záloha je NORMÁLNY stav,
+  //                nie chyba. Ostáva ako poznámka, aby sa na peniaze pri
+  //                uzávierke roka nezabudlo.
   try{
-    const visia=(d.zalohy||[]).filter(z=>vRoku(z.datum) && zalohaZaplatena(z) && !zalohaMaFakturu(z));
-    if(visia.length) pridaj("chyba","zalohaBezFaktury",
-      visia.length+" zaplaten"+(visia.length===1?"á záloha nemá":"é zálohy nemajú")+" faktúru",
-      "Peniaze prišli, ale doklad k nim nevznikol — v príjmoch teda chýbajú. "
-      +"Otvorte Faktúry, v sekcii Zálohové faktúry ťuknite na „Faktúra“ a doklad vystavte.",
-      visia.map(z=>(z.cislo||"—")+" · "+esc(z.odberatel||"")+" · "+eur(+z.spolu||0)));
-  }catch(e){ zlyhalo("zálohy bez faktúry", e); }
+    const zapl=(d.zalohy||[]).filter(z=>vRoku(z.datum) && zalohaZaplatena(z));
+    const chybne=zapl.filter(z=>!zalohaMaFakturu(z) && !zalohaMaDokladKPlatbe(z));
+    const popis=z=>(z.cislo||"—")+" · "+esc(z.odberatel||"")+" · "+eur(+z.spolu||0);
+    if(jePlatcaDPH()){
+      const poLehote=chybne.filter(zalohaPoLehote);
+      if(poLehote.length) pridaj("chyba","zalohaBezFaktury",
+        poLehote.length+" zaplaten"+(poLehote.length===1?"á záloha nemá":"é zálohy nemajú")+" daňový doklad",
+        "Daňová povinnosť vzniká prijatím platby, takže daň z týchto peňazí sa už mala odviesť. "
+        +"Lehota bola do 15 dní od platby alebo do konca mesiaca — podľa toho, čo nastalo skôr. "
+        +"Otvorte Faktúry, v sekcii Zálohové faktúry ťuknite na „K platbe“.",
+        poLehote.map(z=>popis(z)+" · lehota bola "+fmtDatum(zalohaLehota(z))));
+    } else if(chybne.length){
+      pridaj("poznamka","zalohaBezFaktury",
+        chybne.length+" zaplaten"+(chybne.length===1?"á záloha čaká":"é zálohy čakajú")+" na faktúru",
+        "Peniaze prišli, konečná faktúra k nim zatiaľ nie je — kým ste nedodali, je to v poriadku. "
+        +"Po dodaní ju vystavte v module Faktúry, v sekcii Zálohové faktúry.",
+        chybne.map(popis));
+    }
+  }catch(e){ zlyhalo("zálohy bez dokladu", e); }
 
   // ── 2. Faktúra uhradená viac, než je jej suma ──
   // Dva pohyby priradené na tú istú faktúru. Buď dvojitá platba (a treba vrátiť),
@@ -29782,15 +29961,31 @@ function zaokrPopis(u){
 // Kľúčom je preto číslo, a keď chýba, `#id` — to je jedinečné vždy.
 // Pre doklady S číslom sa kľúč rovná číslu, takže existujúce úhrady
 // ostávajú platné a netreba migráciu.
+// Generátor identity dokladu. Je to JEDNO miesto zámerne: `doplnIdDokladom`
+// dopĺňa staré doklady pri načítaní, editor prideľuje id novému dokladu hneď
+// pri uložení. Dve kópie tohto výrazu by sa rozišli formátom a identita je
+// presne to, čo sa rozísť nesmie.
+let _idPocitadlo=0;
+function novyIdDokladu(){
+  return "v"+Date.now().toString(36)+Math.random().toString(36).slice(2,7)+(_idPocitadlo++);
+}
 // Doklady zapísané pred zavedením kľúča `id` nemusia mať — a bez neho by
 // doklad bez čísla ostal s prázdnou identitou, teda presne s tou chybou, ktorú
 // kľúč rieši. Doplní sa raz, ticho, pri načítaní firmy.
+//
+// 🔴 10. 9. 2026: `zalohy` tu chýbali od zavedenia proformy. Záloha vytvorená
+// v appke teda `id` nedostala NIKDY, `zalohaMaFakturu` vracala `null` navždy
+// a väzba záloha → faktúra bola mŕtva: tlačidlo „Faktúra" sa ponúkalo aj po
+// vystavení dokladu a ročná kontrola svietila trvale. Testy to nechytili, lebo
+// si `id` v dátach nastavovali ručne — kotva na správanie, ktorá obišla presne
+// to miesto, kde vzniká.
 function doplnIdDokladom(){
   if(!firmaData) return 0;
   let n=0;
-  const daj=x=>{ if(!x.id){ x.id="v"+Date.now().toString(36)+Math.random().toString(36).slice(2,7)+(n); n++; } };
+  const daj=x=>{ if(!x.id){ x.id=novyIdDokladu(); n++; } };
   (firmaData.vydavky||[]).forEach(daj);
   (firmaData.faktury||[]).forEach(daj);
+  (firmaData.zalohy||[]).forEach(daj);
   return n;
 }
 

@@ -281,7 +281,9 @@ export function vykresliFakturu(jsPDF, model, opts = {}) {
     }
   };
   payR("Spôsob úhrady:", pl.sposob || "Bankový prevod");
-  payR("Suma:", eur(s.spolu));
+  // Suma, ktorú má odberateľ poslať — nie suma dokladu. Keď je na faktúre
+  // odpočet už prijatej zálohy, líšia sa a platobný blok musí ukazovať zvyšok.
+  payR("Suma:", eur(model.zaloha ? +model.zaloha.splatit : s.spolu));
   if (pl.vs) payR("Variabilný symbol:", pl.vs);
   if (m.iban)  payR("IBAN:", m.iban, true);
   if (m.swift) payR("SWIFT/BIC:", m.swift, true);
@@ -368,7 +370,27 @@ export function vykresliFakturu(jsPDF, model, opts = {}) {
   setF(BGSOFT); doc.roundedRect(L, y, R - L, 11, 2, 2, "F");
   doc.setFont(FONT, "bold"); doc.setFontSize(11); setC(INK); doc.text("Spolu", L + 5, y + 7);
   doc.setFontSize(14); setC(BRAND); doc.text(eur(s.spolu), R - 5, y + 7.5, { align: "right" });
-  y += 24;
+  y += 13;
+
+  // Už prijatá záloha, ktorá NEBOLA zdanená samostatným dokladom: v sumách
+  // faktúry je celé dodanie a odpočet sa robí až tu, na úhrade (podoba
+  // „uhrada" — v UBL je to `PrepaidAmount`). Bez týchto dvoch riadkov by
+  // doklad pýtal peniaze, ktoré odberateľ už poslal.
+  //
+  // Pri podobe „zaklad" sa sem NEDOSTANE nič: odpočet je vtedy záporná
+  // položka a je už započítaný v súčte vyššie. Dvakrát odpočítaná záloha by
+  // bola tichá chyba v prospech odberateľa.
+  if (model.zaloha && +model.zaloha.suma > 0) {
+    doc.setFont(FONT, "normal"); doc.setFontSize(9.3); setC(MUTED);
+    doc.text("Uhradená záloha " + (model.zaloha.cislo || ""), L + 5, y + 4);
+    doc.text("\u2212" + money(+model.zaloha.suma), R - 5, y + 4, { align: "right" });
+    y += 8;
+    setF(BGSOFT); doc.roundedRect(L, y, R - L, 11, 2, 2, "F");
+    doc.setFont(FONT, "bold"); doc.setFontSize(11); setC(INK); doc.text("Zostáva uhradiť", L + 5, y + 7);
+    doc.setFontSize(14); setC(BRAND); doc.text(eur(+model.zaloha.splatit), R - 5, y + 7.5, { align: "right" });
+    y += 13;
+  }
+  y += 11;
 
   // ── POZNÁMKA (napr. „uhradené kartou, neuhrádzajte znova") ──
   if (model.poznamka) {
