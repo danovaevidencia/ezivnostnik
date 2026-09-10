@@ -1920,7 +1920,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.10-MV";  // Štatistiky: štyri pohľady, Prognóza zlúčená
+const APP_VERZIA = "2026.09.10-MW";  // Štatistiky: štyri pohľady, Prognóza zlúčená
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -9296,10 +9296,25 @@ function fakHromadneZrusit(){
   fakVybrane.clear(); appFaktury();
   if(n) setTimeout(()=>alert("Úhrada zrušená pri "+n+" faktúrach."),50);
 }
+// Poradie faktúr na obrazovke. Jeden komparátor pre výber období aj pre
+// samotný zoznam — dva by sa rozišli (kap. 16).
+//
+// 🔴 10. 9. 2026: zoznam sa neradil VÔBEC. `faktZaObdobie` je obyčajný filter
+// a vracia faktúry v poradí, v akom ležia vo `firmaData.faktury` — a to pole
+// zoraďuje jediné miesto v celej appke: koniec importu XLSX/XML. Faktúra
+// vystavená po poslednom importe sa `push`ne na koniec a v zozname sedí dole
+// bez ohľadu na dátum. Roman to videl na najnovšej faktúre mesiaca, ktorá
+// stála pod januárovou.
+//
+// Výdavky tú istú vec robia správne: filtrujú už zoradené pole. Rozdiel bol
+// v tom, že tu sa zoradené pole použilo len na naplnenie výberu roka a mesiaca.
+function faktPodlaDatumu(a, b){
+  return String(b.datum||b.vystavenie||"").localeCompare(String(a.datum||a.vystavenie||""));
+}
 function appFaktury(){
   if(prekresliVRamci("faktury")) return;   // rámec super apky (GY)
   const d=firmaData, c=APPS.faktury.c;
-  const vsetky=(d.faktury||[]).slice().sort((a,b)=>String(b.datum||b.vystavenie||"").localeCompare(String(a.datum||a.vystavenie||"")));
+  const vsetky=(d.faktury||[]).slice().sort(faktPodlaDatumu);
   // Rok a mesiac podľa obdobia DANE, nie podľa dátumu faktúry — rovnako ako
   // vo Výdavkoch (kap. 81). Inak by súčet na tejto obrazovke nesedel s tým,
   // čo appka počíta do základu dane, a človek by hľadal doklad v roku, kde
@@ -9309,7 +9324,8 @@ function appFaktury(){
   const roky=[...new Set(vsetky.map(f=>faktObdobieDane(f).slice(0,4)).filter(r=>/^\d{4}$/.test(r)))].sort().reverse();
   if(!fRok && roky.length) fRok=roky[0];
   if(fRok && !roky.includes(fRok)) fRok=roky[0]||"";
-  let fak=fMesiac ? faktZaObdobie("uhrada", fMesiac) : faktZaObdobie("uhrada", fRok);
+  // `faktZaObdobie` vracia nové pole (filter), takže sa dá zoradiť na mieste.
+  let fak=(fMesiac ? faktZaObdobie("uhrada", fMesiac) : faktZaObdobie("uhrada", fRok)).sort(faktPodlaDatumu);
   const mesiace=[...new Set(vsetky.filter(f=>faktObdobieDane(f).slice(0,4)===fRok)
     .map(f=>faktObdobieDane(f)).filter(m=>/^\d{4}-\d{2}$/.test(m)))].sort().reverse();
   const spolu=fak.reduce((a,f)=>a+(+f.spolu||0),0);
