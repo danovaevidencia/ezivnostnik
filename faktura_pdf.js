@@ -193,9 +193,14 @@ export function vykresliFakturu(jsPDF, model, opts = {}) {
   y += 22;
   // Veta, ktorá z dokladu robí to, čím je. Pri zálohovej faktúre musí byť
   // vidieť, že to NIE JE daňový doklad — inak si ju odberateľ zaúčtuje.
+  //
+  // 🔴 10. 9. 2026: prvá verzia ju kreslila na `y - 14`, čo je presne riadok
+  // s číslom dokladu — text sa preložil cez číslo a v PDF vzniklo
+  // „Nie je daňový dokZlad2-0v2ýz2v6a0n0a1platbu". Vyzeralo to ako rozbité
+  // kódovanie, pritom to boli dva reťazce na jednej súradnici.
   if (model.podnadpis) {
     doc.setFont(FONT, "normal"); doc.setFontSize(9); setC(MUTED);
-    doc.text(String(model.podnadpis), R, y - 14, { align: "right" });
+    doc.text(String(model.podnadpis), R, y - 5, { align: "right" });
   }
 
   // ── DODÁVATEĽ / ODBERATEĽ ──
@@ -388,7 +393,9 @@ export function vykresliFakturu(jsPDF, model, opts = {}) {
   const fy = 286;
   setD(LINE); doc.setLineWidth(0.3); doc.line(L, fy - 4, R, fy - 4);
   doc.setFont(FONT, "normal"); doc.setFontSize(7.3); setC(MUTED);
-  doc.text("Faktúra č. " + (model.cislo || ""), L, fy);
+  // Pätka pomenúva doklad tým, čím je. „Faktúra č. Z2026001" na zálohovej
+  // faktúre je tvrdenie, ktoré si odberateľ môže zaúčtovať.
+  doc.text((model.pataLabel || "Faktúra č.") + " " + (model.cislo || ""), L, fy);
   if (opts.isdoc) doc.text("Doklad obsahuje e-faktúru (ISDOC)", W / 2, fy, { align: "center" });
   // Doména zámerne BEZ diakritiky — URL ju nemá (ezivnostnik.eu, nie eživnostník.eu).
   // Zvýraznená značkovou modrou, aby ju zákazník našiel.

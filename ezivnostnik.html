@@ -1920,7 +1920,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.10-NB";  // Štatistiky: štyri pohľady, Prognóza zlúčená
+const APP_VERZIA = "2026.09.10-NC";  // Štatistiky: štyri pohľady, Prognóza zlúčená
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -9489,6 +9489,42 @@ function dalsieCisloPrijmoveho(rok){
 // dala volať z tlačidla aj zo zoznamu bez toho, aby ktokoľvek musel poznať
 // tretí parameter editora.
 function editZaloha(idx, predloha){ editFaktura(idx, predloha, "zalohy"); }
+// Zaplatenie zálohy sa ZÁMERNE nevedie cez systém úhrad (`pridajUhradu`,
+// `uhradaStav`). Ten pozná dva typy dokladov a vetví sa podľa nich na desiatkach
+// miest; proforma medzi ne nepatrí, lebo nie je daňový doklad. Hlavne však:
+// peniaze prídu RAZ a vysporiadajú konečnú faktúru. Keby sa platba priradila
+// proforme, faktúra by navždy vyzerala nezaplatená a v pohľadávkach by visela
+// suma, ktorú už niekto poslal.
+//
+// Preto je to obyčajný príznak na proforme: dátum, kedy peniaze prišli.
+function zalohaZaplatena(z){ return !!(z && z.zaplatene); }
+function zalohaOznacZaplatenu(idx){
+  if(!strazZapis("faktury")) return;
+  const z=(firmaData.zalohy||[])[idx]; if(!z) return;
+  z.zaplatene = z.zaplatene ? "" : new Date().toISOString().slice(0,10);
+  if(!z.zaplatene) delete z.zaplatene;
+  poZmene(); appFaktury();
+}
+// Faktúra, ktorá zálohu vysporiadava. Hľadá sa podľa odkazu, nie podľa čísla:
+// číslo proformy sa dá prepísať, odkaz nie.
+function zalohaMaFakturu(z){
+  const id=(z||{}).id; if(!id) return null;
+  return (firmaData.faktury||[]).find(f=>String(f.zalohaId||"")===String(id)) || null;
+}
+// Vystaví faktúru z proformy. Doklad sa NEZAKLADÁ sám — otvorí sa editor a
+// človek ho potvrdí. Doklad, ktorý vznikne bez rozhodnutia, je zápis do daňovej
+// evidencie, o ktorom sa nikto nedozvedel (spec 100.7).
+function vystavFakturuZoZalohy(idx){
+  const z=(firmaData.zalohy||[])[idx];
+  if(!z){ alert("Zálohová faktúra sa nenašla."); return; }
+  const uz=zalohaMaFakturu(z);
+  if(uz && !confirm("K tejto zálohe už faktúra existuje ("+(uz.cislo||"bez čísla")+").\n\n"
+    +"Vystaviť ďalšiu?")) return;
+  const k=faktKopiaPreNovu(z);
+  delete k.zaplatene;
+  k.zalohaId=z.id||"";
+  editFaktura(null, k);
+}
 // Zálohové faktúry za zvolené obdobie. Filtruje sa podľa DÁTUMU dokladu, nie
 // podľa obdobia dane — proforma daňové obdobie nemá, do priznania nevstupuje.
 function zalohyZaObdobie(){
@@ -9511,7 +9547,14 @@ function zalohySekciaHtml(){
       <div class="c-main" style="min-width:0"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(z.odberatel||"—")}</div></div>
       <div class="acol-muted">${fmtDatum(z.datum)}</div>
       <div class="acol-sum">${eur(+z.spolu||0)}</div>
-      <div class="c-act"><button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();exportZalohaPDF(${i})" title="Vygenerovať PDF zálohovej faktúry">PDF</button></div>
+      <div class="c-act" style="display:flex;gap:5px;align-items:center">
+        <button class="aabtn" style="padding:5px 9px;font-size:11px${zalohaZaplatena(z)?";color:var(--pos)":""}"
+          onclick="event.stopPropagation();zalohaOznacZaplatenu(${i})"
+          title="${zalohaZaplatena(z)?"Zaplatená "+esc(fmtDatum(z.zaplatene))+" — ťuknutím zrušíte":"Označiť ako zaplatenú"}">${zalohaZaplatena(z)?"✓":"○"}</button>
+        ${zalohaZaplatena(z)&&!zalohaMaFakturu(z)?`<button class="aabtn pri" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vystavFakturuZoZalohy(${i})" title="Vystaviť faktúru k tejto zálohe">Faktúra</button>`:""}
+        ${zalohaMaFakturu(z)?`<span style="font-size:11px;color:var(--pos)" title="Zálohu vysporiadava faktúra ${esc((zalohaMaFakturu(z)||{}).cislo||"")}">vyfakturované</span>`:""}
+        <button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();exportZalohaPDF(${i})" title="Vygenerovať PDF zálohovej faktúry">PDF</button>
+      </div>
     </div>`;
   };
   return `<div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line-soft)">
@@ -22932,6 +22975,7 @@ async function exportZalohaPDF(idx){
   const model=FP.modelZakaznickejFaktury(fakturaPreTlac(z), m, s, S);
   model.nadpisDokladu="ZÁLOHOVÁ FAKTÚRA";
   model.podnadpis="Nie je daňový doklad — výzva na platbu";
+  model.pataLabel="Zálohová faktúra č.";
   const doc=FP.vykresliFakturu(jsPDF, model, { qrDataUrl, isdoc:false });
   doc.save("zalohova_faktura_"+(z.cislo||"export")+".pdf");
 }
@@ -24161,6 +24205,19 @@ function rocnaKontrola(rok){
       zlyRok.map(x=>((KATEGORIE_VYDAVKOV[x.kategoria]||{}).n||x.kategoria)+" · "+fmtDatum(x.datum)+" · "+eur(+x.spolu||0)),
       {l:"Opraviť rok povinnosti", fn:"opravZaRokVysporiadania("+rok+")"});
   }catch(e){ zlyhalo("rok povinnosti", e); }
+
+  // ── 1d. Zaplatená záloha, ku ktorej nikto nevystavil faktúru ──
+  // Peniaze prišli, doklad k nim nie. Pri platiteľovi DPH je to navyše daň,
+  // ktorá sa mala odviesť v období prijatia platby. Proforma sama do evidencie
+  // nevstupuje, takže bez tejto kontroly by o nej nepovedal nikto nič.
+  try{
+    const visia=(d.zalohy||[]).filter(z=>vRoku(z.datum) && zalohaZaplatena(z) && !zalohaMaFakturu(z));
+    if(visia.length) pridaj("chyba","zalohaBezFaktury",
+      visia.length+" zaplaten"+(visia.length===1?"á záloha nemá":"é zálohy nemajú")+" faktúru",
+      "Peniaze prišli, ale doklad k nim nevznikol — v príjmoch teda chýbajú. "
+      +"Otvorte Faktúry, v sekcii Zálohové faktúry ťuknite na „Faktúra“ a doklad vystavte.",
+      visia.map(z=>(z.cislo||"—")+" · "+esc(z.odberatel||"")+" · "+eur(+z.spolu||0)));
+  }catch(e){ zlyhalo("zálohy bez faktúry", e); }
 
   // ── 2. Faktúra uhradená viac, než je jej suma ──
   // Dva pohyby priradené na tú istú faktúru. Buď dvojitá platba (a treba vrátiť),
