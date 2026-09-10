@@ -184,10 +184,19 @@ export function vykresliFakturu(jsPDF, model, opts = {}) {
   setF(LOGO2);  doc.roundedRect(lx + lsz - 1.7, ly + 1.8, 1.7, 1.7, 0.4, 0.4, "F");
   doc.roundedRect(lx + lsz - 3.7, ly + 3.8, 1.7, 1.7, 0.4, 0.4, "F");
   doc.setFont(FONT, "bold"); doc.setFontSize(20); setC(INK);
-  doc.text("FAKTÚRA", R, y, { align: "right" });
+  // Nadpis je vlastnosťou modelu, nie natvrdo v generátore: ten istý layout
+  // tlačí faktúru aj zálohovú faktúru a jediné, čím sa navonok líšia, je
+  // nadpis a veta pod ním. Bez `nadpisDokladu` sa nič nemení.
+  doc.text(String(model.nadpisDokladu || "FAKTÚRA"), R, y, { align: "right" });
   doc.setFontSize(19); setC(BRAND);
   doc.text(String(model.cislo || ""), R, y + 8, { align: "right" });
   y += 22;
+  // Veta, ktorá z dokladu robí to, čím je. Pri zálohovej faktúre musí byť
+  // vidieť, že to NIE JE daňový doklad — inak si ju odberateľ zaúčtuje.
+  if (model.podnadpis) {
+    doc.setFont(FONT, "normal"); doc.setFontSize(9); setC(MUTED);
+    doc.text(String(model.podnadpis), R, y - 14, { align: "right" });
+  }
 
   // ── DODÁVATEĽ / ODBERATEĽ ──
   const colR = L + (R - L) / 2 + 8, halfW = (R - L) / 2 - 6;

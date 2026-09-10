@@ -1920,7 +1920,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.10-NA";  // Štatistiky: štyri pohľady, Prognóza zlúčená
+const APP_VERZIA = "2026.09.10-NB";  // Štatistiky: štyri pohľady, Prognóza zlúčená
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -9341,7 +9341,7 @@ function appFaktury(){
   fakPoslednyList=list.map(dokladKluc).filter(Boolean);
   const vsetkyVybrane=fakPoslednyList.length>0 && fakPoslednyList.every(c=>fakVybrane.has(c));
   const _fIdx=new Map((d.faktury||[]).map((x,i)=>[x,i]));   // index riadku bez O(n²) indexOf (45.8)
-  document.getElementById("appScreen").innerHTML=appHlavicka("faktury",`<button class="aabtn" onclick="faktImport()">📥 Import (XLSX/XML/ISDOC/PDF)</button><button class="aabtn" onclick="editPrijmovyDoklad()">💶 Príjem v hotovosti</button><button class="aabtn pri" onclick="editFaktura()">＋ Nová faktúra</button>`)+`
+  document.getElementById("appScreen").innerHTML=appHlavicka("faktury",`<button class="aabtn" onclick="faktImport()">📥 Import (XLSX/XML/ISDOC/PDF)</button><button class="aabtn" onclick="editZaloha()">📄 Zálohová faktúra</button><button class="aabtn" onclick="editPrijmovyDoklad()">💶 Príjem v hotovosti</button><button class="aabtn pri" onclick="editFaktura()">＋ Nová faktúra</button>`)+`
     <div class="amini">
       <div class="aminbox"><div class="al">Fakturované</div><div class="av pos">${eur(spolu)}</div></div>
       <div class="aminbox"><div class="al">Uhradené</div><div class="av">${uhr} / ${fak.length}</div></div>
@@ -9374,7 +9374,7 @@ function appFaktury(){
         "Zatiaľ nemáte žiadnu faktúru. Vystavte prvú — číslo, dátumy aj DPH doplní appka podľa nastavení.",
         {popis:"＋ Nová faktúra", kod:"editFaktura()"},
         "fFilter='vsetky';fRok='';fMesiac='';_hladaj.faktury='';appFaktury()")}
-    </div>`;
+    </div>` + zalohySekciaHtml();
   // Bez obdobia bol drobček zavádzajúci: „22 faktúr · 192 128,84 €" znelo ako
   // ročný obrat, hoci to bol súčet od začiatku evidencie.
   // „podľa úhrady" tu nie je ozdoba: dlaždica na ploche počíta to isté podľa
@@ -9478,6 +9478,58 @@ function dalsieCisloPrijmoveho(rok){
   rok=rok||new Date().getFullYear();
   const prefix="P"+String(rok); let maxPor=0;
   (firmaData.faktury||[]).forEach(f=>{ const c=String(f.cislo||"");
+    if(c.startsWith(prefix)){ const por=parseInt(c.slice(prefix.length),10); if(!isNaN(por)&&por>maxPor) maxPor=por; } });
+  return prefix+String(maxPor+1).padStart(3,"0");
+}
+// Zálohová faktúra má VLASTNÝ číselný rad (Z2026001), rovnako ako príjmový
+// doklad. Nesmie brať číslo z radu daňových dokladov: ročná kontrola stráži
+// jeho súvislosť a proforma by v ňom bola diera, ktorú nemá čím vysvetliť —
+// nie je to daňový doklad, takže po nej nemôže ostať ani storno.
+// Otvorí editor v režime zálohovej faktúry. Samostatná funkcia preto, aby sa
+// dala volať z tlačidla aj zo zoznamu bez toho, aby ktokoľvek musel poznať
+// tretí parameter editora.
+function editZaloha(idx, predloha){ editFaktura(idx, predloha, "zalohy"); }
+// Zálohové faktúry za zvolené obdobie. Filtruje sa podľa DÁTUMU dokladu, nie
+// podľa obdobia dane — proforma daňové obdobie nemá, do priznania nevstupuje.
+function zalohyZaObdobie(){
+  const zoz=(firmaData.zalohy||[]).slice().sort(faktPodlaDatumu);
+  if(fMesiac) return zoz.filter(z=>String(z.datum||"").slice(0,7)===fMesiac);
+  if(fRok)    return zoz.filter(z=>String(z.datum||"").slice(0,4)===fRok);
+  return zoz;
+}
+// Vlastná sekcia, nie riadky medzi faktúrami. Je to INÝ druh dokladu: nejde do
+// príjmov, do DPH ani do siete, a keby stál v tom istom zozname, jeho suma by
+// sa čítala ako fakturované. Oddelený blok to hovorí bez jediného slova navyše.
+function zalohySekciaHtml(){
+  const zoz=zalohyZaObdobie();
+  if(!zoz.length) return "";
+  const suma=zoz.reduce((a,z)=>a+(+z.spolu||0),0);
+  const riadok=(z)=>{
+    const i=(firmaData.zalohy||[]).indexOf(z);
+    return `<div class="arow" style="grid-template-columns:auto 1fr auto auto;gap:10px;align-items:center;cursor:pointer" onclick="editZaloha(${i})">
+      <div class="acol-strong" style="color:var(--ink-soft)">${esc(z.cislo||"—")}</div>
+      <div class="c-main" style="min-width:0"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(z.odberatel||"—")}</div></div>
+      <div class="acol-muted">${fmtDatum(z.datum)}</div>
+      <div class="acol-sum">${eur(+z.spolu||0)}</div>
+      <div class="c-act"><button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();exportZalohaPDF(${i})" title="Vygenerovať PDF zálohovej faktúry">PDF</button></div>
+    </div>`;
+  };
+  return `<div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line-soft)">
+    <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+      <b style="font-size:13px">Zálohové faktúry</b>
+      <span style="font-size:12px;color:var(--ink-soft)">${zoz.length} · ${eur(suma)}</span>
+    </div>
+    <div style="font-size:11.5px;color:var(--ink-soft);line-height:1.55;margin-bottom:9px">
+      Výzva na platbu, <b>nie daňový doklad</b>. Nepočíta sa do fakturovaného ani do DPH
+      a do siete e-faktúr nejde. Po zaplatení vystavíte faktúru.
+    </div>
+    ${zoz.map(riadok).join("")}
+  </div>`;
+}
+function dalsieCisloZalohy(rok){
+  rok=rok||new Date().getFullYear();
+  const prefix="Z"+String(rok); let maxPor=0;
+  (firmaData.zalohy||[]).forEach(z=>{ const c=String(z.cislo||"");
     if(c.startsWith(prefix)){ const por=parseInt(c.slice(prefix.length),10); if(!isNaN(por)&&por>maxPor) maxPor=por; } });
   return prefix+String(maxPor+1).padStart(3,"0");
 }
@@ -10078,7 +10130,20 @@ function feDatumZmena(){
   if(!dv||!dd) return;
   if(dd.dataset.auto!=="0"){ dd.value=dv.value; }
 }
-function editFaktura(idx, predloha){
+// Editor obsluhuje faktúry AJ zálohové faktúry. Formulár je ten istý — líši sa
+// pole, do ktorého sa ukladá, číselný rad a to, čo doklad znamená. Druhý editor
+// by sa s týmto pri prvej zmene rozišiel (kap. 16); miest viazaných na pole je
+// v celom editore šesť, takže parametrizácia je lacnejšia než kópia.
+//
+// Zálohová faktúra NIE JE daňový doklad: nevstupuje do príjmov, DPH ani do
+// siete e-faktúr, a preto ju nezastavuje ani uzávierka. Býva vo vlastnom poli
+// `firmaData.zalohy` — dôvod je v spec 100.4: `faktury` číta 81 funkcií a doklad
+// v tom poli sa štandardne POČÍTA. Proforma sa musí vylúčiť zo všetkých, takže
+// cesta cez príznak by znamenala nezabudnúť na desiatkach miest.
+function editFaktura(idx, predloha, ciel){
+  const jeZaloha = ciel==="zalohy";
+  const KLUC = jeZaloha ? "zalohy" : "faktury";
+  const POLE = () => (firmaData[KLUC] = firmaData[KLUC] || []);
   const d=firmaData; const nova=idx==null;
   // limit plánu — len pri novej faktúre
   if(nova && !skontrolujLimit("faktury","Vo vyššom pláne máte faktúry bez obmedzenia.")) return;
@@ -10087,7 +10152,7 @@ function editFaktura(idx, predloha){
       // kópia: predvyplnené dáta z inej faktúry. Číslo aj VS priradíme až teraz
       // (dovtedy `kopirujFakturu` obe zmazalo), takže sa nič nerezervovalo
       // dopredu a Zrušiť ich nespáli.
-      const cislo=dalsieCisloFaktury();
+      const cislo=jeZaloha?dalsieCisloZalohy():dalsieCisloFaktury();
       _feEdit=Object.assign({odberatel:"",ico:"",icdph:"",zaplatena:false}, predloha);
       _feEdit.cislo=cislo;
       _feEdit.vs=String(cislo).replace(/\D/g,"");
@@ -10096,24 +10161,30 @@ function editFaktura(idx, predloha){
       // `f.vs||f.cislo` len vo formulári, mohli sa v ojedinelých prípadoch (dve
       // volania dalsieCisloFaktury s pribudnutou faktúrou medzitým) rozísť.
       // Priradením naraz je zhoda garantovaná.
-      const _c=dalsieCisloFaktury();
+      const _c=jeZaloha?dalsieCisloZalohy():dalsieCisloFaktury();
       _feEdit={cislo:_c,vs:String(_c).replace(/\D/g,""),odberatel:"",ico:"",icdph:"",datum:new Date().toISOString().slice(0,10),splatnost:"",polozky:[{nazov:"",mn:1,mj:"ks",cena:0}],zaplatena:false};
     }
   } else {
-    _feEdit=JSON.parse(JSON.stringify(d.faktury[idx]));
+    _feEdit=JSON.parse(JSON.stringify(POLE()[idx]));
   }
   if(!_feEdit.polozky || !_feEdit.polozky.length){
     // staré faktúry bez položiek — vytvor jednu z existujúcich súm
     _feEdit.polozky=[{nazov:"Fakturované služby",mn:1,mj:"ks",cena:+_feEdit.bez||0}];
   }
-  feModal(idx, nova);
+  feModal(idx, nova, KLUC);
 }
-function feModal(idx, nova){
+// `kluc` hovorí, do ktorého poľa doklad patrí: „faktury" alebo „zalohy".
+// Formulár je pre obe ten istý, líši sa cieľ a význam dokladu.
+function feModal(idx, nova, kluc){
+  const KLUC = kluc==='zalohy' ? 'zalohy' : 'faktury';
+  const jeZaloha = KLUC==='zalohy';
+  const POLE = () => (firmaData[KLUC] = firmaData[KLUC] || []);
   const f=_feEdit;
   const s=faktSumy(f);
   const S=firmaData.settings||{};
   const hist=odberateliaHistoria();
-  openModal(nova?"Nová faktúra":"Upraviť faktúru",`
+  openModal((jeZaloha?(nova?"Nová zálohová faktúra":"Upraviť zálohovú faktúru")
+                    :(nova?"Nová faktúra":"Upraviť faktúru")),`
     <div class="mrow2">
       <div class="mfield"><label>Číslo faktúry</label><input id="m_cislo" value="${esc(f.cislo)}"></div>
       <div class="mfield"><label>Variabilný symbol</label><input id="m_vs" value="${esc(f.vs||f.cislo)}"></div>
@@ -10192,7 +10263,10 @@ function feModal(idx, nova){
     // Obdobie faktúry určuje dátum dodania (viď faktObdobie). Strážia sa obe
     // strany presunu: kam sa faktúra sťahuje aj odkiaľ odchádza.
     const _nDatum=val("m_dodanie")||val("m_datum");
-    if(!strazUzavierku(_nDatum, nova?"Vystavenie faktúry":"Úprava faktúry")) return false;
+    // Zálohovú faktúru stráže uzávierky ani podaní netýkajú: nie je daňový
+    // doklad, do priznania ani do výkazov nevstupuje, takže uzavretý mesiac
+    // nemá čo chrániť. Pri daňových dokladoch platia bez zmeny.
+    if(!jeZaloha && !strazUzavierku(_nDatum, nova?"Vystavenie faktúry":"Úprava faktúry")) return false;
     // Odoslaný doklad je vonku a jeho obsah sa nemení. Vetva stojí PRED
     // strážou uzávierky zámerne: interná poznámka nie je daňový údaj, takže
     // uzavretý mesiac jej meniť nebráni. Formulár má polia zamknuté; toto je
@@ -10201,15 +10275,18 @@ function feModal(idx, nova){
       f.poznamkaInterna=val("m_poznamkaInterna")||"";
       // `f` je hlboká kópia záznamu (`_feEdit`); bez zápisu späť by sa zmena
       // stratila. Ostatné polia sme sa nedotkli, takže kópia je zhodná s originálom.
-      firmaData.faktury[idx]=f;
+      POLE()[idx]=f;
       const _k=dokladKluc(f), _chce=chk("m_zapl");
       if(_chce && !dokladJeUhradeny("faktura", _k)) oznacDokladUhradeny("faktura", _k);
       else if(!_chce && dokladJeUhradeny("faktura", _k)) zrusDokladUhradu("faktura", _k);
       poZmene(); obnovPoEditacii("faktury");
       return;
     }
-    if(!nova && !strazUzavierku(faktObdobie(f), "Presun faktúry z tohto obdobia")) return false;
-    if(!nova && !overDopadNaPodanie(_nDatum, "Úprava tejto faktúry")) return false;
+    // Zálohová faktúra nie je daňový doklad — do priznania ani do výkazov
+    // nevstupuje, takže uzavretý mesiac ani podané priznanie ju nemajú prečo
+    // zastaviť. Stráže platia pre daňové doklady.
+    if(!jeZaloha && !nova && !strazUzavierku(faktObdobie(f), "Presun faktúry z tohto obdobia")) return false;
+    if(!jeZaloha && !nova && !overDopadNaPodanie(_nDatum, "Úprava tejto faktúry")) return false;
     f.cislo=val("m_cislo"); f.vs=val("m_vs")||f.cislo; f.odberatel=val("m_odberatel");
     f.ico=val("m_ico"); f.icdph=val("m_icdph");
     f.dic=val("m_dic"); f.adresa=val("m_adresa");
@@ -10233,8 +10310,7 @@ function feModal(idx, nova){
     // vracia podiel, preto ×100; bez toho by v dátach ležali dve jednotky
     // pod jedným menom.
     const s=faktSumy(f); f.bez=s.bez; f.dph=s.dph; f.spolu=s.spolu; f.sadzba=r2(s.sadzba*100);
-    if(!firmaData.faktury) firmaData.faktury=[];
-    if(nova) firmaData.faktury.push(f); else firmaData.faktury[idx]=f;
+    if(nova) POLE().push(f); else POLE()[idx]=f;
     // Checkbox „Uhradená" ide cez tie isté funkcie ako zoznam — žiadny priamy
     // zápis príznaku (kap. 45.2). Odškrtnutie ruší len ručné tvrdenie; úhradu
     // potvrdenú bankovým výpisom checkbox neprebije.
@@ -10248,7 +10324,7 @@ function feModal(idx, nova){
     obnovPoEditacii("faktury");
   },
   nova?null:()=>{
-    const _f=firmaData.faktury[idx]||{};
+    const _f=POLE()[idx]||{};
     // Zmazať doklad, ktorý odberateľ dostal, znamená mať v evidencii dieru
     // a u neho platný doklad. Ruší sa stornom, teda dobropisom na celú sumu.
     const _zo=faktOdoslana(_f);
@@ -10258,9 +10334,9 @@ function feModal(idx, nova){
         + "Ak ju treba zrušiť, vystavte STORNO: dobropis na celú sumu s odkazom na ňu.");
       return;
     }
-    if(!strazUzavierku(faktObdobie(_f), "Zmazanie tejto faktúry")) return;
-    if(!overDopadNaPodanie(faktObdobie(_f), "Zmazanie tejto faktúry")) return;
-    firmaData.faktury.splice(idx,1); poZmene(); obnovPoEditacii("faktury"); },
+    if(!jeZaloha && !strazUzavierku(faktObdobie(_f), "Zmazanie tejto faktúry")) return;
+    if(!jeZaloha && !overDopadNaPodanie(faktObdobie(_f), "Zmazanie tejto faktúry")) return;
+    POLE().splice(idx,1); poZmene(); obnovPoEditacii("faktury"); },
   "siroky");
   // Zamyká sa AŽ TU, po vykreslení — dovtedy polia formulára neexistujú.
   // Nad ne sa vloží pás, ktorý povie prečo a ponúkne, čo sa s dokladom ešte
@@ -10268,9 +10344,11 @@ function feModal(idx, nova){
   // Pás sa ukazuje pri KAŽDEJ existujúcej faktúre, nielen pri odoslanej:
   // opravný doklad je vec, ktorú človek hľadá práve tu, v detaile faktúry,
   // ktorej sa týka. Zamykajú sa polia len pri odoslanej.
-  const _zamok = nova ? null : faktOdoslana(f);
-  const _dovod = nova ? null : faktLenOpravaDovod(f);
-  if(!nova){
+  // Zálohová faktúra sa neopravuje dobropisom — nie je daňový doklad, takže
+  // niet čo opravovať. Zruší sa tým, že sa zmaže alebo jednoducho nezaplatí.
+  const _zamok = (nova||jeZaloha) ? null : faktOdoslana(f);
+  const _dovod = (nova||jeZaloha) ? null : faktLenOpravaDovod(f);
+  if(!nova && !jeZaloha){
     const box=document.getElementById("modalBody");
     if(box){
       const pas=document.createElement("div");
@@ -22840,6 +22918,23 @@ async function generujPayBySquareQR(f, m){
 }
 
 // PDF faktúry — šablóna žije v module faktura_pdf.js (spoločná s webhookom)
+// PDF zálohovej faktúry. Zámerne NEvolá `exportFakturaPDF` s iným poľom:
+// faktúra prilepuje do PDF e-faktúru (ISDOC) a rieši originál naskenovaného
+// dokladu — proforma nemá ani jedno a mať nesmie. Spoločný je layout, nie cesta.
+async function exportZalohaPDF(idx){
+  const z=(firmaData.zalohy||[])[idx]; if(!z){ alert("Zálohová faktúra sa nenašla."); return; }
+  const m=firmaData.meta||{}, S=firmaData.settings||{};
+  const s=faktSumy(z);
+  const FP=await fakturaPdfModul();
+  await ensureJsPDF();
+  const { jsPDF }=window.jspdf;
+  const qrDataUrl=await generujPayBySquareQR(z, m);
+  const model=FP.modelZakaznickejFaktury(fakturaPreTlac(z), m, s, S);
+  model.nadpisDokladu="ZÁLOHOVÁ FAKTÚRA";
+  model.podnadpis="Nie je daňový doklad — výzva na platbu";
+  const doc=FP.vykresliFakturu(jsPDF, model, { qrDataUrl, isdoc:false });
+  doc.save("zalohova_faktura_"+(z.cislo||"export")+".pdf");
+}
 async function exportFakturaPDF(idx){
   const f=firmaData.faktury[idx]; const m=firmaData.meta||{};
   // ak bola faktúra importovaná ako PDF, stiahni AUTENTICKÝ originál (nie našu šablónu)
