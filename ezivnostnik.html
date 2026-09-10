@@ -1920,7 +1920,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.10-MY";  // Štatistiky: štyri pohľady, Prognóza zlúčená
+const APP_VERZIA = "2026.09.10-MZ";  // Štatistiky: štyri pohľady, Prognóza zlúčená
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -9940,10 +9940,10 @@ async function faktImportPotvrd(){
 // Číslo, dátumy, variabilný symbol a stav úhrady musia byť nové — kópia
 // s prevzatým číslom by prepísala originál a s prevzatou úhradou by tvrdila,
 // že je zaplatená. Prevzatý originálny PDF by tiež patril inému dokladu.
-function kopirujFakturu(idx){
-  const d=firmaData, zdroj=(d.faktury||[])[idx];
-  if(!zdroj) return;
-  if(!skontrolujLimit("faktury","Vo vyššom pláne máte faktúry bez obmedzenia.")) return;
+// Podklad pre NOVÝ doklad odvodený z existujúceho — kópia aj oprava. Jedno
+// miesto, lebo obe potrebujú to isté: nové dátumy, žiadne číslo, žiadnu úhradu.
+function faktKopiaPreNovu(zdroj){
+  const d=firmaData;
   const k=JSON.parse(JSON.stringify(zdroj));
   const dnes=new Date().toISOString().slice(0,10);
   // Číslo sa ZÁMERNE nepredprideľuje. `dalsieCisloFaktury()` len odvodí ďalšie
@@ -9959,8 +9959,73 @@ function kopirujFakturu(idx){
   delete k.zaplatena; delete k.uhrada; delete k.uhradaRucne; delete k.zaplateny;
   delete k.originalSubor;        // originál patrí pôvodnému dokladu
   delete k.id;
+  return k;
+}
+function kopirujFakturu(idx){
+  const zdroj=(firmaData.faktury||[])[idx];
+  if(!zdroj) return;
+  if(!skontrolujLimit("faktury","Vo vyššom pláne máte faktúry bez obmedzenia.")) return;
   // Otvor ako NOVÚ faktúru s predvyplnenými dátami. Do zoznamu sa dostane až
   // tlačidlom Uložiť — Zrušiť ju zahodí bez stopy (aj bez spálenia čísla).
+  editFaktura(null, faktKopiaPreNovu(zdroj));
+}
+
+// ── DOKLAD, KTORÝ UŽ ODIŠIEL DO SIETE ──────────────────────────────────────
+// Od 1. 1. 2027 je e-faktúra doručený daňový doklad, nie súbor v priečinku.
+// Keď ho sieť prevzala, odberateľ ho má a leží v archíve — zmeniť sa nedá ani
+// u nás, ani u neho. Opraviť sa dá len NOVÝM dokladom: dobropis (381),
+// ťarchopis (383), alebo storno, čo je dobropis na celú sumu
+// (PLAN_EFAKTURA §1.6 — kód 384 slovenské strany v sieti odmietajú).
+//
+// Rozhoduje POTVRDENÉ prevzatie poštárom, nie to, že sme si XML stiahli:
+// súbor v priečinku nie je doručený doklad, sťahuje sa aj na kontrolu a
+// preklep v ňom sa musí dať opraviť. Stav píše adaptér `postar`, appka ho len
+// číta — kým poštár nie je zapojený, nezamyká sa nič.
+//
+// Odmietnutý doklad sa NEZAMYKÁ: sieť ho neprevzala, odberateľ nedostal nič.
+const FAKT_ODOSLANE_STAVY = ["odoslana","dorucena"];
+function faktOdoslana(f){
+  const e=(f||{}).efaktura;
+  if(!e || FAKT_ODOSLANE_STAVY.indexOf(String(e.stav||""))<0) return null;
+  return e;
+}
+function faktZamokVeta(e){
+  const kedy=(e&&e.kedy) ? " "+fmtDatum(String(e.kedy).slice(0,10)) : "";
+  return "Táto faktúra už odišla odberateľovi cez sieť e-faktúr"+kedy
+    +". Meniť sa nedá — opravuje sa novým dokladom.";
+}
+// Zamkne polia samotného DOKLADU. Interná poznámka, príznak úhrady a priradenie
+// platby ostávajú voľné: v odoslanom doklade neboli a úhrada prichádza až po
+// ňom. Zamknúť ju by znamenalo, že zaplatenú faktúru nemá ako označiť.
+function faktZamkniFormular(){
+  const box=document.getElementById("modalBody"); if(!box) return;
+  const povolene={ m_poznamkaInterna:1, m_zapl:1 };
+  box.querySelectorAll("input,select,textarea,button").forEach(el=>{
+    if(el.id && povolene[el.id]) return;
+    if(el.getAttribute && el.getAttribute("data-zamok")==="ok") return;
+    if(el.closest && el.closest("#m_uhradyBox")) return;
+    el.disabled=true;
+  });
+}
+// Oprava odoslaného dokladu je NOVÝ doklad, nie zmena starého.
+// `druhOpravy` sa zapisuje VÝSLOVNE. Doteraz sa ťarchopis poznal podľa toho,
+// či je to slovo v čísle dokladu — nálepka namiesto údaja (kap. 16): stačilo
+// číslovanie bez slov a z ťarchopisu bol dobropis, teda opačné znamienko
+// v priznaní DPH.
+function vystavOpravu(idx, druh){
+  const zdroj=(firmaData.faktury||[])[idx];
+  if(!zdroj){ alert("Faktúra sa nenašla."); return; }
+  if(!skontrolujLimit("faktury","Vo vyššom pláne máte faktúry bez obmedzenia.")) return;
+  const k=faktKopiaPreNovu(zdroj);
+  k.opravujeDoklad=String(zdroj.cislo||"");
+  k.druhOpravy = (druh==="tarchopis") ? "tarchopis" : "dobropis";
+  // Dobropis aj storno majú v našich dátach ZÁPORNÉ sumy — tak ich čaká výkaz
+  // DPH aj súčty. Do siete odchádzajú kladné, znamienko nesie typ dokladu.
+  // Storno je dobropis na celú faktúru; pri čiastočnom si sumy upraví človek.
+  if(druh!=="tarchopis"){
+    k.polozky=(k.polozky||[]).map(p=>Object.assign({}, p, {mn: -(+p.mn||0)}));
+  }
+  closeModal();
   editFaktura(null, k);
 }
 
@@ -10087,6 +10152,21 @@ function feModal(idx, nova){
     // strany presunu: kam sa faktúra sťahuje aj odkiaľ odchádza.
     const _nDatum=val("m_dodanie")||val("m_datum");
     if(!strazUzavierku(_nDatum, nova?"Vystavenie faktúry":"Úprava faktúry")) return false;
+    // Odoslaný doklad je vonku a jeho obsah sa nemení. Vetva stojí PRED
+    // strážou uzávierky zámerne: interná poznámka nie je daňový údaj, takže
+    // uzavretý mesiac jej meniť nebráni. Formulár má polia zamknuté; toto je
+    // poistka pre inú cestu k uloženiu (konzola, stará otvorená karta).
+    if(!nova && faktOdoslana(f)){
+      f.poznamkaInterna=val("m_poznamkaInterna")||"";
+      // `f` je hlboká kópia záznamu (`_feEdit`); bez zápisu späť by sa zmena
+      // stratila. Ostatné polia sme sa nedotkli, takže kópia je zhodná s originálom.
+      firmaData.faktury[idx]=f;
+      const _k=dokladKluc(f), _chce=chk("m_zapl");
+      if(_chce && !dokladJeUhradeny("faktura", _k)) oznacDokladUhradeny("faktura", _k);
+      else if(!_chce && dokladJeUhradeny("faktura", _k)) zrusDokladUhradu("faktura", _k);
+      poZmene(); obnovPoEditacii("faktury");
+      return;
+    }
     if(!nova && !strazUzavierku(faktObdobie(f), "Presun faktúry z tohto obdobia")) return false;
     if(!nova && !overDopadNaPodanie(_nDatum, "Úprava tejto faktúry")) return false;
     f.cislo=val("m_cislo"); f.vs=val("m_vs")||f.cislo; f.odberatel=val("m_odberatel");
@@ -10128,10 +10208,43 @@ function feModal(idx, nova){
   },
   nova?null:()=>{
     const _f=firmaData.faktury[idx]||{};
+    // Zmazať doklad, ktorý odberateľ dostal, znamená mať v evidencii dieru
+    // a u neho platný doklad. Ruší sa stornom, teda dobropisom na celú sumu.
+    const _zo=faktOdoslana(_f);
+    if(_zo){
+      alert("🔒 " + faktZamokVeta(_zo) + "\n\n"
+        + "Zmazať sa nedá — odberateľ ju má a je v archíve siete.\n\n"
+        + "Ak ju treba zrušiť, vystavte STORNO: dobropis na celú sumu s odkazom na ňu.");
+      return;
+    }
     if(!strazUzavierku(faktObdobie(_f), "Zmazanie tejto faktúry")) return;
     if(!overDopadNaPodanie(faktObdobie(_f), "Zmazanie tejto faktúry")) return;
     firmaData.faktury.splice(idx,1); poZmene(); obnovPoEditacii("faktury"); },
   "siroky");
+  // Zamyká sa AŽ TU, po vykreslení — dovtedy polia formulára neexistujú.
+  // Nad ne sa vloží pás, ktorý povie prečo a ponúkne, čo sa s dokladom ešte
+  // dá urobiť. Veta bez východiska je len zákaz; toto je zákaz s cestou ďalej.
+  const _zamok = nova ? null : faktOdoslana(f);
+  if(_zamok){
+    const box=document.getElementById("modalBody");
+    if(box){
+      const pas=document.createElement("div");
+      pas.style.cssText="background:var(--sfc-warn);border-left:3px solid var(--warn);"
+        +"border-radius:0 9px 9px 0;padding:10px 13px;margin-bottom:12px;font-size:12.5px;line-height:1.55";
+      const btn=(dr,popis)=>`<button class="aabtn" data-zamok="ok" style="font-size:12px" `
+        +`onclick="vystavOpravu(${idx},'${dr}')">${popis}</button>`;
+      pas.innerHTML="🔒 <b>"+esc(faktZamokVeta(_zamok))+"</b>"
+        +`<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:9px">`
+        +btn("dobropis","Dobropis")+btn("tarchopis","Ťarchopis")+btn("storno","Storno")
+        +`</div>`
+        +`<div style="color:var(--ink-soft);font-size:11.5px;margin-top:7px;line-height:1.5">`
+        +`Dobropis vracia časť, ťarchopis dopočítava nahor, storno ruší celú faktúru. `
+        +`Každý z nich je nový doklad s odkazom na túto faktúru — tak to čaká aj sieť aj výkaz DPH.`
+        +`</div>`;
+      box.insertBefore(pas, box.firstChild);
+      faktZamkniFormular();
+    }
+  }
 }
 function feZmenPlnenie(k){
   _feEdit.druhPlnenia=k;
@@ -13127,6 +13240,9 @@ function druhPlnenia(f){ return DRUHY_PLNENIA[String(f&&f.druhPlnenia||"").trim(
 function faktOprava(f){
   const cislo=String((f||{}).cislo||"");
   const opravuje=String((f||{}).opravujeDoklad||"").trim();
+  // Výslovný údaj má prednosť pred hádaním z čísla dokladu.
+  const vyslovny=String((f||{}).druhOpravy||"").trim();
+  if(vyslovny) return { opravuje, tarchopis: vyslovny==="tarchopis" };
   const znak = opravuje || (+((f||{}).bez)||0)<0 || /dobropis|opravn|ťarchopis|tarchopis/i.test(cislo);
   if(!znak) return null;
   // Ťarchopis dvíha sumu nahor; poznať sa dá len z čísla dokladu, inde to
