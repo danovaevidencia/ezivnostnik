@@ -1920,7 +1920,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.10-MW";  // Štatistiky: štyri pohľady, Prognóza zlúčená
+const APP_VERZIA = "2026.09.10-MX";  // Štatistiky: štyri pohľady, Prognóza zlúčená
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -5893,13 +5893,13 @@ function renderHomeStrip(){
       <div style="color:var(--ink-soft);font-size:11px;margin-top:3px;font-family:ui-monospace,monospace">${esc(_cakajuceChyba)}</div>
     </div>`;
   }
-  const _cak = (typeof cakajuceNove==="function") ? cakajuceNove() : 0;
+  const _cak = (typeof cakajucePocty==="function") ? cakajucePocty().spolu : 0;
   if(_cak > 0){
     html += `<div onclick="otvorCakajuce()" style="grid-column:1/-1;display:flex;align-items:center;gap:10px;
         background:var(--bg);border:1px solid var(--line);border-left:3px solid var(--brand);
         border-radius:9px;padding:10px 13px;margin-top:10px;cursor:pointer;font-size:12.5px">
       <span style="font-size:16px">📨</span>
-      <div style="flex:1"><b>${_cak} ${_cak===1?"doklad prišiel":(_cak<5?"doklady prišli":"dokladov prišlo")} e-mailom</b>
+      <div style="flex:1"><b>Nové v schránke: ${esc(cakajuceVeta())}</b>
         <span style="color:var(--ink-soft)"> — ťuknite a spracujte</span></div>
       <span style="color:var(--ink-soft)">›</span>
     </div>`;
@@ -16436,7 +16436,7 @@ async function dmVykresliKartu(){
   try{
     adresa=await dokladyAdresa(false);
     await nacitajCakajuce(true);
-    pocet=cakajuceNove();
+    pocet=cakajucePocty().spolu;
   }catch(_){}
 
   if(!adresa){
@@ -16461,7 +16461,7 @@ async function dmVykresliKartu(){
     </div>
     ${pocet?`<div style="background:var(--bg);border-left:3px solid var(--brand);border-radius:0 9px 9px 0;
       padding:9px 12px;font-size:12.5px;margin-bottom:10px;cursor:pointer" onclick="otvorCakajuce()">
-      📨 <b>${pocet} ${pocet===1?"doklad čaká":(pocet<5?"doklady čakajú":"dokladov čaká")}</b> na spracovanie — ťuknite sem
+      📨 <b>${esc(cakajuceVeta())}</b> čaká na spracovanie — ťuknite sem
     </div>`:''}
     <div style="display:flex;gap:7px;flex-wrap:wrap">
       <button class="abtn" onclick="otvorCakajuce()">📨 Schránka dokladov</button>
@@ -26787,6 +26787,35 @@ async function nacitajCakajuce(tiche){
 
 const cakajuceNove = () => cakajuceDoklady.filter(x=>x.stav==="nove").length;
 
+// Čo sa má ohlásiť: doklady s prílohou AJ pohyby z bankových notifikácií.
+//
+// 🔴 10. 9. 2026, zmerané na ostrých dátach. Notifikácie o pohybe na účte
+// prílohu nemajú — celý údaj je v tele mailu —, takže edge funkcia im dá stav
+// `bez_prilohy`. Appka ich číta a `cakajuceNotifikacie` z nich spraví pohyb
+// na jedno ťuknutie, lenže odznak počítal výhradne `nove`. Notifikácia sa teda
+// nikde neohlásila a človek ju našiel, len keď schránku otvoril sám. Za týždeň
+// takto ticho pribudlo päť pohybov a Roman hlásil „nevidím posledné“.
+//
+// Ráta sa len to, s čím sa dá niečo urobiť: pohyb, ktorý sa naozaj podarilo
+// prečítať a ktorý ešte nie je vo výpise. Mail od banky, ktorému nerozumieme,
+// odznak nedvíha — ten patrí do schránky ako nález, nie ako úloha.
+function cakajucePocty(){
+  const doklady=(cakajuceDoklady||[]).filter(x=>x.stav==="nove").length;
+  let pohyby=0;
+  // Parser beží nad cudzím textom; keď spadne, odznak nesmie zhodiť plochu.
+  try{ pohyby=cakajuceNotifikacie().filter(x=>x.pohyb && !x.uzMam).length; }
+  catch(e){ console.error("cakajucePocty:", e); }
+  return { doklady, pohyby, spolu:doklady+pohyby };
+}
+// Veta bez slovesa zámerne: „2 doklady a 1 pohyb" sa inak musí ohýbať podľa
+// oboch čísel naraz a pri každej kombinácii to znie inak.
+function cakajuceVeta(){
+  const p=cakajucePocty(), casti=[];
+  if(p.doklady) casti.push(p.doklady+" "+(p.doklady===1?"doklad":(p.doklady<5?"doklady":"dokladov")));
+  if(p.pohyby)  casti.push(p.pohyby+" "+(p.pohyby===1?"pohyb":(p.pohyby<5?"pohyby":"pohybov")));
+  return casti.join(" a ");
+}
+
 // ── Obnovenie schránky pri návrate do appky ────────────────────────────────
 // Typický tok: zákazník prepošle faktúru z mailu a hneď sa prepne do appky.
 // Bez tohto by odznak neuvidel, kým stránku neobnoví — schránka sa načítava
@@ -27752,7 +27781,7 @@ function rychlyDoklad(zdroj){
   const btn = zdroj
     || (typeof event!=="undefined" && event && (event.currentTarget||event.target))
     || document.querySelector(".qaIt");   // prvá rýchla akcia — 📷 v lište už nie je
-  const cak=(typeof cakajuceNove==="function" && cakajuceNove()) || 0;
+  const cak=(typeof cakajucePocty==="function" && cakajucePocty().spolu) || 0;
   tbMenu("rdMenu", btn, `
     <button onclick="rdVyber('foto')" style="${TB_POLOZKA}">📷 Odfotiť bloček / doklad</button>
     ${TB_CIARA}
