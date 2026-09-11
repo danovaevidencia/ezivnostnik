@@ -1964,7 +1964,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.11-NJ";  // Termíny ako dlaždica; v APK sa neponúka inštalácia
+const APP_VERZIA = "2026.09.11-NK";  // Výpis nabíjaní zo ZSE prijatý e-mailom sa spracuje
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -15995,18 +15995,52 @@ function opravDiakritiku(t){
   }while(t!==prev);
   return t;
 }
+// Uloženie rozpoznaných nabíjaní. JEDNA cesta pre ručný import aj pre výpis,
+// ktorý prišiel e-mailom — dve kópie tohto kódu by sa pri prvej oprave rozišli.
+//
+// Zhoda sa hľadá podľa dátum+začiatok+kWh+suma, takže ten istý výpis sa dá
+// načítať znova a v knihe nepribudnú duplikáty. Vracia počet PRIDANÝCH.
+function zseUlozNabijania(txns){
+  if(!firmaData.nabijania) firmaData.nabijania=[];
+  const key=t=>t.datum+"|"+t.zaciatok+"|"+t.kwh+"|"+t.suma;
+  const existing=new Set(firmaData.nabijania.map(key));
+  let added=0;
+  (txns||[]).forEach(t=>{ if(!existing.has(key(t))){ firmaData.nabijania.push(t); existing.add(key(t)); added++; } });
+  firmaData.nabijania.sort((a,b)=>(a.datum||"").localeCompare(b.datum||""));
+  poZmene(); if(aktualnaApp==="jazdy") appJazdy();
+  return added;
+}
+// Je tento text PODROBNÝ VÝPIS nabíjaní zo ZSE Drive? Vracia transakcie, alebo null.
+//
+// 🔴 11. 9. 2026: ZSE posiela v jednom maili DVA dokumenty — faktúru
+// (`eFaktúra_082026_FA355479.pdf`) a podrobný výpis nabíjaní
+// (`Podrobný výpis_082026_FA355479.pdf`). Faktúra je výdavok a appka ju
+// spracovala; výpis ostal v schránke visieť, lebo doňho viedla len ručná
+// cesta cez tlačidlo ⚡ ZSE v knihe jázd. Cez e-mail sa k nemu appka nevedela
+// dostať vôbec.
+//
+// Rozhodujú DVE veci naraz, ani jedna sama nestačí:
+//   • text musí spomínať ZSE Drive alebo nabíjaciu kartu — inak by sem
+//     spadla hociktorá faktúra, ktorá má v riadkoch dátumy,
+//   • musí tam byť aspoň jedno skutočné nabíjanie (kWh > 0). Mesačný
+//     poplatok je na výpise tiež, ale sám je to len riadok s dátumom.
+//
+// Faktúra zo ZSE tou druhou podmienkou NEPREJDE: má jeden súhrn za mesiac
+// („Ultra nabíjanie 12,254 KWH") na riadku bez dátumu, nie nabíjania po dňoch.
+// Overené na skutočnej faktúre, nie na vymyslenej vzorke.
+function zseNabijania(text){
+  const s=String(text||"");
+  if(!/ZSE\s*Drive|Nabíjacia\s*karta/i.test(s)) return null;
+  const txns=parseZse(s);
+  if(!txns.some(t=>t.kwh>0)) return null;
+  return txns;
+}
 function spracujZse(e){
   const file=e.target.files[0]; if(!file) return; e.target.value="";
   citajTextZoSuboru(file).then(text=>{
     const txns=parseZse(text);
     if(!txns.length){ alert("Vo výpise sa nenašli transakcie. Podporovaný je výpis ZSE Drive (PDF alebo text)."); return; }
-    if(!firmaData.nabijania) firmaData.nabijania=[];
-    const key=t=>t.datum+"|"+t.zaciatok+"|"+t.kwh+"|"+t.suma;
-    const existing=new Set(firmaData.nabijania.map(key));
-    let added=0;
-    txns.forEach(t=>{ if(!existing.has(key(t))){ firmaData.nabijania.push(t); existing.add(key(t)); added++; } });
-    firmaData.nabijania.sort((a,b)=>(a.datum||"").localeCompare(b.datum||""));
-    poZmene(); if(aktualnaApp==="jazdy") appJazdy();
+    const added=zseUlozNabijania(txns);
     const kwh=r2(txns.reduce((a,b)=>a+b.kwh,0));
     alert("ZSE výpis: pridaných "+added+" transakcií, "+kwh.toFixed(2)+" kWh.");
   }).catch(err=>{ console.error(err); alert("Súbor sa nepodarilo prečítať. Skúste PDF výpis zo ZSE Drive."); });
@@ -29045,7 +29079,9 @@ function najdiDuplicityVydavku(nov, ignorujId){
 }
 // ═══ SPOLOČNÉ spracovanie jedného dokladu (súbor → R) — používa jednorazový AJ hromadný import ═══
 // Zabezpečuje rovnakú kvalitu: PDF text → OCR fallback pri skenoch → eKasa QR/UID → parse → register
-async function spracujDokladSubor(file, setStav, qrVopred){
+// `ignorujZse` = človek už povedal, že to výpis nabíjaní nie je, a chce to
+// spracovať ako bežný doklad. Bez tohto prepínača by sa otázka vrátila znova.
+async function spracujDokladSubor(file, setStav, qrVopred, ignorujZse){
   setStav = setStav || (()=>{});
   const jeXml=/\.xml$/i.test(file.name) || file.type==="application/xml" || file.type==="text/xml";
   // e-faktúra (UBL/ISDOC XML) — presné dáta, netreba OCR ani register
@@ -29078,6 +29114,21 @@ async function spracujDokladSubor(file, setStav, qrVopred){
         Rx._surovyText="✓ Údaje načítané z prílohy "+nazovPrilohy+" (e-faktúra), nie z textu PDF.\n\n"+pdfText;
         return Rx;
       }
+    }
+    // ── podrobný výpis nabíjaní zo ZSE Drive ──
+    // Nie je to doklad do evidencie: výdavkom je FAKTÚRA, ktorá chodí v tom
+    // istom maili. Výpis patrí medzi nabíjania v knihe jázd.
+    //
+    // Text sa číta ZNOVA a celý: `pdfTextAPrilohy` berie len prvé tri strany
+    // (na faktúru to bohato stačí), ale výpis máva nabíjania aj ďalej.
+    // Číta ho tá istá funkcia ako ručný import, takže obe cesty dostanú
+    // rovnaký text a nemôžu sa rozísť.
+    if(!ignorujZse && /ZSE\s*Drive|Nabíjacia\s*karta/i.test(text)){
+      setStav("Vyzerá to na výpis nabíjaní…");
+      try{
+        const txns=zseNabijania(await citajTextZoSuboru(file));
+        if(txns) return {_zseTxns:txns};
+      }catch(e){ console.error("čítanie výpisu ZSE:", e); }   // nech ide bežnou cestou
     }
     // ── platobný QR na strane PDF ──
     // Až sem sa dostaneme len keď PDF nemá e-faktúru v prílohe. QR nesie IBAN,
@@ -29934,7 +29985,33 @@ async function spracujDokladZoSuboru(file, qrVopred, archivCesta){
   document.getElementById("modalDelete").classList.add("hidden");
   try{
     const setStav=s=>{ const el=document.getElementById("ocrStav"); if(el) el.textContent=s; };
-    const R=await spracujDokladSubor(file, setStav, qrVopred);
+    let R=await spracujDokladSubor(file, setStav, qrVopred);
+    // Výpis nabíjaní zo ZSE Drive nie je výdavok — pýtame sa, lebo z tohto
+    // miesta človek čakal formulár dokladu. Keď povie nie, pokračuje sa
+    // bežnou cestou; rozpoznanie mu teda nemôže nič zobrať.
+    if(R._zseTxns){
+      const kwh=r2(R._zseTxns.reduce((a,b)=>a+(+b.kwh||0),0));
+      closeModal();
+      if(confirm("Toto vyzerá na podrobný výpis nabíjaní zo ZSE Drive, nie na doklad do výdavkov.\n\n"
+          +R._zseTxns.length+" záznamov · "+kwh.toFixed(2)+" kWh\n\n"
+          +"Načítať ich medzi nabíjania?\n"
+          +"(Faktúra za ten istý mesiac je samostatný doklad a do výdavkov patrí ona.)")){
+        // Výdavok sa nezakladá, takže originál nemá čo nahrávať do cloudu —
+        // inak by tam ostal viseť pre nasledujúci doklad.
+        _ocrFile=null; _ocrArchiv=null;
+        const pridanych=zseUlozNabijania(R._zseTxns);
+        // Až TERAZ, keď sú nabíjania uložené: zrušená otázka musí výpis
+        // nechať v schránke.
+        if(typeof oznacCakajuciSpracovany==="function") oznacCakajuciSpracovany();
+        alert("ZSE výpis: pridaných "+pridanych+" nabíjaní, "+kwh.toFixed(2)+" kWh.");
+        return;
+      }
+      openModal("Spracúvam doklad…", `<div style="text-align:center;padding:20px">
+        <div class="spin" style="margin:0 auto 14px"></div>
+        <div id="ocrStav">Načítavam...</div></div>`, null);
+      document.getElementById("modalDelete").classList.add("hidden");
+      R=await spracujDokladSubor(file, setStav, qrVopred, true);
+    }
     if(R._chyba){ document.getElementById("modalBody").innerHTML=`<div style="padding:10px;color:var(--neg)">${esc(R.partner||"Doklad sa nepodarilo spracovať")}.<br><br>Skúste kvalitnejšiu fotku alebo zadajte výdavok ručne.</div>`; return; }
     otvorOcrVysledok(R);
   }catch(err){
