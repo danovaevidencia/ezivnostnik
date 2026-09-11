@@ -1945,7 +1945,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.11-NF";  // Piktogramy výdavkov podľa kategórie
+const APP_VERZIA = "2026.09.11-NG";  // Prijatý dobropis vždy znižuje náklady
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -22667,6 +22667,37 @@ function ublKorenFaktury(doc){
   }
   return null;
 }
+// ═══════════════════════════════════════════════════════════════
+//  PRIJATÝ DOBROPIS — ZNAMIENKO SI URČUJEME SAMI
+//  Od 1. 1. 2027 musí e-faktúry prijímať KAŽDÝ a my neurčujeme, čo nám kto
+//  pošle. Konvencia EN 16931 hovorí, že znamienko nesie TYP dokladu a sumy sú
+//  kladné; naša appka drží dobropis záporne, lebo tak ho čaká výkaz DPH aj
+//  súčty. Validátor Peppolu pritom prijme obidve podoby (plán §17.5), takže
+//  sieť nerozhodne — rozhodnúť sa to musí na VSTUPE.
+//
+//  🔴 Zmerané 11. 9. 2026: dobropis, ktorý prišiel v kladnej podobe, sa
+//  zaevidoval ako kladný výdavok — teda ZVÝŠIL náklady namiesto toho, aby ich
+//  znížil. Pri dobropise na 100 € je to chyba o 200 € a nikde nesvietila.
+//  Cesta nie je hypotetická: e-faktúra chodí aj e-mailom, nielen sieťou.
+//
+//  Normalizuje sa ABSOLÚTNOU HODNOTOU, nie otočením znamienka — doklad
+//  s premiešanými znamienkami by sa otočením opravil len spolovice.
+//  Množstvo ide do záporu a cena ostáva kladná, aby `mn × cena` naďalej
+//  sedelo so sumou riadka; je to tá istá konvencia, akú si vynucuje sieť
+//  pri odosielaní (BR-27: jednotková cena nesmie byť záporná).
+// ═══════════════════════════════════════════════════════════════
+function dobropisZaporne(R){
+  if(!R || !R.jeDobropis) return R;
+  const zap=v=>{ const n=+v||0; return n ? -Math.abs(n) : 0; };
+  R.bez=zap(R.bez); R.dph=zap(R.dph); R.spolu=zap(R.spolu);
+  if(Array.isArray(R.rozpis)) R.rozpis.forEach(r=>{ r.bez=zap(r.bez); r.dph=zap(r.dph); });
+  if(Array.isArray(R.polozky)) R.polozky.forEach(p=>{
+    p.bez=zap(p.bez);
+    p.cena=Math.abs(+p.cena||0);
+    p.mn=zap(Math.abs(+p.mn||0)||1);
+  });
+  return R;
+}
 function parseUBLFaktura(xmlText){
   let doc;
   try{ doc=new DOMParser().parseFromString(xmlText,"text/xml"); }catch(_){ return null; }
@@ -22745,7 +22776,9 @@ function parseUBLFaktura(xmlText){
   // rozpis podľa sadzieb (viac TaxSubtotal = viac sadzieb)
   const subtotals=localAll(root,"TaxSubtotal");
   const rozpis=[];
-  subtotals.forEach(st=>{ const zaklad=numT(st,"TaxableAmount"), d=numT(st,"TaxAmount"); const cat=local(st,"TaxCategory"); const pct=cat?numT(cat,"Percent"):sadzba; if(zaklad>0) rozpis.push({sadzba:pct, bez:r2(zaklad), dph:r2(d)}); });
+  // `zaklad>0` by pri dobropise so zápornými sumami vyhodilo celý rozpis sadzieb
+  // a viacsadzbový doklad by prišiel o rozpad. Rozhoduje, či tam údaj JE.
+  subtotals.forEach(st=>{ const zaklad=numT(st,"TaxableAmount"), d=numT(st,"TaxAmount"); const cat=local(st,"TaxCategory"); const pct=cat?numT(cat,"Percent"):sadzba; if(zaklad) rozpis.push({sadzba:pct, bez:r2(zaklad), dph:r2(d)}); });
   // položky
   const lines=localAll(root, jeDobropis?"CreditNoteLine":"InvoiceLine");
   const polozky=lines.map(ln=>{ const item=local(ln,"Item"); const price=local(ln,"Price");
@@ -22779,7 +22812,7 @@ function parseUBLFaktura(xmlText){
   // prijatá späť by sa zaevidovala ako cudzí náklad.
   const mojeIco=String((firmaData.meta||{}).ico||"").replace(/\s/g,"");
   if(mojeIco && String(partnerIco).replace(/\s/g,"")===mojeIco) R._vlastnaFaktura=true;
-  return R;
+  return dobropisZaporne(R);
 }
 // ═══ ISDOC 6.x — príloha vnorená v PDF (KROS, Money, Pohoda) ═══
 // ISDOC nie je UBL: má vlastný namespace, "TaxSubTotal" (veľké T), IČO v
@@ -22874,7 +22907,7 @@ function parseIsdocFaktura(xmlText){
   // nie o výdavok — zaevidovať by sa nemala
   const mojeIco=String((firmaData.meta||{}).ico||"").replace(/\s/g,"");
   if(mojeIco && String(ico).replace(/\s/g,"")===mojeIco) R._vlastnaFaktura=true;
-  return R;
+  return dobropisZaporne(R);
 }
 function efakturaInfo(){
   alert("Povinná e-fakturácia od 1.1.2027\n\n• Platitelia DPH musia tuzemské B2B faktúry vystavovať a prijímať v štruktúrovanom XML formáte (UBL 2.1 / Peppol BIS Billing 3.0, norma EN 16931).\n• PDF ani papier už nebudú stačiť.\n• Faktúry sa posielajú cez certifikovaného Digitálneho poštára (Access Point Peppol), ktorý ich doručí odberateľovi a oznámi údaje Finančnej správe v reálnom čase.\n• Zaniká kontrolný a súhrnný výkaz (od 2030).\n• Sankcie: až 10 000 € (prvé porušenie), až 100 000 € (opakované).\n\nČo robí táto appka:\n• Vygeneruje validný UBL 2.1 XML z faktúry (tlačidlo „e-faktúra\").\n• XML nahráte svojmu Digitálnemu poštárovi.\n\nČo musíte spraviť vy:\n• Vybrať si Digitálneho poštára (zoznam na portáli FS, ~5–12 €/mes) a získať Peppol ID.\n• V roku 2026 to môžete testovať dobrovoľne.\n\nUpozornenie: appka negeneruje odosielanie cez Peppol sieť — to zabezpečuje poštár. XML si pred ostrým použitím overte validátorom.");
