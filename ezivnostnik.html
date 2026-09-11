@@ -1945,7 +1945,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.11-NG";  // Prijatý dobropis vždy znižuje náklady
+const APP_VERZIA = "2026.09.11-NH";  // Odpočtový riadok povie, ktorý doklad odpočítava
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -9705,9 +9705,16 @@ function vystavFakturuZoZalohy(idx){
       // rovnako. Zmerané 10. 9. 2026 na XML, ktoré vyrobila appka; ručne
       // zložená vzorka s množstvom −1 pritom prešla, takže tú chybu nemal
       // kto ukázať (§100.10).
+      // `odpocetDoklad` nesie číslo dokladu k prijatej platbe, ktorý sa týmto
+      // riadkom odpočítava. Slovenská konvencia (dokumentácia Verteca, sekcia
+      // „Slovenské konvencie z praxe implementátorov", overené 11. 9. 2026)
+      // žiada, aby záporný riadok niesol `cac:DocumentReference` s týmto
+      // číslom a s `DocumentTypeCode` 130. Bez neho odberateľ vidí záporný
+      // riadok, ale jeho systém nevie, KTORÚ zálohu odpočítava.
       k.polozky=(k.polozky||[]).concat([{
         nazov:"Odpočet prijatej zálohy "+(z.cislo||""),
-        mn:-1, mj:"ks", cena:r2(+_dd.bez||0)
+        mn:-1, mj:"ks", cena:r2(+_dd.bez||0),
+        odpocetDoklad:(_dd.cislo||"")
       }]);
     } else {
       k.zalohaOdpocet="uhrada";
@@ -23026,6 +23033,21 @@ function ublKrajina(icdph){
   const m=String(icdph||"").trim().toUpperCase().match(/^([A-Z]{2})/);
   return m ? m[1] : "SK";
 }
+// Odkaz riadka na doklad, ktorý sa ním odpočítava — daňový doklad k prijatej
+// platbe. `DocumentTypeCode` 130 je v BIS „invoice line object identifier"
+// a smie byť na riadku najviac raz.
+//
+// V poradí prvkov UBL patrí `cac:DocumentReference` ZA `LineExtensionAmount`
+// a PRED `cac:Item`. Riadok bez odpočtu ho nedostane vôbec — prázdny element
+// by bol tvrdenie o odkaze, ktorý neexistuje.
+function odkazRiadka(p){
+  const c=String((p&&p.odpocetDoklad)||"").trim();
+  if(!c) return "";
+  return "\n    <cac:DocumentReference>"
+       + "\n      <cbc:ID>"+ubl(c)+"</cbc:ID>"
+       + "\n      <cbc:DocumentTypeCode>130</cbc:DocumentTypeCode>"
+       + "\n    </cac:DocumentReference>";
+}
 function exportEFakturaUBL(idx){
   const f=firmaData.faktury[idx]; const m=firmaData.meta||{};
   if(!f){ alert("Faktúra sa nenašla."); return; }
@@ -23074,7 +23096,7 @@ function exportEFakturaUBL(idx){
   <cac:${KOREN}Line>
     <cbc:ID>${i+1}</cbc:ID>
     <cbc:${jeDobropis?"Credited":"Invoiced"}Quantity unitCode="${ublJednotka(p.mj)}">${mn}</cbc:${jeDobropis?"Credited":"Invoiced"}Quantity>
-    <cbc:LineExtensionAmount currencyID="EUR">${sumaR.toFixed(2)}</cbc:LineExtensionAmount>
+    <cbc:LineExtensionAmount currencyID="EUR">${sumaR.toFixed(2)}</cbc:LineExtensionAmount>${odkazRiadka(p)}
     <cac:Item>
       <cbc:Name>${ubl(p.nazov||"Položka")}</cbc:Name>
       <cac:ClassifiedTaxCategory>
