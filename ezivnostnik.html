@@ -492,6 +492,25 @@ button.idPrep:hover{color:var(--brand)}
    a pri dlhom texte by to stálo výkon (preto ho aj obmedzuje na pár riadkov). */
 h1,h2,h3,h4,.chead,.wbig,.sbox .sn,.sp-title b,.splittitle{text-wrap:balance}
 .card .csub{color:var(--ink-soft);font-size:13px;margin-bottom:16px}
+/* Riadok modulu E-faktúry. Vlastná rodina, nie `c-main`/`c-sum` z `.rdok`:
+   tie bunky majú na mobile vlastné `grid-area` viazané na `.rdok` a mimo neho
+   nefungujú — prevzatá trieda z iného rozloženia vyzerá na desktope správne
+   a na 375 px sa rozpadne. Zmerané 11. 9. 2026 v prehliadači. */
+.efrow{display:grid;gap:10px;align-items:center;padding:11px 13px;
+       border-bottom:1px solid var(--line);grid-template-columns:minmax(0,1fr) auto auto}
+.efrow:last-child{border-bottom:none}
+.efrow>*{min-width:0}
+.ef-nazov{font-weight:600;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ef-sub{font-size:11.5px;color:var(--ink-soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ef-sum{font-weight:700;font-family:var(--sans);text-align:right;white-space:nowrap}
+.ef-akcie{display:flex;gap:6px;justify-content:flex-end;align-items:center}
+@media(max-width:560px){
+  .efrow{gap:4px 10px;grid-template-columns:minmax(0,1fr) auto;
+         grid-template-areas:"main main" "sum akcie"}
+  .efrow>.ef-main{grid-area:main}
+  .efrow>.ef-sum{grid-area:sum;text-align:left}
+  .efrow>.ef-akcie{grid-area:akcie}
+}
 .statgrid{display:grid;grid-template-columns:repeat(auto-ffill,minmax(150px,1fr));gap:12px;margin-bottom:6px}
 .statgrid{grid-template-columns:repeat(4,1fr)}
 .sbox{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:13px 15px}
@@ -1945,7 +1964,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.11-NH";  // Odpočtový riadok povie, ktorý doklad odpočítava
+const APP_VERZIA = "2026.09.11-NI";  // Peppol, dlaždice, doklady k odvodom z banky
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -5001,6 +5020,71 @@ function dashWidgetKatalog(){
 function _dashWidgetKatalogVypocet(){
   const d=firmaData, rok=new Date().getFullYear();
   const kat = {
+    // Dlaždica „Čaká na zatriedenie". Zoznam pohybov berie z `bankaVedra()` —
+    // z TEJ ISTEJ funkcie, ktorá počíta vedrá v Banke a ktorá už napája
+    // upozornenie v „Vyžaduje pozornosť". Druhé pravidlo pre „nespárované" by
+    // sa rozišlo a pri banke to už raz stálo 47 falošných nálezov z 59
+    // (kap. 88.5, 88.8): skryté a ignorované pohyby sú voľba zobrazenia
+    // a rozhodnutie, nie tvrdenie, že sa peniaze nepohli.
+    nesparovane: {
+      nazov:"Čaká na zatriedenie", ic:"🏦", velkost:"w-s4",
+      metriky:[
+        {k:"posledne", l:"Posledné nespárované", render:()=>{
+          const V=bankaVedra();
+          if(!V.caka) return `<div class="wbig">0</div><div class="wmeta">všetky pohyby sú zatriedené</div>`;
+          const MES=["jan","feb","mar","apr","máj","jún","júl","aug","sep","okt","nov","dec"];
+          const zoz=V.cakaju.slice()
+            .sort((a,b)=>String(b.datum||"").localeCompare(String(a.datum||"")))
+            .slice(0,4);
+          return zoz.map(t=>{
+            const d=String(t.datum||"").slice(0,10).split("-");
+            const den=d[2]?(+d[2]):"", mes=d[1]?MES[(+d[1])-1]:"";
+            const prijem=t.smer==="prijem";
+            const kto=t.protistrana||t.popis||"—";
+            return `<div class="wrem" style="cursor:pointer" onclick="event.stopPropagation();bFilter='nespar';otvorApp('banka')"><div class="dd warn">${den}<br>${mes}</div><div style="min-width:0"><div class="rt" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(kto)}</div><div class="rs">${prijem?"+":"−"}${eur(Math.abs(+t.suma||0))}${t.vs?" · VS "+esc(t.vs):""}</div></div></div>`;
+          }).join("") + (V.caka>zoz.length
+            ? `<div class="wmeta" style="margin-top:6px">a ďalších ${V.caka-zoz.length}</div>` : "");
+        }},
+        {k:"pocet", l:"Koľko čaká", render:()=>{
+          const V=bankaVedra();
+          return `<div class="wbig ${V.caka?"warn":""}">${V.caka}</div><div class="wmeta">${V.caka?"pohybov čaká na zatriedenie":"všetky pohyby sú zatriedené"}</div>`;
+        }},
+      ]
+    },
+    // Dlaždica E-faktúry. Zoznamová, nie metrická: otázka „prešlo to sieťou?"
+    // sa nedá zodpovedať jedným číslom — človek chce vidieť POSLEDNÉ doklady
+    // a ich stav. Používa ten istý tvar riadka ako „Blížiace sa termíny"
+    // (`wrem`/`dd`/`rt`/`rs`), aby plocha ostala jedným vizuálnym jazykom.
+    efaktury: {
+      nazov:"E-faktúry", ic:"📮", velkost:"w-s4",
+      metriky:[
+        {k:"posledne", l:"Posledné cez Peppol", render:()=>{
+          const polozky=[].concat(
+            efaktOdoslane().slice(0,5).map(x=>({
+              smer:"von", kedy:x.f.efaktura.kedy, kto:x.f.odberatel||"—",
+              cislo:x.f.cislo||"", suma:+x.f.spolu||0, e:x.f.efaktura })),
+            efakturyPrijate().slice(0,5).map(z=>({
+              smer:"dnu", kedy:z.prijate, kto:z.dodavatel||"—",
+              cislo:z.cislo||z.id, suma:+z.spolu||0, e:null }))
+          ).sort((a,b)=>String(b.kedy||"").localeCompare(String(a.kedy||""))).slice(0,4);
+          if(!polozky.length) return `<div class="wbig" style="font-size:18px">—</div><div class="wmeta">sieťou zatiaľ neprešlo nič</div>`;
+          const MES=["jan","feb","mar","apr","máj","jún","júl","aug","sep","okt","nov","dec"];
+          return polozky.map(p=>{
+            const d=String(p.kedy||"").slice(0,10).split("-");
+            const den=d[2]?(+d[2]):"", mes=d[1]?MES[(+d[1])-1]:"";
+            const zle=!!(p.e && p.e.nedorucitelne);
+            const popis = p.smer==="von"
+              ? (zle ? "odoslaná · nedoručiteľná" : (p.e&&p.e.stav==="dorucena" ? "doručená odberateľovi" : "odoslaná"))
+              : "prijatá zo siete";
+            return `<div class="wrem"><div class="dd ${zle?"warn":""}">${den}<br>${mes}</div><div style="min-width:0"><div class="rt" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.smer==="von"?"↑":"↓"} ${esc(p.kto)}</div><div class="rs">${esc(p.cislo)} · ${eur(p.suma)} · ${popis}</div></div></div>`;
+          }).join("");
+        }},
+        {k:"caka", l:"Čaká na zaevidovanie", render:()=>{
+          const n=efakturyPrijate().filter(x=>x.stav!=="zaevidovana").length;
+          return `<div class="wbig ${n?"warn":""}">${n}</div><div class="wmeta">${n?"prijatých dokladov čaká na zaevidovanie":"všetko prijaté je zaevidované"}</div>`;
+        }},
+      ]
+    },
     graf: {
       nazov:"Stĺpcový graf", ic:"📊", velkost:"w-s8",
       metriky:[
@@ -5183,6 +5267,30 @@ function dashKonfig(){
     cfg._pausalPonuknuty=true;
     if(!cfg.widgety.includes("pausal")) cfg.widgety.push("pausal");
   }
+  // E-faktúry sa na plochu ponúknu RAZ a len vtedy, keď je čo ukazovať —
+  // teda keď človek odosielanie zapol alebo sieťou už niečo prešlo. Dlaždica,
+  // ktorá každému ukazuje nulu, je len zabraté miesto (§5b.2). Kto ju skryje,
+  // ostane skrytá.
+  if(!cfg._efakturyPonuknute){
+    const maCo = (typeof postarDostupny==="function" && postarDostupny())
+      || (d.efaktury||[]).length
+      || (d.faktury||[]).some(f=>f && f.efaktura);
+    if(maCo){
+      cfg._efakturyPonuknute=true;
+      if(!cfg.widgety.includes("efaktury")) cfg.widgety.push("efaktury");
+    }
+  }
+  // To isté pravidlo ako pri e-faktúrach: dlaždica sa ponúkne RAZ a len keď
+  // je čo zatriediť. Trvalý prvok, ktorý väčšinou hlási „nič", nezaberá
+  // miesto (CLAUDE.md, Rozsah a mobil).
+  if(!cfg._nesparovanePonuknute){
+    let caka=0;
+    try{ caka=bankaVedra().caka; }catch(_){ caka=0; }
+    if(caka>0){
+      cfg._nesparovanePonuknute=true;
+      if(!cfg.widgety.includes("nesparovane")) cfg.widgety.push("nesparovane");
+    }
+  }
   return cfg;
 }
 function dashMetrikaKey(wkey){
@@ -5262,7 +5370,7 @@ function renderWidget(wkey){
 // meno drží preto, že presmerovanie nesie aj VOĽBU POHĽADU. Prepísať ju na
 // "superdash" by dlaždicu otvorilo v tom pohľade, ktorý si používateľ zvolil
 // naposledy — teda inde, než na čo klikol.
-const WIDGET_APP_MAP={graf:"faktury", dan:"prognoza", pausal:"prognoza", faktury:"faktury", vydavky:"vydavky", dph:"dph", km:"jazdy", vykazy:"vykazy", dovolenka:"dovolenka", majetok:"majetok", banka:"banka", cashflow:"banka", priznania:"priznania"};
+const WIDGET_APP_MAP={graf:"faktury", dan:"prognoza", pausal:"prognoza", faktury:"faktury", vydavky:"vydavky", dph:"dph", km:"jazdy", vykazy:"vykazy", dovolenka:"dovolenka", majetok:"majetok", banka:"banka", cashflow:"banka", priznania:"priznania", efaktury:"efaktury", nesparovane:"banka"};
 // menu priamo v dlaždici
 function dashTileMenu(wkey, ev){
   const kat=dashWidgetKatalog()[wkey];
@@ -6798,6 +6906,24 @@ function dashKontroly(){
       }
     }
   }catch(e){ console.error("kontrola nespárovaných pohybov:", e); }
+  // Platby odvodov a DPH, ktoré appka rozpoznala a vie k nim založiť doklad.
+  // Ponuka, nie automatika: doklady vzniknú až jedným ľudským kliknutím.
+  try{
+    if(modulPovolenyPreModul("banka")){
+      const A=pohybyNaAutomat();
+      if(A.length) out.push({ic:"⚡",
+        akcia:"zalozDokladyKOdvodom()", akciaText:"Založiť doklady",
+        text:`K <b>${A.length}</b> ${sklonPohyb(A.length)} odvodov a DPH vie appka založiť doklad sama — označí ${A.length===1?"ho":"ich"} na kontrolu.`});
+    }
+  }catch(e){ console.error("kontrola dokladov k odvodom:", e); }
+  // Doklady, ktoré vznikli automaticky a čakajú na potvrdenie. Bez tejto
+  // položky by značka ležala vo Výdavkoch a nikto by o nej nevedel.
+  try{
+    const K=vydavkyNaKontrolu();
+    if(K.length) out.push({ic:"👁",
+      akcia:"vFilter='kontrola';otvorApp('vydavky')", akciaText:"Skontrolovať",
+      text:`<b>${K.length}</b> ${sklon(K.length,"doklad založený","doklady založené","dokladov založených")} automaticky ${sklon(K.length,"čaká","čakajú","čaká")} na kontrolu.`});
+  }catch(e){ console.error("kontrola automatických dokladov:", e); }
   // Záloha — jediný nález, ktorý zmizne priamo tým tlačidlom.
   const bkp=backupOverdue();
   if(bkp.overdue) out.push({ic:"💾", akcia:"exportFirmu()", akciaText:"Stiahnuť zálohu",
@@ -6897,6 +7023,7 @@ const APPS={
   // obchádzal `renderApp`, lišta v nich svietila na Domove a klamala o tom,
   // kde človek je. Teraz je to modul ako každý iný a vstupov je viac.
   superdash:{n:"Štatistiky",      ic:"📊",c:"var(--m-neutral)", d:"Kompletný prehľad roka — grafy, rozdelenie, počty"},
+  efaktury: {n:"E-faktúry",       ic:"📮",c:"var(--m-podania)", d:"Čo odišlo a čo prišlo sieťou Peppol"},
 };
 
 // ═══ FÁZA 1: INFORMAČNÁ ARCHITEKTÚRA — skupiny modulov ═══
@@ -6915,7 +7042,12 @@ const SKUPINY=[
 // samostatné (mimo skupín): kalendar (prierezový), data (nastavenia v hlavičke)
 // Kniha jázd stojí samostatne: zapisuje sa týždenne, kým majetok a papiere
 // párkrát do roka. Schovať dennú prácu o úroveň nižšie stojí ťuk zakaždým.
-const SKUPINA_SAMOSTATNE=["jazdy","kalendar","clanky","superdash"];
+// E-faktúry stoja SAMOSTATNE, nie v „Podaniach". Dôvod je vecný, nie estetický:
+// skupina Podania je za platenou kategóriou a na pláne Free sa nezobrazuje —
+// e-faktúry tam musia byť aj tak, lebo od 1. 1. 2027 musí PRIJÍMAŤ každý
+// podnikateľ. Modul za platenou skupinou by bránil zákonnej povinnosti.
+// (Skúsené 11. 9. 2026: `test_moduly` aj `test_uzavierka` to zachytili naraz.)
+const SKUPINA_SAMOSTATNE=["jazdy","kalendar","clanky","superdash","efaktury"];
 
 function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function fmtDatum(dt){
@@ -7917,6 +8049,7 @@ function renderAppModul(id){
   if(id==="jazdy") return appJazdy();
   if(id==="majetok") return appMajetok();
   if(id==="zdielanie") return appZdielanie();
+  if(id==="efaktury") return appEfaktury();
   if(id==="data") return appData();
   if(id==="sadzby") return appSadzby();   // údržbová obrazovka, nie je v navigácii
 }
@@ -10380,8 +10513,12 @@ function faktMenu(idx, zdroj){
   const btn = zdroj || (typeof event!=="undefined" && event && (event.currentTarget||event.target));
   const dovod=faktLenOpravaDovod(f);
   const pol=(akcia,ikona,text)=>`<button onclick="${akcia}" style="${TB_POLOZKA}">${ikona} ${text}</button>`;
+  // Odoslanie sieťou stojí PRVÉ, ale len kým doklad neodišiel — potom je
+  // ponuka na mieste, kde predtým bolo odoslanie, past na druhé odoslanie.
+  const mozeOdoslat = !faktOdoslana(f) && postarDostupny();
   tbMenu("fakMenu", btn,
-    pol(`faktMenuAkcia(${idx},'dobropis')`,"➖","Dobropis")
+    (mozeOdoslat ? pol(`faktMenuAkcia(${idx},'odosli')`,"📮","Odoslať sieťou Peppol")+TB_CIARA : "")
+    +pol(`faktMenuAkcia(${idx},'dobropis')`,"➖","Dobropis")
     +TB_CIARA+pol(`faktMenuAkcia(${idx},'tarchopis')`,"➕","Ťarchopis")
     +TB_CIARA+pol(`faktMenuAkcia(${idx},'storno')`,"🚫","Storno — dobropis na celú sumu")
     +TB_CIARA+pol(`faktMenuAkcia(${idx},'kopia')`,"⧉","Kópia ako nová faktúra")
@@ -10390,7 +10527,9 @@ function faktMenu(idx, zdroj){
 }
 function faktMenuAkcia(idx, druh){
   const m=document.getElementById("fakMenu"); if(m) m.remove();
-  if(druh==="kopia") kopirujFakturu(idx); else vystavOpravu(idx, druh);
+  if(druh==="odosli") faktOdosliSietou(idx);
+  else if(druh==="kopia") kopirujFakturu(idx);
+  else vystavOpravu(idx, druh);
 }
 function vystavOpravu(idx, druh){
   const zdroj=(firmaData.faktury||[])[idx];
@@ -11442,6 +11581,7 @@ function appVydavky(){
   else if(vFilter==="blocky") list=vyd.filter(x=>x.druh==="Bloček");
   else if(vFilter==="neuhradene") list=vyd.filter(x=>x.cislo && !vydJeUhradeny(x));
   else if(vFilter==="statu") list=vydStatu;
+  else if(vFilter==="kontrola") list=vyd.filter(x=>x && x.naKontrolu);
   if((_hladaj.vydavky||"").trim()) list=list.filter(x=>hladajZhoda(_hladaj.vydavky, x.cislo, x.partner, x.popis, x.variabilny, x.spolu));
   // Kľúče, nie čísla: doklad bez čísla sa inak nedal ani vybrať, ani zmazať
   // — checkbox sa mu vôbec nevykreslil (rovnaká príčina ako v EX).
@@ -11466,7 +11606,9 @@ function appVydavky(){
         ${mesiace.map(m=>`<option value="${m}" ${m===vMesiac?'selected':''}>${mesiacLabel(m)}</option>`).join('')}
       </select>
       <div style="flex-basis:100%;height:0"></div>
-      ${['vsetky|Všetky','faktury|Došlé faktúry','blocky|Bločky','neuhradene|Neuhradené','statu|Odvody a dane'].map(x=>{const[k,l]=x.split('|');return `<span class="achip ${vFilter===k?'on':''}" onclick="vFilter='${k}';appVydavky()">${l}</span>`}).join('')}${hladatkoHtml('vydavky','appVydavky','🔍 Partner, číslo, popis, suma…')}
+      ${['vsetky|Všetky','faktury|Došlé faktúry','blocky|Bločky','neuhradene|Neuhradené','statu|Odvody a dane']
+        .concat(vydavkyNaKontrolu().length?['kontrola|👁 Na kontrolu ('+vydavkyNaKontrolu().length+')']:[])
+        .map(x=>{const[k,l]=x.split('|');return `<span class="achip ${vFilter===k?'on':''}" onclick="vFilter='${k}';appVydavky()">${l}</span>`}).join('')}${hladatkoHtml('vydavky','appVydavky','🔍 Partner, číslo, popis, suma…')}
     </div>
     ${strazcaBanner()}
     ${vydVybrane.size?`<div style="position:sticky;top:0;z-index:5;display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:var(--brand-lite);border:1px solid var(--line);border-radius:9px;padding:8px 12px;margin-bottom:10px">
@@ -11478,7 +11620,7 @@ function appVydavky(){
     </div>`:''}
     <div class="alist">
       <div class="arow head rdok rv"><div class="c-cb"><input type="checkbox" ${vsetkyVybraneV?'checked':''} onclick="vydVyberVsetky(this.checked)" title="Vybrať všetky" style="cursor:pointer"></div><div class="c-main">Partner / popis</div><div class="c-date">Dátum</div><div class="c-sum" style="text-align:right">Bez DPH</div><div class="c-sub" style="text-align:right">DPH</div><div class="c-stav" style="text-align:center">Stav</div><div class="c-act"></div></div>
-      ${list.length?list.map(x=>{const idx=_vIdx.get(x);const bezDat=!x.datum||!/^\d{4}-\d{2}/.test(String(x.datum));const kl=dokladKluc(x);const st=kl?uhradaStav("vydavok",kl):null;const fb=st?(UHRADA_FARBY[st.stav]||UHRADA_FARBY.neznamy):null;const uhr=vydJeUhradeny(x);const RZ=rozporRiadok(st);return `<div class="arow rdok rv${RZ.trieda}" onclick="editVydavok(${idx})"><div class="c-cb">${kl?`<input type="checkbox" ${vydVybrane.has(kl)?'checked':''} onclick="event.stopPropagation();vydToggleVyber('${esc(kl)}',this.checked)" style="cursor:pointer">`:''}</div><div class="c-main viWrap">${vydavokIkonaHtml(x,_tank)}<div class="viTxt"><div class="acol-strong" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(x.partner||"—")} ${x.doklad?'<span title="Doklad v cloude" style="cursor:pointer" onclick="event.stopPropagation();otvorDokladSubor(\''+esc(x.doklad)+'\')">📎</span>':''}</div><div class="acol-muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(x.popis||x.druh||"")}${(()=>{const kde=uhradyPopis("vydavok",kl,true);return kde?` <span style="color:var(--pos)">· zaplatené ${esc(kde)}</span>`:"";})()}</div></div></div><div class="acol-muted c-date">${bezDat?'<span class="apill neg">bez dátumu</span>':fmtDatum(x.datum)}</div><div class="acol-sum c-sum">${eur(+x.bez||0)}</div><div class="acol-sum c-sub" style="color:var(--ink-soft)">${eur(+x.dph||0)}</div><div class="c-stav" style="text-align:center">${fb?`<span title="${esc((st.n||fb.n)+(st.text?' — '+st.text:'')+(st.stav!=="overene"?" · ťuknutím priradíte platbu z banky":""))}" style="color:${fb.f};font-size:14px;${st.stav!=="overene"?"cursor:pointer":""}" ${st.stav!=="overene"?`onclick="event.stopPropagation();otvorVyberPlatby('vydavok','${esc(kl)}')"`:""}>${fb.ic}</span>`:'<span style="color:var(--ink-soft)">·</span>'}</div><div class="c-act">${kl?(!uhr?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vyberSposobUhrady(null,_s=>{oznacDokladUhradeny('vydavok','${esc(kl)}',_s);appVydavky();})" title="Označiť ako uhradené">✓</button>`:((st.zdroj==='rucne'||st.zdroj==='legacy')?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();zrusDokladUhradu('vydavok','${esc(kl)}');appVydavky()" title="Zrušiť potvrdenie úhrady">✕</button>`:'')):''}</div>${RZ.nota}</div>`;}).join(''):prazdnyAleboFilter(!(d.vydavky||[]).length,
+      ${list.length?list.map(x=>{const idx=_vIdx.get(x);const bezDat=!x.datum||!/^\d{4}-\d{2}/.test(String(x.datum));const kl=dokladKluc(x);const st=kl?uhradaStav("vydavok",kl):null;const fb=st?(UHRADA_FARBY[st.stav]||UHRADA_FARBY.neznamy):null;const uhr=vydJeUhradeny(x);const RZ=rozporRiadok(st);return `<div class="arow rdok rv${RZ.trieda}" onclick="editVydavok(${idx})"><div class="c-cb">${kl?`<input type="checkbox" ${vydVybrane.has(kl)?'checked':''} onclick="event.stopPropagation();vydToggleVyber('${esc(kl)}',this.checked)" style="cursor:pointer">`:''}</div><div class="c-main viWrap">${vydavokIkonaHtml(x,_tank)}<div class="viTxt"><div class="acol-strong" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(x.partner||"—")}${x.naKontrolu?' <span title="Doklad založila appka z bankového pohybu — potvrďte, že sedí" style="font-size:10.5px;font-weight:700;color:var(--ink-warn);background:var(--sfc-warn);border-radius:5px;padding:1px 5px;vertical-align:1px">na kontrolu</span>':''} ${x.doklad?'<span title="Doklad v cloude" style="cursor:pointer" onclick="event.stopPropagation();otvorDokladSubor(\''+esc(x.doklad)+'\')">📎</span>':''}</div><div class="acol-muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(x.popis||x.druh||"")}${(()=>{const kde=uhradyPopis("vydavok",kl,true);return kde?` <span style="color:var(--pos)">· zaplatené ${esc(kde)}</span>`:"";})()}</div></div></div><div class="acol-muted c-date">${bezDat?'<span class="apill neg">bez dátumu</span>':fmtDatum(x.datum)}</div><div class="acol-sum c-sum">${eur(+x.bez||0)}</div><div class="acol-sum c-sub" style="color:var(--ink-soft)">${eur(+x.dph||0)}</div><div class="c-stav" style="text-align:center">${fb?`<span title="${esc((st.n||fb.n)+(st.text?' — '+st.text:'')+(st.stav!=="overene"?" · ťuknutím priradíte platbu z banky":""))}" style="color:${fb.f};font-size:14px;${st.stav!=="overene"?"cursor:pointer":""}" ${st.stav!=="overene"?`onclick="event.stopPropagation();otvorVyberPlatby('vydavok','${esc(kl)}')"`:""}>${fb.ic}</span>`:'<span style="color:var(--ink-soft)">·</span>'}</div><div class="c-act">${x.naKontrolu?`<button class="aabtn pos" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vydavokSkontrolovany(${idx})" title="Potvrdiť, že doklad sedí">👁</button>`:''}${kl?(!uhr?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vyberSposobUhrady(null,_s=>{oznacDokladUhradeny('vydavok','${esc(kl)}',_s);appVydavky();})" title="Označiť ako uhradené">✓</button>`:((st.zdroj==='rucne'||st.zdroj==='legacy')?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();zrusDokladUhradu('vydavok','${esc(kl)}');appVydavky()" title="Zrušiť potvrdenie úhrady">✕</button>`:'')):''}</div>${RZ.nota}</div>`;}).join(''):prazdnyAleboFilter(!(d.vydavky||[]).length,
         "Zatiaľ nemáte žiadny výdavok. Odfoťte bloček alebo prepošlite došlú faktúru e-mailom — appka z nej vytiahne sumu aj DPH.",
         {popis:"＋ Nový výdavok", kod:"editVydavok()"},
         "vFilter='vsetky';vRok='';vMesiac='';_hladaj.vydavky='';appVydavky()")}
@@ -17213,6 +17355,12 @@ function appData(){
         <span>Tržby eviduje pokladnica <b>eKasa</b></span>
       </label>
       <div class="ocr-hint" style="margin-top:5px">Rozhoduje o tom, kam idú hotovostné príjmy v kontrolnom výkaze: cez eKasu do oddielu D.1 súhrnne, bez nej do D.2 ako zjednodušené faktúry. Kto eKasu nemá, nechá vypnuté.</div>
+      <div style="border-top:1px solid var(--line-soft);margin:14px 0 12px"></div>
+      <label style="display:flex;align-items:center;gap:9px;font-size:13.5px;cursor:pointer">
+        <input type="checkbox" id="set_postar" ${(d.settings||{}).postarZapnuty?'checked':''} style="width:17px;height:17px">
+        <span>Odosielať faktúry <b>sieťou Peppol</b> (skúšobná prevádzka)</span>
+      </label>
+      <div class="ocr-hint" style="margin-top:5px">Zapne v menu faktúry voľbu „Odoslať sieťou Peppol“. Odoslanie je <b>nezvratné</b>: doklad dostane odberateľ, poštár ho nahlási Finančnej správe a faktúra sa tým zamkne — meniť sa bude dať už len dobropisom alebo ťarchopisom. Nič sa neodošle samo; pri každom doklade sa appka spýta na sumu aj príjemcu.</div>
     </div>
 
     <div class="card" style="margin-bottom:14px">
@@ -17381,6 +17529,7 @@ async function ulozNastavenia(){
   s.pokladnaZaciatok=num("set_pokladnaZaciatok",0);
   s.pokladnaZaciatokOd=val("set_pokladnaZaciatokOd")||"";
   s.maEkasa=chk("set_maEkasa");
+  if(document.getElementById("set_postar")) s.postarZapnuty=chk("set_postar");
   // kniha jázd
   s.kjVodic=val("set_kjVodic")||"";
   s.kjAutoLimit=num("set_kjAutoLimit",50);
@@ -22507,15 +22656,18 @@ function doplnOdvodoveDoklady(){
 // pohyby, o ktorých človek rozhodol, že ho nezaujímajú, a číslo, ktoré nikdy
 // neklesne na nulu, sa prestane čítať.
 function bankaVedra(){
-  const out={sparene:0, vybavene:0, caka:0};
+  // `cakaju` je ZOZNAM tých istých pohybov, ktoré počíta `caka` — nie druhý
+  // filter. Počet sa z neho odvodzuje na konci, takže sa nemôžu rozísť.
+  const out={sparene:0, vybavene:0, caka:0, cakaju:[]};
   (firmaData.vypis||[]).forEach(tx=>{
     let s=null;
     try{ s=pohybStav(tx); }catch(e){ return; }
     if(!s || s.kod==="skryty" || s.kod==="ignorovany") return;
     if(s.kod==="vybaveny") out.sparene++;
     else if(s.kod==="klasifikovany") out.vybavene++;
-    else out.caka++;
+    else out.cakaju.push(tx);
   });
+  out.caka=out.cakaju.length;
   return out;
 }
 // `parsedVopred` je výsledok, ktorý už niekto prečítal inou cestou — dnes
@@ -23048,8 +23200,17 @@ function odkazRiadka(p){
        + "\n      <cbc:DocumentTypeCode>130</cbc:DocumentTypeCode>"
        + "\n    </cac:DocumentReference>";
 }
-function exportEFakturaUBL(idx){
-  const f=firmaData.faktury[idx]; const m=firmaData.meta||{};
+// Výroba UBL XML je oddelená od toho, ČO sa s ním urobí. Súbor na stiahnutie
+// a odoslanie sieťou sú dve cesty k tomu istému dokladu — a keby si každá
+// skladala XML po svojom, raz by sa rozišli a do siete by odišlo niečo iné,
+// než čo si človek stiahol a skontroloval.
+//
+// Vracia aj `chyba`: zoznam toho, čo dokladu chýba na doručenie. XML sa vyrobí
+// aj tak — kto ho chce len vidieť, nech ho má — ale odoslanie sa na tom musí
+// zastaviť, inak by chyba prišla najavo až odmietnutím u poštára.
+function efakturaXml(idx){
+  const f=(firmaData.faktury||[])[idx]; const m=firmaData.meta||{};
+  if(!f) return null;
   if(!f){ alert("Faktúra sa nenašla."); return; }
   const s=faktSumy(f);
   // ŽIADNY `||0.23`. `faktSadzba` po oprave 91.3 vracia nulu legitímne
@@ -23224,20 +23385,308 @@ function exportEFakturaUBL(idx){
     <cbc:PayableAmount currencyID="EUR">${splatit.toFixed(2)}</cbc:PayableAmount>
   </cac:LegalMonetaryTotal>${lineXml}
 </${KOREN}>`;
-  const blob=new Blob([xml],{type:"application/xml"});
-  const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
-  a.download="efaktura_"+String(f.cislo||"").replace(/[^\w.-]+/g,"_")+".xml"; a.click();
-  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
-  // Bez identifikátora účastníka doklad v sieti nemá kam ísť. Súbor sa
-  // vygeneruje aj tak — kto ho chce len vidieť, nech ho má — ale musí byť
-  // povedané, čo chýba a kde sa to dopĺňa. Ticho by to prišlo najavo až
-  // odmietnutím u poštára, teda po odoslaní.
   const chyba=[];
   if(!dodEndpoint) chyba.push("tvoje DIČ (Nastavenia → Firma)");
   if(!odbEndpoint) chyba.push("DIČ alebo IČ DPH odberateľa (úprava faktúry)");
-  setTimeout(()=>alert(chyba.length
-    ? "E-faktúra (UBL 2.1) vygenerovaná, ale sieť Peppol ju takto nedoručí.\n\nChýba: "+chyba.join(", ")+".\n\nÚčastník sa v sieti hľadá podľa DIČ; bez neho poštár nevie, komu doklad patrí."
+  return { xml, cislo:String(f.cislo||""), prijemca:odbEndpoint, odosielatel:dodEndpoint, chyba };
+}
+function exportEFakturaUBL(idx){
+  const v=efakturaXml(idx); if(!v) return;
+  const blob=new Blob([v.xml],{type:"application/xml"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
+  a.download="efaktura_"+v.cislo.replace(/[^\w.-]+/g,"_")+".xml"; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  setTimeout(()=>alert(v.chyba.length
+    ? "E-faktúra (UBL 2.1) vygenerovaná, ale sieť Peppol ju takto nedoručí.\n\nChýba: "+v.chyba.join(", ")+".\n\nÚčastník sa v sieti hľadá podľa DIČ; bez neho poštár nevie, komu doklad patrí."
     : "E-faktúra (UBL 2.1) vygenerovaná.\n\nOd 1.1.2027 je elektronická fakturácia povinná. Tento XML nahráte svojmu Digitálnemu poštárovi (certifikovaný poskytovateľ Peppol), ktorý ho doručí odberateľovi a oznámi FS. V roku 2026 to môžete testovať dobrovoľne."),150);
+}
+// ═══════════════════════════════════════════════════════════════
+//  JEDINÁ HRANICA VOLANIA DIGITÁLNEHO POŠTÁRA
+//  Appka nesmie volať CPDS odnikiaľ inde (spec 38.13). Všetko ide cez edge
+//  funkciu `postar`, ktorá hovorí národným rozhraním SAPI-SK — poštár sa tak
+//  dá vymeniť konfiguráciou, nie prepisovaním appky.
+//
+//  Prihlásenie sa posiela POUŽÍVATEĽOVÝM tokenom: o tom, ku ktorej firme sa
+//  volajúci dostane, rozhoduje RLS v databáze, nie táto funkcia.
+// ═══════════════════════════════════════════════════════════════
+async function postarVolaj(akcia, telo){
+  if(localMode || !sb || !firmaId) throw new Error("Odosielanie sieťou funguje len v cloudovom režime.");
+  const tok=await ziskajToken();
+  if(!tok) throw new Error(CHYBA_SESSION);
+  const res=await fetch(SUPABASE_URL+"/functions/v1/postar",{
+    method:"POST",
+    headers:{"Content-Type":"application/json","Authorization":"Bearer "+tok},
+    body:JSON.stringify(Object.assign({akcia:akcia, firma_id:firmaId}, telo||{}))
+  });
+  const d=await res.json().catch(()=>({}));
+  if(!res.ok){
+    const e=new Error(d.error || ("poštár odpovedal "+res.status));
+    e.chyby=d.chyby||[]; e.stav=res.status; throw e;
+  }
+  return d;
+}
+// Je odoslanie sieťou vôbec na stole? Tri podmienky a každá má dôvod:
+//   · cloudový režim — edge funkcia potrebuje prihlásenie
+//   · DIČ firmy — bez neho v Peppole neexistuje a poštár nevie, kto posiela
+//   · vedomé ZAPNUTIE v Nastaveniach
+//
+// 🔴 Tretia podmienka nie je opatrnosť navyše. Edge funkcia `postar` sa
+// nasadzuje samostatne a potrebuje tajomstvá; kým ich firma nemá, tlačidlo by
+// každému zlyhalo. Ponuka, ktorá vždy skončí chybou, je horšia než žiadna —
+// a odoslanie je nezvratné, takže predvolene VYPNUTÉ je aj tak správne.
+function postarDostupny(){
+  if(localMode || !sb || !firmaId) return false;
+  const m=firmaData.meta||{};
+  if(!String(m.dic||m.icdph||"").trim()) return false;
+  return !!((firmaData.settings||{}).postarZapnuty);
+}
+// ═══════════════════════════════════════════════════════════════
+//  MODUL E-FAKTÚRY — čo odišlo a čo prišlo sieťou Peppol
+//
+//  Vlastný modul, nie záložka vo Faktúrach: prijaté doklady sú VÝDAVKY,
+//  odoslané sú PRÍJMY, a spoločné majú len to, že prešli sieťou. Tá cesta je
+//  od 1. 1. 2027 samostatná agenda so samostatnými povinnosťami (archív,
+//  hlásenie Finančnej správe) a človek sa na ňu pýta ako na celok:
+//  „odišlo to?", „prišlo mi niečo?".
+//
+//  NIE JE v `MODUL_KATEGORIA` zámerne. Prijímať e-faktúry musí od 2027 KAŽDÝ
+//  vrátane plánu Free — modul za platenou kategóriou by bránil povinnosti,
+//  nie funkcii navyše.
+// ═══════════════════════════════════════════════════════════════
+function efaktOdoslane(){
+  return (firmaData.faktury||[])
+    .map((f,i)=>({f, i}))
+    .filter(x=>x.f && x.f.efaktura && x.f.efaktura.kedy)
+    .sort((a,b)=>String(b.f.efaktura.kedy).localeCompare(String(a.f.efaktura.kedy)));
+}
+const EFAKT_STAVY={
+  odoslana:{n:"odoslaná", f:"var(--ink-info)"},
+  dorucena:{n:"doručená", f:"var(--pos)"},
+};
+function efaktStavHtml(e){
+  if(e && e.nedorucitelne)
+    return `<span style="color:var(--warn);font-weight:600" title="Poštár doklad prevzal a nahlásil Finančnej správe, ale odberateľ v sieti Peppol nie je">nedoručiteľná</span>`;
+  const S=EFAKT_STAVY[String((e||{}).stav||"")]||{n:String((e||{}).stav||"—"), f:"var(--ink-soft)"};
+  return `<span style="color:${S.f};font-weight:600">${esc(S.n)}</span>`;
+}
+async function efaktSkontrolujSchranku(btn){
+  if(btn){ btn.disabled=true; btn.textContent="Kontrolujem…"; }
+  try{
+    const n=await postarSynchronizuj();
+    appEfaktury();
+    alert(n ? ("Prevzaté nové doklady: "+n+"\n\nOriginály sú v archíve. Zaevidovať ich do výdavkov môžete nižšie.")
+            : "V schránke nič nové nie je.");
+  }catch(e){ alert("Schránku sa nepodarilo skontrolovať: "+e.message); }
+  finally{ if(btn){ btn.disabled=false; btn.textContent="Skontrolovať schránku"; } }
+}
+function appEfaktury(){
+  if(prekresliVRamci("efaktury")) return;
+  const c=APPS.efaktury.c;
+  const odo=efaktOdoslane();
+  const pri=efakturyPrijate();
+  const nove=pri.filter(x=>x.stav!=="zaevidovana").length;
+  const zapnuty=postarDostupny();
+  const akcia = zapnuty
+    ? `<button class="aabtn pri" onclick="efaktSkontrolujSchranku(this)">Skontrolovať schránku</button>`
+    : `<button class="aabtn" onclick="otvorApp('data')">Nastaviť</button>`;
+  document.getElementById("appScreen").innerHTML=appHlavicka("efaktury", akcia)+`
+    ${zapnuty ? "" : `<div class="card" style="margin-bottom:14px;border-left:3px solid var(--warn)">
+      <b>Odosielanie a príjem sieťou nie sú zapnuté.</b>
+      <div class="csub" style="margin-top:5px">Zapnete ich v Nastaveniach. Od 1. 1. 2027 musí e-faktúry <b>prijímať každý</b> podnikateľ; vystavovať ich musia platitelia DPH. Do vtedy je to dobrovoľné a dá sa to skúšať.</div>
+    </div>`}
+    <div class="statgrid" style="margin-bottom:14px">
+      <div class="sbox"><div class="sn">${odo.length}</div><div class="sl">odoslané sieťou</div></div>
+      <div class="sbox"><div class="sn">${pri.length}</div><div class="sl">prijaté${nove?" · "+nove+" čaká":""}</div></div>
+    </div>
+
+    <div class="card" style="margin-bottom:14px">
+      <h2 style="font-size:16px;margin-bottom:4px">Prijaté zo siete</h2>
+      <div class="csub" style="margin-bottom:12px">Originál je uložený v archíve — zákon žiada uchovať ho 10 rokov v pôvodnom formáte a poštár ho nedrží.</div>
+      <div class="alist">${pri.length ? pri.map(z=>`
+        <div class="efrow">
+          <div class="ef-main">
+            <div class="ef-nazov">${esc(z.dodavatel||"—")}</div>
+            <div class="ef-sub">${esc(z.cislo||z.id)} · prijaté ${esc(fmtDatum(String(z.prijate||"").slice(0,10)))}</div>
+          </div>
+          <div class="ef-sum">${eur(+z.spolu||0)}</div>
+          <div class="ef-akcie">${z.stav==="zaevidovana"
+            ? `<span style="color:var(--pos);font-size:11.5px;font-weight:600">zaevidovaná</span>`
+            : `<button class="aabtn pri" style="padding:5px 9px;font-size:11px" onclick="efakturaZaevidujte('${esc(z.id)}')">Zaevidovať</button>`}
+            <button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="otvorDokladSubor('${esc(z.cesta)}')" title="Otvoriť originál XML">XML</button></div>
+        </div>`).join("") : `<div class="aempty">Zo siete zatiaľ neprišlo nič.</div>`}</div>
+    </div>
+
+    <div class="card">
+      <h2 style="font-size:16px;margin-bottom:4px">Odoslané sieťou</h2>
+      <div class="csub" style="margin-bottom:12px">Odoslaný doklad sa už nemení — opravuje sa dobropisom, ťarchopisom alebo stornom.</div>
+      <div class="alist">${odo.length ? odo.map(x=>`
+        <div class="efrow" style="cursor:pointer" onclick="otvorDoklad(${x.i})">
+          <div class="ef-main">
+            <div class="ef-nazov">${esc(x.f.odberatel||"—")}</div>
+            <div class="ef-sub">${esc(x.f.cislo||"—")} · ${esc(fmtDatum(String(x.f.efaktura.kedy).slice(0,10)))}</div>
+          </div>
+          <div class="ef-sum">${eur(+x.f.spolu||0)}</div>
+          <div class="ef-akcie" style="font-size:11.5px">${efaktStavHtml(x.f.efaktura)}</div>
+        </div>`).join("") : `<div class="aempty">Sieťou zatiaľ neodišlo nič.</div>`}</div>
+    </div>`;
+}
+// ═══════════════════════════════════════════════════════════════
+//  PRÍJEM E-FAKTÚR ZO SIETE
+//
+//  Front si NEZAKLADÁME. Schránka u poštára front UŽ JE: doklad v nej leží,
+//  kým ho nepotvrdíme (`potvrd`), a potvrdenie je presne tá značka „prevzaté".
+//  Druhá kópia toho istého zoznamu by sa raz rozišla.
+//
+//  🔴 PORADIE JE ZÁKONNÁ VEC, NIE ESTETIKA. § 76 zákona o DPH žiada uchovať
+//  doklad 10 rokov v pôvodnom formáte a poštár ho neuchováva — Verteco obsah
+//  predvolene maže 14 dní po doručení (PLAN_EFAKTURA §1.4). Potvrdiť prevzatie
+//  skôr, než originál naozaj leží v našom úložisku, znamená, že ho po dvoch
+//  týždňoch nemá nikto.
+//
+//  Preto: detail → ARCHÍV → až potom `potvrd` → až potom zápis do zoznamu.
+//  Keď archív zlyhá, doklad ostáva v schránke a skúsi sa nabudúce.
+// ═══════════════════════════════════════════════════════════════
+function efakturyPrijate(){ return (firmaData && firmaData.efaktury) || []; }
+function efakturaMam(id){ return efakturyPrijate().some(x=>String(x.id)===String(id)); }
+
+// Prevzatie JEDNÉHO dokladu. Vracia zápis, alebo vyhodí chybu s dôvodom —
+// ticho zhltnutá chyba tu znamená stratený originál.
+async function postarPrevezmi(dokladId){
+  const d=await postarVolaj("detail", {doklad_id:dokladId});
+  const xml=String((d&&(d.payload||d.xml))||"");
+  if(!xml) throw new Error("poštár nevrátil obsah dokladu");
+  const R=parseUBLFaktura(xml)||parseIsdocFaktura(xml);
+  const cislo=String((R&&R.cislo)||dokladId).replace(/[^\w.-]+/g,"_");
+  // Do úložiska ide SUROVÉ XML, presne ako prišlo — to je ten pôvodný formát,
+  // ktorý zákon žiada. Vlastný prefix `efaktura`, aby sa archív dal nájsť.
+  const subor=new File([xml], "efaktura_"+cislo+".xml", {type:"application/xml"});
+  const cesta=await dokladUpload(subor, "efaktura");
+  if(!cesta) throw new Error("originál sa nepodarilo uložiť do archívu");
+  // Až teraz. Pred týmto riadkom je doklad u poštára a dá sa stiahnuť znova.
+  await postarVolaj("potvrd", {doklad_id:dokladId});
+  const zaznam={
+    id:String(dokladId), cesta:cesta, prijate:new Date().toISOString(), stav:"nove",
+    cislo:(R&&R.cislo)||"", dodavatel:(R&&R.partner)||"",
+    datum:(R&&R.datum)||"", spolu:(R&&R.spolu)||0, mena:(R&&R.mena)||"EUR"
+  };
+  if(!firmaData.efaktury) firmaData.efaktury=[];
+  firmaData.efaktury.unshift(zaznam);
+  poZmene();
+  return zaznam;
+}
+
+// Príjem na pozadí. Polling je podľa dokumentácie poštára plnohodnotná cesta —
+// webhook je doplnok, nie podmienka. Doklad nie je vec, kde záleží na
+// sekundách, takže realtime spojenie by tu bolo réžia navyše.
+let _postarBezi=false;
+async function postarSynchronizuj(tiche){
+  if(_postarBezi || !postarDostupny()) return 0;
+  _postarBezi=true;
+  let vzatych=0;
+  try{
+    const z=await postarVolaj("prijate", {filtre:{limit:"50"}});
+    const zoznam=(z&&z.documents)||[];
+    for(const d of zoznam){
+      const id=d&&(d.documentId||d.id);
+      if(!id || efakturaMam(id)) continue;
+      try{ await postarPrevezmi(id); vzatych++; }
+      catch(e){
+        // Jeden pokazený doklad nesmie zastaviť ostatné. A chyba sa NEZAHADZUJE:
+        // doklad ostal v schránke a treba vedieť prečo.
+        console.error("prevzatie e-faktúry "+id+" zlyhalo:", e);
+        if(!tiche && typeof cloudMsg==="function") cloudMsg("E-faktúru "+id+" sa nepodarilo prevziať: "+e.message+" — ostáva v schránke.","warn");
+      }
+    }
+  }catch(e){
+    console.error("schránka poštára:", e);
+    if(!tiche && typeof cloudMsg==="function") cloudMsg("Schránku sa nepodarilo načítať: "+e.message,"warn");
+  }finally{ _postarBezi=false; }
+  return vzatych;
+}
+
+// Zaevidovanie prevzatej e-faktúry do výdavkov. Doklad sa NEZAKLADÁ sám —
+// otvorí sa tá istá cesta ako pri načítaní XML zo súboru, takže človek vidí,
+// čo appka prečítala, a potvrdí to.
+//
+// Originál UŽ V ARCHÍVE JE, preto sa podáva jeho cesta: bez nej by ho tá cesta
+// nahrala druhýkrát a v úložisku by ležali dve kópie toho istého dokladu.
+async function efakturaZaevidujte(id){
+  const z=efakturyPrijate().find(x=>String(x.id)===String(id));
+  if(!z){ alert("Záznam sa nenašiel."); return; }
+  try{
+    const url=await dokladUrl(z.cesta);
+    const r=await fetch(url);
+    const xml=await r.text();
+    const subor=new File([xml], "efaktura_"+(z.cislo||z.id)+".xml", {type:"application/xml"});
+    await spracujDokladZoSuboru(subor, null, z.cesta);
+    z.stav="zaevidovana"; z.zaevidovane=new Date().toISOString();
+    poZmene();
+  }catch(e){
+    console.error("zaevidovanie e-faktúry:", e);
+    alert("Doklad sa nepodarilo otvoriť: "+e.message);
+  }
+}
+// ── ODOSLANIE FAKTÚRY SIEŤOU PEPPOL ──────────────────────────────────────
+// NEZVRATNÉ: doklad odíde odberateľovi a poštár ho nahlási Finančnej správe.
+// Preto sa pýta na potvrdenie so sumou aj príjemcom — a preto sa faktúra hneď
+// potom ZAMKNE (`f.efaktura`), takže meniť sa bude dať už len opravným
+// dokladom. Zámok tu nie je nová vec: `faktOdoslana` ho čaká od verzie MZ,
+// len dovtedy nemal kto nastaviť stav.
+async function faktOdosliSietou(idx){
+  if(!strazZapis("faktury")) return;
+  const f=(firmaData.faktury||[])[idx];
+  if(!f){ alert("Faktúra sa nenašla."); return; }
+  const uz=faktOdoslana(f);
+  if(uz){ alert("🔒 "+faktZamokVeta(uz)+"\n\nTen istý doklad sa druhýkrát neposiela. Opraviť sa dá dobropisom alebo ťarchopisom."); return; }
+  const v=efakturaXml(idx);
+  if(!v) return;
+  if(v.chyba.length){
+    alert("Takto sa doklad odoslať nedá.\n\nChýba: "+v.chyba.join(", ")+".\n\nÚčastník sa v sieti hľadá podľa DIČ; bez neho poštár nevie, komu doklad patrí.");
+    return;
+  }
+  let reg=null;
+  try{
+    const n=await postarVolaj("najdi", {prijemca:v.prijemca});
+    reg=!!(n && n.registered);
+  }catch(e){
+    // Overenie príjemcu je predbežná otázka, nie podmienka. Keď zlyhá, treba
+    // to povedať a nechať rozhodnutie na človeku — nie ticho pokračovať ani
+    // ticho odmietnuť.
+    console.error("postar/najdi zlyhalo:", e);
+    if(!confirm("Nepodarilo sa overiť, či je odberateľ v sieti Peppol ("+e.message+").\n\nSkúsiť odoslať aj tak?")) return;
+  }
+  const s=faktSumy(f);
+  const varovanie = reg===false
+    ? "⚠ Tento odberateľ v sieti Peppol registrovaný NIE JE.\nPoštár doklad prevezme a nahlási Finančnej správe, ale odberateľovi sa NEDORUČÍ.\n\n"
+    : "";
+  if(!confirm("Odoslať faktúru "+v.cislo+" sieťou Peppol?\n\n"
+    +"Odberateľ: "+(f.odberatel||"—")+"\n"
+    +"Suma: "+eur(s.spolu)+"\n"
+    +"DIČ odberateľa: "+v.prijemca+"\n\n"
+    +varovanie
+    +"Odoslanie sa nedá vziať späť a faktúra sa tým zamkne.")) return;
+  try{
+    const r=await postarVolaj("odosli", {xml:v.xml, prijemca:v.prijemca, cislo:v.cislo, doklad_id:f.id||v.cislo});
+    f.efaktura={
+      stav:"odoslana",
+      kedy:new Date().toISOString(),
+      id:String((r&&(r.providerDocumentId||r.id))||""),
+      prijemca:v.prijemca,
+      sietStav:String((r&&r.status)||""),
+      nedorucitelne:!!(r&&r.undeliverable)
+    };
+    poZmene();
+    obnovPoEditacii("faktury");
+    alert((f.efaktura.nedorucitelne
+      ? "Doklad poštár prevzal a nahlási ho Finančnej správe, ale odberateľovi sa nedoručil — v sieti Peppol nie je.\n\n"
+      : "Faktúra odoslaná sieťou Peppol.\n\n")
+      +"Faktúra je odteraz zamknutá. Opraviť sa dá dobropisom, ťarchopisom alebo stornom.");
+  }catch(e){
+    console.error("postar/odosli zlyhalo:", e);
+    alert("Odoslanie zlyhalo: "+e.message
+      +((e.chyby&&e.chyby.length) ? "\n\n"+e.chyby.slice(0,5).join("\n") : "")
+      +"\n\nFaktúra ostáva nezmenená a dá sa odoslať znova.");
+  }
 }
 
 // PayBySquare QR (slovenský platobný štandard)
@@ -27435,6 +27884,9 @@ if(!R._sumyNesedia && R.bez>0 && R.spolu>0 && Math.abs(R.spolu-(R.bez+R.dph))>1)
   return R;
 }
 let _ocrFile=null;
+// Cesta k originálu, ktorý UŽ leží v archíve (e-faktúra prevzatá zo siete).
+// Keď je vyplnená, `_ocrFile` sa nenastavuje a druhá kópia nevznikne.
+let _ocrArchiv=null;
 // rýchle načítanie dokladu z topbaru — malé menu foto / PDF-súbor
 // ═══════════════════════════════════════════════════════════════════════════
 //  DOKLADY PRIJATÉ E-MAILOM (B7)
@@ -29426,8 +29878,12 @@ async function spracujOCR(e){
 }
 // Jedna cesta pre obe možnosti — vlastný fotoaparát aj výber súboru. `qrVopred`
 // je kód prečítaný zo živého obrazu pri mierení; z výberu súboru je null.
-async function spracujDokladZoSuboru(file, qrVopred){
-  _ocrFile=file; // zapamätaj originál na neskoršie uloženie do cloudu
+async function spracujDokladZoSuboru(file, qrVopred, archivCesta){
+  // Pri doklade prevzatom zo siete je originál v archíve už PRED týmto
+  // krokom — tam ho uložil príjem, aby sa dalo potvrdiť prevzatie. Nahrať ho
+  // znova by znamenalo dve kópie toho istého XML v úložisku.
+  _ocrArchiv = archivCesta || null;
+  _ocrFile = archivCesta ? null : file; // originál na neskoršie uloženie do cloudu
   openModal("Spracúvam doklad…", `<div style="text-align:center;padding:20px">
     <div class="spin" style="margin:0 auto 14px"></div>
     <div id="ocrStav">Načítavam...</div>
@@ -29663,6 +30119,10 @@ function otvorOcrVysledok(R){
       }
       else _ocrFile=null;
     }
+    // Doklad prevzatý zo siete má originál v archíve už od príjmu — pripojí sa
+    // k výdavku odkazom, nie druhým nahraním.
+    if(!obj.doklad && _ocrArchiv){ obj.doklad=_ocrArchiv; }
+    _ocrArchiv=null;
     if(!firmaData.vydavky) firmaData.vydavky=[];
     // kontrola: doklad z iného mesiaca? (chytí OCR chybu v roku/dátume)
     if(!overMesiacDokladu(datum)) return false;
@@ -32572,7 +33032,7 @@ function pohybMaVydavok(tx){
   const id=txId(tx);
   return (firmaData.vydavky||[]).some(x=>x.zdrojPohyb===id);
 }
-function vytvorVydavokZPohybu(txIdVal, prepisKategoria, prepisZaRok){
+function vytvorVydavokZPohybu(txIdVal, prepisKategoria, prepisZaRok, naKontrolu){
   if(!strazZapis("banka")) return null;
   const tx=(firmaData.vypis||[]).find(t=>txId(t)===txIdVal);
   if(!tx) return null;
@@ -32590,6 +33050,9 @@ function vytvorVydavokZPohybu(txIdVal, prepisKategoria, prepisZaRok){
     }
   } else if(prepisZaRok>2000) n.zaRok=prepisZaRok;
   delete n._pochybnost;                       // do uloženého dokladu nepatrí
+  // Doklad založený automaticky sa označí, kým ho človek nepotvrdí. Bez značky
+  // by v evidencii ležal zápis, o ktorom nikto nevie, že vznikol sám.
+  if(naKontrolu) n.naKontrolu=true;
   n.id="v"+Date.now();
   firmaData.vydavky=(firmaData.vydavky||[]);
   firmaData.vydavky.push(n);
@@ -32600,6 +33063,66 @@ function vytvorVydavokZPohybu(txIdVal, prepisKategoria, prepisZaRok){
   pridajUhradu(tx, "vydavok", dokladKluc(n), null);
   firmaDirty=true; ulozFirmu();
   return n;
+}
+// ═══════════════════════════════════════════════════════════════
+//  DOKLADY K ODVODOM A DPH, KTORÉ APPKA ZALOŽÍ SAMA
+//
+//  Platba Sociálnej poisťovni, zdravotnej alebo Finančnej správe je doklad
+//  BEZ ROZHODOVANIA: `rozpoznajOdvod` ju identifikuje z variabilného symbolu
+//  a sumy, dokladom je samotný bankový výpis a DPH sa z nej neodpočítava.
+//  Robiť to ručne pri každej mesačnej platbe sú desiatky klikov za rok.
+//
+//  🔴 Nezaloží sa doklad, pri ktorom má appka POCHYBNOSŤ (`_pochybnost`).
+//  To je presne prípad, ktorý sa už raz pokazil: nedoplatok zo zdravotného
+//  za 2025 sa ticho zaevidoval ako preddavok a musel sa prepínať spätne.
+//  Otázka položená po tom, ako doklad vznikol, je oprava, nie rozhodnutie —
+//  tie platby preto ostávajú na ručné rozhodnutie.
+//
+//  Každý takto vzniknutý doklad nesie `naKontrolu` a appka ho drží označený,
+//  kým ho človek nepotvrdí. Doklad, ktorý vznikol bez rozhodnutia, nesmie
+//  vyzerať ako doklad, ktorý už niekto videl.
+// ═══════════════════════════════════════════════════════════════
+function pohybyNaAutomat(){
+  return (firmaData.vypis||[]).filter(tx=>{
+    // Smer sa tu NEKONTROLUJE: `vydavokZPohybuNavrh` vráti pri príjme null a je
+    // to jeho pravidlo — z príjmu výdavok nevzniká. Druhá kópia tej podmienky
+    // by sa raz rozišla a sanity check 11. 9. 2026 ju rovno odhalil ako
+    // zbytočnú: zámerné odstránenie nič nezmenilo.
+    if(pohybMaVydavok(tx)) return false;
+    let n=null;
+    try{ n=vydavokZPohybuNavrh(tx); }
+    catch(e){ console.error("pohybyNaAutomat:", e); return false; }
+    if(!n || !n.kategoria || n._pochybnost) return false;
+    return DOKLAD_BEZ_ROZHODOVANIA.has(n.kategoria);
+  });
+}
+function vydavkyNaKontrolu(){ return (firmaData.vydavky||[]).filter(x=>x && x.naKontrolu); }
+function zalozDokladyKOdvodom(){
+  if(!strazZapis("banka")) return;
+  const zoz=pohybyNaAutomat();
+  if(!zoz.length){ alert("Niet čo zakladať — ku všetkým rozpoznaným platbám odvodov a DPH už doklad existuje."); return; }
+  const suma=zoz.reduce((a,t)=>a+(+t.suma||0),0);
+  const kat={};
+  zoz.forEach(tx=>{ const n=vydavokZPohybuNavrh(tx); const k=(KATEGORIE_VYDAVKOV[n.kategoria]||{}).n||n.kategoria; kat[k]=(kat[k]||0)+1; });
+  if(!confirm("Založiť "+zoz.length+" interných dokladov k platbám odvodov a DPH?\n\n"
+    +Object.keys(kat).map(k=>"• "+kat[k]+"× "+k).join("\n")+"\n\n"
+    +"Spolu "+eur(suma)+".\n\n"
+    +"Doklady sa označia NA KONTROLU — prejdete ich vo Výdavkoch a potvrdíte.\n"
+    +"Platby, pri ktorých si appka nie je istá, zostanú na vás.")) return;
+  let n=0;
+  zoz.forEach(tx=>{ if(vytvorVydavokZPohybu(txId(tx), null, null, true)) n++; });
+  if(typeof appVydavky==="function" && aktualnaApp==="vydavky") appVydavky();
+  if(typeof appBanka==="function" && aktualnaApp==="banka") appBanka();
+  if(typeof renderHomeStrip==="function") renderHomeStrip();
+  setTimeout(()=>alert("Založených dokladov: "+n+"\n\nNájdete ich vo Výdavkoch označené ako „na kontrolu“. Potvrdením značka zmizne."),60);
+}
+// Potvrdenie, že si doklad človek pozrel. Značka zmizne aj vtedy, keď doklad
+// otvorí a uloží — vtedy ho videl tiež.
+function vydavokSkontrolovany(idx){
+  if(!strazZapis("vydavky")) return;
+  const x=(firmaData.vydavky||[])[idx]; if(!x) return;
+  delete x.naKontrolu;
+  poZmene(); appVydavky();
 }
 function bkVytvorVydavok(txIdVal){
   // Otázka MUSÍ prísť pred vytvorením. Roman zaplatil nedoplatok zo zdravotného
@@ -32627,13 +33150,23 @@ function bkVytvorVydavok(txIdVal){
     }
   }catch(e){ console.error("bkVytvorVydavok — otázka na zúčtovanie:", e); }
   const n=vytvorVydavokZPohybu(txIdVal, prepis, prepisRok);
-  if(!n || !DOKLAD_BEZ_ROZHODOVANIA.has(n.kategoria)) return;
+  if(!n) return;
+  // 🔴 11. 9. 2026: doklad vznikol, ale karta pohybu ostala otvorená — človek
+  // videl tú istú obrazovku a nevedel, či sa niečo stalo. `parPrekresli` totiž
+  // pri otvorenom modáli prekresľuje JEHO TELO, takže „obnovenie" tam pôsobí
+  // ako nič. Práca s pohybom je hotová (je spárovaný), okno sa preto zatvára.
+  //
+  // Zatvorenie aj prekreslenie stoja PRED vetvou o zhrnutí zámerne: predtým
+  // boli za ňou, takže doklad s kategóriou mimo `DOKLAD_BEZ_ROZHODOVANIA`
+  // nespustil ani jedno — ani okno, ani obnovu zoznamu.
+  closeModal();
+  parPrekresli();
+  if(typeof appBanka==="function") appBanka();
+  if(!DOKLAD_BEZ_ROZHODOVANIA.has(n.kategoria)) return;
   const kat=(KATEGORIE_VYDAVKOV[n.kategoria]||{}).n;
   const txt = "Vytvorený interný doklad "+n.cislo+" na "+eur(n.spolu)+"."
     + (kat ? "\n\nZaradený ako: "+kat+(n.obdobie?" ("+n.obdobie+")":"")+"\nRozpoznané podľa: "+n.rozpoznane : "\n\nDoplňte kategóriu vo výdavkoch.")
     + "\n\nBez DPH — dokladom je bankový výpis. Ak máte faktúru a chcete uplatniť odpočet, zmeňte druh dokladu.";
-  parPrekresli();
-  if(typeof appBanka==="function") appBanka();
   setTimeout(()=>alert(txt), 60);
 }
 
