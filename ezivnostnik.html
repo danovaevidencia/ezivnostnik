@@ -1920,7 +1920,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.10-ND";  // Doklad k prijatej platbe (388) a odpočet zálohy
+const APP_VERZIA = "2026.09.11-NE";  // Opravy podaní DPH: daňový úrad, kontakt v KV, oddelené výkazy
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -23664,13 +23664,23 @@ function dphMeta(){
 // Čo v identifikácii daňovníka chýba — volať PRED generovaním XML.
 // Kontrola bez spúšťača je horšia než žiadna (kap. 16), preto vracia
 // zoznam na zobrazenie, nie iba true/false.
-function dphMetaChyba(){
+// `typ` je „dp" / „sv" / „kv" — hlavička každého výkazu žiada niečo iné.
+// 🔴 11. 9. 2026: daňový úrad sa nekontroloval vôbec a appka vygenerovala
+// priznanie s prázdnym <danovyUrad>. Pole v Nastaveniach existuje, len ho nič
+// nepýtalo — a keďže `dphMeta` si ho zámerne nedomýšľa (prázdny je lepší než
+// cudzí), prázdny prešiel ticho až do súboru pre finančnú správu.
+//
+// Kontrolný výkaz ho v schéme NEMÁ, takže sa pri ňom nesmie pýtať: blokovať
+// export kvôli poľu, ktoré v tom dokumente nie je, je falošný poplach — a ten
+// naučí preskakovať aj pravé nálezy.
+function dphMetaChyba(typ){
   const M=dphMeta(), ch=[];
   if(!M.icdph) ch.push("IČ DPH");
   if(!M.nazov) ch.push("názov firmy");
   if(!M.ulica) ch.push("ulica");
   if(!M.obec)  ch.push("obec");
   if(!M.psc)   ch.push("PSČ");
+  if((typ==="dp"||typ==="sv") && !M.danovyUrad) ch.push("daňový úrad");
   return ch;
 }
 
@@ -24095,13 +24105,22 @@ function kontrolaPredPodanim(mk, typ){
   // Riadne podanie za obdobie, za ktoré už XML vzniklo, pôvodné NENAHRADÍ —
   // portál ho prijme ako ďalšie riadne. Appka ale nevie, či sa to prvé aj
   // podalo (stiahnutie súboru nie je podanie), preto sa pýta, netvrdí.
+  //
+  // 🔴 11. 9. 2026: kontrola sa pozerala na `ex.kv||ex.dp`, teda na to, či za
+  // obdobie vznikol AKÝKOĽVEK súbor. Kontrolný výkaz a priznanie sú ale dve
+  // samostatné podania — kto vygeneroval výkaz a hneď nato priznanie, dostal
+  // hlášku, že priznanie už raz generoval, hoci ho generoval prvýkrát.
+  // Archív pritom obidva časy drží oddelene (`dphZaznamExport`), takže údaj
+  // bol k dispozícii, len sa nečítal. Falošný poplach presne na mieste, kde
+  // človek potrebuje vedieť, či nemá prepnúť druh podania.
   {
     const ex=dphExportInfo(mk);
-    if(ex && dphDruhPodania(mk)==="R"){
-      const kedyEx=new Date(ex.kv||ex.dp).toLocaleDateString("sk-SK");
+    const uzTento = ex && (typ==="dp" ? ex.dp : ex.kv);
+    if(uzTento && dphDruhPodania(mk)==="R"){
+      const kedyEx=new Date(uzTento).toLocaleDateString("sk-SK");
       const n=dphNavrhDruhu(mk);
       podozrenia.push({
-        text:`Za toto obdobie ste už XML generovali (${kedyEx}), druh je stále „riadny".`,
+        text:`${typ==="dp"?"Priznanie k DPH":"Kontrolný výkaz"} za toto obdobie ste už generovali (${kedyEx}), druh je stále „riadny".`,
         detail:"Ak ste podanie aj odoslali, oprava musí ísť ako "
           + (n==="D" ? "dodatočná — uvádzajú sa v nej len rozdiely oproti podanému."
                      : "opravná — nahradí pôvodné podanie celé.")
@@ -25695,7 +25714,7 @@ function dphStiahni(typ, mk){
   // nedopĺňa nič za používateľa (viď tam), chýbajúca adresa alebo IČ DPH
   // by prešli do XML ako prázdne elementy a odmietla by ich až finančná
   // správa — po podaní, s nejasnou hláškou.
-  const chyba=dphMetaChyba();
+  const chyba=dphMetaChyba(typ);
   if(chyba.length){
     alert("Vo výkaze by chýbala identifikácia daňovníka:\n\n• "+chyba.join("\n• ")+
           "\n\nDoplňte to v Nastaveniach (údaje firmy) a skúste znova.");
@@ -25979,7 +25998,12 @@ function dphGenerujKV(mk){
 `<Identifikacia>\r\n<IcDphPlatitela>${esc(m.icdph)}</IcDphPlatitela>\r\n<Druh>${dphDruhPodania(mk)}</Druh>\r\n`+
 `<Obdobie>\r\n<Rok>${rok}</Rok>\r\n${mes?`<Mesiac>${mes}</Mesiac>`:`<Stvrtrok>${P.stvrtrok}</Stvrtrok>`}\r\n</Obdobie>\r\n`+
 `<Nazov>${esc(m.nazov)}</Nazov>\r\n<Stat>Slovenská republika</Stat>\r\n<Obec>${esc(m.obec)}</Obec>\r\n`+
-`<PSC>${esc(m.psc)}</PSC>\r\n<Ulica>${esc(m.ulica)}</Ulica>\r\n<Cislo>${esc(m.cislo)}</Cislo>\r\n<Tel></Tel>\r\n<Email></Email>\r\n</Identifikacia>\r\n`+
+// Telefón a e-mail sa berú z tých istých údajov firmy ako v priznaní. Kým tu
+// boli natvrdo prázdne, ten istý údaj bol v jednom podaní vyplnený a v druhom
+// nie — a práve kontrolný výkaz je ten, kde Finančná správa volá najčastejšie,
+// lebo nesadol s protistranou. Schéma ich má ako voliteľný `string` bez vzoru
+// aj bez obmedzenia dĺžky (overené proti kv_dph_2025.xsd 11. 9. 2026).
+`<PSC>${esc(m.psc)}</PSC>\r\n<Ulica>${esc(m.ulica)}</Ulica>\r\n<Cislo>${esc(m.cislo)}</Cislo>\r\n<Tel>${esc(m.tel)}</Tel>\r\n<Email>${esc(m.email)}</Email>\r\n</Identifikacia>\r\n`+
 `<Transakcie>\r\n${riadky}</Transakcie>\r\n</KVDPH_2025>\r\n`;
 }
 
@@ -26295,7 +26319,7 @@ function svZaznamExport(kod){
 // Tvar výsledku je zámerne rovnaký, takže `dphExport` ho vie zobraziť bez zmeny.
 function svKontrola(kod){
   const chyby=[], podozrenia=[], odsuhlasenie=[];
-  const chybaMeta=dphMetaChyba();
+  const chybaMeta=dphMetaChyba("sv");
   if(chybaMeta.length) chyby.push({blokuje:true,
     text:"Chýba identifikácia daňovníka: "+chybaMeta.join(", ")+".",
     detail:"Doplňte údaje firmy v Nastaveniach — bez nich portál Finančnej správy súbor odmietne."});
