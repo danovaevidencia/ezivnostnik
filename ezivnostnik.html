@@ -1964,7 +1964,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.11-NI";  // Peppol, dlaždice, doklady k odvodom z banky
+const APP_VERZIA = "2026.09.11-NJ";  // Termíny ako dlaždica; v APK sa neponúka inštalácia
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -5020,6 +5020,28 @@ function dashWidgetKatalog(){
 function _dashWidgetKatalogVypocet(){
   const d=firmaData, rok=new Date().getFullYear();
   const kat = {
+    // Blížiace sa termíny. Do 11. 9. 2026 sa kreslili NATVRDO za cyklom
+    // widgetov, bez `data-wkey` — a celý režim úprav pracuje výhradne so
+    // `.w[data-wkey]`. Dlaždica teda nemala úchyt, ⋮ menu ani možnosť skryť sa,
+    // hoci vyzerala rovnako ako ostatné. V režime úprav to nepôsobilo ako
+    // zámer („táto je vždy"), ale ako pokazená dlaždica.
+    //
+    // Rozhodnutie „vždy" pochádzalo z čias pred režimom úprav. Dlaždica, ktorá
+    // sa tvári ako ostatné a nesprává sa ako ostatné, je horšia než dlaždica,
+    // ktorú si človek môže skryť: termíny sú aj v Kalendári a v „Vyžaduje
+    // pozornosť", takže skrytím sa nič nestratí.
+    terminy: {
+      nazov:"Blížiace sa termíny", ic:"📅", velkost:"w-s5",
+      metriky:[
+        {k:"najblizsie", l:"Najbližšie termíny", render:()=>{
+          let zoz=[];
+          try{ zoz=vypocitajTerminy(new Date(), firmaData.settings||{})||[]; }
+          catch(e){ console.error("termíny na ploche:", e); }
+          if(!zoz.length) return `<div class="wbig" style="font-size:18px">—</div><div class="wmeta">v najbližšom čase nič nehorí</div>`;
+          return zoz.map(t=>`<div class="wrem"><div class="dd ${t.dni<=10?"warn":""}">${t.den}<br>${t.mes}</div><div style="min-width:0"><div class="rt">${esc(t.nazov)}</div><div class="rs">${t.dni<0?"po termíne":"o "+t.dni+" dní"}${t.detail?" · "+esc(t.detail):""}</div></div></div>`).join("");
+        }},
+      ]
+    },
     // Dlaždica „Čaká na zatriedenie". Zoznam pohybov berie z `bankaVedra()` —
     // z TEJ ISTEJ funkcie, ktorá počíta vedrá v Banke a ktorá už napája
     // upozornenie v „Vyžaduje pozornosť". Druhé pravidlo pre „nespárované" by
@@ -5257,12 +5279,19 @@ function dashKonfig(){
     // `pausal` je v zozname zámerne: neplatiteľovi sa ukáže hneď (u platiteľa
     // ho katalóg odfiltruje), lebo o voľbe výdavkov má vedieť od začiatku roka,
     // nie až v marci. Kto ho nechce, skryje ho cez ⋮ ako ktorúkoľvek dlaždicu.
-    widgety:["graf","dan","faktury","vydavky","dph","pausal","km"],
+    widgety:["graf","dan","faktury","vydavky","dph","pausal","km","terminy"],
     metriky:{} // widgetKey -> zvolená metrika key
   };
   // Doplnenie pre firmy, ktoré si dashboard nastavili pred DZ: widget by im
   // inak nikdy nepribudol. Pridá sa RAZ — kto ho skryje, ostane skrytý.
   const cfg=d.settings.dashboard;
+  // Termíny sa doteraz kreslili mimo zoznamu widgetov, takže v uloženej
+  // konfigurácii nikoho nie sú. Bez tohto doplnenia by dlaždica všetkým
+  // jednoducho ZMIZLA — presun do katalógu nesmie nič zobrať.
+  if(!cfg._terminyPonuknute){
+    cfg._terminyPonuknute=true;
+    if(!cfg.widgety.includes("terminy")) cfg.widgety.push("terminy");
+  }
   if(!cfg._pausalPonuknuty && !jePlatcaDPH()){
     cfg._pausalPonuknuty=true;
     if(!cfg.widgety.includes("pausal")) cfg.widgety.push("pausal");
@@ -5370,7 +5399,7 @@ function renderWidget(wkey){
 // meno drží preto, že presmerovanie nesie aj VOĽBU POHĽADU. Prepísať ju na
 // "superdash" by dlaždicu otvorilo v tom pohľade, ktorý si používateľ zvolil
 // naposledy — teda inde, než na čo klikol.
-const WIDGET_APP_MAP={graf:"faktury", dan:"prognoza", pausal:"prognoza", faktury:"faktury", vydavky:"vydavky", dph:"dph", km:"jazdy", vykazy:"vykazy", dovolenka:"dovolenka", majetok:"majetok", banka:"banka", cashflow:"banka", priznania:"priznania", efaktury:"efaktury", nesparovane:"banka"};
+const WIDGET_APP_MAP={graf:"faktury", dan:"prognoza", pausal:"prognoza", faktury:"faktury", vydavky:"vydavky", dph:"dph", km:"jazdy", vykazy:"vykazy", dovolenka:"dovolenka", majetok:"majetok", banka:"banka", cashflow:"banka", priznania:"priznania", efaktury:"efaktury", nesparovane:"banka", terminy:"kalendar"};
 // menu priamo v dlaždici
 function dashTileMenu(wkey, ev){
   const kat=dashWidgetKatalog()[wkey];
@@ -5877,9 +5906,27 @@ window.addEventListener("appinstalled", () => {
   renderHomeStrip();
 });
 
+// Beží appka vo vlastnom natívnom obale (APK `sk.ezivnostnik.obal`)?
+//
+// Poznáme ho podľa mostov, ktoré obal vkladá do WebView hneď pri štarte
+// (`addJavascriptInterface` v `HlavnaAktivita`) — sú tam vždy, kým beží obal.
+//
+// `EzGeoNativ` sa na to použiť NEDÁ, hoci to tak vyzerá: `most.js` ho zámerne
+// nevytvorí, keď natívne meranie polohy k dispozícii nie je. Je to príznak
+// SCHOPNOSTI, nie prostredia — a appka by sa podľa neho raz rozhodla zle.
+function jeNativnyObal(){
+  try{ return !!(window.AndroidGeo || window.EzSubor); }catch(_){ return false; }
+}
+
 // beží appka už ako nainštalovaná (nie v prehliadači)?
 function jeNainstalovana(){
   try{
+    // 🔴 11. 9. 2026: v APK appka PONÚKALA vlastnú inštaláciu do telefónu.
+    // WebView v obale hlási `display-mode: browser`, `navigator.standalone`
+    // tam neexistuje a značka v `localStorage` nevznikne — appka sa totiž
+    // neinštalovala cez PWA, ale ako APK. Ani jeden z pôvodných troch signálov
+    // teda nezabral, hoci nainštalovanejšie to už byť nemôže.
+    if(jeNativnyObal()) return true;
     if(window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) return true;
     if(window.matchMedia && window.matchMedia("(display-mode: minimal-ui)").matches) return true;
     if(navigator.standalone) return true;                       // iOS Safari
@@ -6646,18 +6693,13 @@ function vykresliDashboard(){
 
   const cfg=dashKonfig();
   const rok=new Date().getFullYear();
-  const terminy=vypocitajTerminy(new Date(), firmaData.settings||{});
 
-  // vykresli zvolené widgety (vynechaj tie, čo v katalógu nie sú — napr. DPH pre neplatiteľa)
+  // Vykresli zvolené widgety (vynechaj tie, čo v katalógu nie sú — napr. DPH
+  // pre neplatiteľa). Termíny sú od 11. 9. 2026 widget ako každý iný; predtým
+  // sa kreslili až za týmto cyklom a nedali sa presunúť ani skryť.
   const katK=dashWidgetKatalog();
   const vidiet=cfg.widgety.filter(w=>katK[w] && dashWidgetPovoleny(w));
-  let html=vidiet.map(renderWidget).join("");
-
-  // termíny (vždy) + tlačidlo konfigurácie
-  html+=`<div class="w w-s5">
-      <div class="wl"><span class="dt" style="background:var(--neg)"></span>Blížiace sa termíny</div>
-      ${terminy.map(t=>`<div class="wrem"><div class="dd ${t.dni<=10?'warn':''}">${t.den}<br>${t.mes}</div><div><div class="rt">${t.nazov}</div><div class="rs">${t.dni<0?'po termíne':'o '+t.dni+' dní'}${t.detail?' · '+t.detail:''}</div></div></div>`).join("")}
-    </div>`;
+  const html=vidiet.map(renderWidget).join("");
 
   dash.innerHTML=html;
 
