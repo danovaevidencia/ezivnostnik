@@ -1981,7 +1981,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.12-NO";  // Tachometer je v celých kilometroch
+const APP_VERZIA = "2026.09.12-NP";  // Výdavky sa dajú filtrovať podľa dodania aj úhrady
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -7334,6 +7334,27 @@ function vydavokObdobieDane(x){
   return u ? u.slice(0,7) : String((x&&x.datum)||"").slice(0,7);
 }
 function vydavokVRoku(x, rok){ return vydavokObdobieDane(x).slice(0,4)===String(rok); }
+// PODĽA ČOHO sa výdavky filtrujú v zozname. Tri odpovede, lebo doklad má tri
+// dátumy a každý je na inú otázku:
+//
+//   dane    — obdobie dane z príjmov: ÚHRADA, a kým sa nezaplatilo, dátum
+//             dokladu. Presne toto appka počíta do základu dane, preto je
+//             predvolené a preto naň sedia dlaždice nad zoznamom.
+//   dodanie — dátum dodania, teda obdobie DPH. Toto hľadá človek, keď
+//             kontroluje priznanie alebo kontrolný výkaz.
+//   uhrada  — dátum úplnej úhrady. Nezaplatený doklad tu NIE JE a nie je to
+//             chyba filtra: v tom období peniaze neodišli.
+//
+// Jedna funkcia preto, že to isté pravidlo potrebuje aj filter, aj ponuka
+// rokov, aj ponuka mesiacov. Kým ich boli dve, ponuka mesiacov sa stavala
+// z dátumu dokladu a filter porovnával obdobie dane — mesiac, v ktorom bola
+// zaplatená faktúra z predošlého roka, sa teda v ponuke vôbec neobjavil
+// a nedal sa vybrať.
+function vydavokObdobiePodla(x, zaklad){
+  if(zaklad==="dodanie") return String((x&&x.datum)||"").slice(0,7);
+  if(zaklad==="uhrada")  return String(vydavokDatumUplnejUhrady(x)||"").slice(0,7);
+  return vydavokObdobieDane(x);
+}
 
 // Doklady, ktoré v tomto období NIE SÚ, lebo čakajú na zaplatenie. Práve
 // preto o nich treba povedať — inak by odpočet ticho zmizol a nikto by
@@ -11630,7 +11651,7 @@ function feRefreshSumy(){
 }
 
 // ── VÝDAVKY ──
-let vFilter="vsetky", vRok="", vMesiac="";
+let vFilter="vsetky", vRok="", vMesiac="", vZaklad="dane";
 // výber a hromadné akcie (rovnako ako pri faktúrach, typ="vydavok")
 let vydVybrane=new Set(), vydPoslednyList=[];
 function vydToggleVyber(cislo, on){ if(on) vydVybrane.add(String(cislo)); else vydVybrane.delete(String(cislo)); appVydavky(); }
@@ -11672,11 +11693,15 @@ function appVydavky(){
   // Rok aj mesiac podľa obdobia DANE, nie podľa dátumu dokladu — inak by
   // súčet na tejto obrazovke nesedel s výdavkami, ktoré appka počíta do
   // základu dane, a používateľ by hľadal doklad v roku, kde nie je (kap. 81).
-  const roky=[...new Set(vsetky.map(x=>vydavokObdobieDane(x).slice(0,4)).filter(r=>/^\d{4}$/.test(r)))].sort().reverse();
+  const roky=[...new Set(vsetky.map(x=>vydavokObdobiePodla(x,vZaklad).slice(0,4)).filter(r=>/^\d{4}$/.test(r)))].sort().reverse();
   if(!vRok && roky.length) vRok=roky[0];
+  // Po prepnutí základu môže zvolený rok zaniknúť (nezaplatené doklady sa
+  // pri „podľa úhrady" nikam nezaradia). Vtedy sa skočí na najnovší, ktorý
+  // existuje — prázdny zoznam bez vysvetlenia vyzerá ako stratené dáta.
+  if(roky.length && roky.indexOf(vRok)<0){ vRok=roky[0]; vMesiac=""; }
   // filtruj podľa roka a mesiaca
-  let vyd=vsetky.filter(x=>vydavokVRoku(x, vRok));
-  if(vMesiac) vyd=vyd.filter(x=>vydavokObdobieDane(x)===vMesiac);
+  let vyd=vsetky.filter(x=>vydavokObdobiePodla(x,vZaklad).slice(0,4)===vRok);
+  if(vMesiac) vyd=vyd.filter(x=>vydavokObdobiePodla(x,vZaklad)===vMesiac);
   // Platby štátu sa do „Výdavkov bez DPH" NEsčítavajú. Na doklade z banky sa
   // `bez` rovná celej sume, takže odvody a dane by to číslo nafúkli o tisíce
   // eur — a je to práve číslo, ktoré človek číta ako „koľko ma stálo
@@ -11685,16 +11710,30 @@ function appVydavky(){
   const vydBezne=vyd.filter(x=>!jePlatbaStatu(x));
   const vydStatu=vyd.filter(jePlatbaStatu);
   const bezSpolu=vydBezne.reduce((a,x)=>a+(+x.bez||0),0);
+  // Suma S DPH je to, čo naozaj odišlo z účtu. NIE je to „bez DPH + odpočet":
+  // odpočet je daňový nárok a počíta ho `dphSaldoRok` cez samozdanenie
+  // a oddiely, takže tie dve čísla sa nemusia sčítať. Berie sa preto `spolu`
+  // z dokladu, a keď chýba, dopočíta sa zo základu a dane.
+  const sDphSpolu=vydBezne.reduce((a,x)=>a+(+x.spolu || (+x.bez||0)+(+x.dph||0)),0);
   // Odpočet, ktorý pôjde do priznania, počíta `dphSaldoRok` cez mesačný zber
   // (samozdanenie, oddiely, sadzby). Vlastný súčet `x.dph` dával o 48,71 €
   // menej než dlaždica DPH na ploche — dve čísla pod jedným popiskom.
   // Pri mesačnom filtri sa ročné saldo nehodí, tam ostáva súčet dokladov.
-  const dphSpolu=vMesiac ? vydBezne.reduce((a,x)=>a+(+x.dph||0),0) : dphSaldoRok(+vRok||new Date().getFullYear()).inp;
+  // Ročné saldo platí len pre obdobie DANE cez celý rok — to je jediná
+  // zostava, ktorú `dphSaldoRok` naozaj počíta. Pri mesačnom filtri aj pri
+  // inom základe by to bolo číslo za úplne inú množinu dokladov, než akú
+  // človek pod ním vidí.
+  const dphSpolu=(vMesiac||vZaklad!=="dane") ? vydBezne.reduce((a,x)=>a+(+x.dph||0),0)
+    : dphSaldoRok(+vRok||new Date().getFullYear()).inp;
   const statuSpolu=vydStatu.reduce((a,x)=>a+(+x.spolu||+x.bez||0),0);
   const fakt=vydBezne.filter(x=>x.druh==="Došlá faktúra").length;
   const blocky=vydBezne.filter(x=>x.druh==="Bloček").length;
   // mesiace v roku
-  const mesiace=[...new Set(vsetky.filter(x=>String(x.datum||"").slice(0,4)===vRok).map(x=>String(x.datum||"").slice(0,7)).filter(m=>/^\d{4}-\d{2}$/.test(m)))].sort().reverse();
+  // Ponuka mesiacov sa stavia TÝM ISTÝM pravidlom ako filter. Kým sa stavala
+  // z dátumu dokladu a filter porovnával obdobie dane, mesiac, v ktorom bola
+  // zaplatená faktúra z predošlého roka, sa v ponuke vôbec neobjavil.
+  const mesiace=[...new Set(vsetky.map(x=>vydavokObdobiePodla(x,vZaklad))
+    .filter(m=>/^\d{4}-\d{2}$/.test(m) && m.slice(0,4)===vRok))].sort().reverse();
   let list=vyd;
   if(vFilter==="faktury") list=vyd.filter(x=>x.druh==="Došlá faktúra");
   else if(vFilter==="blocky") list=vyd.filter(x=>x.druh==="Bloček");
@@ -11710,7 +11749,8 @@ function appVydavky(){
   const _tank=vydavkySTankovanim();   // raz na vykreslenie, nie raz na riadok
   document.getElementById("appScreen").innerHTML=appHlavicka("vydavky",`<button class="aabtn" onclick="rychlyDoklad(this)">🧾 Odfotiť / načítať doklad</button><button class="aabtn" onclick="faktPdfImport()">📥 Import faktúr (XML/PDF)</button><button class="aabtn" onclick="otvorOpakovane()">🔁 Opakované${(()=>{const n=opakovaneCakajuce().length;return n?" ("+n+")":"";})()}</button><button class="aabtn pri" onclick="editVydavok()">＋ Nový výdavok</button>`)+`
     <div class="amini">
-      <div class="aminbox"><div class="al">Výdavky bez DPH</div><div class="av">${eur(bezSpolu)}</div></div>
+      <div class="aminbox"><div class="al">Výdavky bez DPH</div><div class="av">${eur(bezSpolu)}</div>${
+        Math.abs(sDphSpolu-bezSpolu)>=0.01?`<div class="as">${eur(sDphSpolu)} s DPH</div>`:''}</div>
       <div class="aminbox"><div class="al">DPH na odpočet</div><div class="av pos">${eur(dphSpolu)}</div></div>
       <div class="aminbox"><div class="al">Odvody a dane</div><div class="av">${eur(statuSpolu)}</div><div class="as">${vydStatu.length} platieb · mimo výdavkov</div></div>
       <div class="aminbox"><div class="al">Faktúry / bločky</div><div class="av">${fakt} / ${blocky}</div></div>
@@ -11724,7 +11764,18 @@ function appVydavky(){
         <option value="">celý rok</option>
         ${mesiace.map(m=>`<option value="${m}" ${m===vMesiac?'selected':''}>${mesiacLabel(m)}</option>`).join('')}
       </select>
+      <select onchange="vZaklad=this.value;vMesiac='';appVydavky()" title="Podľa ktorého dátumu sa obdobie počíta"
+              style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:13px">
+        ${[['dane','podľa obdobia dane'],['dodanie','podľa dátumu dodania'],['uhrada','podľa dátumu úhrady']]
+          .map(([k,l])=>`<option value="${k}" ${k===vZaklad?'selected':''}>${l}</option>`).join('')}
+      </select>
       <div style="flex-basis:100%;height:0"></div>
+      ${vZaklad!=="dane"?`<div class="ocr-hint" style="flex-basis:100%;margin:0 0 2px">
+        ${vZaklad==="dodanie"
+          ? "Obdobie sa počíta z <b>dátumu dodania</b> — tak sa doklady zaraďujú do DPH."
+          : "Obdobie sa počíta z <b>dátumu úhrady</b>. Nezaplatené doklady tu nie sú: v tom období peniaze neodišli."}
+        Sumy nad zoznamom idú za túto množinu, nie za základ dane.
+      </div>`:""}
       ${['vsetky|Všetky','faktury|Došlé faktúry','blocky|Bločky','neuhradene|Neuhradené','statu|Odvody a dane']
         .concat(vydavkyNaKontrolu().length?['kontrola|👁 Na kontrolu ('+vydavkyNaKontrolu().length+')']:[])
         .map(x=>{const[k,l]=x.split('|');return `<span class="achip ${vFilter===k?'on':''}" onclick="vFilter='${k}';appVydavky()">${l}</span>`}).join('')}${hladatkoHtml('vydavky','appVydavky','🔍 Partner, číslo, popis, suma…')}
@@ -11742,9 +11793,11 @@ function appVydavky(){
       ${list.length?list.map(x=>{const idx=_vIdx.get(x);const bezDat=!x.datum||!/^\d{4}-\d{2}/.test(String(x.datum));const kl=dokladKluc(x);const st=kl?uhradaStav("vydavok",kl):null;const fb=st?(UHRADA_FARBY[st.stav]||UHRADA_FARBY.neznamy):null;const uhr=vydJeUhradeny(x);const RZ=rozporRiadok(st);return `<div class="arow rdok rv${RZ.trieda}" onclick="editVydavok(${idx})"><div class="c-cb">${kl?`<input type="checkbox" ${vydVybrane.has(kl)?'checked':''} onclick="event.stopPropagation();vydToggleVyber('${esc(kl)}',this.checked)" style="cursor:pointer">`:''}</div><div class="c-main viWrap">${vydavokIkonaHtml(x,_tank)}<div class="viTxt"><div class="acol-strong" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(x.partner||"—")}${x.naKontrolu?' <span title="Doklad založila appka z bankového pohybu — potvrďte, že sedí" style="font-size:10.5px;font-weight:700;color:var(--ink-warn);background:var(--sfc-warn);border-radius:5px;padding:1px 5px;vertical-align:1px">na kontrolu</span>':''} ${x.doklad?'<span title="Doklad v cloude" style="cursor:pointer" onclick="event.stopPropagation();otvorDokladSubor(\''+esc(x.doklad)+'\')">📎</span>':''}</div><div class="acol-muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(x.popis||x.druh||"")}${(()=>{const kde=uhradyPopis("vydavok",kl,true);return kde?` <span style="color:var(--pos)">· zaplatené ${esc(kde)}</span>`:"";})()}</div></div></div><div class="acol-muted c-date">${bezDat?'<span class="apill neg">bez dátumu</span>':fmtDatum(x.datum)}</div><div class="acol-sum c-sum">${eur(+x.bez||0)}</div><div class="acol-sum c-sub" style="color:var(--ink-soft)">${eur(+x.dph||0)}</div><div class="c-stav" style="text-align:center">${fb?`<span title="${esc((st.n||fb.n)+(st.text?' — '+st.text:'')+(st.stav!=="overene"?" · ťuknutím priradíte platbu z banky":""))}" style="color:${fb.f};font-size:14px;${st.stav!=="overene"?"cursor:pointer":""}" ${st.stav!=="overene"?`onclick="event.stopPropagation();otvorVyberPlatby('vydavok','${esc(kl)}')"`:""}>${fb.ic}</span>`:'<span style="color:var(--ink-soft)">·</span>'}</div><div class="c-act">${x.naKontrolu?`<button class="aabtn pos" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vydavokSkontrolovany(${idx})" title="Potvrdiť, že doklad sedí">👁</button>`:''}${kl?(!uhr?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vyberSposobUhrady(null,_s=>{oznacDokladUhradeny('vydavok','${esc(kl)}',_s);appVydavky();})" title="Označiť ako uhradené">✓</button>`:((st.zdroj==='rucne'||st.zdroj==='legacy')?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();zrusDokladUhradu('vydavok','${esc(kl)}');appVydavky()" title="Zrušiť potvrdenie úhrady">✕</button>`:'')):''}</div>${RZ.nota}</div>`;}).join(''):prazdnyAleboFilter(!(d.vydavky||[]).length,
         "Zatiaľ nemáte žiadny výdavok. Odfoťte bloček alebo prepošlite došlú faktúru e-mailom — appka z nej vytiahne sumu aj DPH.",
         {popis:"＋ Nový výdavok", kod:"editVydavok()"},
-        "vFilter='vsetky';vRok='';vMesiac='';_hladaj.vydavky='';appVydavky()")}
+        "vFilter='vsetky';vRok='';vMesiac='';vZaklad='dane';_hladaj.vydavky='';appVydavky()")}
     </div>`;
-  setCrumb(`${vyd.length} dokladov · ${vRok}${vMesiac?' · '+mesiacLabel(vMesiac):''} · ${eur(bezSpolu)} bez DPH`);
+  setCrumb(`${vyd.length} dokladov · ${vRok}${vMesiac?' · '+mesiacLabel(vMesiac):''}`
+    +(vZaklad==="dodanie"?" · podľa dodania":(vZaklad==="uhrada"?" · podľa úhrady":""))
+    +` · ${eur(bezSpolu)} bez DPH`);
 }
 // ═══════════════════════════════════════════════════════════════════════════
 //  FORMULÁR VÝDAVKU — jeden pre editáciu aj pre import z dokladu
