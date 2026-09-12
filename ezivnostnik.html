@@ -1981,7 +1981,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.12-NP";  // Výdavky sa dajú filtrovať podľa dodania aj úhrady
+const APP_VERZIA = "2026.09.12-NQ";  // Zvonček otvorí presne tie záznamy, o ktorých hovorí
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -5578,25 +5578,113 @@ const AUTOMAT_TEXTY={
     nazov:n=>"Doplnené IČ DPH k "+n+" "+(n===1?"dokladu":n<5?"dokladom":"dokladom"),
     detail:"Appka ho prevzala od toho istého dodávateľa z iných dokladov. Ak dodávateľ platiteľom DPH nie je, opravte to v editore dokladu." }
 };
+// Koľko identít si denník k jednej udalosti odloží. Nad tým sa už len počíta:
+// notifikácia povie pravdivý počet, výber ukáže prvých 200 a POVIE, že ich
+// ukazuje 200 zo 400. Zoznam sa synchronizuje do cloudu, takže neobmedzený
+// byť nemôže.
+const VYBER_STROP = 200;
 // Záznamy z toho istého dňa a druhu sa zlučujú — po importe výpisu by inak
 // zvonček hlásil dvadsať riadkov o tom istom.
-function zapisAutomat(druh, pocet){
-  if(!firmaData || !pocet || !AUTOMAT_TEXTY[druh]) return;
+//
+// 🔴 12. 9. 2026, Roman: „keď zvonček hovorí, že spároval 10 transakcií, po
+// kliknutí nechce používateľ vidieť celý modul a v ňom hľadať, ale tie
+// konkrétne transakcie."
+//
+// Príčina bola v podpise tejto funkcie: brala POČET. V okamihu zápisu ten
+// zoznam existoval a hneď sa zahodil — a človek potom robil rukou tú istú
+// prácu, ktorú appka pred chvíľou urobila. Berie preto IDENTITY dotknutých
+// záznamov (`dokladKluc`, `txId`) a počet sa z nich odvodí; dve čísla o tej
+// istej veci by sa rozišli.
+//
+// Kľúče sú FOTOGRAFIA stavu v okamihu udalosti, nie živý dotaz. Dotaz
+// spustený znova by o týždeň vrátil inú množinu a notifikácia by klamala
+// o tom, čo urobila.
+//
+// `mimoModul` je počet záznamov, ktoré udalosť tiež zasiahla, ale NEŽIJÚ
+// v module, kam notifikácia vedie. Odlíšenie kolíznych čísel sa napríklad
+// týka výdavkov aj vystavených faktúr; veta musí hlásiť pravdivý celok, ale
+// výber vie ukázať len tie z jedného modulu. Bez tohto rozlíšenia by pás nad
+// zoznamom tvrdil, že zvyšok „odvtedy zmizol" — a to by bola lož.
+function zapisAutomat(druh, kluce, mimoModul){
+  if(!firmaData || !AUTOMAT_TEXTY[druh]) return;
+  const zoz = Array.isArray(kluce) ? [...new Set(kluce.map(String).filter(Boolean))] : [];
+  const mimo = +mimoModul||0;
+  const pocet = Array.isArray(kluce) ? zoz.length+mimo : (+kluce||0);
+  if(!pocet) return;
   if(!Array.isArray(firmaData.automat)) firmaData.automat=[];
   const kluc="auto:"+druh+":"+new Date().toISOString().slice(0,10);
   const uz=firmaData.automat.find(z=>z.kluc===kluc);
   if(uz){
-    uz.pocet=(+uz.pocet||0)+pocet;
+    // Zjednotenie, nie zreťazenie: ten istý záznam dotknutý dvakrát za deň
+    // je jedna vec, nie dve. `celkom` je pravdivý počet aj po orezaní.
+    const spolu=[...new Set([...(uz.kluce||[]), ...zoz])];
+    uz.mimo   = (+uz.mimo||0)+mimo;
+    uz.celkom = spolu.length;                 // koľko sa dá ukázať vo výbere
+    uz.pocet  = uz.celkom + uz.mimo;          // koľko ich naozaj bolo — to hlási veta
+    uz.kluce  = spolu.slice(0, VYBER_STROP);
     uz.kedy=new Date().toISOString();
     // Po zlúčení musí notifikácia vyskočiť znova — inak by sa nový počet
     // schoval pod hlásenie, ktoré si používateľ prečítal, keď bol nižší.
     const P=(firmaData.settings||{}).notifPrecitane;
     if(P && P[kluc]) delete P[kluc];
   } else {
-    firmaData.automat.push({kluc, kedy:new Date().toISOString(), druh, pocet});
+    firmaData.automat.push({kluc, kedy:new Date().toISOString(), druh,
+      pocet, celkom:zoz.length, mimo, kluce:zoz.slice(0, VYBER_STROP)});
   }
   // Denník je pomôcka, nie archív — celý sa synchronizuje do cloudu.
   if(firmaData.automat.length>40) firmaData.automat=firmaData.automat.slice(-40);
+}
+
+// ═══ VÝBER — otvor modul PRESNE NA TÝCHTO ZÁZNAMOCH ════════════════════
+//
+// Nie je to funkcia zvončeka, hoci ten je prvý používateľ. Tá istá otázka
+// („ukáž mi tie, o ktorých hovoríš") príde pri dlaždici nespárovaných,
+// pri „Vyžaduje pozornosť" aj pri nálezoch ročnej kontroly. Štyri verzie
+// toho istého by sa rozišli ako všetko ostatné, čo v tomto projekte vzniklo
+// dvakrát.
+//
+// Tri pravidlá, na ktorých to stojí:
+//
+//  1. VÝBER MUSÍ BYŤ VIDIEŤ. Tichý filter je presne tá chyba, ktorá v Banke
+//     stála 47 falošných nálezov z 59 — zobrazenie, ktoré vyzerá ako celok
+//     a nie je ním (kap. 88.5).
+//  2. VÝBER NIE JE PODMNOŽINA OBDOBIA. „Týchto desať" je absolútna množina;
+//     keby sa kombinovala s filtrom „august", ukázali by sa tri a nikto by
+//     nevedel prečo. Kým je výber aktívny, ostatné filtre neplatia.
+//  3. NIKDY TICHO MENEJ. Kým si to človek otvorí, časť záznamov nemusí
+//     existovať. Pás to povie — „8 z 10, dva odvtedy zmizli".
+//
+// Výber smie FILTROVAŤ, nikdy nie hromadne MENIŤ: identita pohybu je
+// `tx.id || datum+suma` a dva pohyby v ten istý deň s tou istou sumou ju
+// majú spoločnú. Na zobrazenie je to znesiteľné, na zápis nie.
+let vyber=null;   // {modul, kluce:[…], popis, celkom}
+function otvorSVyberom(modul, kluce, popis, celkom){
+  const zoz=(kluce||[]).map(String).filter(Boolean);
+  vyber = zoz.length ? {modul, kluce:zoz, popis:popis||"", celkom:celkom||zoz.length} : null;
+  otvorApp(modul);
+}
+function vyberAktivny(modul){ return (vyber && vyber.modul===modul) ? vyber : null; }
+function vyberZrus(){
+  const m=vyber && vyber.modul; vyber=null;
+  if(m) otvorApp(m);
+}
+// Pás nad zoznamom. `najdenych` je, koľko z výberu sa naozaj našlo — rozdiel
+// oproti `celkom` sa musí povedať, nie zamlčať.
+function vyberPas(v, najdenych){
+  if(!v) return "";
+  // „Zmizli" sa počíta z KĽÚČOV, ktoré výber naozaj nesie — nie z celkového
+  // počtu. Pri orezaní na strop je `celkom` 400 a kľúčov 200; tých 200 nikdy
+  // v množine nebolo, takže nemohli zmiznúť. Zmerané 12. 9. 2026: pás tvrdil
+  // „398 odvtedy zmizli" o záznamoch, ktoré sa nikdy nestratili.
+  const chyba=v.kluce.length-najdenych;
+  return `<div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;background:var(--brand-lite);
+      border:1px solid var(--line);border-radius:9px;padding:9px 12px;margin-bottom:10px">
+    <b style="font-size:13px">${najdenych} ${sklon(najdenych,"záznam","záznamy","záznamov")}${v.popis?" "+esc(v.popis):""}</b>
+    ${chyba>0?`<span style="font-size:11.5px;color:var(--ink-warn)">z ${v.kluce.length} — ${chyba===1?"jeden odvtedy zmizol":chyba+" odvtedy zmizli"}</span>`:""}
+    ${v.kluce.length<v.celkom?`<span style="font-size:11.5px;color:var(--ink-soft)">ukazujem prvých ${v.kluce.length} z ${v.celkom}</span>`:""}
+    <span style="font-size:11.5px;color:var(--ink-soft);flex:1;min-width:120px">Ktorýkoľvek filter výber zruší.</span>
+    <button class="aabtn" style="padding:5px 10px;font-size:12px" onclick="vyberZrus()">Zobraziť celý zoznam</button>
+  </div>`;
 }
 
 // zozbieraj všetko, čo si zaslúži pozornosť
@@ -5758,9 +5846,15 @@ function zbierNotifikacie(){
     (firmaData.automat||[]).forEach(z=>{
       const T=AUTOMAT_TEXTY[z.druh]; if(!T || !z.pocet) return;
       if(Math.round((dnes-new Date(z.kedy))/86400000)>30) return;
+      // Staršie záznamy denníka kľúče nemajú — vtedy ostáva pôvodné správanie,
+      // teda otvorenie modulu. Kontrakt je voliteľný: tlačiť doň notifikáciu,
+      // ktorá množinu nemá, by bol sľub, ktorý sa nedá splniť.
+      const kl=Array.isArray(z.kluce)?z.kluce:[];
       out.push({kluc:z.kluc, ic:T.ic, nal:"info",
         nazov:T.nazov(z.pocet), detail:T.detail,
-        akcia:()=>otvorApp(T.modul)});
+        akcia: kl.length
+          ? ()=>otvorSVyberom(T.modul, kl, "z upozornenia", +z.celkom||kl.length)
+          : ()=>otvorApp(T.modul)});
     });
   }catch(_){}
 
@@ -7900,6 +7994,10 @@ function otvorApp(id){
     alert("DPH modul je dostupný len pre platiteľov DPH.\n\nAk ste sa stali platiteľom, doplňte IČ DPH v Nastaveniach → Firemné údaje.");
     return;
   }
+  // Výber zo zvončeka platí pre JEDEN modul. Odchodom inam stráca zmysel a
+  // nechať ho žiť by znamenalo, že sa človek o týždeň vráti do Banky a nájde
+  // tam filtrovaný zoznam bez toho, aby vedel prečo.
+  if(vyber && vyber.modul!==id) vyber=null;
   aktualnaApp=id;
   aktualnaSuperApka=null;
   zobrazObrazovku("app");
@@ -11741,6 +11839,14 @@ function appVydavky(){
   else if(vFilter==="statu") list=vydStatu;
   else if(vFilter==="kontrola") list=vyd.filter(x=>x && x.naKontrolu);
   if((_hladaj.vydavky||"").trim()) list=list.filter(x=>hladajZhoda(_hladaj.vydavky, x.cislo, x.partner, x.popis, x.variabilny, x.spolu));
+  // Výber zo zvončeka. Je to ABSOLÚTNA množina, nie podmnožina obdobia —
+  // kombinovať ju s rokom a chipmi by ukázalo tri z desiatich a nikto by
+  // nevedel prečo. Preto sa počíta z celého zoznamu, nie z `list`.
+  const vyb=vyberAktivny("vydavky");
+  if(vyb){
+    const chcem=new Set(vyb.kluce);
+    list=(d.vydavky||[]).filter(x=>chcem.has(dokladKluc(x)));
+  }
   // Kľúče, nie čísla: doklad bez čísla sa inak nedal ani vybrať, ani zmazať
   // — checkbox sa mu vôbec nevykreslil (rovnaká príčina ako v EX).
   vydPoslednyList=list.map(dokladKluc).filter(Boolean);
@@ -11757,14 +11863,14 @@ function appVydavky(){
     </div>
     ${odvodyDoplnitHtml()}
     <div class="atool" style="flex-wrap:wrap;gap:8px">
-      <select onchange="vRok=this.value;vMesiac='';appVydavky()" style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:13px">
+      <select onchange="vyber=null;vRok=this.value;vMesiac='';appVydavky()" style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:13px">
         ${roky.map(r=>`<option value="${r}" ${r===vRok?'selected':''}>${r}</option>`).join('')}
       </select>
-      <select onchange="vMesiac=this.value;appVydavky()" style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:13px">
+      <select onchange="vyber=null;vMesiac=this.value;appVydavky()" style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:13px">
         <option value="">celý rok</option>
         ${mesiace.map(m=>`<option value="${m}" ${m===vMesiac?'selected':''}>${mesiacLabel(m)}</option>`).join('')}
       </select>
-      <select onchange="vZaklad=this.value;vMesiac='';appVydavky()" title="Podľa ktorého dátumu sa obdobie počíta"
+      <select onchange="vyber=null;vZaklad=this.value;vMesiac='';appVydavky()" title="Podľa ktorého dátumu sa obdobie počíta"
               style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:13px">
         ${[['dane','podľa obdobia dane'],['dodanie','podľa dátumu dodania'],['uhrada','podľa dátumu úhrady']]
           .map(([k,l])=>`<option value="${k}" ${k===vZaklad?'selected':''}>${l}</option>`).join('')}
@@ -11778,9 +11884,10 @@ function appVydavky(){
       </div>`:""}
       ${['vsetky|Všetky','faktury|Došlé faktúry','blocky|Bločky','neuhradene|Neuhradené','statu|Odvody a dane']
         .concat(vydavkyNaKontrolu().length?['kontrola|👁 Na kontrolu ('+vydavkyNaKontrolu().length+')']:[])
-        .map(x=>{const[k,l]=x.split('|');return `<span class="achip ${vFilter===k?'on':''}" onclick="vFilter='${k}';appVydavky()">${l}</span>`}).join('')}${hladatkoHtml('vydavky','appVydavky','🔍 Partner, číslo, popis, suma…')}
+        .map(x=>{const[k,l]=x.split('|');return `<span class="achip ${vFilter===k?'on':''}" onclick="vyber=null;vFilter='${k}';appVydavky()">${l}</span>`}).join('')}${hladatkoHtml('vydavky','appVydavky','🔍 Partner, číslo, popis, suma…')}
     </div>
     ${strazcaBanner()}
+    ${vyberPas(vyb, list.length)}
     ${vydVybrane.size?`<div style="position:sticky;top:0;z-index:5;display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:var(--brand-lite);border:1px solid var(--line);border-radius:9px;padding:8px 12px;margin-bottom:10px">
       <b style="font-size:13px">${vydVybrane.size} vybraných</b>
       <button class="aabtn pri" style="padding:5px 10px;font-size:12px" onclick="vydHromadneUhradit()">✓ Označiť uhradené</button>
@@ -12189,7 +12296,7 @@ function editVydavok(idx){
     if(litreVal>0) obj.litre=litreVal; else delete obj.litre;
     // Doplnenie z pamäte partnerov musí bežať PRED kontrolou — inak by appka
     // pýtala IČ DPH, ktoré o riadok nižšie sama doplní.
-    if(doplnZPartnera(obj)) zapisAutomat("icdph", 1);
+    if(doplnZPartnera(obj)) zapisAutomat("icdph", [dokladKluc(obj)]);
     // Pravidlá nad jedným dokladom — tie isté, aké o rok vyhodnotí ročná
     // kontrola. Beží aj pri úprave: chyba sa dá do dokladu vniesť aj neskôr,
     // a človek, ktorý ho práve otvoril, je jediný, kto vie, čo na ňom bolo.
@@ -12387,6 +12494,14 @@ function appBanka(){
   else if(bFilter==="vydaj") list=vypis.filter(t=>t.smer==="vydaj");
   else if(bFilter==="ignor") list=cely.filter(t=>(!bMesiac||String(t.datum||"").slice(0,7)===bMesiac) && !t.skryty && jePohybIgnorovany(t));
   else if(bFilter==="skryte") list=cely.filter(t=>(!bMesiac||String(t.datum||"").slice(0,7)===bMesiac) && t.skryty);
+  // Výber zo zvončeka — absolútna množina, počíta sa z CELÉHO výpisu.
+  // Skryté ani ignorované sa tu nevynechávajú: keď o nich upozornenie hovorí,
+  // musia byť vidieť, inak by pás tvrdil, že zmizli.
+  const vybB=vyberAktivny("banka");
+  if(vybB){
+    const chcem=new Set(vybB.kluce);
+    list=cely.filter(t=>chcem.has(txId(t)));
+  }
   document.getElementById("appScreen").innerHTML=appHlavicka("banka",`<button class="aabtn pri" onclick="importVypis()"${zam("banka")}>📥 Import výpisu</button>`)+pasIbaCitanie("banka")+`
     <div class="amini">
       <div class="aminbox"><div class="al">Príjmy</div><div class="av pos">${eur(prijmy)}</div></div>
@@ -12406,16 +12521,17 @@ function appBanka(){
       </div>
     </div>`; })()}
     <div class="atool" style="align-items:center">
-      <select onchange="bMesiac=this.value;appBanka()" style="background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-size:12.5px">
+      <select onchange="vyber=null;bMesiac=this.value;appBanka()" style="background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-size:12.5px">
         <option value="">celé obdobie</option>
         ${bMesiace.map(m=>`<option value="${m}" ${bMesiac===m?'selected':''}>${m.slice(5)}/${m.slice(0,4)}</option>`).join('')}
       </select>
-      ${['vsetky|Všetky','nespar|Nespárované','prijem|Príjmy','vydaj|Výdaje'].map(x=>{const[k,l]=x.split('|');return `<span class="achip ${bFilter===k?'on':''}" onclick="bFilter='${k}';appBanka()">${l}</span>`}).join('')}
+      ${['vsetky|Všetky','nespar|Nespárované','prijem|Príjmy','vydaj|Výdaje'].map(x=>{const[k,l]=x.split('|');return `<span class="achip ${bFilter===k?'on':''}" onclick="vyber=null;bFilter='${k}';appBanka()">${l}</span>`}).join('')}
       ${pocIgnor?`<span class="achip ${bFilter==='ignor'?'on':''}" onclick="bFilter='ignor';appBanka()" title="Pohyby vylúčené pravidlami">⊘ ignorované (${pocIgnor})</span>`:''}
       ${pocSkryte?`<span class="achip ${bFilter==='skryte'?'on':''}" onclick="bFilter='skryte';appBanka()" title="Ručne skryté pohyby">🗄 skryté (${pocSkryte})</span>`:''}
       ${hladatkoHtml('banka','appBanka','🔍 Protistrana, VS, suma…')}
       <span class="achip ${bPohlad==='vedla'?'on':''}" style="margin-left:auto" onclick="bPohlad=bPohlad==='vedla'?'zoznam':'vedla';appBanka()" title="Príjmy a výdaje vedľa seba (bývalý Cashflow)">⇄ vedľa seba</span>
     </div>
+    ${vyberPas(vybB, list.length)}
     <div class="csub" style="margin:0 2px 12px">Ťuknutím na riadok otvoríte pohyb — tam sa vyberá doklad, vytvára výdavok z platby, ignoruje sa alebo skrýva.</div>
     ${bPohlad==="vedla" ? (()=>{
       // Bývalý modul Cashflow (kap. 49 etapa 7). Nebol to iný pohľad na iné
@@ -32331,6 +32447,10 @@ function rozlisKolizneDoklady(){
     +"Kde to jednoznačné nebude, priradenie sa odoberie a pohyb nájdete v Banke medzi nespárovanými.")) return;
 
   let prenesene=0, vratene=0;
+  // Identity pre výber v zvončeku. Notifikácia vedie do Výdavkov, takže sa
+  // zbierajú kľúče výdavkov; vystavené faktúry sa spočítajú zvlášť, aby veta
+  // hlásila pravdivý celok a pás nad zoznamom netvrdil, že zvyšok zmizol.
+  const kluceKolizie=[]; let mimoVydavky=0;
   skupiny.forEach(s=>{
     // úhrady na spoločné číslo si zapamätaj skôr, než sa kľúče zmenia
     const dotknute=[];
@@ -32338,6 +32458,9 @@ function rozlisKolizneDoklady(){
       if(u.typ===s.typ && String(u.cislo)===s.cislo) dotknute.push({t,u});
     }));
     s.doklady.forEach(x=>{ x.klucId=true; });
+    // Kľúč sa berie AŽ TERAZ — `klucId` mení to, čo `dokladKluc` vracia.
+    if(s.typ==="vydavok") s.doklady.forEach(x=>kluceKolizie.push(dokladKluc(x)));
+    else mimoVydavky+=s.doklady.length;
     dotknute.forEach(({t,u})=>{
       const suma=r2(+u.suma||0);
       const sedia=s.doklady.filter(x=>Math.abs(r2(+x.spolu||0)-suma)<0.02);
@@ -32347,7 +32470,7 @@ function rozlisKolizneDoklady(){
     });
   });
   poZmene();
-  if(typeof zapisAutomat==="function") zapisAutomat("kolizia", pocet);
+  if(typeof zapisAutomat==="function") zapisAutomat("kolizia", kluceKolizie, mimoVydavky);
   alert("Odlíšených "+pocet+" dokladov.\n\n"
     +"Platby prenesené podľa sumy: "+prenesene
     +(vratene?"\nVrátené medzi nespárované: "+vratene+" — sumu nebolo možné priradiť jednoznačne." : ""));
@@ -32415,21 +32538,25 @@ function odoberUhradu(tx, typ, cislo){
 // Na ostrých dátach pribudlo v druhom kole ďalšie priradenie. Bez slučky by
 // človek musel appku otvoriť dvakrát, aby dostal to isté.
 function autoParujPohyby(pohyby){
-  let spolu=0;
+  // Kolá vracajú KĽÚČE spárovaných pohybov, nie počet. Zvonček z nich spraví
+  // výber, takže klik vedie presne na tie pohyby — nie do Banky, kde ich má
+  // človek hľadať (12. 9. 2026).
+  const kluce=[];
   for(let kolo=0; kolo<10; kolo++){
-    const n=autoParujKolo(pohyby);
-    if(!n) break;
-    spolu+=n;
+    const k=autoParujKolo(pohyby);
+    if(!k.length) break;
+    kluce.push(...k);
   }
+  const spolu=kluce.length;
   // Denník sa píše tu, nie v kole a nie u volajúceho: kolo je vnútorná vec
   // slučky a volajúcich je päť (načítanie firmy, import výpisu, uloženie
   // dokladu, prekreslenie, ručné tlačidlo) — jeden by sa zabudol.
-  if(spolu) zapisAutomat("parovanie", spolu);
+  if(spolu) zapisAutomat("parovanie", kluce);
   return spolu;
 }
 function autoParujKolo(pohyby){
-  if(!firmaData || typeof vypisSparuj!=="function") return 0;
-  let n=0;
+  if(!firmaData || typeof vypisSparuj!=="function") return [];
+  const n=[];
   (pohyby || firmaData.vypis || []).forEach(t=>{
     if(t.skryty || t.vratenie || t._autoNie || t.odmietnutaZhoda) return;
     if((t.uhrady||[]).length) return;
@@ -32439,12 +32566,12 @@ function autoParujKolo(pohyby){
       // `pridajUhradu` má strop na zostatok dokladu, takže druhá platba s tým
       // istým VS sa nepriradí a ostane v kontrole vidieť. To je zámer: preplatok
       // je nález, nie šum, a nemá sa stratiť tým, že ho automatika ticho zhltne.
-      if(pridajUhradu(t, "faktura", dokladKluc(s.zaznam), null, true) > 0) n++;
+      if(pridajUhradu(t, "faktura", dokladKluc(s.zaznam), null, true) > 0) n.push(txId(t));
       return;
     }
     // 2) jednoznačný kandidát podľa skóre — platí pre príjmy aj výdaje
     const k=parJednoznacny(t);
-    if(k && pridajUhradu(t, k.typ, String(k.kluc||k.cislo), null, true) > 0) n++;
+    if(k && pridajUhradu(t, k.typ, String(k.kluc||k.cislo), null, true) > 0) n.push(txId(t));
   });
   return n;
 }
@@ -32491,7 +32618,7 @@ function autoParujDoklad(typ, kluc){
   if(kand[1] && kand[0].skore-kand[1].skore<25) return null;
   const tx=kand[0].t;
   if(pridajUhradu(tx, typ, String(kluc), null, true) <= 0) return null;
-  zapisAutomat("parovanie", 1);
+  zapisAutomat("parovanie", [txId(tx)]);
   return tx;
 }
 
@@ -32630,9 +32757,10 @@ function doplnPartnerovDoVydavkov(){
     + nahlad.slice(0,8).map(riadok).join("\n")
     + (nahlad.length>8 ? "\n… a ďalších "+(nahlad.length-8) : "")
     + "\n\nDopĺňajú sa len prázdne polia — čo je na doklade vyplnené, ostane.")) return;
-  let n=0;
-  V.forEach(x=>{ if(doplnZPartnera(x)) n++; });
-  zapisAutomat("icdph", n);
+  const kluce=[];
+  V.forEach(x=>{ if(doplnZPartnera(x)) kluce.push(dokladKluc(x)); });
+  const n=kluce.length;
+  zapisAutomat("icdph", kluce);
   poZmene();
   alert("Doplnené v "+n+" dokladoch.\n\nZáznam nájdete aj v zvončeku — keby sa niektorý dodávateľ ukázal ako neplatiteľ DPH, opravíte to v editore dokladu.");
   if(typeof appUzavierka==="function" && aktualnaApp==="uzavierka") appUzavierka();
