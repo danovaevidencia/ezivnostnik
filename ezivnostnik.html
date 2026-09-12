@@ -374,6 +374,11 @@ body.mademo .wrap{padding-bottom:calc(var(--lista-v) + var(--demo-v) + 25px + en
 .bcNadpis{font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;
   color:var(--ink-soft);padding:14px 12px 5px;display:flex;align-items:center;gap:6px}
 .bcNadpis .bcTip{font-weight:400;letter-spacing:0;text-transform:none;font-size:10.5px}
+/* Ceruzka pri „Pripnuté". Hitbox rastie paddingom na ~28 px, lebo znak sám
+   je 12 px — netrafené ťuknutie by v lište otvorilo apku pod ním. */
+.bcUprav{margin-left:auto;cursor:pointer;font-size:12px;letter-spacing:0;text-transform:none;
+  color:var(--ink-soft);padding:6px 8px;margin-right:-8px;border-radius:6px;line-height:1}
+.bcUprav:hover{color:var(--brand);background:var(--brand-lite)}
 .bcRodina{font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;
   padding:10px 12px 4px}
 .bcCiara{height:1px;background:var(--line-soft);margin:12px 6px}
@@ -1659,6 +1664,9 @@ html[data-jazda] .jazdapruh{display:flex}
   :root[data-bocna="uzka"] .bcNadpis,
   :root[data-bocna="uzka"] .bcRodina{font-size:0;padding:0;height:1px;
     background:var(--line-soft);margin:9px 8px 5px}
+  /* V pruhu je nadpis len čiara. Ceruzka by v nej ostala neviditeľným, ale
+     klikateľným bodom — pravé tlačidlo na ikone ostáva. */
+  :root[data-bocna="uzka"] .bcUprav{display:none}
   /* 🔴 Zmena šírky NEMÁ prechod, a to zámerne. Prvá verzia mala
      `transition:width .18s` a v karte bez kompozície uviazla na počiatočnej
      hodnote: premenná sa prepla na 60 px, `getComputedStyle` hlásil 60 px,
@@ -1981,7 +1989,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.12-NS";  // Prepínač Peppolu má vlastnú kartu E-faktúry
+const APP_VERZIA = "2026.09.12-NU";  // E-faktúry Peppol v Príjmoch, ceruzka pri pripnutých
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -7236,14 +7244,14 @@ const APPS={
   // obchádzal `renderApp`, lišta v nich svietila na Domove a klamala o tom,
   // kde človek je. Teraz je to modul ako každý iný a vstupov je viac.
   superdash:{n:"Štatistiky",      ic:"📊",c:"var(--m-neutral)", d:"Kompletný prehľad roka — grafy, rozdelenie, počty"},
-  efaktury: {n:"E-faktúry",       ic:"📮",c:"var(--m-podania)", d:"Čo odišlo a čo prišlo sieťou Peppol"},
+  efaktury: {n:"E-faktúry Peppol", ic:"📮",c:"var(--m-prijmy)", d:"Čo odišlo a čo prišlo sieťou Peppol"},
 };
 
 // ═══ FÁZA 1: INFORMAČNÁ ARCHITEKTÚRA — skupiny modulov ═══
 // 5 logických skupín + samostatný kalendár. Zoskupené podľa mentálneho modelu
 // živnostníka (tok peňazí: príjmy→výdavky→banka→podania, + agenda).
 const SKUPINY=[
-  {id:"prijmy",  n:"Príjmy",          ic:"💰", c:"var(--m-prijmy)", dd:"koľko a od koho mi príde",      moduly:["faktury","vykazy","pohladavky"]},
+  {id:"prijmy",  n:"Príjmy",          ic:"💰", c:"var(--m-prijmy)", dd:"koľko a od koho mi príde",      moduly:["faktury","vykazy","pohladavky","efaktury"]},
   {id:"vydavky", n:"Výdavky",         ic:"🧾", c:"var(--m-vydavky)", dd:"čo som minul a komu dlžím",     moduly:["vydavky"]},
   {id:"banka",   n:"Banka",           ic:"🏦", c:"var(--m-banka)", dd:"čo reálne pretieklo účtom",     moduly:["banka"]},
   {id:"podania", n:"Podania",         ic:"§",  c:"var(--m-podania)", dd:"čo posielam Finančnej správe",  moduly:["dph","priznania","priznanieB","uzavierka"]},
@@ -7260,7 +7268,10 @@ const SKUPINY=[
 // e-faktúry tam musia byť aj tak, lebo od 1. 1. 2027 musí PRIJÍMAŤ každý
 // podnikateľ. Modul za platenou skupinou by bránil zákonnej povinnosti.
 // (Skúsené 11. 9. 2026: `test_moduly` aj `test_uzavierka` to zachytili naraz.)
-const SKUPINA_SAMOSTATNE=["jazdy","kalendar","clanky","superdash","efaktury"];
+// E-faktúry sú od 12. 9. 2026 v skupine Príjmy (Roman). Skupina sa zobrazí,
+// keď má aspoň jeden povolený modul, a E-faktúry nie sú viazané na plán —
+// prijímať musia všetci, takže ich neprídu ani firmy bez fakturácie.
+const SKUPINA_SAMOSTATNE=["jazdy","kalendar","clanky","superdash"];
 
 function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function fmtDatum(dt){
@@ -8107,9 +8118,16 @@ function renderBocnuListu(){
     <span>🏠</span><span class="bcN">Prehľad</span></div>`;
 
   // Pripnuté — tie isté apky, ktoré má na mobile spodná lišta.
+  //
+  // 🔴 12. 9. 2026, Roman: „ako pripnem apku e-fakturácia hore?" Na počítači
+  // sa to nedalo VÔBEC. Slot sa menil len podržaním prsta na spodnej lište
+  // mobilu (`listaMenu`); položky v ľavej lište ho nemali, takže kliknutie
+  // ich len otvorilo. Pravé tlačidlo je náprotivok podržania — ale je rovnako
+  // NEVIDITEĽNÉ, preto je pri nadpise aj ceruzka, ktorú vidieť.
   if(pripnute.length){
-    h+=`<div class="bcNadpis">Pripnuté</div>`;
-    h+=pripnute.map(k=>`<div class="bcPol${k.aktivna()?" on":""}" onclick="${k.akcia}" title="${esc(k.n)}">
+    h+=`<div class="bcNadpis">Pripnuté<span class="bcUprav" onclick="otvorPripnute()" title="Upraviť pripnuté apky" role="button" tabindex="0">✎</span></div>`;
+    h+=pripnute.map((k,i)=>`<div class="bcPol${k.aktivna()?" on":""}" onclick="${k.akcia}"
+      oncontextmenu="event.preventDefault();listaMenu(${i},event)" title="${esc(k.n)} · pravým tlačidlom vymeníte">
       <span>${k.ic}</span><span class="bcN">${esc(k.n)}</span></div>`).join("");
   }
 
@@ -8170,6 +8188,22 @@ function renderLista(){
     + vyber.map((k,i)=>polozka(k.ic,k.n,k.akcia,k.aktivna(),
         ` oncontextmenu="event.preventDefault();listaMenu(${i},event)"`)).join("")
     + `</div>`;
+}
+// Okno „Pripnuté apky" — viditeľná cesta k tomu istému, čo robí podržanie
+// prstom na mobile. Každý riadok je slot a zmena ide cez `listaNastav`, teda
+// cez JEDNO pravidlo výmeny: vybraná apka, ktorá už v inom slote je, si s ním
+// miesto vymení, nezduplikuje sa. Druhé pravidlo v tomto okne by sa rozišlo.
+function otvorPripnute(){
+  const kat=listaKatalog();
+  const teraz=listaVyber();
+  openModal("Pripnuté apky", `
+    <div class="csub" style="margin-bottom:12px">Tieto apky máte na počítači hore v ľavej lište a na telefóne v spodnej lište. Výber sa ukladá do firmy, takže platí na všetkých zariadeniach.</div>
+    ${teraz.map((id,i)=>`<div class="mfield"><label>${i+1}. miesto</label>
+      <select onchange="listaNastav(${i}, this.value); otvorPripnute()">
+        ${kat.map(k=>`<option value="${esc(k.id)}" ${k.id===id?"selected":""}>${k.ic} ${esc(k.n)}</option>`).join("")}
+      </select></div>`).join("")}
+    <div class="ocr-hint">Keď vyberiete apku, ktorá už na inom mieste je, tie dve si miesto vymenia. Ostatné apky nájdete ďalej v lište — pripnutím sa nič neskryje.</div>
+  `, null);
 }
 // Výmena slotu. Mriežka sa tým nemení — apka z nej nikdy nezmizne (90.5/4),
 // takže sa tu nedá stratiť prístup k ničomu.
