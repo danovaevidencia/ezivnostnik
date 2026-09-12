@@ -1964,7 +1964,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.11-NK";  // Výpis nabíjaní zo ZSE prijatý e-mailom sa spracuje
+const APP_VERZIA = "2026.09.12-NL";  // Mail, ktorému appka prílohu neprijala, po sebe nechá stopu
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -27980,6 +27980,13 @@ let cakajuceDoklady = [];
 let _cakajuceNacitane = false;
 let _cakajuceChyba = null;
 
+// Značka, ktorou edge funkcia označí, že v `telo` nie je text mailu, ale
+// DÔVOD, prečo prílohu neprijala. Tá istá veta musí byť v
+// `dev/supabase/functions/doklady-mailom/index.ts` — stráži to test.
+const PRICINA_ZNACKA = "Prílohu sme neuložili:";
+const cakajuceNeprijate = () => (cakajuceDoklady||[])
+  .filter(x=>x.stav==="bez_prilohy" && String(x.telo||"").startsWith(PRICINA_ZNACKA));
+
 async function nacitajCakajuce(tiche){
   if(localMode || !sb || !firmaId) { cakajuceDoklady=[]; return; }
   try{
@@ -28018,13 +28025,19 @@ const cakajuceNove = () => cakajuceDoklady.filter(x=>x.stav==="nove").length;
 // Ráta sa len to, s čím sa dá niečo urobiť: pohyb, ktorý sa naozaj podarilo
 // prečítať a ktorý ešte nie je vo výpise. Mail od banky, ktorému nerozumieme,
 // odznak nedvíha — ten patrí do schránky ako nález, nie ako úloha.
+//
+// 🔴 12. 9. 2026 pribudol tretí počet. Mail, ktorému appka prílohu neprijala,
+// nedvíhal odznak vôbec — a keďže doteraz po ňom neostal ani riadok, vyzeralo
+// to, že mail nikdy neprišiel. Je to ÚLOHA, nie nález: doklad existuje, len
+// sa nedostal dnu, a človek s tým vie niečo urobiť (prepošle ho inak).
 function cakajucePocty(){
   const doklady=(cakajuceDoklady||[]).filter(x=>x.stav==="nove").length;
+  const neprijate=cakajuceNeprijate().length;
   let pohyby=0;
   // Parser beží nad cudzím textom; keď spadne, odznak nesmie zhodiť plochu.
   try{ pohyby=cakajuceNotifikacie().filter(x=>x.pohyb && !x.uzMam).length; }
   catch(e){ console.error("cakajucePocty:", e); }
-  return { doklady, pohyby, spolu:doklady+pohyby };
+  return { doklady, pohyby, neprijate, spolu:doklady+pohyby+neprijate };
 }
 // Veta bez slovesa zámerne: „2 doklady a 1 pohyb" sa inak musí ohýbať podľa
 // oboch čísel naraz a pri každej kombinácii to znie inak.
@@ -28032,6 +28045,8 @@ function cakajuceVeta(){
   const p=cakajucePocty(), casti=[];
   if(p.doklady) casti.push(p.doklady+" "+(p.doklady===1?"doklad":(p.doklady<5?"doklady":"dokladov")));
   if(p.pohyby)  casti.push(p.pohyby+" "+(p.pohyby===1?"pohyb":(p.pohyby<5?"pohyby":"pohybov")));
+  if(p.neprijate) casti.push(p.neprijate+" "+(p.neprijate===1?"neprijatá príloha"
+    :(p.neprijate<5?"neprijaté prílohy":"neprijatých príloh")));
   return casti.join(" a ");
 }
 
@@ -28349,6 +28364,36 @@ async function zrusPotlacenie(id){
 }
 
 // ── obrazovka schránky ─────────────────────────────────────────────────────
+// Kedy sem naposledy DOŠIEL mail — akýkoľvek, aj dávno spracovaný.
+//
+// 🔴 12. 9. 2026: Roman prepošle doklad a v appke sa nič neobjaví. Otázka
+// „prišlo to vôbec?" sa dovtedy zvnútra appky nedala zodpovedať — schránka
+// ukazuje len NESPRACOVANÉ maily, takže prázdna schránka vyzerá rovnako, či
+// je všetko odbavené, alebo sa príjem pokazil niekde pred nami (u poštovej
+// služby, na webhooku). Rozdiel medzi tými dvoma je presne to, čo sa hľadá.
+//
+// Preto sa nepíše „všetko odbavené", ale DÁTUM. Keď sa nezhoduje s tým, čo
+// človek pred chvíľou poslal, je hneď jasné, že sa treba pozerať pred appku.
+async function poslednyMailHtml(){
+  if(localMode || !sb || !firmaId) return "";
+  try{
+    const { data, error } = await sb.from("cakajuce_doklady")
+      .select("prijate").eq("firma_id", firmaId)
+      .order("prijate", { ascending:false }).limit(1);
+    if(error) throw error;
+    const p=data && data[0] && data[0].prijate;
+    if(!p) return `<div class="ocr-hint">Na túto adresu ešte nič neprišlo.</div>`;
+    const d=new Date(p), dni=Math.floor((Date.now()-d.getTime())/86400000);
+    const kedy=fmtDatum(String(p).slice(0,10))+" "+String(p).slice(11,16);
+    return `<div class="ocr-hint">Naposledy sem prišiel mail <b>${esc(kedy)}</b>${
+      dni>=2 ? ` — pred ${dni} dňami. Ak ste odvtedy niečo preposielali, nedorazilo to.` : "."}</div>`;
+  }catch(e){
+    // Nezhltnúť: bez dôvodu vyzerá chýbajúci riadok ako „ešte nič neprišlo".
+    console.error("posledný prijatý mail:", e);
+    return "";
+  }
+}
+
 async function otvorCakajuce(){
   if(localMode){ alert("Doklady e-mailom fungujú len v cloudovom režime — prihláste sa."); return; }
   await nacitajCakajuce();
@@ -28361,8 +28406,15 @@ async function otvorCakajuce(){
   const notifik  = cakajuceNotifikacie();
   const notifNove= notifik.filter(x=>x.pohyb && !x.uzMam);
   const notifZle = notifik.filter(x=>!x.pohyb);
-  const bezPril= cakajuceDoklady.filter(x=>x.stav==="bez_prilohy" && !notifik.some(p=>p.z.id===x.id));
+  // Mail, ktorý prílohu MAL, ale filter ju zahodil. Je to iná vec než mail
+  // bez prílohy: tam nebolo čo uložiť, tu doklad prišiel a neprešiel — a
+  // človek s tým vie niečo urobiť, keď sa mu povie čo. Delí ich `cakajuceNeprijate`,
+  // teda tá istá funkcia, ktorá dvíha odznak.
+  const zahodena= cakajuceNeprijate().filter(x=>!notifik.some(p=>p.z.id===x.id));
+  const bezPril = cakajuceDoklady.filter(x=>x.stav==="bez_prilohy"
+    && !notifik.some(p=>p.z.id===x.id) && !zahodena.includes(x));
   const opakuje= cakajuceOpakovane();
+  const posledny= await poslednyMailHtml();
 
   openModal("📨 Doklady e-mailom", `
     <div class="mfield">
@@ -28373,6 +28425,7 @@ async function otvorCakajuce(){
       </div>
       <div class="ocr-hint">Prepošlite sem faktúru a objaví sa tu. Prijímame od kohokoľvek — adresu, od ktorej nič nechcete, zablokujete nižšie.</div>`
       : `<div class="ocr-hint">Adresa sa nepodarilo načítať — skúste to neskôr.</div>`}
+      ${posledny}
     </div>
 
     ${nove.length ? `<div style="margin-top:14px">
@@ -28448,8 +28501,19 @@ async function otvorCakajuce(){
       Formát tejto banky ešte nepoznáme — pohyb sa dá zapísať ručne v Banke.
     </div>` : ""}
 
+    ${zahodena.length ? `<div class="ocr-hint" style="margin-top:12px;border-left:3px solid var(--warn,#c98a00);padding-left:9px">
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:5px">
+        <span style="flex:1;font-weight:600">⚠ ${zahodena.length===1?"Jeden mail priniesol prílohu, ktorú appka neprijala":zahodena.length+" mailov prinieslo prílohu, ktorú appka neprijala"}</span>
+        <button class="aabtn" style="padding:3px 9px;font-size:11px" onclick="odbavCakajuce('neprijate')">Zahodiť</button>
+      </div>
+      ${zahodena.map(x=>`<div style="margin-bottom:6px">
+        <div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(x.predmet||"—")}</div>
+        <div style="font-size:11px;color:var(--ink-soft);white-space:pre-wrap">${esc(String(x.telo||"").slice(PRICINA_ZNACKA.length).trim())}</div>
+      </div>`).join("")}
+    </div>` : ""}
+
     ${bezPril.length ? `<div class="ocr-hint" style="margin-top:12px;display:flex;gap:8px;align-items:center">
-      <span style="flex:1">${bezPril.length} mailov prišlo bez prílohy — nič sa neuložilo.</span>
+      <span style="flex:1">${bezPril.length===1?"1 mail prišiel":bezPril.length+(bezPril.length<5?" maily prišli":" mailov prišlo")} bez prílohy — nič sa neuložilo.</span>
       <button class="aabtn" style="padding:3px 9px;font-size:11px" onclick="odbavCakajuce('bez_prilohy')">Zahodiť</button>
     </div>` : ""}
 
@@ -28652,11 +28716,21 @@ let _cakajuciSpracovavany = null;
 // Hromadné odbavenie záznamov, ktoré nikdy nebudú dokladom: mail od cudzej
 // adresy (prílohu sme neuložili) a mail bez prílohy. Sú to len stopy po tom,
 // že niečo prišlo — keď ich používateľ videl, nemajú dôvod ostávať.
+// `stav` je stav v databáze, s jednou výnimkou: "neprijate" sú maily, ktorým
+// appka prílohu odmietla. V databáze majú `bez_prilohy` ako ostatné, líšia sa
+// obsahom `telo` — a zahodiť sa musia zvlášť, inak by ich tlačidlo pri
+// „mailoch bez prílohy" zmietlo spolu s nimi a varovanie by zmizlo bez toho,
+// aby ho niekto čítal.
 async function odbavCakajuce(stav, odKoho){
-  const zoznam=cakajuceDoklady.filter(x=>x.stav===stav && (!odKoho || x.od_koho===odKoho));
+  const zoznam = stav==="neprijate"
+    ? cakajuceNeprijate()
+    : cakajuceDoklady.filter(x=>x.stav===stav && (!odKoho || x.od_koho===odKoho)
+        && !(stav==="bez_prilohy" && cakajuceNeprijate().includes(x)));
   if(!zoznam.length) return;
   const co = stav==="neznamy_odosielatel"
     ? "Zahodiť "+zoznam.length+" mailov z adresy "+odKoho+"?"
+    : stav==="neprijate"
+    ? "Zahodiť "+zoznam.length+" upozornení na neprijatú prílohu?"
     : "Zahodiť "+zoznam.length+" mailov bez prílohy?";
   if(!confirm(co+"\n\nŽiadne súbory sa neuložili, takže sa nič nestráca.")) return;
   try{
