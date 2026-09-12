@@ -1981,7 +1981,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.12-NQ";  // Zvonček otvorí presne tie záznamy, o ktorých hovorí
+const APP_VERZIA = "2026.09.12-NR";  // Miesto tankovania a upozornenie, keď nie je na trase
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -15300,6 +15300,82 @@ function nahradyHtml(rok){
   </div>`;
 }
 
+// ═══ MIESTO TANKOVANIA / NABÍJANIA A TRASA V TEN DEŇ ══════════════════════
+//
+// 12. 9. 2026, Roman: „nepovinný atribút Miesto tankovania. V deň tankovania
+// v knihe jázd bude upozornenie, ak sa miesto tankovania nenachádza na trase."
+//
+// Zmysel je daňový: keď je bloček z Košíc a jazdy toho dňa vedú z Modry
+// do Bratislavy, chýba jazda alebo bola súkromná. To je nález, ktorý sa inak
+// nájde až pri kontrole — a vtedy ho už nemá kto vysvetliť.
+//
+// TRI VECI, KTORÉ ROZHODUJÚ, ČI TO BUDE POMOC ALEBO OTRAVA:
+//
+//  1. Pole je NEPOVINNÉ a bez neho sa nekontroluje nič. Kontrola musí byť
+//     viazaná na dôkaz, že sa téma týka (kap. 16) — `stanica` sa na to použiť
+//     NEDÁ: pri tankovaní je to značka („Shell"), nie miesto, a na trase by
+//     nesedela nikdy.
+//  2. Trasa je TEXT S KONCOVÝMI BODMI, nie prejdená cesta. Čerpacia stanica
+//     pri diaľnici na trase nikdy nebude, hoci po nej naozaj je. Nález je
+//     preto OTÁZKA, nie verdikt.
+//  3. Preto sa dá umlčať na jeden klik (`miestoOk`). Upozornenie, ktoré sa
+//     nedá vybaviť, sa prestane čítať — a s ním aj tie pravé.
+function miestaDnaZJazd(den){
+  const out=[];
+  (firmaData.jazdy||[]).forEach(j=>{
+    if(jazdaDayKey(j)!==den) return;
+    mapaMiestaZTrasy(j.cesta||j.trasa||"").forEach(m=>out.push(m));
+  });
+  return [...new Set(out.filter(Boolean))];
+}
+// Zhoda po slovách: „Bratislava, Mlynské nivy" sedí s trasou „Modra –
+// Bratislava – Modra". Porovnáva sa bez diakritiky a bez veľkosti
+// písmen — trasu píše človek a register miest mapa.
+function miestoSediNaTrasu(miesto, miesta){
+  const slova=s=>notifNorm(s).split(/[^a-z0-9]+/).filter(w=>w.length>=3);
+  const hladane=slova(miesto);
+  if(!hladane.length) return false;
+  return miesta.some(m=>{
+    const tam=slova(m);
+    return hladane.some(w=>tam.includes(w));
+  });
+}
+// Vracia null, keď niet čo hlásiť. Inak dôvod aj podklad, aby sa dal nález
+// vysvetliť — hláška bez podkladu je len oznam.
+function miestoMimoTrasu(z){
+  const miesto=String(z && z.miesto || "").trim();
+  if(!miesto || (z && z.miestoOk)) return null;
+  const den=String(z.datum||"").slice(0,10);
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(den)) return null;
+  const miesta=miestaDnaZJazd(den);
+  // Žiadna jazda v ten deň je INÁ veta než „nesedí na trasu". Zamieňať ich
+  // by znamenalo, že človek hľadá chybu v trase, ktorá neexistuje.
+  if(!miesta.length) return {dovod:"bezjazdy", miesto, den, miesta};
+  if(miestoSediNaTrasu(miesto, miesta)) return null;
+  return {dovod:"mimo", miesto, den, miesta};
+}
+// Značka v riadku. Jeden tvar pre tankovania aj nabíjania — dve kópie tej
+// istej vety by sa rozišli. Podrobnosť je v `title`: v tabuľke na 390 px
+// nie je miesto na celú trasu a riadok otvorí editor, kde je aj tlačidlo.
+function miestoZnackaHtml(z){
+  const n=miestoMimoTrasu(z);
+  if(!n) return "";
+  return ` <span class="apill warn" style="font-size:9px" title="${esc(miestoNalezVeta(n))}">⚠ mimo trasy</span>`;
+}
+function miestoNalezVeta(n){
+  if(!n) return "";
+  return n.dovod==="bezjazdy"
+    ? "V tento deň nemáte v knihe žiadnu jazdu."
+    : "Miesto nie je na trase: "+n.miesta.join(" · ");
+}
+// „Je to po trase" — nález sa umlčí pri konkrétnom zázname, nie globálne.
+function miestoOznacOk(druh, idx){
+  const pole = druh==="nabijanie" ? "nabijania" : "tankovania";
+  const z=(firmaData[pole]||[])[idx]; if(!z) return;
+  z.miestoOk=true;
+  poZmene(); prekresliSoScrollom(appJazdy);
+}
+
 // prehľad nabíjaní (ZSE) a tankovaní (PHM)
 function kjNabijaniaTankovania(){
   const nab=(firmaData.nabijania||[]);
@@ -15313,7 +15389,7 @@ function kjNabijaniaTankovania(){
       <h2 style="font-size:15px;margin-bottom:4px">⚡ Nabíjania (ZSE) — ${nab.length}× · ${kwh} kWh · ${eur(suma)}</h2>
       <div class="alist" style="max-height:220px;overflow:auto" data-scroll="kjNabij">
         <div class="arow head" style="grid-template-columns:1fr 1.5fr 1fr 1fr"><div>Dátum</div><div>Stanica</div><div style="text-align:right">kWh</div><div style="text-align:right">Suma</div></div>
-        ${nab.slice().reverse().slice(0,limitPre('nab',50)).map(n=>`<div class="arow" style="grid-template-columns:1fr 1.5fr 1fr 1fr;cursor:default"><div class="acol-muted">${fmtDatum(n.datum)}</div><div class="acol-muted">${esc(n.stanica||n.typ||"")}</div><div class="acol-sum">${(+n.kwh||0).toFixed(1)}</div><div class="acol-sum">${eur(+n.suma||0)}</div></div>`).join('')+orezInfo('nab', Math.min(limitPre('nab',50),nab.length), nab.length, 'appJazdy')}
+        ${(()=>{const _nIdx=new Map((firmaData.nabijania||[]).map((x,i)=>[x,i]));return nab.slice().reverse().slice(0,limitPre('nab',50)).map(n=>`<div class="arow" style="grid-template-columns:1fr 1.5fr 1fr 1fr;cursor:pointer" onclick="editNabijanie(${_nIdx.get(n)})"><div class="acol-muted">${fmtDatum(n.datum)}</div><div class="acol-muted">${esc(n.stanica||n.typ||"")}${miestoZnackaHtml(n)}</div><div class="acol-sum">${(+n.kwh||0).toFixed(1)}</div><div class="acol-sum">${eur(+n.suma||0)}</div></div>`).join('')+orezInfo('nab', Math.min(limitPre('nab',50),nab.length), nab.length, 'appJazdy');})()}
       </div></div>`;
   }
   if(tank.length){
@@ -15324,10 +15400,36 @@ function kjNabijaniaTankovania(){
       <div class="csub" style="margin-bottom:10px">Litre sa pridávajú automaticky pri OCR bločku označenom ako PHM (tankovanie).</div>
       <div class="alist" style="max-height:220px;overflow:auto" data-scroll="kjTank">
         <div class="arow head" style="grid-template-columns:1fr 1.5fr 1fr 1fr"><div>Dátum</div><div>Stanica</div><div style="text-align:right">Litre</div><div style="text-align:right">Suma</div></div>
-        ${(()=>{const _tIdx=new Map((firmaData.tankovania||[]).map((x,i)=>[x,i]));return tank.slice().reverse().slice(0,limitPre('tank',50)).map((t)=>{ const realIdx=_tIdx.get(t); return `<div class="arow" style="grid-template-columns:1fr 1.5fr 1fr 1fr;cursor:pointer" onclick="editTankovanie(${realIdx})"><div class="acol-muted">${fmtDatum(t.datum)}</div><div class="acol-muted">${esc(t.stanica||"")}</div><div class="acol-sum">${(+t.litre||0).toFixed(2)}</div><div class="acol-sum">${eur(+t.suma||0)}</div></div>`; }).join('')+orezInfo('tank', Math.min(limitPre('tank',50),tank.length), tank.length, 'appJazdy');})()}
+        ${(()=>{const _tIdx=new Map((firmaData.tankovania||[]).map((x,i)=>[x,i]));return tank.slice().reverse().slice(0,limitPre('tank',50)).map((t)=>{ const realIdx=_tIdx.get(t); return `<div class="arow" style="grid-template-columns:1fr 1.5fr 1fr 1fr;cursor:pointer" onclick="editTankovanie(${realIdx})"><div class="acol-muted">${fmtDatum(t.datum)}</div><div class="acol-muted">${esc(t.stanica||"")}${miestoZnackaHtml(t)}</div><div class="acol-sum">${(+t.litre||0).toFixed(2)}</div><div class="acol-sum">${eur(+t.suma||0)}</div></div>`; }).join('')+orezInfo('tank', Math.min(limitPre('tank',50),tank.length), tank.length, 'appJazdy');})()}
       </div></div>`;
   }
   return html;
+}
+
+// Editácia nabíjania. Vznikla kvôli poľu „Miesto" (12. 9. 2026) — dovtedy sa
+// riadok nabíjania nedal otvoriť vôbec. Dátum, kWh ani suma sa tu meniť
+// nedajú: prišli z výpisu ZSE a ručná oprava by z doloženého údaja spravila
+// tvrdenie. Miesto je naša poznámka, tá sa upraviť smie.
+function editNabijanie(idx){
+  const n=(firmaData.nabijania||[])[idx]; if(!n) return;
+  openModal("Nabíjanie", `
+    <div class="csub" style="margin-bottom:12px">${esc(fmtDatum(n.datum))} · ${esc(n.stanica||n.typ||"—")}
+      · ${(+n.kwh||0).toFixed(2)} kWh · ${eur(+n.suma||0)}<br>
+      <span style="color:var(--ink-soft)">Údaje sú z výpisu ZSE Drive a nemenia sa.</span></div>
+    <div class="mfield"><label>Miesto nabíjania <span style="font-weight:400;color:var(--ink-soft)">— nepovinné</span></label>
+      <input id="n_miesto" value="${esc(n.miesto||'')}" placeholder="napr. Senec">
+      <div style="font-size:11.5px;color:var(--ink-soft);margin-top:5px;line-height:1.5">
+        Keď ho vyplníte, appka upozorní, ak v ten deň nevedie cez toto miesto žiadna jazda.
+        Prázdne pole nekontroluje nič.</div>
+      ${(()=>{const x=miestoMimoTrasu(n);return x?`<div style="font-size:11.5px;color:var(--ink-warn);margin-top:6px">⚠ ${esc(miestoNalezVeta(x))}
+        <button type="button" class="aabtn" style="padding:4px 9px;font-size:11px;margin-left:6px" onclick="miestoOznacOk('nabijanie',${idx})">Je to po trase</button></div>`:"";})()}
+    </div>
+  `, ()=>{
+    const nove=val("n_miesto").trim();
+    if(nove!==String(n.miesto||"").trim()) delete n.miestoOk;
+    n.miesto=nove;
+    poZmene(); prekresliSoScrollom(appJazdy);
+  });
 }
 
 // editácia tankovania (dátum, stanica, litre, suma) + zmazanie
@@ -15336,6 +15438,14 @@ function editTankovanie(idx){
   openModal("Upraviť tankovanie", `
     <div class="mfield"><label>Dátum</label><input id="t_datum" type="date" value="${esc((t.datum||'').slice(0,10))}"></div>
     <div class="mfield"><label>Stanica / partner</label><input id="t_stanica" value="${esc(t.stanica||'')}"></div>
+    <div class="mfield"><label>Miesto tankovania <span style="font-weight:400;color:var(--ink-soft)">— nepovinné</span></label>
+      <input id="t_miesto" value="${esc(t.miesto||'')}" placeholder="napr. Senec">
+      <div style="font-size:11.5px;color:var(--ink-soft);margin-top:5px;line-height:1.5">
+        Keď ho vyplníte, appka upozorní, ak v ten deň nevedie cez toto miesto žiadna jazda.
+        Prázdne pole nekontroluje nič.</div>
+      ${(()=>{const n=miestoMimoTrasu(t);return n?`<div style="font-size:11.5px;color:var(--ink-warn);margin-top:6px">⚠ ${esc(miestoNalezVeta(n))}
+        <button type="button" class="aabtn" style="padding:4px 9px;font-size:11px;margin-left:6px" onclick="miestoOznacOk('tankovanie',${idx})">Je to po trase</button></div>`:"";})()}
+    </div>
     <div class="mrow2">
       <div class="mfield"><label>Litre</label><input id="t_litre" type="number" step="0.01" value="${esc(t.litre||'')}"></div>
       <div class="mfield"><label>Suma (€)</label><input id="t_suma" type="number" step="0.01" value="${esc(t.suma||'')}"></div>
@@ -15346,6 +15456,11 @@ function editTankovanie(idx){
     if(!datum){ alert("Zadajte dátum."); return false; }
     t.datum=datum; t.mesiac=datum.slice(0,7);
     t.stanica=val("t_stanica");
+    const noveMiesto=val("t_miesto").trim();
+    // Zmena miesta ruší predošlé „je to po trase" — súhlas patril inému
+    // miestu a tichý prenos by nález umlčal tam, kde nikto nič nepotvrdil.
+    if(noveMiesto!==String(t.miesto||"").trim()) delete t.miestoOk;
+    t.miesto=noveMiesto;
     t.litre=parseFloat(val("t_litre"))||0;
     t.suma=parseFloat(val("t_suma"))||0;
     poZmene(); prekresliSoScrollom(appJazdy);
