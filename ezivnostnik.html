@@ -1964,7 +1964,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.12-NL";  // Mail, ktorému appka prílohu neprijala, po sebe nechá stopu
+const APP_VERZIA = "2026.09.12-NM";  // Duplicitný doklad sa ohlási skôr než mesiac a v oboch cestách rovnako
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -12066,32 +12066,11 @@ function editVydavok(idx){
     if(!dokladKontrolaPriZapise(obj, "vydavok")) return false;
     // kontrola duplicít (len pri novom výdavku; pri úprave ignoruj seba)
     if(nova){
+      // Duplicita sa pýta PRVÁ — je to silnejší fakt než mesiac a na rozdiel
+      // od neho znamená chybu v peniazoch.
+      if(!potvrdDuplicituVydavku(obj)) return false;
       // kontrola: doklad z iného mesiaca? (chytí OCR/preklep v dátume)
       if(!overMesiacDokladu(obj.datum)) return false;
-      const dupl=najdiDuplicityVydavku(obj);
-      if(dupl.length){
-        // Rovnaké číslo pri INEJ sume nie je duplicita — sú to dva rôzne doklady
-        // s jednou identitou. Pýtať sa „naozaj pridať?" je vtedy zavádzajúce:
-        // človek správne odpovie áno a nedozvie sa, že si tie doklady odteraz
-        // budú prepisovať úhrady. Presne takto vznikli štyri doklady „FXLY6UUY".
-        const nCislo=String(obj.cislo||"").trim();
-        const nSuma=r2(+obj.spolu||0);
-        const kolizia=nCislo ? dupl.filter(x=>String(x.cislo||"").trim()===nCislo
-                                           && Math.abs(r2(+x.spolu||0)-nSuma)>=0.02) : [];
-        if(kolizia.length===dupl.length && kolizia.length){
-          if(!confirm("⚠ Číslo „"+nCislo+"“ už má iný doklad s inou sumou.\n\n"
-            +kolizia.slice(0,3).map(x=>"• "+fmtDatum(x.datum)+" · "+eur(x.spolu)+" · "+(x.partner||"—")).join("\n")
-            +"\n• "+fmtDatum(obj.datum)+" · "+eur(nSuma)+" · tento doklad\n\n"
-            +"Nie je to duplicita, ale appka rozoznáva doklady podľa čísla — párovanie s bankou "
-            +"aj kontrolný výkaz by pracovali s prvým nájdeným, teda s cudzou sumou.\n\n"
-            +"Ak má doklad na papieri iné číslo, opravte ho. Ak dodávateľ naozaj posiela rovnaké "
-            +"číslo (zákaznícke ID), pridajte ho a v Ročnej kontrole ich dajte odlíšiť.\n\n"
-            +"Pridať doklad s týmto číslom?")) return false;
-        } else {
-          const d0=dupl[0];
-          if(!confirm("⚠ Možná duplicita!\n\nUž evidujete podobný výdavok:\n• "+(d0.partner||"—")+"\n• "+fmtDatum(d0.datum)+" · "+eur(d0.spolu)+(d0.cislo?"\n• č. "+d0.cislo:"")+"\n\nNaozaj chcete pridať tento výdavok?")) return false;
-        }
-      }
       obj.id = obj.id || ("v"+Date.now()+Math.random().toString(36).slice(2,7));
       // Pamäť partnerov sa musí aj čítať, nielen plniť — inak doklad od dávno
       // známeho dodávateľa ostane bez IČ DPH a vyplaví sa až v ročnej kontrole.
@@ -29151,6 +29130,49 @@ function najdiDuplicityVydavku(nov, ignorujId){
     return false;
   });
 }
+// Otázka na duplicitu. Vracia `true`, keď sa má pokračovať.
+//
+// 🔴 12. 9. 2026, hlásil Roman: „apka si nevšimne, že rovnakú faktúru za
+// nabíjanie už mám vo výdavkoch, a dovolí mi ju znovu. Len upozorní, že je
+// z iného mesiaca. Pri mailových preposielačkách hrozí dvojité zaradenie
+// do nákladov."
+//
+// Kontrola tam bola, ale stála ZA otázkou na mesiac — a tá pri preposlanom
+// staršom doklade vyskočí VŽDY. Kto ju zrušil, o duplicite sa nedozvedel
+// vôbec; kto ju odklikol, dostal druhé okno a to už je cvičenie v odklikávaní.
+// Odteraz sa pýta duplicita ako prvá: je to silnejší fakt a na rozdiel od
+// mesiaca znamená chybu v peniazoch.
+//
+// Text bol navyše v appke DVAKRÁT — raz v ručnom formulári aj s vetvou na
+// kolíziu čísel, raz v ceste z OCR iba s tou jednoduchou. Doklad prijatý
+// e-mailom teda dostával slabšie varovanie než ten istý doklad zadaný rukou.
+function potvrdDuplicituVydavku(obj, ignorujId){
+  const dupl=najdiDuplicityVydavku(obj, ignorujId);
+  if(!dupl.length) return true;
+  // Rovnaké číslo pri INEJ sume nie je duplicita — sú to dva rôzne doklady
+  // s jednou identitou. Pýtať sa „naozaj pridať?" je vtedy zavádzajúce:
+  // človek správne odpovie áno a nedozvie sa, že si tie doklady odteraz
+  // budú prepisovať úhrady. Presne takto vznikli štyri doklady „FXLY6UUY".
+  const nCislo=String(obj.cislo||"").trim();
+  const nSuma=r2(+obj.spolu||0);
+  const kolizia=nCislo ? dupl.filter(x=>String(x.cislo||"").trim()===nCislo
+                                     && Math.abs(r2(+x.spolu||0)-nSuma)>=0.02) : [];
+  if(kolizia.length===dupl.length && kolizia.length){
+    return confirm("⚠ Číslo „"+nCislo+"“ už má iný doklad s inou sumou.\n\n"
+      +kolizia.slice(0,3).map(x=>"• "+fmtDatum(x.datum)+" · "+eur(x.spolu)+" · "+(x.partner||"—")).join("\n")
+      +"\n• "+fmtDatum(obj.datum)+" · "+eur(nSuma)+" · tento doklad\n\n"
+      +"Nie je to duplicita, ale appka rozoznáva doklady podľa čísla — párovanie s bankou "
+      +"aj kontrolný výkaz by pracovali s prvým nájdeným, teda s cudzou sumou.\n\n"
+      +"Ak má doklad na papieri iné číslo, opravte ho. Ak dodávateľ naozaj posiela rovnaké "
+      +"číslo (zákaznícke ID), pridajte ho a v Ročnej kontrole ich dajte odlíšiť.\n\n"
+      +"Pridať doklad s týmto číslom?");
+  }
+  const d0=dupl[0];
+  return confirm("⚠ Tento doklad už evidujete!\n\n• "+(d0.partner||"—")+"\n• "
+    +fmtDatum(d0.datum)+" · "+eur(d0.spolu)+(d0.cislo?"\n• č. "+d0.cislo:"")
+    +"\n\nAk ho pridáte znova, ten istý náklad sa do daní započíta DVAKRÁT.\n\n"
+    +"Naozaj pridať ešte raz?");
+}
 // ═══ SPOLOČNÉ spracovanie jedného dokladu (súbor → R) — používa jednorazový AJ hromadný import ═══
 // Zabezpečuje rovnakú kvalitu: PDF text → OCR fallback pri skenoch → eKasa QR/UID → parse → register
 // `ignorujZse` = človek už povedal, že to výpis nabíjaní nie je, a chce to
@@ -30132,7 +30154,20 @@ function otvorOcrVysledok(R){
   _ocrR=R;
   const jeCloud=!localMode&&sb;
   const jePHM=R.druh==="PHM (tankovanie)"||R.litre>0;
+  // Duplicitu treba povedať HNEĎ, nie až pri ukladaní. Kto prejde celý
+  // formulár a až potom sa dozvie, že ten doklad už má, spravil prácu
+  // nazmar — a okno, ktoré príde po práci, sa odkliká ľahšie než okno,
+  // ktoré príde pred ňou.
+  let _dupl=[];
+  try{ _dupl=najdiDuplicityVydavku(ocrNaVydavok(R)); }
+  catch(e){ console.error("kontrola duplicity v náhľade:", e); }
+  const d0=_dupl[0];
   openModal("Skontrolujte údaje z dokladu", `
+    ${d0?`<div style="background:var(--sfc-warn);border-left:3px solid var(--warn);border-radius:0 9px 9px 0;padding:11px 13px;margin-bottom:14px;font-size:12.5px;line-height:1.6">
+      ⚠ <b>Tento doklad už evidujete.</b>
+      <div style="margin-top:5px">${esc(d0.partner||"—")} · ${fmtDatum(d0.datum)} · ${eur(d0.spolu)}${d0.cislo?" · č. "+esc(d0.cislo):""}</div>
+      <div style="margin-top:6px;color:var(--ink-soft);font-size:11.5px">Ak ho uložíte znova, ten istý náklad sa do daní započíta dvakrát. Zavrite okno, ak ste ho pridávali omylom.</div>
+    </div>`:""}
     <div style="background:var(--brand-lite);color:var(--brand-deep);font-size:12px;padding:9px 12px;border-radius:9px;margin-bottom:14px">
       ${R._efaktura
         ? `✅ Doklad obsahuje <b>e-faktúru${R._priloha?" ("+esc(R._priloha)+")":""}</b> — údaje sú načítané zo štruktúrovaných dát, nie z OCR. Sú presné.`
@@ -30317,14 +30352,12 @@ function otvorOcrVysledok(R){
     if(!obj.doklad && _ocrArchiv){ obj.doklad=_ocrArchiv; }
     _ocrArchiv=null;
     if(!firmaData.vydavky) firmaData.vydavky=[];
+    // Duplicita PRED mesiacom a tou istou funkciou ako v ručnom formulári.
+    // Doklad prijatý e-mailom je na duplicitu náchylnejší než ktorýkoľvek iný
+    // — preposlať sa dá koľkokrát chce —, takže tu nesmie mať slabšiu kontrolu.
+    if(!potvrdDuplicituVydavku(obj)) return false;
     // kontrola: doklad z iného mesiaca? (chytí OCR chybu v roku/dátume)
     if(!overMesiacDokladu(datum)) return false;
-    // kontrola duplicít — nahrali sme možno ten istý doklad dvakrát?
-    const dupl=najdiDuplicityVydavku(obj);
-    if(dupl.length){
-      const d0=dupl[0];
-      if(!confirm("⚠ Možná duplicita!\n\nUž evidujete podobný výdavok:\n• "+(d0.partner||"—")+"\n• "+fmtDatum(d0.datum)+" · "+eur(d0.spolu)+(d0.cislo?"\n• č. "+d0.cislo:"")+"\n\nNaozaj chcete pridať tento doklad ešte raz?")) return false;
-    }
     const vydId = "v"+Date.now()+Math.random().toString(36).slice(2,7);
     obj.id = vydId;
     firmaData.vydavky.push(obj);
