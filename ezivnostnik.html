@@ -1981,7 +1981,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.12-NN";  // Váš prehľad je jedna dlaždica s mesiacom aj rokom
+const APP_VERZIA = "2026.09.12-NO";  // Tachometer je v celých kilometroch
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -4426,11 +4426,26 @@ function optimalizujMesiac(month){
   // prepočítaj kontinuálny tachometer od reálneho počiatočného stavu
   const prvyPoc = vysledok.length ? (+vysledok[0].poc || +(firmaData.settings&&firmaData.settings.tachometer) || 0) : 0;
   let stav=prvyPoc;
-  vysledok.forEach(j=>{ if(stav>0){ j.poc=r2(stav); j.kon=r2(stav+(+j.km||0)); stav=j.kon; } });
+  vysledok.forEach(j=>{ if(stav>0){ j.poc=tachoCele(stav); j.kon=tachoCele(j.poc+(+j.km||0)); stav=j.kon; } });
   const novyKm=r2(vysledok.reduce((a,j)=>a+(+j.km||0),0));
   return {novy:vysledok, povodneKm, novyKm, rozdelenych:naRozdelenie.length, novychDni:novejazdy.length, ponechanych:ponechane.length};
 }
 
+// Tachometer je ODČÍTANIE Z PRÍSTROJA, nie výsledok výpočtu — a prístroj
+// ukazuje celé kilometre. Namerané km si desatinu držia (GPS ich naozaj
+// meria), stav tachometra nie.
+//
+// 🔴 10. 9. 2026, našlo sa v Romanovej knihe: prvá meraná jazda (17,23 km)
+// vniesla do reťaze desatiny a tie sa odvtedy ťahali ďalej — aj cez jazdy
+// importované z auta, ktoré hlásia celé kilometre. Vzniklo „30 799,23",
+// teda hodnota, ktorú auto nikdy neukázalo a nikto ju nemá ako overiť.
+// Nálepka namiesto údaja je horšia než chýbajúci údaj (kap. 16).
+//
+// Cena je, že riadok už nesedí na centy: 17,23 km, a pritom 30 782 → 30 799.
+// Vedomé rozhodnutie — stĺpec tachometra sa dá porovnať s autom, stĺpec km
+// ostáva meraním. Pravidlo je tu JEDNO, hoci miesta zápisu sú tri
+// (ukončenie merania, sprievodca rozdelenia, doplnenie reťaze).
+function tachoCele(x){ return Math.round(+x||0); }
 // ═══════════════════════════════════════════════════════════════
 //  TACHOMETER — spojitosť naprieč celou knihou
 //
@@ -4471,7 +4486,7 @@ function prepocitajTachometer(odDatumu, dryRun){
   const odKm=stav; let doplnenych=0, posunutych=0;
   for(; i<jazdy.length; i++){
     const j=jazdy[i], km=+j.km||0;
-    const novyPoc=r2(stav), novyKon=r2(stav+km);
+    const novyPoc=tachoCele(stav), novyKon=tachoCele(novyPoc+km);
     const maloTacho = (+j.poc>0 || +j.kon>0);
     if(j.poc!==novyPoc || j.kon!==novyKon){
       // rozlíšenie je podstatné: DOPLNENIE prázdneho poľa je bezpečné,
@@ -16793,8 +16808,8 @@ function jazdaDokonci(obj){
   return obj;
 }
 function jazdaDoplnTacho(obj, pocStav){
-  const p=+pocStav||0;
-  if(p>0){ obj.poc=r2(p); obj.kon=r2(p+(+obj.km||0)); }
+  const p=tachoCele(pocStav);
+  if(p>0){ obj.poc=p; obj.kon=tachoCele(p+(+obj.km||0)); }
   return obj;
 }
 function jazdaZaver(){
