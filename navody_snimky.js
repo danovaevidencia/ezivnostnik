@@ -714,7 +714,7 @@ window.NAVODY_SNIMKY = {
  },
  "kalendar-fs-1": {
   "m": {
-   "subor": "navody/kalendar-fs-1.m.ecf38e3c.webp",
+   "subor": "navody/kalendar-fs-1.m.f5771233.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -725,7 +725,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/kalendar-fs-1.d.6ab39f1b.webp",
+   "subor": "navody/kalendar-fs-1.d.3038646b.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -738,7 +738,7 @@ window.NAVODY_SNIMKY = {
  },
  "kalendar-terminy-1": {
   "m": {
-   "subor": "navody/kalendar-terminy-1.m.02527fc6.webp",
+   "subor": "navody/kalendar-terminy-1.m.4cf6a9ef.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -749,7 +749,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/kalendar-terminy-1.d.6ab39f1b.webp",
+   "subor": "navody/kalendar-terminy-1.d.3038646b.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -762,7 +762,7 @@ window.NAVODY_SNIMKY = {
  },
  "kalendar-terminy-2": {
   "m": {
-   "subor": "navody/kalendar-terminy-2.m.4eb9f82f.webp",
+   "subor": "navody/kalendar-terminy-2.m.ede27b8c.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -773,7 +773,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/kalendar-terminy-2.d.b926ddcf.webp",
+   "subor": "navody/kalendar-terminy-2.d.365403a0.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -786,7 +786,7 @@ window.NAVODY_SNIMKY = {
  },
  "kalendar-udalost-1": {
   "m": {
-   "subor": "navody/kalendar-udalost-1.m.41bc1732.webp",
+   "subor": "navody/kalendar-udalost-1.m.0c3c34e5.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -797,7 +797,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/kalendar-udalost-1.d.6ab39f1b.webp",
+   "subor": "navody/kalendar-udalost-1.d.3038646b.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -834,7 +834,7 @@ window.NAVODY_SNIMKY = {
  },
  "kalendar-udalost-3": {
   "m": {
-   "subor": "navody/kalendar-udalost-3.m.43bef144.webp",
+   "subor": "navody/kalendar-udalost-3.m.e1175adf.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -845,7 +845,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/kalendar-udalost-3.d.8e66bd31.webp",
+   "subor": "navody/kalendar-udalost-3.d.d091fb03.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -858,7 +858,7 @@ window.NAVODY_SNIMKY = {
  },
  "kalendar-udalost-4": {
   "m": {
-   "subor": "navody/kalendar-udalost-4.m.6197d976.webp",
+   "subor": "navody/kalendar-udalost-4.m.fcb419d8.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -869,7 +869,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/kalendar-udalost-4.d.8e66bd31.webp",
+   "subor": "navody/kalendar-udalost-4.d.d091fb03.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -965,7 +965,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/superdash-odberatelia-1.d.b400755b.webp",
+   "subor": "navody/superdash-odberatelia-1.d.0931cbb4.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1013,7 +1013,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/superdash-rok-1.d.9823c1ce.webp",
+   "subor": "navody/superdash-rok-1.d.f5524e83.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1133,7 +1133,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/superdash-trend-2.d.f6c4197c.webp",
+   "subor": "navody/superdash-trend-2.d.4fbe71f0.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
