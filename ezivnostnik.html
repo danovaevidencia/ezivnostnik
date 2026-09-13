@@ -12556,30 +12556,57 @@ function vydavokFormInit(noveZOcr){
   if(typeof mPodielBox==="function") mPodielBox();
 }
 
-function vydavokDoplnkovePolia(obj){
-  const kat=val("m_kategoria"); if(kat) obj.kategoria=kat;
+// ── VÝDAVOK Z FORMULÁRA — JEDEN ČITATEĽ ────────────────────────────────────
+// Celý doklad tak, ako ho formulár práve ukazuje. Do 13. 9. 2026 si ho skladali
+// dve funkcie — editor inline a okno dokladu z OCR cez `vydavokDoplnkovePolia` —
+// a pole doplnené len do jednej v druhej ticho chýbalo: percento osobného
+// použitia, rok povinnosti, tuzemský prenos; rozpis sadzieb a zaokrúhlenie
+// okno dokladu nečítalo vôbec. Komentáre pri čitateľoch nižšie opisujú tú dobu.
+// Teraz je čitateľ jeden a ukladá ním jedine `ulozVydavokZFormulara`.
+//
+// Vracia null, keď z formulára doklad nevznikne (rozpis bez sadzby) — hlášku
+// dá sám.
+function vydavokZFormulara(datum){
+  const cislo=(id)=>parseFloat(String(val(id)).replace(",","."))||0;
+  const obj={druh:val("m_druh"), partner:val("m_partner"), cislo:val("m_cislo")||"", variabilny:val("m_vs")||"",
+    popis:val("m_popis"), datum:datum, mesiac:datum.slice(0,7),
+    vystavenie:val("m_vystavenie")||"", splatnost:val("m_splatnostVyd")||"", kategoria:val("m_kategoria")||"sluzby",
+    opravujeDoklad:val("m_opravuje")||"",
+    // Kľúče periódy sú `mes`/`stvrt`/`polrok`/`rok` (viď PERIODY). Záloha znela
+    // „mesacne", čo v tej tabuľke nie je — taký doklad by z prehľadu opakovaných
+    // ticho vypadol, lebo sa filtruje cez `PERIODY[x.opakovanie.perioda]`.
+    opakovanie: chk("m_opakovany") ? {perioda: val("m_perioda")||"mes"} : null,
+    // väzba na vozidlo — kvôli nej sa doklad dostane do knihy jázd a odpisov
+    autoDoklad: chk("m_autoDoklad"), autoDruh: chk("m_autoDoklad") ? (val("m_autoDruh")||"ine") : "",
+    oddielRucne: val("m_oddielRucne")||"",
+    zaokruhlenie: zistiZaokruhlenie(cislo("m_bez"), cislo("m_dph"), cislo("m_spolu")),
+    zahranicny:chk("m_zahranicny"), kodKrajiny:val("m_kodKrajiny")||"", dodavatelIco:val("m_dodIco")||"", dodavatelIcDph:val("m_dodIcDph")||"",
+    iban:String(val("m_ibanVyd")||"").replace(/\s/g,"").toUpperCase()};
+  if(chk("m_viacSadzieb")){
+    const rozpis=mZbierRozpis();
+    if(!rozpis.length){ alert("Zadajte aspoň jednu sadzbu v rozpise."); return null; }
+    obj.rozpis=rozpis; normalizujRozpis(obj);
+  } else {
+    obj.bez=parseFloat(val("m_bez"))||0; obj.dph=parseFloat(val("m_dph"))||0; obj.spolu=parseFloat(val("m_spolu"))||r2(obj.bez+obj.dph);
+  }
+  // litre (PHM) — idú aj do prehľadu tankovaní
+  const litre=parseFloat(val("m_litre"))||0;
+  if(litre>0) obj.litre=litre;
+  // Čitatelia, ktorí potrebujú hotový objekt (kategóriu, väzbu na auto, dátum).
   citajZaRok(obj);
-  const vyst=val("m_vystavenie"); if(vyst) obj.vystavenie=vyst;
-  const spl=val("m_splatnostVyd"); if(spl) obj.splatnost=spl;
-  const ib=String(val("m_ibanVyd")||"").replace(/\s/g,"").toUpperCase(); if(ib) obj.iban=ib;
-  const odd=val("m_oddielRucne"); if(odd) obj.oddielRucne=odd;
   citajSamozdanenie(obj);
-  const opr=val("m_opravuje"); if(opr) obj.opravujeDoklad=opr;
-  // väzba na vozidlo — kvôli nej sa doklad dostane do knihy jázd a odpisov
-  const ad=document.getElementById("m_autoDoklad");
-  if(ad){ obj.autoDoklad=ad.checked; if(!ad.checked) delete obj.autoDoklad; }
-  const adr=val("m_autoDruh"); if(adr && obj.autoDoklad) obj.autoDruh=adr;
-  // opakovaný doklad
-  const op=document.getElementById("m_opakovany");
-  // Kľúče periódy sú `mes`/`stvrt`/`polrok`/`rok` (viď PERIODY). Záloha znela
-  // „mesacne", čo v tej tabuľke nie je — taký doklad by z prehľadu opakovaných
-  // ticho vypadol, lebo sa filtruje cez `PERIODY[x.opakovanie.perioda]`.
-  if(op && op.checked){ obj.opakovanie={perioda:val("m_perioda")||"mes"}; }
   citajPodnikPct(obj);
   citajUcetFS(obj);
   citajOsobitnu(obj);
   return obj;
 }
+// Polia formulára, ktoré sa pri prázdnej hodnote do dokladu NEZAPISUJÚ. Pri
+// úprave ich treba zo starého dokladu zmazať: `Object.assign` chýbajúci kľúč
+// nezmaže a stará hodnota by ticho ostala — tak po úprave ostával rozpis sadzieb,
+// litre aj tuzemský prenos. `ucetFS` a `osobitna68d` tu zámerne nie sú: ich
+// čitateľ pri nenačítanom registri nevie, a „neviem" nesmie zmazať, čo sa
+// zistilo skôr.
+const VYDAVOK_POLIA_BEZ_PRAZDNEJ=["rozpis","viacSadzieb","litre","podnikPct","zaRok","samozdanenieTyp"];
 
 // ── PERCENTO OSOBNÉHO POUŽITIA — JEDEN ČITATEĽ ─────────────────────────────
 // Formulár výdavku je síce jeden, ale ČÍTAJÚ ho dve rôzne cesty: editor si
@@ -12611,10 +12638,18 @@ function vydavokDoplnkovePolia(obj){
 // slovenského dodávateľa, § 69 ods. 12) a zapísal `samozdanenieTyp`, ale
 // formulár výdavku ten údaj nemal kam uložiť. Doklad s DPH 0 potom
 // `dphOddielVydavok` zaradil do „X" a z kontrolného výkazu (B.1) aj z priznania
-// (samozdanenie na výstupe aj odpočet) ticho vypadol. Príznak nesie skryté pole
-// formulára, takže ho uloží import z dokladu aj editor.
+// (samozdanenie na výstupe aj odpočet) ticho vypadol.
+//
+// Od 13. 9. 2026 (ROZHODNUTIA č. 18) je tuzemský prenos viditeľná voľba
+// `m_tuzemskyPrenos` — dá sa zaškrtnúť aj pri doklade zadanom rukou a zrušiť,
+// keď ho parser označil omylom. Skryté pole nesie už len iné druhy samozdanenia,
+// ktoré prišli s dokladom (služba zo zahraničia z e-faktúry). Pri zahraničnom
+// doklade voľba neplatí — § 69 ods. 12 je prenos od slovenského dodávateľa.
+// Ten istý čitateľ počíta aj náhľad oddielu (`mAktualizujOddiel`).
 function citajSamozdanenie(obj){
-  const t=String(val("m_samozdanenieTyp")||"").trim();
+  let t=String(val("m_samozdanenieTyp")||"").trim();
+  if(t==="tuzemsky") t="";
+  if(chk("m_tuzemskyPrenos") && !chk("m_zahranicny")) t="tuzemsky";
   if(SAMOZD_DRUHY[t]) obj.samozdanenieTyp=t; else delete obj.samozdanenieTyp;
   return obj;
 }
@@ -12700,9 +12735,10 @@ function vydavokFormHtml(x, nova, idx){
   // 695 px v obsahu modálu, teda 109 px pod ohybom a za ôsmimi poľami, z ktorých
   // štyri vypĺňajú samy. Skratka umiestnená za prácou, ktorú má ušetriť, nie je
   // skratka; Roman ich v appke jednoducho nikdy nevidel.
-  // Skryté `m_samozdanenieTyp`: prenesenie daňovej povinnosti nevyberá človek,
-  // nesie ho doklad (e-faktúra). Bez poľa by ho uloženie zahodilo (citajSamozdanenie).
-  return `    ${_uhrHtml}${nova?vzoryHtml():""}<input type="hidden" id="m_samozdanenieTyp" value="${esc(x.samozdanenieTyp||"")}"><div class="mfield"><label>Druh dokladu</label><select id="m_druh" onchange="mDruhZmeneny()"><option ${x.druh==="Došlá faktúra"?"selected":""}>Došlá faktúra</option><option ${x.druh==="Bloček"?"selected":""}>Bloček</option><option ${x.druh==="PHM (tankovanie)"?"selected":""}>PHM (tankovanie)</option><option ${x.druh==="Interný doklad"?"selected":""}>Interný doklad</option></select></div>
+  // Skryté `m_samozdanenieTyp` nesie druh samozdanenia, ktorý prišiel s dokladom
+  // (e-faktúra). Tuzemský prenos v ňom nie je — ten je viditeľná voľba
+  // `m_tuzemskyPrenos` (citajSamozdanenie).
+  return `    ${_uhrHtml}${nova?vzoryHtml():""}<input type="hidden" id="m_samozdanenieTyp" value="${esc(x.samozdanenieTyp==="tuzemsky"?"":(x.samozdanenieTyp||""))}"><div class="mfield"><label>Druh dokladu</label><select id="m_druh" onchange="mDruhZmeneny()"><option ${x.druh==="Došlá faktúra"?"selected":""}>Došlá faktúra</option><option ${x.druh==="Bloček"?"selected":""}>Bloček</option><option ${x.druh==="PHM (tankovanie)"?"selected":""}>PHM (tankovanie)</option><option ${x.druh==="Interný doklad"?"selected":""}>Interný doklad</option></select></div>
     <div class="mfield" style="position:relative"><label>Partner</label>
       <input id="m_partner" value="${esc(x.partner)}" autocomplete="off" oninput="feHladajFirmu(this.value,'m_partner')" placeholder="Začnite písať názov alebo IČO dodávateľa…">
       <div id="feNasepP" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:30;background:var(--paper);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px -8px rgba(19,28,43,.25);max-height:240px;overflow-y:auto;margin-top:2px"></div>
@@ -12789,12 +12825,18 @@ function vydavokFormHtml(x, nova, idx){
     <div style="background:var(--bg);border-radius:9px;padding:11px 13px;margin-bottom:4px">
       <label style="display:flex;align-items:center;gap:9px;cursor:pointer;font-size:13.5px">
         <input type="checkbox" id="m_zahranicny" ${x.zahranicny?"checked":""}
-          onchange="const b=document.getElementById('m_zahrBox'); if(b) b.style.display=this.checked?'block':'none'; mAktualizujOddiel()">
+          onchange="const p=document.getElementById('m_prenosBox'); if(p) p.style.display=this.checked?'none':'block'; const b=document.getElementById('m_zahrBox'); if(b) b.style.display=this.checked?'block':'none'; mAktualizujOddiel()">
         <b>Zahraničný doklad</b> (samozdanenie / reverse charge)</label>
       <div id="m_zahrBox" style="display:${x.zahranicny?'block':'none'};margin-top:10px">
         <div class="csub" style="margin-bottom:8px">Pri službe zo zahraničia bez slovenskej DPH sa uplatní <b>samozdanenie (reverse charge)</b> — appka dopočíta 23% DPH do výstupu aj odpočtu.</div>
         <div class="mfield" style="margin-bottom:0"><label>Kód krajiny</label><input id="m_kodKrajiny" value="${esc(x.kodKrajiny||'')}" placeholder="US, DE, IE…"></div>
       </div>
+    </div>
+    <div id="m_prenosBox" style="display:${x.zahranicny?'none':'block'};background:var(--bg);border-radius:9px;padding:11px 13px;margin-bottom:4px">
+      <label style="display:flex;align-items:center;gap:9px;cursor:pointer;font-size:13.5px">
+        <input type="checkbox" id="m_tuzemskyPrenos" ${x.samozdanenieTyp==="tuzemsky"?"checked":""} onchange="mAktualizujOddiel()">
+        <b>Tuzemský prenos daňovej povinnosti</b> (§ 69 ods. 12)</label>
+      <div class="ocr-hint" style="margin-top:5px">Slovenský dodávateľ faktúruje bez DPH a daň platíte vy — stavebné práce, kovový odpad a podobne. Na faktúre býva veta „prenesenie daňovej povinnosti“. Doklad pôjde do kontrolného výkazu (B.1) a daň sa dopočíta do výstupu aj odpočtu.</div>
     </div>
     <div style="background:var(--bg);border-radius:9px;padding:11px 13px;margin-bottom:10px">
       <label style="display:flex;align-items:center;gap:9px;cursor:pointer;font-size:13.5px">
@@ -12842,6 +12884,13 @@ function vydavokFormHtml(x, nova, idx){
     ${!nova?(x.zaradenyMajetokId?`<div style="background:var(--sfc-pos);color:var(--pos);font-size:12.5px;padding:9px 12px;border-radius:9px">✓ Tento výdavok je zaradený do majetku.</div>`:`<button type="button" class="aabtn" style="width:100%;justify-content:center" onclick="closeModal();vydavokDoMajetku(${idx})">⌂ Zaradiť do majetku</button>`):''}`;
 }
 
+// Bloček = zjednodušená faktúra z registračnej pokladnice. Appka ho pozná podľa
+// druhu dokladu (filter „Bločky", oddiel B.3.1) a podľa eKasy: doklad načítaný
+// z QR kódu eKasy je pokladničný doklad aj vtedy, keď mu človek zmenil druh
+// napríklad na tankovanie.
+function vydavokJeBlocek(x){
+  return !!x && (String(x.druh||"").trim()==="Bloček" || !!x.ekasaId || x.zdroj==="ekasa");
+}
 // ── IČ DPH DODÁVATEĽA: KEDY HO DOKLAD NAOZAJ POTREBUJE ─────────────────────
 // Jedno pravidlo pre ručný formulár aj doklad z OCR. Do 13. 9. 2026 stálo
 // v appke dvakrát a obe kópie žiadali IČ DPH pri KAŽDEJ došlej faktúre: faktúra
@@ -12853,9 +12902,14 @@ function vydavokFormHtml(x, nova, idx){
 // kontrolného výkazu do oddielu, ktorý IČ DPH dodávateľa uvádza — napríklad
 // tuzemský prenos (§ 69 ods. 12) má DPH 0 a patrí do B.1. Faktúra bez DPH, ktorá
 // do výkazu nevstupuje (oddiel „X" podľa `dphOddielVydavok`), ho nepotrebuje.
+//
+// Roman 13. 9. 2026 (ROZHODNUTIA č. 16): „vždy, keď doklad obsahuje DPH a nie
+// je to bloček". Platiteľ/neplatiteľ o tom nerozhoduje a to isté pravidlo používa
+// mäkká kontrola `dphBezIc` aj ročná kontrola — dovtedy sa rozchádzali práve
+// v bločkoch a v neplatiteľovi.
 function vydavokPotrebujeIcDph(x){
   if(!x || x.zahranicny) return null;
-  if((+x.dph||0)>0) return {odpocet:true};
+  if((+x.dph||0)>0) return vydavokJeBlocek(x) ? null : {odpocet:true};
   if(String(x.druh||"")!=="Došlá faktúra") return null;
   const odd=dphOddielVydavok(x);
   return odd==="X" ? null : {oddiel:odd};
@@ -12906,112 +12960,7 @@ function editVydavok(idx){
   if(nova && !skontrolujLimit("doklady","Vo vyššom pláne máte doklady bez obmedzenia.")) return;
   const x=nova?{druh:"Došlá faktúra",partner:"",popis:"",datum:new Date().toISOString().slice(0,10),bez:"",dph:"",spolu:""}:Object.assign({},d.vydavky[idx]);
   openModal(nova?"Nový výdavok":"Upraviť výdavok", vydavokFormHtml(x, nova, idx),
-  ()=>{const datum=val("m_datum"); if(!datum){ alert("Doklad musí mať dátum, inak sa nezapočíta do daňovej evidencie."); return false; }
-    // zmena v období, za ktoré už bol vytvorený výkaz → upozorni
-    if(!strazUzavierku(datum, nova?"Pridanie tohto dokladu":"Úprava tohto dokladu")) return false;
-    // pri presune dokladu treba strážiť OBE obdobia — pôvodné aj cieľové
-    if(!nova && x.datum && !strazUzavierku(x.datum, "Presun dokladu z tohto obdobia")) return false;
-    if(!overDopadNaPodanie(datum, nova?"Pridanie tohto dokladu":"Úprava tohto dokladu")) return false;
-    if(!nova && x.datum && String(x.datum).slice(0,7)!==String(datum).slice(0,7)
-       && !overDopadNaPodanie(x.datum, "Presun dokladu z tohto obdobia")) return false;
-    const viacSadzieb=chk("m_viacSadzieb");
-    const obj={druh:val("m_druh"),partner:val("m_partner"),cislo:val("m_cislo")||"",variabilny:val("m_vs")||"",popis:val("m_popis"),datum:datum,mesiac:datum.slice(0,7),
-      vystavenie:val("m_vystavenie")||"", splatnost:val("m_splatnostVyd")||"", kategoria:val("m_kategoria")||"sluzby",
-      opravujeDoklad:val("m_opravuje")||"",
-      opakovanie: chk("m_opakovany") ? {perioda: val("m_perioda")||"mes"} : null,
-      autoDoklad: chk("m_autoDoklad"), autoDruh: chk("m_autoDoklad") ? (val("m_autoDruh")||"ine") : "",
-      oddielRucne: val("m_oddielRucne")||"",
-      zaokruhlenie: zistiZaokruhlenie(parseFloat(String(val("m_bez")).replace(",","."))||0,
-                                      parseFloat(String(val("m_dph")).replace(",","."))||0,
-                                      parseFloat(String(val("m_spolu")).replace(",","."))||0),
-      zahranicny:chk("m_zahranicny"), kodKrajiny:val("m_kodKrajiny")||"", dodavatelIco:val("m_dodIco")||"", dodavatelIcDph:val("m_dodIcDph")||"",
-      iban:String(val("m_ibanVyd")||"").replace(/\s/g,"").toUpperCase()};
-    if(viacSadzieb){
-      const rozpis=mZbierRozpis();
-      if(!rozpis.length){ alert("Zadajte aspoň jednu sadzbu v rozpise."); return false; }
-      obj.rozpis=rozpis; normalizujRozpis(obj);
-    } else {
-      obj.bez=parseFloat(val("m_bez"))||0; obj.dph=parseFloat(val("m_dph"))||0; obj.spolu=parseFloat(val("m_spolu"))||r2(obj.bez+obj.dph);
-      delete obj.rozpis; delete obj.viacSadzieb;
-      // rovnaká kontrola ako pri doklade z fotky — tu chytá preklepy
-      const nez=dokladNekonzistentny(obj.bez, obj.dph, obj.spolu);
-      if(nez){
-        const opravit=confirm(
-          "Sumy si odporujú:\n\n"+
-          "  základ "+eur(obj.bez)+" + DPH "+eur(obj.dph)+" = "+eur(nez.sucet)+"\n"+
-          "  ale Spolu je "+eur(obj.spolu)+"\n\n"+
-          "Prepočítať základ a DPH zo sumy Spolu pri sadzbe "+Math.round(nez.sadzba*100)+" %?\n\n"+
-          "  základ "+eur(nez.navrhBez)+" + DPH "+eur(nez.navrhDph)+"\n\n"+
-          "OK = opraviť · Zrušiť = opravím ručne");
-        if(opravit){
-          const eb=document.getElementById("m_bez"), ed=document.getElementById("m_dph");
-          if(eb) eb.value=nez.navrhBez;
-          if(ed) ed.value=nez.navrhDph;
-          if(typeof mAktualizujOddiel==="function") mAktualizujOddiel();
-        }
-        return false;
-      }
-    }
-    // IČ DPH dodávateľa — to isté pravidlo ako pri doklade z OCR
-    if(!vydavokOverIcDph(obj)) return false;
-    if(!vydavokOverIban(obj)) return false;
-    if(!d.vydavky)d.vydavky=[];
-    // litre (PHM) — ulož a synchronizuj s prehľadom tankovaní
-    const litreVal=parseFloat(val("m_litre"))||0;
-    if(litreVal>0) obj.litre=litreVal; else delete obj.litre;
-    // Doplnenie z pamäte partnerov musí bežať PRED kontrolou — inak by appka
-    // pýtala IČ DPH, ktoré o riadok nižšie sama doplní.
-    if(doplnZPartnera(obj)) zapisAutomat("icdph", [dokladKluc(obj)]);
-    // Pravidlá nad jedným dokladom — tie isté, aké o rok vyhodnotí ročná
-    // kontrola. Beží aj pri úprave: chyba sa dá do dokladu vniesť aj neskôr,
-    // a človek, ktorý ho práve otvoril, je jediný, kto vie, čo na ňom bolo.
-    if(!dokladKontrolaPriZapise(obj, "vydavok")) return false;
-    // kontrola duplicít (len pri novom výdavku; pri úprave ignoruj seba)
-    if(nova){
-      // Duplicita sa pýta PRVÁ — je to silnejší fakt než mesiac a na rozdiel
-      // od neho znamená chybu v peniazoch.
-      if(!potvrdDuplicituVydavku(obj)) return false;
-      // kontrola: doklad z iného mesiaca? (chytí OCR/preklep v dátume)
-      if(!overMesiacDokladu(obj.datum)) return false;
-      obj.id = obj.id || ("v"+Date.now()+Math.random().toString(36).slice(2,7));
-      // Pamäť partnerov sa musí aj čítať, nielen plniť — inak doklad od dávno
-      // známeho dodávateľa ostane bez IČ DPH a vyplaví sa až v ročnej kontrole.
-      // Dopĺňa výhradne prázdne polia, takže ručne zadané prepísať nemôže.
-      citajPodnikPct(obj);
-      citajUcetFS(obj);
-      citajOsobitnu(obj);
-      citajZaRok(obj);
-      citajSamozdanenie(obj);
-      d.vydavky.push(obj);
-      zapamatajPartnera(obj);
-    } else {
-      if(!d.vydavky[idx].id) d.vydavky[idx].id="v"+Date.now()+Math.random().toString(36).slice(2,7);
-      obj.id=d.vydavky[idx].id;
-      citajPodnikPct(obj);
-      citajUcetFS(obj);
-      citajOsobitnu(obj);
-      citajZaRok(obj);
-      citajSamozdanenie(obj);
-      if(obj.podnikPct==null) delete d.vydavky[idx].podnikPct;   // Object.assign staré pole neodstráni
-      // To isté pre rok povinnosti: po prepnutí na kategóriu, ktorá ho nemá,
-      // by starý rok v doklade ostal a ďalej priraďoval platbu inému roku.
-      if(obj.zaRok==null) delete d.vydavky[idx].zaRok;
-      d.vydavky[idx]=Object.assign(d.vydavky[idx],obj);
-      zapamatajPartnera(d.vydavky[idx]);
-    }
-    // synchronizuj tankovanie prepojené s týmto výdavkom
-    if(!d.tankovania) d.tankovania=[];
-    const tIdx=d.tankovania.findIndex(t=>t.vydavokId===obj.id);
-    if(litreVal>0){
-      const tankObj={vydavokId:obj.id, datum:obj.datum, litre:litreVal, suma:obj.spolu||0, stanica:obj.partner||"", mesiac:obj.datum.slice(0,7)};
-      if(tIdx>=0){ d.tankovania[tIdx]=Object.assign(d.tankovania[tIdx],tankObj); }
-      else { tankObj.id="t"+Date.now()+Math.random().toString(36).slice(2,7); d.tankovania.push(tankObj); }
-    } else if(tIdx>=0){ d.tankovania.splice(tIdx,1); }  // litre zmazané → zmaž tankovanie
-    poZmene();
-    // Nový doklad si hľadá svoju platbu (kap. 47.7). Až po `poZmene`, aby
-    // automatika videla doklad, ktorý práve vznikol.
-    if(nova) oznamAutoUhradu(autoParujDoklad("vydavok", dokladKluc(obj)), "vydavok", dokladKluc(obj));
-    obnovPoEditacii("vydavky");},
+  ()=>ulozVydavokZFormulara(idx, null),
   nova?null:()=>{
     const vyd=d.vydavky[idx];
     // zmaž aj prepojené tankovanie (PHM doklad vytvára výdavok + tankovanie)
@@ -13024,6 +12973,197 @@ function editVydavok(idx){
   vydavokFormInit();
   // inicializuj rozpis editor
   setTimeout(()=>{ mRozpisData = maRozpis(x) ? x.rozpis.map(r=>({sadzba:+r.sadzba,bez:+r.bez,dph:+r.dph})) : [{sadzba:23,bez:0,dph:0}]; if(maRozpis(x)) mVykresliRozpis(); }, 30);
+}
+// ═══ ULOŽENIE VÝDAVKU Z FORMULÁRA — JEDNA CESTA ════════════════════════════
+// Editor (`editVydavok`) aj okno dokladu z fotky, súboru, e-mailu a e-faktúry
+// (`otvorOcrVysledok`) ukladajú touto funkciou. Do 13. 9. 2026 mala každá svoju
+// a hoci volali tie isté kontroly, rozchádzali sa v tom, čo z formulára
+// prečítali, a v poradí otázok (dev/opravy/vydavky-cesta.md, ROZHODNUTIA č. 19).
+//
+// `idx` = index upravovaného výdavku, null pri novom. `R` = výsledok
+// rozpoznania dokladu, len z okna dokladu: nesie zdroj, eKasa ID a to, že
+// k dokladu patrí originál (`_ocrFile` / `_ocrArchiv`).
+//
+// Poradie:
+//   1. dátum, uzávierka, dopad na podané výkazy
+//   2. doklad z formulára, sumy sedia samy so sebou, cena za liter
+//   3. doplnenie z pamäte partnerov — PRED kontrolou IČ DPH
+//   4. IČ DPH dodávateľa
+//   5. (miesto pre kontrolu IBAN dodávateľa — viď nižšie)
+//   6. pravidlá nad dokladom (`PRAVIDLA_DOKLADU`)
+//   7. nový doklad: duplicita, potom mesiac (kap. 101.3)
+//   8. originál do úložiska — AŽ PO všetkých otázkach
+//   9. zápis, tankovanie, poZmene, párovanie
+//
+// Je async kvôli nahratiu originálu, ale `await` sa vykoná len vtedy, keď
+// originál naozaj je — editor tak ukladá synchrónne ako predtým.
+async function ulozVydavokZFormulara(idx, R){
+  const d=firmaData; const nova=idx==null;
+  const x=nova?null:d.vydavky[idx];   // upravovaný doklad
+  const datum=val("m_datum");
+  if(!datum){ alert("Doklad musí mať dátum — bez neho sa nezapočíta do daňovej evidencie. Doplňte ho, prosím."); return false; }
+  // zmena v období, za ktoré už bol vytvorený výkaz → upozorni
+  if(!strazUzavierku(datum, nova?"Pridanie tohto dokladu":"Úprava tohto dokladu")) return false;
+  // pri presune dokladu treba strážiť OBE obdobia — pôvodné aj cieľové
+  if(!nova && x.datum && !strazUzavierku(x.datum, "Presun dokladu z tohto obdobia")) return false;
+  if(!overDopadNaPodanie(datum, nova?"Pridanie tohto dokladu":"Úprava tohto dokladu")) return false;
+  if(!nova && x.datum && String(x.datum).slice(0,7)!==String(datum).slice(0,7)
+     && !overDopadNaPodanie(x.datum, "Presun dokladu z tohto obdobia")) return false;
+
+  const obj=vydavokZFormulara(datum);
+  if(!obj) return false;
+
+  // ── Doklad musí sedieť sám so sebou ──
+  // OCR sa pri fotke bločku mýli a mýliť sa bude vždy; v ručnom formulári to
+  // chytá preklepy. Do daňovej evidencie by sa inak dostalo číslo, ktoré na
+  // papieri neexistuje. Reálny prípad: 9,36 + 2,15 = 11,51 pri sume 71,51.
+  if(!obj.rozpis){
+    const nez=dokladNekonzistentny(obj.bez, obj.dph, obj.spolu);
+    if(nez){
+      const opravit=confirm(
+        "Sumy si odporujú:\n\n"+
+        "  základ "+eur(obj.bez)+" + DPH "+eur(obj.dph)+" = "+eur(nez.sucet)+"\n"+
+        "  ale Spolu je "+eur(obj.spolu)+"\n\n"+
+        (R?"Býva to chyba pri čítaní dokladu. ":"")+
+        "Prepočítať základ a DPH zo sumy Spolu pri sadzbe "+Math.round(nez.sadzba*100)+" %?\n\n"+
+        "  základ "+eur(nez.navrhBez)+" + DPH "+eur(nez.navrhDph)+"\n\n"+
+        "OK = opraviť · Zrušiť = opravím ručne");
+      if(opravit){
+        const eb=document.getElementById("m_bez"), ed=document.getElementById("m_dph");
+        if(eb) eb.value=nez.navrhBez;
+        if(ed) ed.value=nez.navrhDph;
+        if(typeof mAktualizujOddiel==="function") mAktualizujOddiel();
+      }
+      // v oboch prípadoch späť do formulára, nech človek vidí, s akými číslami
+      // doklad naozaj uloží
+      return false;
+    }
+  }
+  // ── Litre: cena za liter musí byť v rozumnom rozsahu ──
+  // `mKontrolaLitre` to ukazuje pri písaní, ale pri hodnotách predvyplnených
+  // z OCR sa nespustí — do poľa nikto nepíše. Litre idú do knihy jázd.
+  if(obj.litre>0 && obj.spolu>0){
+    const cenaZaLiter=obj.spolu/obj.litre;
+    if((cenaZaLiter>2.5 || cenaZaLiter<0.8)
+       && !confirm("Cena "+cenaZaLiter.toFixed(2)+" €/l je nezvyčajná.\n\n"+
+                   "Pri sume "+eur(obj.spolu)+" a "+obj.litre+" l to vyzerá na chybu v litroch.\n"+
+                   "Litre idú do knihy jázd a do spotreby, takže chyba sa prenesie ďalej.\n\n"+
+                   "Naozaj uložiť s týmito litrami?")) return false;
+  }
+  if(R){
+    // pôvod dokladu — prepísanie na „ocr" by zahladilo, že prišiel ako e-faktúra
+    Object.assign(obj, {zdroj:R.ekasaId?"ekasa":(R.zdroj||"ocr")});
+    if(R.ekasaId){ obj.ekasaId=R.ekasaId; obj.cislo=obj.cislo||R.ekasaId; }
+  }
+
+  // Pamäť partnerov sa musí aj čítať, nielen plniť — inak doklad od dávno
+  // známeho dodávateľa ostane bez IČ DPH a vyplaví sa až v ročnej kontrole.
+  // Dopĺňa výhradne prázdne polia. Stojí PRED kontrolou IČ DPH: v editore bola
+  // do 13. 9. 2026 za ňou (appka pýtala IČ DPH, ktoré o riadok nižšie sama
+  // doplnila) a okno dokladu ju nevolalo vôbec. Do denníka automatiky sa
+  // zapíše až uložený doklad — zrušené uloženie nemá čo hlásiť.
+  const doplnene=doplnZPartnera(obj);
+  if(!vydavokOverIcDph(obj, R ? "Doplňte ho z dokladu — nájdete ho aj v sekcii „Čo appka prečítala z dokladu\"." : "")) return false;
+  // IBAN dodávateľa (ROZHODNUTIA č. 13): za IČ DPH, pred pravidlami nad
+  // dokladom a pred nahratím originálu. Platí tak pre editor aj okno dokladu
+  // a odmietnutý doklad nenechá súbor v úložisku.
+  if(!vydavokOverIban(obj)) return false;
+
+  // Pravidlá nad jedným dokladom — tie isté, aké o rok vyhodnotí ročná
+  // kontrola. Bežia aj pri úprave: chyba sa dá do dokladu vniesť aj neskôr,
+  // a človek, ktorý ho práve otvoril, je jediný, kto vie, čo na ňom bolo.
+  if(!dokladKontrolaPriZapise(obj, "vydavok")) return false;
+  if(nova){
+    // Duplicita sa pýta PRVÁ — je to silnejší fakt než mesiac a na rozdiel
+    // od neho znamená chybu v peniazoch (kap. 101.3). Doklad prijatý e-mailom
+    // je na ňu náchylnejší než ktorýkoľvek iný — preposlať sa dá koľkokrát chce.
+    if(!potvrdDuplicituVydavku(obj)) return false;
+    // doklad z iného mesiaca? (chytí OCR chybu či preklep v roku)
+    if(!overMesiacDokladu(obj.datum)) return false;
+  }
+
+  // ── ORIGINÁL DOKLADU DO ÚLOŽISKA ──
+  // Pri fotke bločka je to pohodlie. Pri e-faktúre je to zákonná povinnosť:
+  // § 76 zákona o DPH žiada uchovať doklad 10 rokov V PÔVODNOM FORMÁTE
+  // a poštár ho neuchováva — Verteco obsah predvolene maže 14 dní po
+  // doručení (PLAN_EFAKTURA §1.4). Sme jediní, kto originál drží.
+  //
+  // AŽ PO všetkých otázkach. Do 13. 9. 2026 sa nahrával pred otázkou na
+  // duplicitu a mesiac a hneď sa zabudol; keď človek otázku zrušil a uložil
+  // znova, výdavok ostal bez odkazu na originál (ROZHODNUTIA č. 20).
+  //
+  // Chyba sa tu NESMIE zhltnúť prázdnou vetvou catch: výdavok by sa uložil,
+  // používateľ by nič nespozoroval a originál by bol nenávratne preč.
+  // Vlastný prefix `efaktura` je preto, aby sa archív dal v úložisku nájsť.
+  if(R && _ocrFile){
+    const jeEf=!!R._efaktura;
+    let cesta=null, chyba="";
+    try{ cesta=await dokladUpload(_ocrFile, jeEf?"efaktura":"vydavok"); }
+    catch(e){ chyba=(e&&e.message)||String(e); console.error("archív dokladu:",e); }
+    if(cesta){ obj.doklad=cesta; _ocrFile=null; }
+    else if(jeEf && localMode){
+      // Lokálny režim nie je porucha — cloud tam nie je vôbec. Nemá zmysel
+      // pýtať sa; stačí, aby človek vedel, že originál si musí odložiť sám.
+      if(typeof cloudMsg==="function") cloudMsg("Originál e-faktúry sa neuložil — v lokálnom režime nie je archív. Odložte si XML sami.","warn");
+      _ocrFile=null;
+    }
+    else if(jeEf){
+      if(!confirm("⚠ Originál e-faktúry sa NEULOŽIL do archívu.\n\n"
+        +(chyba?"Dôvod: "+chyba+"\n\n":"")
+        +"Zákon žiada uchovať doklad 10 rokov v pôvodnom formáte a digitálny poštár\n"
+        +"ho neuchováva — obsah zvyčajne maže do 14 dní. Odložte si XML sami.\n\n"
+        +"Uložiť výdavok aj tak?")) return false;   // _ocrFile ostáva, dá sa skúsiť znova
+      _ocrFile=null;
+    }
+    else _ocrFile=null;
+  }
+  if(R){
+    // Doklad prevzatý zo siete má originál v archíve už od príjmu — pripojí sa
+    // k výdavku odkazom, nie druhým nahraním.
+    if(!obj.doklad && _ocrArchiv){ obj.doklad=_ocrArchiv; }
+    _ocrArchiv=null;
+  }
+
+  if(!firmaData.vydavky) firmaData.vydavky=[];
+  let ulozeny;
+  if(nova){
+    obj.id="v"+Date.now()+Math.random().toString(36).slice(2,7);
+    d.vydavky.push(obj);
+    ulozeny=obj;
+  } else {
+    if(!x.id) x.id="v"+Date.now()+Math.random().toString(36).slice(2,7);
+    obj.id=x.id;
+    VYDAVOK_POLIA_BEZ_PRAZDNEJ.forEach(k=>{ if(!(k in obj)) delete x[k]; });
+    ulozeny=Object.assign(x, obj);
+  }
+  zapamatajPartnera(ulozeny);
+  if(doplnene) zapisAutomat("icdph", [dokladKluc(ulozeny)]);
+  // tankovanie prepojené s výdavkom (pri mazaní výdavku sa zmaže aj tankovanie)
+  if(!d.tankovania) d.tankovania=[];
+  const litre=+obj.litre||0;
+  const tIdx=d.tankovania.findIndex(t=>t.vydavokId===obj.id);
+  if(litre>0){
+    const tankObj={vydavokId:obj.id, datum:obj.datum, litre:litre, suma:obj.spolu||0, stanica:obj.partner||"", mesiac:obj.datum.slice(0,7)};
+    if(tIdx>=0){ d.tankovania[tIdx]=Object.assign(d.tankovania[tIdx],tankObj); }
+    else { tankObj.id="t"+Date.now()+Math.random().toString(36).slice(2,7); if(R) tankObj.zdroj="ocr"; d.tankovania.push(tankObj); }
+  } else if(tIdx>=0){ d.tankovania.splice(tIdx,1); }  // litre zmazané → zmaž tankovanie
+  if(R){
+    // Prijatá e-faktúra je zaevidovaná AŽ TERAZ — výdavok naozaj existuje.
+    // Pred `poZmene()`, aby stav odišiel do cloudu v tom istom uložení.
+    if(typeof oznacEfakturuZaevidovanu==="function") oznacEfakturuZaevidovanu();
+  }
+  poZmene();
+  if(R){
+    // Doklad prišiel e-mailom a je uložený — až teraz zmizne zo schránky.
+    if(typeof oznacCakajuciSpracovany==="function") oznacCakajuciSpracovany();
+  }
+  // Nový doklad si hľadá svoju platbu (kap. 47.7). Až po `poZmene`, aby
+  // automatika videla doklad, ktorý práve vznikol.
+  if(nova) oznamAutoUhradu(autoParujDoklad("vydavok", dokladKluc(obj)), "vydavok", dokladKluc(obj));
+  // Okno dokladu sa otvára aj z E-faktúr a z plochy — tam sa Výdavky nekreslia.
+  if(R){ if(aktualnaApp==="vydavky") appVydavky(); }
+  else obnovPoEditacii("vydavky");
+  return true;
 }
 // ── editor rozpisu na viac sadzieb ──
 let mRozpisData=[];
@@ -24090,7 +24230,7 @@ function odvodyDoplnitHtml(){
   const rozpis=Object.keys(O.podla).map(k=>menoKat(k)+" ×"+O.podla[k]).join(" · ");
   return `<div style="${ram}">
     <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px">
-      <b>V banke je ${O.hotove.length} platieb odvodov a daní, tu doklad nemajú</b>
+      <b>V banke ${sklon(O.hotove.length,"je","sú","je")} ${O.hotove.length} ${sklon(O.hotove.length,"platba","platby","platieb")} odvodov a daní, tu doklad ${sklon(O.hotove.length,"nemá","nemajú","nemajú")}</b>
       <b style="white-space:nowrap">${eur(O.suma)}</b></div>
     <div style="font-size:11.5px;color:var(--ink-soft);margin-top:4px">${esc(rozpis)}</div>
     <button class="aabtn pri" style="width:100%;justify-content:center;margin-top:9px" onclick="doplnOdvodoveDoklady()">Doplniť ich do výdavkov</button>
@@ -24501,6 +24641,24 @@ function parseIsdocFaktura(xmlText){
   if(!bez && spolu)           bez=r2(spolu-dph);
   const sadzba = rozpis.length===1 ? rozpis[0].sadzba : (cis(hlbka(root,"Percent"))||23);
 
+  // ── tuzemský prenos daňovej povinnosti ──
+  // ISDOC 6.0.2, schéma isdoc.cz/6.0.2/xsd/isdoc-invoice-6.0.2.xsd:
+  //  · TaxSubTotal/TaxCategory/LocalReverseChargeFlag — „Je daňová sazba v režimu
+  //    přenesení daňové povinnosti?", BooleanType: len "true" alebo "false";
+  //  · na riadku ClassifiedTaxCategory/LocalReverseCharge (povinný
+  //    LocalReverseChargeCode) — „Lokální režim přenesení daňové povinnosti".
+  // Oboje je nepovinné, preto stačí jedno. Režim je „lokálny" — prenos v krajine
+  // vystaviteľa. Za slovenský § 69 ods. 12 sa berie len od dodávateľa so
+  // slovenským IČ DPH, rovnako ako AE v UBL (`parseUBLFaktura`).
+  let prenos=false;
+  if(tt) deti(tt,"TaxSubTotal").concat(deti(tt,"TaxSubtotal")).forEach(st=>{
+    if(tx(dieta(dieta(st,"TaxCategory"),"LocalReverseChargeFlag"))==="true") prenos=true;
+  });
+  if(!prenos) deti(hlbka(root,"InvoiceLines")||root,"InvoiceLine").forEach(ln=>{
+    if(dieta(dieta(ln,"ClassifiedTaxCategory"),"LocalReverseCharge")) prenos=true;
+  });
+  const samozdanenieTyp = (prenos && /^SK/i.test(icdph)) ? "tuzemsky" : "";
+
   // ── položky ──
   const polozky=[];
   deti(hlbka(root,"InvoiceLines")||root,"InvoiceLine").forEach(ln=>{
@@ -24518,7 +24676,7 @@ function parseIsdocFaktura(xmlText){
     druh:"Došlá faktúra", zdroj:"efaktura-isdoc", jeDobropis, mena,
     partner, cislo, vs: vs||cislo, datum, splatnost,
     bez:r2(bez), dph:r2(dph), spolu:r2(spolu), sadzba,
-    ico, icdph, dodavatelIco:ico, dodavatelIcDph:icdph, dodavatelDic:dic,
+    ico, icdph, dodavatelIco:ico, dodavatelIcDph:icdph, dodavatelDic:dic, samozdanenieTyp,
     rozpis: rozpis.length>1?rozpis:null,
     viacSadzieb: rozpis.length>1,
     polozky: polozky.length?polozky:null,
@@ -25593,7 +25751,6 @@ function mAktualizujOddiel(){
   const viac=chk("m_viacSadzieb");
   const x={
     oddielRucne: val("m_oddielRucne"),
-    samozdanenieTyp: val("m_samozdanenieTyp"),
     druh: val("m_druh"),
     kategoria: val("m_kategoria"),
     dodavatelIcDph: val("m_dodIcDph"),
@@ -25601,6 +25758,9 @@ function mAktualizujOddiel(){
     bez: parseFloat(val("m_bez"))||0,
     dph: parseFloat(val("m_dph"))||0,
   };
+  // prenos daňovej povinnosti tým istým čitateľom ako uloženie — voľba
+  // `m_tuzemskyPrenos` aj druh, ktorý prišiel s dokladom
+  citajSamozdanenie(x);
   if(viac && typeof mZbierRozpis==="function"){
     const rz=mZbierRozpis();
     if(rz.length){ x.rozpis=rz; x.bez=rz.reduce((a,r)=>a+(+r.bez||0),0); x.dph=rz.reduce((a,r)=>a+(+r.dph||0),0); }
@@ -26492,13 +26652,15 @@ function dokladKontext(){
 const PRAVIDLA_DOKLADU=[
   {
     k:"dphBezIc", typ:"vydavok",
-    plati:(x)=>{
-      try{ if(!jePlatcaDPH()) return false; }catch(_){ return false; }
-      return (+x.dph||0)>0 && !x.zahranicny
-        && !String(x.dodavatelIcDph||"").trim() && String(x.druh||"")!=="Bloček";
-    },
-    hlaska:(x)=>"⚠ Doklad si odpočítava DPH "+eur(x.dph)+", ale dodávateľ nemá IČ DPH.\n\n"
-      +"Bez neho nárok na odpočet nevzniká a kontrolný výkaz taký doklad odmietne.\n\n"
+    // To isté pravidlo ako tvrdá kontrola pri zápise (`vydavokPotrebujeIcDph`).
+    // Do 13. 9. 2026 malo vlastné: neplatiteľa vynechávalo a pri tankovaní či
+    // prenose sa s tvrdou kontrolou rozchádzalo (ROZHODNUTIA č. 16).
+    plati:(x)=>!!vydavokPotrebujeIcDph(x) && !String(x.dodavatelIcDph||"").trim(),
+    hlaska:(x)=>((+x.dph||0)>0
+        ? "⚠ Doklad si odpočítava DPH "+eur(x.dph)+", ale dodávateľ nemá IČ DPH.\n\n"
+          +"Bez neho nárok na odpočet nevzniká a kontrolný výkaz taký doklad odmietne.\n\n"
+        : "⚠ Doklad ide do kontrolného výkazu DPH, ale dodávateľ nemá IČ DPH.\n\n"
+          +"Kontrolný výkaz taký doklad odmietne.\n\n")
       +"Doplňte IČ DPH podľa dokladu (pomôže tlačidlo „Skontrolovať / doplniť z registra“). "
       +"Ak dodávateľ platiteľom DPH nie je, dajte DPH na 0 a celú sumu do základu.\n\n"
       +"Uložiť doklad aj tak?"
@@ -26947,7 +27109,7 @@ function rocnaKontrola(rok){
       // nič neurobí, je horšia než žiadna — nabudúce ju človek preskočí.
       let daSa=0;
       try{ daSa=bezIc.filter(x=>{ const p=najdiPartnera(x); return p && p.icdph; }).length; }catch(_){}
-      pridaj("chyba","dphBezIc", bezIc.length+" dokladov si odpočítava DPH ("+eur(dan)+") bez IČ DPH dodávateľa",
+      pridaj("chyba","dphBezIc", bezIc.length+(dan>0 ? " dokladov si odpočítava DPH ("+eur(dan)+")" : " dokladov ide do kontrolného výkazu")+" bez IČ DPH dodávateľa",
         "Bez IČ DPH nárok na odpočet nevzniká a kontrolný výkaz taký doklad odmietne."
         + (daSa ? " Pri "+daSa+" z nich appka IČ DPH pozná z iných dokladov toho istého dodávateľa." : ""),
         bezIc.slice(0,8).map(x=>(x.cislo||"—")+" · "+(x.partner||"—")+" · DPH "+eur(x.dph)),
@@ -31005,6 +31167,10 @@ async function faktPdfSpracuj(e){
   const citatelne=_faktPdfData.filter(R=>!R._chyba);
   if(citatelne.length===1){
     closeModal();
+    // Originál z predošlého okna dokladu tu nesmie ostať — nahral by sa k tomuto
+    // dokladu. Odkedy sa originál nahráva až po otázkach, ostáva po zrušenom
+    // okne dlhšie. Import súborov originál neukladá (dev/opravy/vydavky-cesta.md).
+    _ocrFile=null; _ocrArchiv=null;
     otvorOcrVysledok(citatelne[0]);
   } else {
     faktPdfNahlad();
@@ -31075,8 +31241,10 @@ function faktPdfNahlad(){
       if(!R._import || R._chyba) return;
       const obj=faktPdfNaVydavok(R);
       if(!firmaData.vydavky) firmaData.vydavky=[];
-      // preskoč duplicity (rovnaké číslo, alebo dátum+suma+partner)
-      if(najdiDuplicityVydavku(obj).length){ preskocene++; return; }
+      // Duplicitu, ktorú náhľad ukázal a človek ju aj tak zaškrtol, rozhodol
+      // človek — naimportuje sa (ROZHODNUTIA č. 21). Preskočí sa len duplicita,
+      // ktorú náhľad neukázal (doklad medzičasom pribudol).
+      if(!R._duplicita && najdiDuplicityVydavku(obj).length){ preskocene++; return; }
       obj.id="v"+Date.now()+Math.random().toString(36).slice(2,7);
       firmaData.vydavky.push(obj); zapamatajPartnera(obj); pridane++;
     });
@@ -31858,136 +32026,7 @@ function otvorOcrVysledok(R){
       <div style="white-space:pre-wrap;font-size:11px;line-height:1.5;color:var(--ink);max-height:220px;overflow:auto;background:var(--paper,#fff);border:1px solid var(--line);border-radius:8px;padding:9px 11px">${esc((R._surovyText||"").split("\n").map(s=>s.trim()).filter(Boolean).join("\n")||"(z dokladu sa nepodarilo prečítať text)")}</div>
     </details>`}
     ${vydavokFormHtml(ocrNaVydavok(R), true, null)}
-  `, async ()=>{
-    const datum=val("m_datum");
-    if(!datum){ alert("Doklad musí mať dátum — bez neho sa nezapočíta do daňovej evidencie. Doplňte ho, prosím."); return false; }
-    const druh=val("m_druh");
-    const dodIcDph=val("m_dodIcDph")||"";
-    const jeZahr=document.getElementById("m_zahranicny").checked;
-    const litre=parseFloat(val("m_litre"))||0;
-
-    // ── Doklad musí sedieť sám so sebou ──
-    // OCR sa pri fotke bločku mýli a mýliť sa bude vždy. Appka si však vie
-    // overiť, že základ + DPH = spolu, a bez toho doklad prijať nesmie:
-    // do daňovej evidencie by sa dostalo číslo, ktoré neexistuje na papieri.
-    // Reálny prípad: 9,36 + 2,15 = 11,51 pri sume 71,51.
-    const bezV=parseFloat(val("m_bez"))||0;
-    const dphV=parseFloat(val("m_dph"))||0;
-    const spoluV=parseFloat(val("m_spolu"))||0;
-    const nezhoda=dokladNekonzistentny(bezV, dphV, spoluV);
-    if(nezhoda){
-      const opravit=confirm(
-        "Údaje na doklade si odporujú:\n\n"+
-        "  základ "+eur(bezV)+" + DPH "+eur(dphV)+" = "+eur(nezhoda.sucet)+"\n"+
-        "  ale v poli Spolu je "+eur(spoluV)+"\n\n"+
-        "Býva to chyba pri čítaní dokladu. Ak je suma Spolu správna, prepočítame "+
-        "základ a DPH pri sadzbe "+Math.round(nezhoda.sadzba*100)+" %:\n\n"+
-        "  základ "+eur(nezhoda.navrhBez)+" + DPH "+eur(nezhoda.navrhDph)+"\n\n"+
-        "OK = opraviť · Zrušiť = opravím ručne");
-      if(opravit){
-        const eb=document.getElementById("m_bez"), ed=document.getElementById("m_dph");
-        if(eb) eb.value=nezhoda.navrhBez;
-        if(ed) ed.value=nezhoda.navrhDph;
-        if(typeof mAktualizujOddiel==="function") mAktualizujOddiel();
-      }
-      // v oboch prípadoch sa vraciame do formulára, nech používateľ vidí,
-      // s akými číslami doklad naozaj uloží
-      return false;
-    }
-
-    // ── Litre: cena za liter musí byť v rozumnom rozsahu ──
-    // `mKontrolaLitre` to zobrazuje pri písaní, ale pri hodnotách z OCR sa
-    // nikdy nespustí — do poľa nikto nepíše. Preto kontrola aj tu.
-    if(litre>0 && spoluV>0){
-      const cenaZaLiter=spoluV/litre;
-      if(cenaZaLiter>2.5 || cenaZaLiter<0.8){
-        if(!confirm("Cena "+cenaZaLiter.toFixed(2)+" €/l je nezvyčajná.\n\n"+
-                    "Pri sume "+eur(spoluV)+" a "+litre+" l to vyzerá na chybu v litroch.\n"+
-                    "Litre idú do knihy jázd a do spotreby, takže chyba sa prenesie ďalej.\n\n"+
-                    "Naozaj uložiť s týmito litrami?")) return false;
-      }
-    }
-    const obj={druh:druh,partner:val("m_partner"),cislo:val("m_cislo")||"",variabilny:val("m_vs")||"",popis:val("m_popis"),datum:datum,bez:parseFloat(val("m_bez"))||0,dph:parseFloat(val("m_dph"))||0,spolu:parseFloat(val("m_spolu"))||0,mesiac:datum.slice(0,7),zdroj:R.ekasaId?"ekasa":(R.zdroj||"ocr"),
-      dodavatelIco:val("m_dodIco")||"", dodavatelIcDph:dodIcDph,
-      zahranicny:jeZahr, kodKrajiny:val("m_kodKrajiny")||""};
-    // Polia, ktoré formulár od zjednotenia ponúka aj pri importe. Bez ich
-    // prečítania by ich používateľ vyplnil a doklad by sa uložil bez nich —
-    // horšie než keby tam pole nebolo vôbec.
-    vydavokDoplnkovePolia(obj);
-    if(R.ekasaId){ obj.ekasaId=R.ekasaId; obj.cislo=obj.cislo||R.ekasaId; }
-    if(litre>0) obj.litre=litre;
-    // Tie isté kontroly pred zápisom ako v ručnom formulári (`editVydavok`)
-    // a v tom istom poradí: IČ DPH, potom pravidlá nad dokladom. Pravidlá
-    // z `PRAVIDLA_DOKLADU` (napr. „tankovanie bez jazdy") doklad z fotky, súboru
-    // aj e-mailu do 13. 9. 2026 obchádzal — dostal ich len doklad zadaný rukou
-    // (kap. 109.11). Stoja pred nahratím originálu: odmietnutý doklad nemá čo
-    // v úložisku nechať.
-    if(!vydavokOverIcDph(obj, "Doplňte ho z dokladu — nájdete ho aj v sekcii „Čo appka prečítala z dokladu\".")) return false;
-    if(!vydavokOverIban(obj)) return false;
-    if(!dokladKontrolaPriZapise(obj, "vydavok")) return false;
-    // ── ORIGINÁL DOKLADU DO ÚLOŽISKA ──
-    // Pri fotke bločka je to pohodlie. Pri e-faktúre je to zákonná povinnosť:
-    // § 76 zákona o DPH žiada uchovať doklad 10 rokov V PÔVODNOM FORMÁTE
-    // a poštár ho neuchováva — Verteco obsah predvolene maže 14 dní po
-    // doručení (PLAN_EFAKTURA §1.4). Sme jediní, kto originál drží.
-    //
-    // Preto sa tu chyba NESMIE zhltnúť prázdnou vetvou catch: výdavok by sa
-    // uložil, používateľ by nič nespozoroval a originál by bol nenávratne preč.
-    // Vlastný prefix `efaktura` je preto, aby sa archív dal v úložisku nájsť.
-    if(_ocrFile){
-      const jeEf=!!R._efaktura;
-      let cesta=null, chyba="";
-      try{ cesta=await dokladUpload(_ocrFile, jeEf?"efaktura":"vydavok"); }
-      catch(e){ chyba=(e&&e.message)||String(e); console.error("archív dokladu:",e); }
-      if(cesta){ obj.doklad=cesta; _ocrFile=null; }
-      else if(jeEf && localMode){
-        // Lokálny režim nie je porucha — cloud tam nie je vôbec. Nemá zmysel
-        // pýtať sa; stačí, aby človek vedel, že originál si musí odložiť sám.
-        if(typeof cloudMsg==="function") cloudMsg("Originál e-faktúry sa neuložil — v lokálnom režime nie je archív. Odložte si XML sami.","warn");
-        _ocrFile=null;
-      }
-      else if(jeEf){
-        if(!confirm("⚠ Originál e-faktúry sa NEULOŽIL do archívu.\n\n"
-          +(chyba?"Dôvod: "+chyba+"\n\n":"")
-          +"Zákon žiada uchovať doklad 10 rokov v pôvodnom formáte a digitálny poštár\n"
-          +"ho neuchováva — obsah zvyčajne maže do 14 dní. Odložte si XML sami.\n\n"
-          +"Uložiť výdavok aj tak?")) return false;   // _ocrFile ostáva, dá sa skúsiť znova
-        _ocrFile=null;
-      }
-      else _ocrFile=null;
-    }
-    // Doklad prevzatý zo siete má originál v archíve už od príjmu — pripojí sa
-    // k výdavku odkazom, nie druhým nahraním.
-    if(!obj.doklad && _ocrArchiv){ obj.doklad=_ocrArchiv; }
-    _ocrArchiv=null;
-    if(!firmaData.vydavky) firmaData.vydavky=[];
-    // Duplicita PRED mesiacom a tou istou funkciou ako v ručnom formulári.
-    // Doklad prijatý e-mailom je na duplicitu náchylnejší než ktorýkoľvek iný
-    // — preposlať sa dá koľkokrát chce —, takže tu nesmie mať slabšiu kontrolu.
-    if(!potvrdDuplicituVydavku(obj)) return false;
-    // kontrola: doklad z iného mesiaca? (chytí OCR chybu v roku/dátume)
-    if(!overMesiacDokladu(datum)) return false;
-    const vydId = "v"+Date.now()+Math.random().toString(36).slice(2,7);
-    obj.id = vydId;
-    firmaData.vydavky.push(obj);
-    zapamatajPartnera(obj);
-    // ak sú litre, ulož aj do tankovaní (prepojené cez vydavokId — pri mazaní výdavku sa zmaže aj tankovanie)
-    if(litre>0){
-      if(!firmaData.tankovania) firmaData.tankovania=[];
-      firmaData.tankovania.push({id:"t"+Date.now()+Math.random().toString(36).slice(2,7), vydavokId:vydId, datum:datum, litre:litre, suma:obj.spolu, stanica:obj.partner, mesiac:datum.slice(0,7), zdroj:"ocr"});
-    }
-    // Prijatá e-faktúra je zaevidovaná AŽ TERAZ — výdavok naozaj existuje.
-    // Pred `poZmene()`, aby stav odišiel do cloudu v tom istom uložení.
-    if(typeof oznacEfakturuZaevidovanu==="function") oznacEfakturuZaevidovanu();
-    poZmene();
-    // Doklad prišiel e-mailom a je uložený — až teraz zmizne zo schránky.
-    if(typeof oznacCakajuciSpracovany==="function") oznacCakajuciSpracovany();
-    // Nový doklad si hľadá svoju platbu (kap. 47.7) rovnako ako z ručného
-    // formulára — dovtedy sa doklad z fotky spároval až pri ďalšom importe
-    // výpisu. Až po `poZmene`, aby automatika videla doklad, ktorý práve vznikol.
-    oznamAutoUhradu(autoParujDoklad("vydavok", dokladKluc(obj)), "vydavok", dokladKluc(obj));
-    if(aktualnaApp==="vydavky") appVydavky();
-  });
+  `, ()=>ulozVydavokZFormulara(null, R));
   // eKasa doklad → dotiahni z FS hneď, bez čakania na klik
   if(R.ekasaId) setTimeout(()=>ekasaAutoDoplnenie(R.ekasaId), 60);
   // Názov firmy over v registri podľa IČO — OCR sa v názve mýli častejšie než
