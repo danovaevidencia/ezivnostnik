@@ -954,7 +954,130 @@ zdielanie: {
 // ───────────────────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────────────── KNIHA JÁZD
-// (miesto pre návody: jazdy)
+jazdy: {
+  vJednejVete: "Zapisovať jazdy autom a pripraviť knihu jázd na kontrolu",
+  uvod: "Kniha jázd eviduje, kam, kedy a prečo ste autom išli a koľko kilometrov ste prešli. Jazdu zapíšete ručne, necháte si ju <b>zmerať</b> alebo ju načítate z auta — a pred odovzdaním knihu skontroluje sprievodca.",
+  ulohy: [
+    {
+      id: "zapisat",
+      nazov: "Zapísať jazdu ručne",
+      kedy: "Po ceste, ktorú ste nemerali, alebo keď jazdy dopisujete dodatočne.",
+      kroky: [
+        { text: "Ťuknite na <b>＋ Nová</b>.", tlacidlo: "＋ Nová", snimka: "jazdy-zapisat-1" },
+        { text: "Vyplňte trasu, účel, dátum a počet kilometrov.", snimka: "jazdy-zapisat-2",
+          tip: "Účel appka navrhne sama, keď máte na ten deň [[app:vykazy|výkaz prác]]. Inak predvyplní [[app:data#set_kjUcel|predvolený účel z nastavení]]." },
+        { text: "Skontrolujte <b>Stav tachometra na začiatku</b> — appka ho doplní z predchádzajúcej jazdy a koncový stav dopočíta.", tlacidlo: "Stav tachometra na začiatku", snimka: "jazdy-zapisat-3",
+          tip: "Stav tachometra sa ukladá v celých kilometroch. Kilometre jazdy môžu mať aj desatinné miesto." },
+        { text: "Ak cesta s podnikaním nesúvisela, zaškrtnite <b>Súkromná jazda</b>.", tlacidlo: "Súkromná jazda", snimka: "jazdy-zapisat-4" },
+        { text: "Ťuknite na <b>Uložiť</b>.", tlacidlo: "Uložiť", snimka: "jazdy-zapisat-5" },
+      ],
+      tip: "Jazdíte často tú istú trasu? Zapíšte si ju ako [[app:data#set_kjTrasa|predvolenú trasu]] — každá nová jazda ju predvyplní.",
+      podrobnosti: [
+        { nadpis: "Kilometre z mapy",
+          html: "<p>Tlačidlo <b>🗺️ Zistiť z mapy</b> vypočíta dĺžku cesty podľa miest v poli Trasa (aspoň dve, napríklad „Trnava – Bratislava“). Potrebuje cloudový účet a miesta sa mapovej službe pošlú až po stlačení.</p>" },
+        { nadpis: "Opraviť alebo zmazať jazdu",
+          html: "<p>Ťuknite na jazdu v zozname — otvorí sa na úpravu. Tlačidlo <b>Zmazať</b> ju odstráni hneď, bez ďalšej otázky.</p>" },
+        { nadpis: "Musím knihu jázd viesť?",
+          html: "<p>Závisí to od toho, ako uplatňujete pohonné hmoty. Nastavuje sa to v [[app:data|nastaveniach firmy]] v časti <b>Pohonné hmoty — daň z príjmov</b> a appka pri každej voľbe povie, čo znamená:</p><ul><li><b>Podľa knihy jázd</b> — uplatníte skutočnú spotrebu, knihu treba viesť.</li><li><b>Náhrady za km</b> — knihu viesť musíte, kilometre sú základ výpočtu.</li><li><b>Paušál 80 %</b> alebo <b>50 %</b> — knihu viesť nemusíte.</li></ul><p>Pri paušáli aj náhradách to appka pripomenie aj priamo tu, v Knihe jázd.</p>" },
+      ],
+    },
+    {
+      id: "merat",
+      nazov: "Nechať si jazdu zmerať",
+      kedy: "Pred vyrazením — kilometre sa spočítajú po trase a nemusíte ich odhadovať.",
+      kroky: [
+        { text: "Pred vyrazením ťuknite na <b>📍 Merať jazdu</b>.", tlacidlo: "Merať jazdu", snimka: "jazdy-merat-1" },
+        { text: "Prvý raz appka vysvetlí, ako meranie funguje. Ťuknite na <b>Uložiť</b> a prehliadaču povoľte polohu.", tlacidlo: "Meranie jazdy", snimka: "jazdy-merat-2" },
+        { text: "Počas jazdy nechajte appku otvorenú a displej rozsvietený — hore beží pás s kilometrami." },
+        { text: "Na konci ťuknite v páse na <b>Ukončiť</b>.", tlacidlo: "Ukončiť" },
+        { text: "Doplňte trasu, účel a stav tachometra na začiatku a ťuknite na <b>Uložiť</b>." },
+      ],
+      tip: "Ak sa appka počas jazdy zavrie, jazda sa nestratí — po návrate pokračuje a chýbajúci úsek dopočíta vzdušnou čiarou. Na konci povie, koľko kilometrov takto dopočítala.",
+      podrobnosti: [
+        { nadpis: "Prečo musí byť appka otvorená",
+          html: "<p>Prehliadač odpojí polohu v momente, keď stránka stratí popredie. Je to obmedzenie webu, nie nastavenie, ktoré by sa dalo zapnúť.</p>" },
+        { nadpis: "Čo sa ukladá",
+          html: "<p>Súradnice zostávajú v telefóne. Do knihy jázd sa uloží len počet kilometrov, čas a názov trasy. Miesto, ktoré na konci jazdy raz pomenujete, appka nabudúce doplní sama.</p>" },
+        { nadpis: "Spustil som jazdu omylom",
+          html: "<p>V záverečnom okne je <b>Zahodiť jazdu</b> — nič sa nezapíše.</p>" },
+      ],
+    },
+    {
+      id: "sprievodca",
+      nazov: "Pripraviť a stiahnuť knihu jázd za obdobie",
+      kedy: "Na konci mesiaca alebo roka, keď chcete mať knihu v poriadku a stiahnuť ju.",
+      kroky: [
+        { text: "Ťuknite na <b>✨ Sprievodca</b>.", tlacidlo: "Sprievodca", snimka: "jazdy-sprievodca-1" },
+        { text: "Vyberte obdobie — zobrazený mesiac, tento rok alebo celú knihu.", tlacidlo: "Zobrazený mesiac", snimka: "jazdy-sprievodca-2" },
+        { text: "Ťuknite na <b>↳ Doplniť účel z výkazu</b> — jazdy dostanú účel podľa toho, čo ste v ten deň robili.", tlacidlo: "Doplniť účel z výkazu", snimka: "jazdy-sprievodca-3",
+          tip: "Pôvodný účel sa uchová. Nesedí vám nový? V Knihe jázd ho pre zobrazený mesiac vrátite tlačidlom <b>↩ Vrátiť pôvodné</b>." },
+        { text: "V kroku <b>Kontrola knihy</b> pozrite, čo appka našla, a opravte to.", tlacidlo: "Kontrola knihy", snimka: "jazdy-sprievodca-4" },
+        { text: "Na konci ťuknite na <b>↧ Exportovať knihu jázd do XLS</b>.", tlacidlo: "Exportovať knihu jázd do XLS", snimka: "jazdy-sprievodca-5" },
+      ],
+      tip: "Bez sprievodcu knihu stiahnete hneď tlačidlom <b>↧ XLS mesiac</b> alebo <b>↧ XLS celá</b>.",
+      podrobnosti: [
+        { nadpis: "Domáce nabíjanie (elektromobil a plug-in hybrid)",
+          html: "<p>Pri aute s elektrinou má sprievodca krok navyše. Porovná spotrebu podľa vozidla s tým, čo ste nabili verejne na staniciach ZSE — rozdiel ste nabili doma. Tlačidlom <b>+ Vytvoriť výdavok</b> z neho vznikne interný doklad s celým výpočtom v popise. Cenu za kWh zmeníte v [[app:data#set_kjCenaElektro|nastaveniach knihy jázd]].</p>" },
+        { nadpis: "Krok Rozloženie a export",
+          html: "<p>Appka ho sama označuje <b>Iba ukážka — na daňové účely sa nepoužíva</b>: prepisuje dátumy jázd a výsledok už nezodpovedá tomu, čo hlási vozidlo. Do knihy sa nič neuloží, kým návrh výslovne nepoužijete — vtedy sa najprv stiahne záloha a treba potvrdiť napísaním slova.</p>" },
+        { nadpis: "Čo je v exporte",
+          html: "<p>Súbor Excel s hárkom za každý mesiac: dátum a čas, trasa, účel, stav tachometra na začiatku a na konci, prejdené kilometre a spotreba. Do PDF appka knihu jázd neexportuje.</p>" },
+      ],
+    },
+    {
+      id: "import",
+      nazov: "Načítať jazdy z auta",
+      kedy: "Auto si jazdy zaznamenáva samo a nechcete ich prepisovať ručne.",
+      kroky: [
+        { text: "Ťuknite na <b>🚗 Z vozidla</b> a vyberte export jázd z auta (súbor .xlsx z VW TripStatistics).", tlacidlo: "Z vozidla", snimka: "jazdy-import-1" },
+        { text: "Appka ukáže nájdené jazdy po mesiacoch. Odškrtnite tie, ktoré do knihy nepatria." },
+        { text: "Ťuknite na <b>Uložiť</b>." },
+      ],
+      tip: "Jazdy, ktoré už v knihe sú, sa preskočia a dni, ktoré už vediete, sú vopred odznačené — väčší export tak môžete načítať aj cez mesiace, ktoré v knihe už máte.",
+      podrobnosti: [
+        { nadpis: "Kontrola oproti vozidlu",
+          html: "<p>Pred uložením appka porovná stav tachometra vo vozidle so stavom v knihe a natankované litre podľa auta s litrami z bločkov. Keď litre chýbajú, chýbajú aj doklady za tankovanie.</p>" },
+        { nadpis: "Krátke jazdy",
+          html: "<p>Jazdy do limitu z [[app:data#set_kjAutoLimit|nastavení knihy jázd]] (predvolene 50 km) dostanú predvolenú trasu a účel. Kratšie ako 2 alebo 5 km môžete v náhľade skryť.</p>" },
+        { nadpis: "Z GPX alebo CSV",
+          html: "<p><b>📥 GPX/CSV</b> načíta trasy z GPS aplikácie (jedna trasa = jedna jazda) alebo tabuľku so stĺpcami dátum, km, trasa, účel. Jazdy pridá hneď, bez náhľadu a bez kontroly, či už v knihe sú — ten istý súbor preto nenačítavajte dvakrát.</p>" },
+      ],
+    },
+    {
+      id: "nabijanie",
+      nazov: "Nahrať výpis nabíjaní ZSE",
+      kedy: "Nabíjate na staniciach ZSE Drive a prišiel podrobný výpis nabíjaní.",
+      kroky: [
+        { text: "Ťuknite na <b>⚡ ZSE</b> a vyberte podrobný výpis nabíjaní zo ZSE Drive (PDF alebo text).", tlacidlo: "⚡ ZSE", snimka: "jazdy-nabijanie-1" },
+        { text: "Nabíjania sa objavia v prehľade <b>Nabíjania (ZSE)</b>.", tlacidlo: "Nabíjania (ZSE)", snimka: "jazdy-nabijanie-2" },
+      ],
+      tip: "Ten istý výpis môžete načítať aj druhý raz — nabíjanie, ktoré už v knihe je, sa nepridá znova.",
+      podrobnosti: [
+        { nadpis: "Výpis som nahral medzi doklady",
+          html: "<p>Keď výpis nahráte ako doklad do [[app:vydavky|výdavkov]], appka ho spozná a opýta sa, či ho má načítať medzi nabíjania. Faktúra za ten istý mesiac je samostatný doklad a do výdavkov patrí ona.</p>" },
+        { nadpis: "Na čo sú nabíjania v knihe",
+          html: "<p>Appka z nich porovná nabitú elektrinu so spotrebou podľa jázd a [[navod:jazdy/sprievodca|sprievodca]] z nich vypočíta domáce nabíjanie.</p>" },
+      ],
+    },
+    {
+      id: "miesto",
+      nazov: "Overiť, že tankovanie sedí s jazdami",
+      kedy: "Chcete mať istotu, že ku každému tankovaniu či nabíjaniu je v knihe jazda.",
+      kroky: [
+        { text: "V prehľade <b>Tankovania (PHM)</b> alebo <b>Nabíjania (ZSE)</b> ťuknite na riadok.", tlacidlo: "Tankovania (PHM)", snimka: "jazdy-miesto-1" },
+        { text: "Napíšte obec, kde ste tankovali alebo nabíjali, a ťuknite na <b>Uložiť</b>.", tlacidlo: "Miesto tankovania", snimka: "jazdy-miesto-2" },
+        { text: "Keď v ten deň cez to miesto nevedie žiadna jazda, appka to v okne povie a riadok dostane značku <b>⚠ mimo trasy</b>.", tlacidlo: "mimo trasy", snimka: "jazdy-miesto-3" },
+      ],
+      tip: "Boli ste tam naozaj po ceste? V okne ťuknite na <b>Je to po trase</b> — upozornenie pri tomto zázname zmizne.",
+      podrobnosti: [
+        { nadpis: "Ako appka porovnáva",
+          html: "<p>Hľadá slová z miesta v trasách jázd z toho dňa, bez ohľadu na diakritiku a veľké písmená — „Senec“ sedí na trase „Bratislava – Senec – Trnava“. Miesto je nepovinné a prázdne pole nekontroluje nič.</p>" },
+        { nadpis: "Odkiaľ sa tankovania berú",
+          html: "<p>Tankovanie v Knihe jázd nepridáte — vznikne samo z dokladu za pohonné hmoty s vyplnenými litrami vo [[app:vydavky|výdavkoch]]. Sumu preto opravujte vo výdavku, nie tu.</p>" },
+      ],
+    },
+  ],
+},
 // ───────────────────────────────────────────────────────────────────────
 
 // ────────────────────────────────── KALENDÁR, ŠTATISTIKY, NASTAVENIA
