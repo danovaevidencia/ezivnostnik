@@ -266,7 +266,210 @@ efaktury: {
 // ───────────────────────────────────────────────────────────────────────
 
 // ────────────────────────────────── KALENDÁR, ŠTATISTIKY, NASTAVENIA
-// (miesto pre návody: kalendar, superdash, data)
+kalendar: {
+  vJednejVete: "Kedy čo zaplatiť a podať — a vlastné pripomienky",
+  uvod: "Kalendár sám dopočíta daňové a odvodové termíny z vašich [[app:data|nastavení]] — DPH, odvody, preddavky aj daňové priznanie. Pridať si môžete aj vlastné udalosti.",
+  ulohy: [
+    {
+      id: "terminy",
+      nazov: "Zistiť, čo ma v najbližších týždňoch čaká",
+      kedy: "Keď chcete vedieť, čo treba zaplatiť alebo podať a dokedy.",
+      kroky: [
+        { text: "V zozname <b>Nadchádzajúce</b> je najbližší termín hore — s dátumom a počtom dní, ktoré zostávajú.", tlacidlo: "Nadchádzajúce", snimka: "kalendar-terminy-1" },
+        { text: "Termín, ktorý sa opakuje, je zbalený do jedného riadka — ďalšie dátumy ukáže ťuknutie na <b>ďalších … v kalendári</b>.", tlacidlo: "v kalendári", snimka: "kalendar-terminy-2" },
+      ],
+      tip: "Termíny, ktoré sú do 14 dní, appka ukáže aj na ploche v časti <b>Vyžaduje pozornosť</b> — kalendár netreba otvárať každý deň.",
+      podrobnosti: [
+        { nadpis: "Prečo mi nejaký termín chýba",
+          html: "<p>Termín sa ukáže, len keď k nemu appka má údaj: sociálne odvody pri vyplnených [[app:data#set_socOdvodyMes|mesačných sociálnych odvodoch]], preddavok na daň pri vyplnenom [[app:data#set_preddavokDanQ|štvrťročnom preddavku]] a DPH, keď má firma vyplnené [[app:data#set_icdph|IČ DPH]].</p>" },
+        { nadpis: "Termín cez víkend a ako ďaleko dopredu",
+          html: "<p>Keď lehota pripadne na sobotu alebo nedeľu, appka ju posunie na pondelok. Štátne sviatky nepozná. Kalendár ukazuje termíny na pol roka dopredu.</p>" },
+      ],
+    },
+    {
+      id: "udalost",
+      nazov: "Pripomenúť si vlastnú vec",
+      kedy: "Stretnutie s účtovníkom, koniec zmluvy, STK — čokoľvek, na čo nechcete zabudnúť.",
+      kroky: [
+        { text: "Ťuknite na <b>＋ Udalosť</b>.", tlacidlo: "＋ Udalosť", snimka: "kalendar-udalost-1" },
+        { text: "Napíšte názov a vyberte dátum.", snimka: "kalendar-udalost-2" },
+        { text: "Pri <b>Pripomienka</b> vyberte, koľko dní vopred sa má ozvať.", tlacidlo: "Pripomienka", snimka: "kalendar-udalost-3" },
+        { text: "Ťuknite na <b>Uložiť</b>.", tlacidlo: "Uložiť", snimka: "kalendar-udalost-4" },
+      ],
+      tip: "Pripomienka sa ukáže na ploche v časti <b>Vyžaduje pozornosť</b> — e-mail ani notifikáciu do telefónu appka neposiela.",
+      podrobnosti: [
+        { nadpis: "Zmeniť alebo zmazať udalosť",
+          html: "<p>Uloženú udalosť upraviť nejde. Zmažte ju krížikom <b>✕</b> v jej riadku a pridajte novú.</p>" },
+      ],
+    },
+    {
+      id: "fs",
+      nazov: "Mať termíny priamo od Finančnej správy",
+      kedy: "Chcete v zozname vidieť aj oficiálne termíny z kalendára Finančnej správy.",
+      kroky: [
+        { text: "Ťuknite na <b>↧ Načítať termíny FS</b>.", tlacidlo: "Načítať termíny FS", snimka: "kalendar-fs-1" },
+        { text: "Oficiálne termíny sa pridajú do zoznamu so značkou 🏛." },
+      ],
+      tip: "Opätovné načítanie staré termíny FS nahradí — v zozname sa nezdvoja.",
+      podrobnosti: [
+        { nadpis: "Vlastný kalendár z Google alebo Outlooku",
+          html: "<p>Súbor .ics z vlastného kalendára Kalendár nenačíta. Odpracované dni z neho vie načítať [[navod:vykazy/novy|výkaz prác]].</p>" },
+        { nadpis: "Odstrániť termíny FS",
+          html: "<p>Pod modrým rámčekom je pri počte načítaných termínov odkaz <b>Vymazať</b>.</p>" },
+      ],
+    },
+  ],
+},
+
+superdash: {
+  vJednejVete: "Ako sa vám darí — rok, porovnanie s minulým a odberatelia",
+  uvod: "Štatistiky zhrnú doklady z appky do čísel a grafov: koľko ste zarobili, koľko z toho zoberú dane a odvody, ako sa rok líši od minulého a od koho peniaze chodia.",
+  ulohy: [
+    {
+      id: "rok",
+      nazov: "Zistiť, koľko mi z roka ostane",
+      kedy: "Priebežne počas roka, keď chcete vedieť, koľko si odložiť na dane a odvody.",
+      kroky: [
+        { text: "Na ploche ťuknite na dlaždicu <b>Prehľad</b>.", tlacidlo: "Prehľad", snimka: "superdash-rok-1" },
+        { text: "V pohľade <b>Rok</b> hore vidíte, koľko odložiť na dane, a čistý príjem.", tlacidlo: "Odložiť na dane", snimka: "superdash-rok-2" },
+        { text: "Nižšie je graf príjmov a čistého zisku po mesiacoch a rozdelenie roka na odvody, daň a to, čo ostane.", tlacidlo: "Príjmy a čistý zisk po mesiacoch", snimka: "superdash-rok-3" },
+        { text: "Iný rok vyberiete vpravo hore.", snimka: "superdash-rok-4" },
+      ],
+      tip: "Appka si v tomto prehliadači pamätá naposledy zvolený pohľad aj rok — nabudúce sa otvorí tam, kde ste skončili.",
+      podrobnosti: [
+        { nadpis: "Odkiaľ sú čísla",
+          html: "<p>Z dokladov, ktoré v appke máte. Nezapísaný výdavok alebo nevystavená faktúra čísla skreslí — štatistika je odhad, nie daňové priznanie.</p>" },
+        { nadpis: "Pohľad Dane",
+          html: "<p>V platených plánoch je navyše pohľad <b>Dane</b> s daňou po mesiacoch a odhadom celého roka. V pláne Free sa neukáže — plány porovnáte v [[navod:data/predplatne|nastaveniach predplatného]].</p>" },
+      ],
+    },
+    {
+      id: "trend",
+      nazov: "Porovnať rok s minulým",
+      kedy: "Chcete vedieť, či rastiete, a v ktorých mesiacoch býva práce menej.",
+      kroky: [
+        { text: "Ťuknite na <b>Trend</b>.", tlacidlo: "Trend", snimka: "superdash-trend-1" },
+        { text: "Hore vidíte, koľko ste za rok fakturovali a o koľko percent je to viac alebo menej než minulý rok; nižšie roky vedľa seba.", tlacidlo: "Rok po roku", snimka: "superdash-trend-2" },
+      ],
+      tip: "Priebeh roka proti minulému a sezónnosť sa ukážu, až keď máte v appke doklady aspoň za dva roky.",
+    },
+    {
+      id: "odberatelia",
+      nazov: "Zistiť, na kom som závislý a kto platí neskoro",
+      kedy: "Keď väčšina príjmu chodí od jedného klienta alebo peniaze chodia pomaly.",
+      kroky: [
+        { text: "Ťuknite na <b>Odberatelia</b>.", tlacidlo: "Odberatelia", snimka: "superdash-odberatelia-1" },
+        { text: "<b>Najväčší podiel</b> ukáže, koľko príjmu prišlo od jedného odberateľa, a <b>Priemerne platia</b>, za koľko dní od vystavenia vám platia.", tlacidlo: "Najväčší podiel", snimka: "superdash-odberatelia-2" },
+      ],
+      tip: "Keď od jedného odberateľa príde 60 % príjmu alebo viac, appka na to upozorní — pri 90 % pripomenie aj otázku, či nejde o závislú prácu.",
+      podrobnosti: [
+        { nadpis: "Podľa čoho sa počíta",
+          html: "<p>Podľa dátumu úhrady a bez DPH — teda čo naozaj prišlo, nie čo bolo vystavené. Kto vám ešte nezaplatil, uvidíte v [[app:pohladavky|nezaplatených faktúrach]].</p>" },
+      ],
+    },
+  ],
+},
+
+data: {
+  vJednejVete: "Údaje firmy, predplatné a záloha dát",
+  uvod: "Tu vyplníte údaje, ktoré appka dáva na faktúry a do daňových podaní, nastavíte odvody a preddavky a stiahnete si zálohu dát. Väčšinu stačí vyplniť raz — a uložiť tlačidlom <b>Uložiť všetky nastavenia</b> na konci stránky.",
+  ulohy: [
+    {
+      id: "firma",
+      nazov: "Vyplniť údaje firmy",
+      kedy: "Raz na začiatku — a keď sa zmení adresa, účet v banke alebo sa stanete platiteľom DPH.",
+      kroky: [
+        { text: "V časti <b>Firemné údaje</b> napíšte IČO.", tlacidlo: "Firemné údaje", snimka: "data-firma-1" },
+        { text: "Ťuknite na <b>Doplniť z registra</b> — appka doplní názov a adresu.", tlacidlo: "Doplniť z registra", snimka: "data-firma-2",
+          tip: "DIČ a IČ DPH doplní len vtedy, keď ich register má — inak ich dopíšte sami." },
+        { text: "Skontrolujte <b>DIČ</b> a <b>IČ DPH</b>; platiteľ DPH vyplní aj <b>Daňový úrad</b>.", tlacidlo: "Daňový úrad", snimka: "data-firma-3" },
+        { text: "Nižšie vyplňte <b>IBAN</b> — faktúry dostanú QR kód na platbu.", tlacidlo: "IBAN (pre QR platbu na faktúre)", snimka: "data-firma-4" },
+        { text: "Na konci stránky ťuknite na <b>Uložiť všetky nastavenia</b>.", tlacidlo: "Uložiť všetky nastavenia", snimka: "data-firma-5" },
+      ],
+      tip: "Kým neťuknete na <b>Uložiť všetky nastavenia</b>, vyplnené polia sa neuložia — ani to, čo doplnil register.",
+      podrobnosti: [
+        { nadpis: "Čo bez DIČ a IČ DPH nefunguje",
+          html: "<p>Bez <b>DIČ</b> sa nedajú posielať faktúry sieťou Peppol — [[navod:efaktury/zapnut|ako zapnúť odosielanie]].</p><p>Bez <b>IČ DPH</b>, názvu a adresy appka nevytvorí [[app:dph|priznanie k DPH ani kontrolný výkaz]]. Priznanie k DPH a súhrnný výkaz potrebujú aj <b>Daňový úrad</b> — appka si ho nedomýšľa.</p>" },
+        { nadpis: "IBAN a QR kód",
+          html: "<p>Appka IBAN nekontroluje — preklep skončí v QR kóde. Po uložení si otvorte PDF [[navod:faktury/poslat|faktúry]] a QR kód skúšobne naskenujte v banke.</p>" },
+        { nadpis: "Register neodpovedá",
+          html: "<p>Údaje berie appka z registra právnických osôb Štatistického úradu. Keď neodpovie, vyplňte ich ručne — uložia sa rovnako.</p>" },
+      ],
+    },
+    {
+      id: "doklady",
+      nazov: "Posielať doklady do appky e-mailom",
+      kedy: "Faktúry od dodávateľov vám chodia e-mailom a nechcete ich sťahovať a nahrávať.",
+      kroky: [
+        { text: "V časti <b>Doklady e-mailom</b> skopírujte svoju prijímaciu adresu tlačidlom <b>⧉</b>.", tlacidlo: "Doklady e-mailom" },
+        { text: "Doklad na ňu prepošlite ako prílohu e-mailu." },
+        { text: "Ťuknite na <b>📨 Schránka dokladov</b> a pri doklade na <b>Spracovať →</b>.", tlacidlo: "Schránka dokladov" },
+        { text: "Appka doklad prečíta a predvyplní [[app:vydavky|výdavok]] — skontrolujte ho a uložte." },
+      ],
+      tip: "Doklad, ktorý príde, sa do evidencie sám nedostane — vždy čaká na vaše potvrdenie.",
+      podrobnosti: [
+        { nadpis: "V ukážkovom režime časť chýba",
+          html: "<p>Doklady e-mailom fungujú len s vlastným účtom prihláseným v cloude — bez neho sa časť Doklady e-mailom v nastaveniach nezobrazí.</p>" },
+        { nadpis: "Adresa sa dostala k nesprávnemu človeku",
+          html: "<p>V Schránke dokladov vytvoríte novú adresu tlačidlom <b>↻ Nová adresa</b> — stará okamžite prestane fungovať. Jednotlivých odosielateľov zablokujete cez <b>🚫 Blokované adresy</b>.</p>" },
+      ],
+    },
+    {
+      id: "predplatne",
+      nazov: "Pozrieť si plán a čo v ňom je",
+      kedy: "Narazili ste na limit alebo chcete modul, ktorý váš plán nemá.",
+      kroky: [
+        { text: "V časti <b>Predplatné</b> vidíte svoj plán a koľko faktúr a dokladov v ňom ešte zostáva. Ťuknite na <b>Zobraziť plány a ceny</b>.", tlacidlo: "Zobraziť plány a ceny", snimka: "data-predplatne-1" },
+        { text: "Porovnajte plány a ťuknite na <b>Predplatiť</b> pri tom, ktorý chcete.", tlacidlo: "Predplatiť", snimka: "data-predplatne-2" },
+      ],
+      tip: "Kto už platený plán má, nájde na tom istom mieste tlačidlo <b>Zmeniť plán</b>.",
+      podrobnosti: [
+        { nadpis: "V ukážkovom režime",
+          html: "<p>Plány si pozriete, ale predplatiť ich ide len s vlastným účtom prihláseným v cloude.</p>" },
+      ],
+    },
+    {
+      id: "zaloha",
+      nazov: "Zálohovať si dáta",
+      kedy: "Raz za mesiac — appka vám to pripomenie.",
+      kroky: [
+        { text: "Hore na stránke ťuknite na <b>⬇ Stiahnuť zálohu</b>.", tlacidlo: "Stiahnuť zálohu", snimka: "data-zaloha-1" },
+        { text: "Súbor .json sa uloží medzi stiahnuté súbory — presuňte si ho na disk alebo do vlastného úložiska." },
+      ],
+      tip: "Keď zálohu 30 dní nestiahnete, ukáže sa na ploche upozornenie s tlačidlom <b>Stiahnuť zálohu</b> — stačí ťuknúť naň.",
+      podrobnosti: [
+        { nadpis: "Záloha a uloženie do cloudu",
+          html: "<p><b>☁ Uložiť do cloudu</b> uloží dáta na server, aby ste ich mali na každom zariadení. Záloha je vaša vlastná kópia v súbore, ku ktorej sa viete vrátiť — [[navod:data/obnovit|ako obnoviť dáta zo zálohy]].</p>" },
+      ],
+    },
+    {
+      id: "obnovit",
+      nazov: "Obnoviť dáta zo zálohy",
+      kedy: "Potrebujete sa vrátiť k stavu, ktorý máte uložený v zálohe.",
+      kroky: [
+        { text: "Ťuknite na <b>📥 Importovať JSON</b> a vyberte súbor zálohy.", tlacidlo: "Importovať JSON", snimka: "data-obnovit-1" },
+        { text: "Appka ukáže názov firmy a koľko faktúr, výdavkov a jázd v súbore je — potvrďte." },
+        { text: "Ťuknite na <b>☁ Uložiť do cloudu</b> — až tým sa načítané dáta uložia.", tlacidlo: "Uložiť do cloudu", snimka: "data-obnovit-2" },
+      ],
+      tip: "Import nič nezlučuje — všetko, čo máte v appke teraz, nahradí obsahom súboru. Ak si nie ste istí, stiahnite si najprv zálohu terajšieho stavu.",
+    },
+    {
+      id: "excel",
+      nazov: "Odovzdať dáta účtovníkovi v Exceli",
+      kedy: "Účtovník chce všetko za rok v jednom súbore.",
+      kroky: [
+        { text: "V sprievodcovi exportom ťuknite na <b>Čo exportovať</b> a vyberte rok.", tlacidlo: "Čo exportovať", snimka: "data-excel-1" },
+        { text: "V kroku <b>Kontrola dát</b> si pozrite, čo appka našla.", tlacidlo: "Kontrola dát", snimka: "data-excel-2" },
+        { text: "V kroku <b>Generovať</b> ťuknite na <b>📊 Stiahnuť kompletný export</b>.", tlacidlo: "Stiahnuť kompletný export", snimka: "data-excel-3" },
+      ],
+      tip: "Nálezy kontroly export nezastavia — sú tam, aby ste vedeli, čo je v súbore neisté, skôr než ho odovzdáte.",
+      podrobnosti: [
+        { nadpis: "Čo v súbore je",
+          html: "<p>Jeden formátovaný Excel so záložkami. Koľko hárkov a čo v nich bude, ukáže krok <b>Náhľad</b>. Pribaliť môžete aj peňažný denník a jazdy rozdelené po mesiacoch.</p>" },
+      ],
+    },
+  ],
+},
 // ───────────────────────────────────────────────────────────────────────
 
 },
