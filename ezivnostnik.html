@@ -2766,6 +2766,14 @@ function dphPlatcaCelyRok(rok){
   return celyOd && celyDo;
 }
 function pausalMoznyVRoku(rok){ return !dphPlatcaCelyRok(rok); }
+// Paušálne výdavky roka (§ 6 ods. 10 ZDP): percento z príjmov, najviac strop.
+// Obe čísla sú v sadzby.js po rokoch. Predtým stáli 0.6 a 20000 natvrdo
+// v ročnom súhrne, prognóze, priznaní B a v porovnaní režimov.
+function pausalVydavky(prijmy, rok){
+  const sadzba=sadzbaFirmy("pausalSadzba", rok), strop=sadzbaFirmy("pausalStrop", rok);
+  const plny=r2((+prijmy||0)*sadzba);
+  return {suma:r2(Math.min(plny, strop)), sadzba, strop, zastropovany: plny>strop};
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  VIAC FIRIEM V JEDNOM ÚČTE (fáza 1 plánu Spolupráca, kap. 38.8)
@@ -3517,7 +3525,7 @@ function deRocnySuhrn(rok){
   const V=vyradeniaRok(rok);
   const vyradenie=V.vydavok;
   const vydavkySkutSpolu=r2(vydavkySkut+odpis+vyradenie);
-  const pausal=r2(Math.min(prijmy*0.6, 20000));
+  const pausal=pausalVydavky(prijmy, rok).suma;
   // základ dane sa znižuje o SKUTOČNE ZAPLATENÉ poistné (z výpisu), nie preddavok × 12
   const zpZapl=zaplateneZPRok(rok);
   const zpRok=zpZapl.suma;
@@ -3583,7 +3591,7 @@ function pausalPorovnanie(rok){
     prebytokVydavkov: chybaVydavkov<0 ? r2(-chybaVydavkov) : 0,
     // Strop sa dosiahne pri príjmoch nad 33 333 € — nad ním paušál prestáva rásť
     // a každé ďalšie euro príjmu ho zhoršuje. Používateľ o tom má vedieť.
-    pausalZastropovany: R.prijmy*0.6 > 20000,
+    pausalZastropovany: pausalVydavky(R.prijmy, rok).zastropovany,
     rezim: (typeof vydavkyRezimEfektivny==="function") ? vydavkyRezimEfektivny() : "skutocne",
   };
 }
@@ -4147,7 +4155,7 @@ function dePrognoza(rok){
   // režim výdavkov: paušál (60 %, max 20 000 €) vs skutočné — po rokoch
   const pausalMozny = pausalMoznyVRoku(rok);
   const pausalRezim = pausalMozny && (vydavkyRezimEfektivny(rok)==="pausal");
-  const pausalVydavok = r2(Math.min(rocPrijmy*0.6, 20000));
+  const pausalVydavok = pausalVydavky(rocPrijmy, rok).suma;
   const zaklad = pausalRezim
     ? r2(Math.max(0, rocPrijmy - pausalVydavok - odvodyRok))       // paušál: odvody sa pripočítajú zvlášť (nie do stropu)
     : r2(Math.max(0, rocPrijmy - rocVydavkySpolu - odvodyRok));    // skutočné
@@ -7795,10 +7803,12 @@ function nastVydavkyRezimHtml(){
       <div class="ob-hint">Rozhoduje o paušále v roku registrácie. Kým je prázdny, appka predpokladá celý rok a paušál nepripustí.</div></div>`:""}
     ${porovnanie}`;
 }
-function nastavVydavkyRezim(rezim, rok){
+// Zápis spôsobu výdavkov pre rok. Jediné miesto zápisu — volajú ho Nastavenia
+// aj sprievodca priznaním B (ten mal predtým vlastný prepínač pre všetky roky).
+function zapisVydavkyRezim(rezim, rok){
   const r=(rezim==="pausal") ? "pausal" : "skutocne";
   const y=+rok||new Date().getFullYear();
-  if(r==="pausal" && !pausalMoznyVRoku(y)) return;   // platiteľ po celý rok nemôže
+  if(r==="pausal" && !pausalMoznyVRoku(y)) return;   // platiteľ po celý rok nemôže (vráti undefined = nezapísané)
   firmaData.settings=firmaData.settings||{};
   firmaData.settings.vydavkyRezimRoky=firmaData.settings.vydavkyRezimRoky||{};
   firmaData.settings.vydavkyRezimRoky[String(y)]=r;
@@ -7806,7 +7816,10 @@ function nastavVydavkyRezim(rezim, rok){
   // onboarding, admin panel aj staršie miesta, ktoré rok nepoznajú.
   if(y===new Date().getFullYear()) firmaData.settings.vydavkyRezim=r;
   poZmene();
-  appData();                                 // prekresli nastavenia (porovnanie + prepínač)
+  return true;
+}
+function nastavVydavkyRezim(rezim, rok){
+  if(zapisVydavkyRezim(rezim, rok)) appData();   // prekresli nastavenia (porovnanie + prepínač)
 }
 function nastavOdvodyRoka(rok, druh, hodnota){
   firmaData.settings=firmaData.settings||{};
@@ -18719,17 +18732,21 @@ function zmazPriznanie(rok){
 }
 // ═══ SPRIEVODCA DAŇOVÝM PRIZNANÍM B (Release 9) ═══
 // POZOR: predvyplňovací nástroj, NENAHRÁDZA daňového poradcu ani oficiálne priznanie.
-// Postavené na SPRÁVNYCH konštantách 2026: 15 % sadzba (príjmy <100k), NČZD /3,
+// Sadzby a hranice podľa zdaňovacieho obdobia zo sadzby.js: 15 % sadzba (príjmy <100k), NČZD,
 // daňový bonus s krátením podľa príjmu. Progresia 19/25 % len ako voliteľná vetva.
 
-// daňový bonus na deti 2026 — presné pravidlá (overené voči FS/KROS/Podnikajte 2026)
-const DB_BONUS_2026={
-  do15: 100,          // €/mesiac na dieťa do 15 rokov
-  do18: 50,           // €/mesiac na dieťa 15–17 rokov
-  hranicaKratenia: 27432,   // ročný základ, nad ktorým sa kráti (2026)
-  // percentuálny limit zo základu podľa počtu detí s nárokom
-  pctLimit: {1:0.29, 2:0.36, 3:0.43, 4:0.50, 5:0.57, 6:0.64},
-};
+// Daňový bonus na deti — sumy, hranica krátenia a percentuálny limit sú v sadzby.js
+// po rokoch. Predtým tu stála kópia sadzieb roku 2026, ktorá rok 2025 krátila
+// od hranice 27 432 € namiesto 25 740 € (poučenie DPFOBv25).
+function detiBonusSadzby(rok){
+  return {
+    do15: sadzbaFirmy("bonusDo15", rok),              // €/mesiac na dieťa do 15 rokov
+    do18: sadzbaFirmy("bonus15az18", rok),            // €/mesiac na dieťa 15–17 rokov
+    hranicaKratenia: sadzbaFirmy("bonusKratHranica", rok),   // ročný základ, nad ktorým sa kráti
+    // percentuálny limit zo základu podľa počtu detí s nárokom (6 a viac = jeden limit)
+    pctLimit: pocet=>sadzbaFirmy("bonusLimitSadzba"+Math.min(Math.max(pocet,1),6), rok),
+  };
+}
 // vek dieťaťa k danému roku
 function detiVek(dieta, rok){
   if(dieta.vek!=null && !dieta.narodenie) return +dieta.vek;
@@ -18740,9 +18757,10 @@ function detiVek(dieta, rok){
 function detiBonusMaxRok(dieta, rok){
   const vek=detiVek(dieta, rok);
   if(vek>=18) return 0;
-  return (vek<15?DB_BONUS_2026.do15:DB_BONUS_2026.do18)*12;
+  const B=detiBonusSadzby(rok);
+  return (vek<15?B.do15:B.do18)*12;
 }
-// celkový daňový bonus na deti pre daný ročný základ dane (2026 pravidlá)
+// celkový daňový bonus na deti pre daný ročný základ dane (sadzby roka zo sadzby.js)
 function detiBonusSpolu(deti, zakladDane, rok){
   const opravnene=(deti||[]).filter(dt=>detiVek(dt,rok)<18);
   const pocet=opravnene.length;
@@ -18750,15 +18768,16 @@ function detiBonusSpolu(deti, zakladDane, rok){
   // 1) teoretická plná suma podľa veku
   const maxBonus=r2(opravnene.reduce((a,dt)=>a+detiBonusMaxRok(dt,rok),0));
   // 2) percentuálny limit zo základu dane podľa počtu detí
-  const pct=DB_BONUS_2026.pctLimit[Math.min(pocet,6)]||0.64;
+  const B=detiBonusSadzby(rok);
+  const pct=B.pctLimit(pocet);
   const limitZoZakladu=r2(Math.max(0,zakladDane)*pct);
   // 3) krátenie pri vysokom príjme: na každé dieťa −1/10 × (základ − hranica)
   let poVysokom=maxBonus;
-  if(zakladDane>DB_BONUS_2026.hranicaKratenia){
-    const znizNaDieta=r2((zakladDane-DB_BONUS_2026.hranicaKratenia)/10);
+  if(zakladDane>B.hranicaKratenia){
+    const znizNaDieta=r2((zakladDane-B.hranicaKratenia)/10);
     // krátenie sa uplatňuje na každé dieťa (proporčne k jeho max sume cez mesiace)
     let spolu=0;
-    opravnene.forEach(dt=>{ const maxMes=(detiVek(dt,rok)<15?DB_BONUS_2026.do15:DB_BONUS_2026.do18); const mes=maxMes*12; spolu+=Math.max(0, mes - znizNaDieta); });
+    opravnene.forEach(dt=>{ const mes=(detiVek(dt,rok)<15?B.do15:B.do18)*12; spolu+=Math.max(0, mes - znizNaDieta); });
     poVysokom=r2(spolu);
   }
   // výsledný bonus = min(plný/po vysokom, percentuálny limit)
@@ -18770,11 +18789,13 @@ function pbVypocet(rok){
   const S=firmaData.settings||{};
   const R=deRocnySuhrn(rok);
   const P=dePrognoza(rok);
-  const pausalne=!!(S.pbPausalne);
+  // Spôsob výdavkov je na rok (kap. 89.3) — ten istý zápis ako v Nastaveniach.
+  // Predtým tu rozhodoval jeden prepínač pbPausalne pre všetky roky.
+  const pausalne=(vydavkyRezimEfektivny(rok)==="pausal");
   const prijmy=R.prijmy;
-  // výdavky: paušál 60 % (max 20000) + odvody, alebo skutočné + odpis
+  // výdavky: paušál (percento a strop zo sadzby.js) + odvody, alebo skutočné + odpis
   let vydavky;
-  if(pausalne){ vydavky=r2(Math.min(prijmy*0.6,20000)+R.odvodyRok); }
+  if(pausalne){ vydavky=r2(pausalVydavky(prijmy, rok).suma+R.odvodyRok); }
   else { vydavky=R.vydavkySkutSpolu; }
   const zaklad=Math.max(0, r2(prijmy-vydavky-(pausalne?0:R.odvodyRok)));  // r41 čiastkový základ §6 (odvody v skutočných sú v module)
   // §5 – príjmy zo závislej činnosti (zamestnanie/dohody) — zadáva sa ručne v sprievodcovi,
@@ -18868,9 +18889,19 @@ function pbKontroly(rok){
   const S=firmaData.settings||{}, v=pbVypocet(rok);
   const blok=[], upoz=[], info=[]; const R=String(rok);
   const fakt=firmaData.faktury||[];
-  // 1) Platiteľ DPH celý rok → paušál nie je prípustný
-  if(v.pausalne && typeof jePlatcaDPH==="function" && jePlatcaDPH())
-    blok.push("Ste platiteľ DPH — paušálne výdavky (60 %) nie sú prípustné. Prepnite na skutočné výdavky.");
+  // 1) Platiteľ DPH po CELÝ rok → paušál nie je prípustný (§ 6 ods. 10 ZDP).
+  // Rozhoduje stav v danom roku, nie dnešný: v roku registrácie paušál ešte smie.
+  if(v.pausalne && !pausalMoznyVRoku(rok))
+    blok.push(`V roku ${rok} ste boli platiteľom DPH po celý rok — paušálne výdavky nie sú prípustné (§ 6 ods. 10). Prepnite na skutočné výdavky.`);
+  // 1b) Údaje o daňovníkovi (poučenie DPFOBv25): riadok 01 DIČ, meno a priezvisko,
+  // riadok 03 SK NACE a hlavná činnosť pre každého s príjmami z podnikania.
+  const O=pbDanovnikUdaje(rok);
+  if(!O.meno || !O.priezvisko)
+    blok.push("Chýba meno alebo priezvisko daňovníka. Doplňte ho v kroku Zhrnutie, časť Údaje o daňovníkovi.");
+  if(!String((firmaData.meta||{}).dic||"").trim())
+    blok.push("Chýba DIČ (riadok 01). Doplňte ho v Nastaveniach, časť Firemné údaje.");
+  if((v.prijmy||0)>0 && (!O.k1 || !O.cinnost))
+    blok.push(`Chýba kód SK NACE alebo hlavná činnosť za rok ${rok} (riadok 03). Doplňte ich v kroku Zhrnutie.`);
   // 2) Hotovostný princíp — prelom rokov (príjem sa počíta podľa úhrady, nie vystavenia)
   let von=0, dovnutra=0; const nespar=[];
   fakt.forEach(f=>{
@@ -18950,7 +18981,7 @@ function pbNahladFormular(rok){
 
     <div class="pbf-sec">VI. oddiel – Príjmy z podnikania (§ 6)</div>
     ${rr("39","Príjmy z podnikania a inej samostatnej zárobkovej činnosti", R.r39)}
-    ${rr("40","Výdavky "+(V.pausalne?"(paušálne 60 % + odvody)":"(skutočné + odpisy)"), R.r40)}
+    ${rr("40","Výdavky "+(V.pausalne?"(paušálne "+Math.round(pausalVydavky(V.prijmy, rok).sadzba*100)+" % + odvody)":"(skutočné + odpisy)"), R.r40)}
     ${rr("41","Čiastkový základ dane (r. 39 − r. 40)", R.r41, "sub")}
 
     ${(+R.r71||+R.r80)?`<div class="pbf-sec">VIII. oddiel – Ostatné príjmy (§ 8)</div>
@@ -19052,7 +19083,7 @@ function appPriznanieB(){
   const otvoreny=rokPovoleny(pbRok);
   document.getElementById("appScreen").innerHTML=appHlavicka("priznanieB","")+`
     <div style="background:var(--sfc-neg);border-left:3px solid #c0564a;border-radius:8px;padding:11px 14px;margin-bottom:14px;font-size:12.5px">
-      <b>Predvyplňovací nástroj.</b> Vytvorí návrh priznania DPFO typ B na kontrolu. <b>Nenahrádza daňového poradcu ani oficiálne priznanie.</b> Pred podaním si všetko overte. Výpočet je postavený na 15 % sadzbe (príjmy pod 100 000 €) a pravidlách 2026.
+      <b>Predvyplňovací nástroj.</b> Vytvorí návrh priznania DPFO typ B na kontrolu. <b>Nenahrádza daňového poradcu ani oficiálne priznanie.</b> Pred podaním si všetko overte. Výpočet je postavený na 15 % sadzbe (príjmy pod 100 000 €) a pravidlách ${pbRok}.
     </div>
     <div class="atool" style="margin-bottom:12px">${roky.map(r=>`<span class="achip ${String(pbRok)===r?'on':''}" onclick="pbRok=${r};pbKrok=0;appPriznanieB()">${rokPovoleny(r)?"":"🔒 "}Rok ${r}</span>`).join('')}</div>
     ${otvoreny?`
@@ -19120,16 +19151,76 @@ function pbZamInput(label, key, val){
       onchange="firmaData.settings.${key}=+this.value||0;poZmene();appPriznanieB()"
       style="width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:8px"></div>`;
 }
+// Druh priznania, ktorý sprievodca vyrába: len riadne. Opravné a dodatočné nie —
+// dodatočné potrebuje X. oddiel (r. 137 až 144, rozdiely oproti pôvodnému
+// priznaniu) a deň zistenia, a tie appka nemá (poučenie DPFOBv25, bod 3).
+// Rozsah podpory čaká na rozhodnutie (dev/opravy/priznanieB.md). Predtým sa druh
+// čítal z importovaného priznania, ktoré ho nikdy nenastavilo — vždy vyšlo
+// riadne, len to kód nepovedal.
+function pbTypDP(rok){ return "riadne"; }
+// SK NACE Rev. 2 v tvare 00.00.0 → k1 (2 číslice), k2 (2), k3 (1) podľa skNaceType
+// v XSD DPFOBv25. Neúplný kód vráti null — do XML nejde nič, kontrola to povie.
+function pbNaceRozloz(kod){
+  const d=String(kod||"").replace(/[\s.]/g,"");
+  if(!/^\d{5}$/.test(d)) return null;
+  return {k1:d.slice(0,2), k2:d.slice(2,4), k3:d.slice(4)};
+}
+// Údaje o daňovníkovi do hlavičky XML. Patria k priznaniu, nie k firme: meno
+// a priezvisko sú v settings.pbDanovnik, SK NACE a hlavná činnosť po rokoch
+// v settings.pbNaceRoky — riadok 03 je činnosť s najvyšším príjmom V TOM roku.
+// Dátum narodenia sa nepýta ani neukladá: riadok 02 vypĺňa len daňovník bez DIČ
+// aj rodného čísla (poučenie DPFOBv25) a živnostník DIČ má.
+function pbDanovnikUdaje(rok){
+  const S=(firmaData&&firmaData.settings)||{};
+  const D=S.pbDanovnik||{}, N=(S.pbNaceRoky||{})[String(rok)]||{};
+  const k=pbNaceRozloz(N.kod)||{k1:"", k2:"", k3:""};
+  return {meno:D.meno||"", priezvisko:D.priezvisko||"", titul:D.titul||"", titulZa:D.titulZa||"",
+    naceKod:N.kod||"", cinnost:N.cinnost||"", k1:k.k1, k2:k.k2, k3:k.k3};
+}
+function pbNastavDanovnik(pole, hodnota){
+  if(!["meno","priezvisko","titul","titulZa"].includes(pole)) return;
+  if(!strazZapis("priznanieB")){ appPriznanieB(); return; }   // pole sa vráti na uloženú hodnotu
+  const S=firmaData.settings=firmaData.settings||{};
+  S.pbDanovnik=Object.assign({}, S.pbDanovnik, {[pole]:String(hodnota||"").trim()});
+  poZmene(); appPriznanieB();
+}
+function pbNastavNace(rok, pole, hodnota){
+  if(pole!=="kod" && pole!=="cinnost") return;
+  if(!strazZapis("priznanieB")){ appPriznanieB(); return; }   // pole sa vráti na uloženú hodnotu
+  const S=firmaData.settings=firmaData.settings||{}, R=String(rok);
+  S.pbNaceRoky=S.pbNaceRoky||{};
+  S.pbNaceRoky[R]=Object.assign({}, S.pbNaceRoky[R], {[pole]:String(hodnota||"").trim()});
+  poZmene(); appPriznanieB();
+}
+function pbDanovnikSekcia(rok){
+  const O=pbDanovnikUdaje(rok), w=zam("priznanieB");
+  const naceRoky=(firmaData.settings||{}).pbNaceRoky||{};
+  const predosly=Object.keys(naceRoky).filter(r=>r<String(rok) && (naceRoky[r]||{}).kod).sort().pop();
+  const pole=(label, val, onch, ph)=>`<div class="mfield" style="margin-bottom:8px"><label style="font-size:12.5px">${label}</label>
+    <input value="${esc(val)}" placeholder="${esc(ph||'')}"${w} onchange="${onch}" style="width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:8px"></div>`;
+  return `<div style="margin:0 0 12px;padding:10px 12px;border-radius:10px;border:1px solid var(--line)">
+    <div style="font-weight:700;font-size:13px;margin-bottom:6px">Údaje o daňovníkovi</div>
+    <div class="mrow2">${pole("Meno", O.meno, "pbNastavDanovnik('meno',this.value)")}${pole("Priezvisko", O.priezvisko, "pbNastavDanovnik('priezvisko',this.value)")}</div>
+    <div class="mrow2">${pole("Titul pred menom", O.titul, "pbNastavDanovnik('titul',this.value)", "nepovinné")}${pole("Titul za menom", O.titulZa, "pbNastavDanovnik('titulZa',this.value)", "nepovinné")}</div>
+    <div style="font-size:12.5px;margin:2px 0 8px">DIČ (r. 01): <b>${esc((firmaData.meta||{}).dic||"—")}</b> <span style="color:var(--ink-soft)">— mení sa v Nastaveniach</span></div>
+    ${pole(`Kód SK NACE za rok ${rok} (r. 03)`, O.naceKod, `pbNastavNace(${rok},'kod',this.value)`, predosly?`v roku ${predosly}: ${naceRoky[predosly].kod}`:"napr. 74.10.0")}
+    ${O.naceKod&&!O.k1?`<div style="font-size:11.5px;color:var(--neg);margin:-4px 0 8px">Kód má päť číslic v tvare 00.00.0.</div>`:""}
+    ${pole(`Hlavná, prevažná činnosť v roku ${rok}`, O.cinnost, `pbNastavNace(${rok},'cinnost',this.value)`, "činnosť, z ktorej bol najvyšší príjem")}
+    <div style="font-size:11.5px;color:var(--ink-soft)">Dátum narodenia sa nevypĺňa — riadok 02 je len pre daňovníka, ktorý nemá DIČ ani rodné číslo.</div>
+  </div>`;
+}
 function pbKrokObsah(krok, v, S){
   if(krok===0){
+    const PV=pausalVydavky(v.prijmy, v.rok), pctP=Math.round(PV.sadzba*100);
     return `<h2 style="font-size:16px;margin-bottom:12px">Príjmy a výdavky ${v.rok}</h2>
       <div class="mfield" style="margin-bottom:12px"><label>Spôsob výdavkov</label>
-        <select onchange="firmaData.settings.pbPausalne=(this.value==='pausal');poZmene();appPriznanieB()">
+        <select${zam("priznanieB")} onchange="if(strazZapis('priznanieB'))zapisVydavkyRezim(this.value,${v.rok});appPriznanieB()">
           <option value="skutocne" ${!v.pausalne?'selected':''}>Skutočné výdavky (z evidencie + odpis)</option>
-          <option value="pausal" ${v.pausalne?'selected':''}>Paušálne 60 % (max 20 000 €)</option>
-        </select></div>
+          <option value="pausal" ${v.pausalne?'selected':''}${pausalMoznyVRoku(v.rok)?'':' disabled'}>Paušálne ${pctP} % (max ${eur(PV.strop)})</option>
+        </select>
+        <div style="font-size:11.5px;color:var(--ink-soft);margin-top:4px">Platí pre rok ${v.rok} — je to ten istý výber ako v Nastaveniach.${pausalMoznyVRoku(v.rok)?'':` V roku ${v.rok} ste boli platiteľom DPH po celý rok, paušál nie je možný.`}</div></div>
       ${pbRiadok("Príjmy z podnikania", v.prijmy, "r39")}
-      ${pbRiadok("Výdavky"+(v.pausalne?" (paušál 60 % + odvody)":" (skutočné + odpis)"), v.vydavky, "r40")}
+      ${pbRiadok("Výdavky"+(v.pausalne?` (paušál ${pctP} % + odvody)`:" (skutočné + odpis)"), v.vydavky, "r40")}
       ${pbRiadok("Zaplatené odvody (ZP+SP)", v.odvody)}
       ${pbRiadok("Čiastkový základ dane", v.zaklad, "r41", true)}
       <div style="margin:16px 0 6px;font-weight:700;font-size:14px">Príjmy zo zamestnania (§ 5) — nepovinné</div>
@@ -19167,7 +19258,7 @@ function pbKrokObsah(krok, v, S){
   }
   if(krok===2){
     const deti=S.deti||[];
-    const bd=v.bonusDetail;
+    const bd=v.bonusDetail, B=detiBonusSadzby(v.rok);
     return `<h2 style="font-size:16px;margin-bottom:12px">Daň a daňový bonus</h2>
       ${v.progresia?`<div class="csub" style="margin-bottom:10px">Príjmy presiahli hranicu 100 000 € — daň sa počíta progresívne po pásmach. Uplatňuje sa automaticky, nič netreba zapínať.</div>`:''}
       ${pbRiadok("Základ dane spolu (§5 + §6)", v.zakladCelkom, "r72")}
@@ -19177,19 +19268,20 @@ function pbKrokObsah(krok, v, S){
       <div style="margin-bottom:10px">
         ${deti.length?deti.map((dt,i)=>`<div style="display:flex;gap:8px;align-items:center;margin-bottom:5px">
           <input type="number" value="${esc(String(dt.vek!=null?dt.vek:''))}" placeholder="vek" onchange="firmaData.settings.deti[${i}].vek=+this.value;delete firmaData.settings.deti[${i}].narodenie;poZmene();appPriznanieB()" style="width:70px;padding:5px;border:1px solid var(--line);border-radius:7px">
-          <span style="font-size:12.5px;color:var(--ink-soft)">${detiVek(dt,v.rok)<15?'do 15 r. (100 €/mes)':detiVek(dt,v.rok)<18?'15–17 r. (50 €/mes)':'nad 18 r. (bez nároku)'}</span>
+          <span style="font-size:12.5px;color:var(--ink-soft)">${detiVek(dt,v.rok)<15?`do 15 r. (${eur(B.do15)}/mes)`:detiVek(dt,v.rok)<18?`15–17 r. (${eur(B.do18)}/mes)`:'nad 18 r. (bez nároku)'}</span>
           <span onclick="firmaData.settings.deti.splice(${i},1);poZmene();appPriznanieB()" style="cursor:pointer;color:var(--neg);margin-left:auto">✕</span>
         </div>`).join(''):'<div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:8px">Žiadne deti. Pridajte vek dieťaťa.</div>'}
         <button class="aabtn" onclick="firmaData.settings.deti=firmaData.settings.deti||[];firmaData.settings.deti.push({vek:10});poZmene();appPriznanieB()">+ Pridať dieťa</button>
       </div>
       ${deti.length?`<div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:8px">
-        ${bd.opravnenych} detí s nárokom · plná suma ${eur(bd.maxBonus)} · limit ${Math.round(bd.pctLimit*100)} % zo základu = ${eur(bd.limitZoZakladu||0)}${v.zaklad>DB_BONUS_2026.hranicaKratenia?` · po krátení vysokým príjmom ${eur(bd.poVysokomPrijme||0)}`:''}</div>`:''}
+        ${bd.opravnenych} detí s nárokom · plná suma ${eur(bd.maxBonus)} · limit ${Math.round(bd.pctLimit*100)} % zo základu = ${eur(bd.limitZoZakladu||0)}${v.zaklad>B.hranicaKratenia?` · po krátení vysokým príjmom ${eur(bd.poVysokomPrijme||0)}`:''}</div>`:''}
       ${pbRiadok("Daňový bonus na deti", v.bonusDeti, "r120", true)}
-      ${(v.zakladRocny||v.zaklad)>DB_BONUS_2026.hranicaKratenia&&v.bonusDeti===0&&deti.length?`<div style="font-size:11.5px;color:var(--accent-deep);margin-bottom:8px">⚠ Pri ročnom základe dane ${eur(v.zakladRocny||v.zaklad)} (nad ${eur(DB_BONUS_2026.hranicaKratenia)}) nárok na bonus zaniká — krátenie vysokým príjmom.</div>`:''}
+      ${(v.zakladRocny||v.zaklad)>B.hranicaKratenia&&v.bonusDeti===0&&deti.length?`<div style="font-size:11.5px;color:var(--accent-deep);margin-bottom:8px">⚠ Pri ročnom základe dane ${eur(v.zakladRocny||v.zaklad)} (nad ${eur(B.hranicaKratenia)}) nárok na bonus zaniká — krátenie vysokým príjmom.</div>`:''}
       ${pbRiadok("Daň po bonuse", v.danPoBonuse, "r124", true)}`;
   }
   // zhrnutie
   return `<h2 style="font-size:16px;margin-bottom:12px">Zhrnutie priznania ${v.rok}</h2>
+    ${pbDanovnikSekcia(v.rok)}
     ${pbKontrolyHtml(v.rok)}
     ${pbRiadok("Príjmy", v.prijmy, "r39")}
     ${pbRiadok("Výdavky", v.vydavky, "r40")}
@@ -19203,7 +19295,8 @@ function pbKrokObsah(krok, v, S){
     ${pbDarSekcia(v, S)}
     <div style="margin-top:12px;padding:12px;border-radius:10px;background:${v.doplatok>0?'#fdf2f2':'var(--sfc-pos)'}">
       ${pbRiadok(v.doplatok>0?"Daň na úhradu":"Daňový preplatok", Math.abs(v.doplatok), v.doplatok>0?"r135":"r136", true)}
-    </div>`;
+    </div>
+    <div style="margin-top:10px;font-size:11.5px;color:var(--ink-soft)">Sprievodca vyrába len riadne priznanie. Opravné ani dodatočné nevyrobí — dodatočné potrebuje rozdiely oproti pôvodnému priznaniu (X. oddiel), ktoré appka nemá.</div>`;
 }
 function pbExportXml(){
   if(!strazZapis("priznania")) return;
@@ -19216,7 +19309,10 @@ function pbExportXml(){
     ulica:_mA.ulica||_mD.ulica||"", cislo:_mA.cislo||_mD.cislo||"",
     psc:(_mA.psc||_mD.psc||"").replace(/\s/g,""), obec:_mA.obec||_mD.obec||"",
   });
-  const typ=(firmaData.danovePriznania&&firmaData.danovePriznania[pbRok]&&firmaData.danovePriznania[pbRok].typDP)||"riadne";
+  const typ=pbTypDP(pbRok);
+  // Údaje o daňovníkovi patria k priznaniu, nie k firme. Dátum narodenia ostáva
+  // prázdny: riadok 02 je len pre daňovníka bez DIČ aj rodného čísla.
+  const O=pbDanovnikUdaje(pbRok);
   const n=x=>{const q=(+x||0);return q?q.toFixed(2):"";};
   const b=x=>x?"1":"0";
   const esc=s=>String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
@@ -19230,7 +19326,7 @@ function pbExportXml(){
 <dokument>
   <hlavicka>
     <dic>${esc(m.dic||'')}</dic>
-    <datumNarodenia>${esc(m.datumNarodenia||'')}</datumNarodenia>
+    <datumNarodenia></datumNarodenia>
     <typDP>
       <rdp>${b(typ==='opravne'||typ==='dodatocne'?0:1)}</rdp>
       <odp>${b(typ==='opravne'?1:0)}</odp>
@@ -19241,15 +19337,15 @@ function pbExportXml(){
       <datumDDP></datumDDP>
     </zdanovacieObdobie>
     <skNace>
-      <k1>${esc(m.naceK1||'')}</k1>
-      <k2>${esc(m.naceK2||'')}</k2>
-      <k3>${esc(m.naceK3||'')}</k3>
-      <cinnost>${esc(m.nace||m.cinnost||'')}</cinnost>
+      <k1>${esc(O.k1)}</k1>
+      <k2>${esc(O.k2)}</k2>
+      <k3>${esc(O.k3)}</k3>
+      <cinnost>${esc(O.cinnost)}</cinnost>
     </skNace>
-    <priezvisko>${esc(m.priezvisko||'')}</priezvisko>
-    <meno>${esc(m.meno||'')}</meno>
-    <titul>${esc(m.titul||'')}</titul>
-    <titulZa>${esc(m.titulZa||'')}</titulZa>
+    <priezvisko>${esc(O.priezvisko)}</priezvisko>
+    <meno>${esc(O.meno)}</meno>
+    <titul>${esc(O.titul)}</titul>
+    <titulZa>${esc(O.titulZa)}</titulZa>
     <adresaTrvPobytu>
       <ulica>${esc(m.ulica||'')}</ulica>
       <cislo>${esc(m.cislo||'')}</cislo>
@@ -20087,7 +20183,7 @@ function pbExportXml(){
 function pbUlozPodanie(rok, xml, v){
   if(!mozemPisat("priznania")) return;   // vedľajší zápis po exporte — volajúci už bol odmietnutý
   firmaData.priznanieB=firmaData.priznanieB||{};
-  const typ=(firmaData.danovePriznania&&firmaData.danovePriznania[rok]&&firmaData.danovePriznania[rok].typDP)||"riadne";
+  const typ=pbTypDP(rok);
   firmaData.priznanieB[rok]={
     xml, kedy:new Date().toISOString(), typDP:typ,
     prijmy:r2(v.prijmy||0), zakladCelkom:r2(v.zakladCelkom||v.zaklad||0),

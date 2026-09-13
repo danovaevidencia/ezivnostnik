@@ -56,6 +56,12 @@ const SADZBY = {
   danPasma:       {n:"Pásma progresívnej dane", sk:"dan", mienaSa:"rocne", overenost:"zdroj", kontrola:"2026-07-21",
     h:[{od:"2026-01-01", v:[{do:43983.32, s:0.19},{do:60349.21, s:0.25},{do:75010.32, s:0.30},{do:null, s:0.35}],
         zdroj:"§ 15 ZDP — štyri pásma od 1. 1. 2026 (154,8× / 212,4× / 264× ŽM)"}]},
+  // Paušálne výdavky. Predtým 0.6 a 20000 natvrdo na troch miestach appky.
+  // Poučenie DPFOBv25 (za rok 2025) ich uvádza; dátum účinnosti neoverený, preto od:null.
+  pausalSadzba:   {n:"Paušálne výdavky — percento z príjmov", sk:"dan", mienaSa:"zriedka", overenost:"zdroj", kontrola:"2026-09-13",
+    h:[{od:null, v:0.6, zdroj:"§ 6 ods. 10 ZDP — výdavky percentom z príjmov 60 % (poučenie DPFOBv25)"}]},
+  pausalStrop:    {n:"Paušálne výdavky — ročný strop", sk:"dan", mienaSa:"zriedka", overenost:"zdroj", kontrola:"2026-09-13",
+    h:[{od:null, v:20000, zdroj:"§ 6 ods. 10 ZDP — najviac 20 000 € ročne (poučenie DPFOBv25)"}]},
   sadzbaDPH:      {n:"Základná sadzba DPH", sk:"dph", mienaSa:"zriedka", overenost:"zdroj", kontrola:"2026-07-21",
     h:[{od:"2025-01-01", v:0.23, zdroj:"§ 27 zákona o DPH — 23 % od 1. 1. 2025"}]},
   zdravSadzba:    {n:"Zdravotné poistné SZČO", sk:"odvody", mienaSa:"rocne", overenost:"zdroj", kontrola:"2026-07-21",
@@ -125,6 +131,21 @@ const SADZBY = {
   bonusKratHranica:{n:"Základ, od ktorého sa bonus kráti", sk:"bonus", mienaSa:"rocne", overenost:"zdroj", kontrola:"2026-07-21",
     h:[{od:"2025-01-01", v:25740, zdroj:"ročná hranica krátenia bonusu 2025 (FS)"},
        {od:"2026-01-01", v:27432, zdroj:"1,5-násobok priem. mzdy = 2 286 €/mes. × 12"}]},
+  // Limit bonusu zo základu dane podľa počtu detí s nárokom (6 a viac detí = jeden limit).
+  // Prevzaté z kópie DB_BONUS_2026, ktorá bola v appke. Pre rok 2025 zdroj nemáme —
+  // poučenie DPFOBv25 hovorí len „ustanovené percento" — preto len od 2026.
+  bonusLimitSadzba1:{n:"Limit bonusu zo základu — 1 dieťa", sk:"bonus", mienaSa:"zriedka", overenost:"kod", kontrola:null,
+    h:[{od:"2026-01-01", v:0.29, zdroj:"§ 33 ZDP — prevzaté z DB_BONUS_2026 (v kóde: overené voči FS/KROS/Podnikajte 2026)"}]},
+  bonusLimitSadzba2:{n:"Limit bonusu zo základu — 2 deti", sk:"bonus", mienaSa:"zriedka", overenost:"kod", kontrola:null,
+    h:[{od:"2026-01-01", v:0.36, zdroj:"§ 33 ZDP — prevzaté z DB_BONUS_2026 (v kóde: overené voči FS/KROS/Podnikajte 2026)"}]},
+  bonusLimitSadzba3:{n:"Limit bonusu zo základu — 3 deti", sk:"bonus", mienaSa:"zriedka", overenost:"kod", kontrola:null,
+    h:[{od:"2026-01-01", v:0.43, zdroj:"§ 33 ZDP — prevzaté z DB_BONUS_2026 (v kóde: overené voči FS/KROS/Podnikajte 2026)"}]},
+  bonusLimitSadzba4:{n:"Limit bonusu zo základu — 4 deti", sk:"bonus", mienaSa:"zriedka", overenost:"kod", kontrola:null,
+    h:[{od:"2026-01-01", v:0.50, zdroj:"§ 33 ZDP — prevzaté z DB_BONUS_2026 (v kóde: overené voči FS/KROS/Podnikajte 2026)"}]},
+  bonusLimitSadzba5:{n:"Limit bonusu zo základu — 5 detí", sk:"bonus", mienaSa:"zriedka", overenost:"kod", kontrola:null,
+    h:[{od:"2026-01-01", v:0.57, zdroj:"§ 33 ZDP — prevzaté z DB_BONUS_2026 (v kóde: overené voči FS/KROS/Podnikajte 2026)"}]},
+  bonusLimitSadzba6:{n:"Limit bonusu zo základu — 6 a viac detí", sk:"bonus", mienaSa:"zriedka", overenost:"kod", kontrola:null,
+    h:[{od:"2026-01-01", v:0.64, zdroj:"§ 33 ZDP — prevzaté z DB_BONUS_2026 (v kóde: overené voči FS/KROS/Podnikajte 2026)"}]},
   obratRocny:     {n:"Obrat — platiteľom od nasl. roka", sk:"dph", mienaSa:"zriedka", overenost:"zdroj", kontrola:"2026-07-21",
     h:[{od:"2025-01-01", v:50000, zdroj:"§ 4 zákona o DPH"}]},
   obratOkamzity:  {n:"Obrat — platiteľom dňom dodania", sk:"dph", mienaSa:"zriedka", overenost:"zdroj", kontrola:"2026-07-21",
