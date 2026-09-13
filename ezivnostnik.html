@@ -15499,27 +15499,45 @@ function vykazAktivitaDna(dayKey){
   }
   return null;
 }
-function jazdyStavVykaz(mesiac){
-  const J=(firmaData.jazdy||[]).filter(j=>!mesiac || jazdaDayKey(j).slice(0,7)===mesiac);
-  let zhoda=0, doplnene=0;
-  J.forEach(j=>{ const a=vykazAktivitaDna(jazdaDayKey(j)); if(a){ zhoda++; if(j.ucelZVykazu) doplnene++; } });
-  return {zhoda, doplnene, nedoplnene:zhoda-doplnene, spolu:J.length};
+// Jazdy so zhodným dňom vo výkaze prác — JEDNO pravidlo pre modul aj sprievodcu.
+// Obdobie sú dni YYYY-MM-DD vrátane, bez hraníc celá kniha. Účel sa z výkazu
+// doplní len jazde, ktorá ho ešte nedostala a nemá vlastný: prázdny alebo
+// predvolený (ten dáva nová jazda aj import z auta). Dve kópie tohto pravidla
+// predtým prepisovali aj účel napísaný rukou (kap. 109.11).
+function jazdyVykazZhody(od, doD){
+  const def=String((firmaData.settings||{}).kjUcel||"").trim();
+  const out=[];
+  (firmaData.jazdy||[]).forEach(j=>{
+    const d=jazdaDayKey(j); if(!d || (od && d<od) || (doD && d>doD)) return;
+    const a=vykazAktivitaDna(d); if(!a) return;
+    const u=String(j.ucel||"").trim();
+    out.push({j, a, doplnit:!j.ucelZVykazu && (!u || u===def)});
+  });
+  return out;
+}
+function jazdyStavVykaz(od, doD){
+  const Z=jazdyVykazZhody(od, doD);
+  const doplnene=Z.filter(z=>z.j.ucelZVykazu).length, nedoplnene=Z.filter(z=>z.doplnit).length;
+  return {zhoda:Z.length, doplnene, nedoplnene, vlastny:Z.length-doplnene-nedoplnene};
 }
 // hromadne doplní účel z výkazu (nedeštruktívne — pôvodný do ucelPovodny)
-function jazdyDoplnUcelZVykazu(mesiac){
+function jazdyDoplnUcel(od, doD){
   let n=0;
-  (firmaData.jazdy||[]).forEach(j=>{
-    if(mesiac && jazdaDayKey(j).slice(0,7)!==mesiac) return;
-    const a=vykazAktivitaDna(jazdaDayKey(j));
-    if(a){
-      if(j.ucelPovodny==null) j.ucelPovodny=j.ucel||"";
-      j.ucel=a.aktivita; j.ucelZVykazu=true;
-      if(a.zakazka) j.zakazka=a.zakazka;
-      n++;
-    }
+  jazdyVykazZhody(od, doD).forEach(({j, a, doplnit})=>{
+    if(!doplnit) return;
+    if(j.ucelPovodny==null) j.ucelPovodny=j.ucel||"";
+    j.ucel=a.aktivita; j.ucelZVykazu=true;
+    if(a.zakazka) j.zakazka=a.zakazka;
+    n++;
   });
-  poZmene(); appJazdy();
-  setTimeout(()=>alert(n?(n+" jázd doplnených účelom z výkazu."):"Žiadne jazdy so zhodou dňa vo výkaze prác."),100);
+  if(n) poZmene();
+  return n;
+}
+function kjMesiacObdobie(mk){ return mk ? [mk+"-01", mk+"-31"] : [null, null]; }
+function jazdyDoplnUcelZVykazu(mesiac){
+  const n=jazdyDoplnUcel(...kjMesiacObdobie(mesiac));
+  appJazdy();
+  setTimeout(()=>alert(n?(n+" jázd doplnených účelom z výkazu."):"Žiadna jazda na doplnenie — vlastný účel sa neprepisuje."),100);
 }
 function jazdyVratVsetky(mesiac){
   let n=0;
@@ -15539,6 +15557,11 @@ function appJazdy(){
   const kmSukrAll=kmSukromne(vsetky), kmPodnikAll=kmPodnik(vsetky);
   const kmMesPodnik=kmPodnik(jazMes);
   const tachStav=(d.settings&&d.settings.tachometer)?(+d.settings.tachometer):null;
+  // Pole je POČIATOČNÝ stav knihy (kotva `prepocitajTachometer`). Karta písala
+  // „Aktuálny stav + najazdené za rok = odhad ku koncu roka" — zvádzalo to
+  // zadať dnešný stav a pri medzere v reťazi súčet nesedel. Stav po poslednej
+  // jazde berie reťaz, kde je; kotva + km len keď jazdy stav nemajú.
+  const tachKon=vsetky.some(j=>+j.kon>0) ? jazdaPoslednyStav() : (tachStav ? tachoCele(tachStav+kmAll) : 0);
   const kontroly=jazdyKontrola();
 
   document.getElementById("appScreen").innerHTML=appHlavicka("jazdy",
@@ -15553,11 +15576,11 @@ function appJazdy(){
     </div>
     ${autoNezrovnalostiHtml(true)}
     ${kontroly.length?`<div class="chead" style="margin:0 2px 8px">Strážca konzistencie</div>`+kontrolyZoznamHtml(kontroly):''}
-    ${(()=>{ const st=jazdyStavVykaz(kjMesiac); if(!st.zhoda) return ''; return `
+    ${(()=>{ const st=jazdyStavVykaz(...kjMesiacObdobie(kjMesiac)); if(!st.zhoda) return ''; return `
     <div class="card" style="margin-bottom:14px">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <div style="min-width:0"><b class="chead">Prepojenie s výkazom prác</b>
-          <div class="csub">${st.zhoda} jázd má zhodu s dňom vo výkaze${st.doplnene?` · ${st.doplnene} už doplnených`:''}. Účel jazdy sa nastaví podľa aktivity z výkazu v ten deň.</div></div>
+          <div class="csub">${st.zhoda} jázd má zhodu s dňom vo výkaze${st.doplnene?` · ${st.doplnene} už doplnených`:''}${st.vlastny?` · ${st.vlastny} s vlastným účelom`:''}. Prázdny alebo predvolený účel sa nastaví podľa aktivity z výkazu v ten deň, vlastný ostane.</div></div>
         <div class="sp" style="flex:1"></div>
         <div style="display:flex;gap:6px;flex-wrap:wrap">
           ${st.nedoplnene?`<button class="aabtn pri" onclick="jazdyDoplnUcelZVykazu(kjMesiac)">↳ Doplniť účel z výkazu (${st.nedoplnene})</button>`:''}
@@ -15574,7 +15597,7 @@ function appJazdy(){
         <button class="aabtn" onclick="kjUlozTachometer()">Uložiť</button>
         <button class="aabtn" onclick="kjPrepocitajTacho()" title="Zreťazí stav tachometra naprieč celou knihou">↻ Prepočítať</button>
       </div>
-      <div class="csub">Aktuálny stav + najazdené za rok = ${tachStav?((tachStav+kmAll).toLocaleString('sk')+' km odhad ku koncu roka'):'zadajte stav pre dopočet'}</div>
+      <div class="csub">Pole je stav tachometra pred prvou jazdou v knihe. ${tachKon?`Po poslednej jazde: <b>${tachKon.toLocaleString('sk')} km</b>`:'Ďalšie stavy appka dopočíta z kilometrov.'}</div>
       ${(()=>{ const d=tachometerDiery(); if(!d.length) return "";
         return `<div style="margin-top:8px;font-size:12px;color:var(--neg)">⚠ Tachometer nie je spojitý na ${d.length} ${d.length===1?'mieste':'miestach'} — tlačidlom <b>↻ Prepočítať</b> sa reťaz obnoví.</div>`; })()}
     </div>
@@ -15929,25 +15952,10 @@ function kjwMesiaceObdobia(od, doD){
 }
 
 // ── Krok: účely z výkazu prác ──
-function kjwStavVykazu(od, doD){
-  let zhoda=0, nedoplnene=0;
-  kjwJazdyObdobia(od,doD).forEach(j=>{
-    const a=vykazAktivitaDna(jazdaDayKey(j));
-    if(a){ zhoda++; if(!j.ucelZVykazu) nedoplnene++; }
-  });
-  return {zhoda, nedoplnene};
-}
+// pravidlo je spoločné s modulom — `jazdyStavVykaz`, `jazdyDoplnUcel`
+function kjwStavVykazu(od, doD){ return jazdyStavVykaz(od, doD); }
 function kjwApplyVykaz(){
-  const {od,doD}=_kjW; let n=0;
-  (firmaData.jazdy||[]).forEach(j=>{
-    const d=jazdaDayKey(j); if(!d || d<od || d>doD) return;
-    const a=vykazAktivitaDna(d); if(!a) return;
-    if(j.ucelPovodny==null) j.ucelPovodny=j.ucel||"";
-    j.ucel=a.aktivita; j.ucelZVykazu=true;
-    if(a.zakazka) j.zakazka=a.zakazka;
-    n++;
-  });
-  if(n) poZmene();
+  const n=jazdyDoplnUcel(_kjW.od, _kjW.doD);
   _kjW.hotovo.vykaz=n;
   return n;
 }
@@ -16067,10 +16075,10 @@ function kjwRender(){
   }
 
   else if(akt.k==="vykaz"){
-    const V=kjwStavVykazu(_kjW.od,_kjW.doD);
+    const V=jazdyStavVykaz(_kjW.od,_kjW.doD);
     telo=`<div class="csub" style="margin-bottom:10px">Účel jazdy sa dá doložiť výkazom prác — ak ste v ten deň niečo robili, jazda mala dôvod. Toto je najsilnejší podklad, aký k účelu máte.</div>
       ${V.zhoda?`<div style="background:var(--bg);border-radius:9px;padding:11px 13px;font-size:13px">
-        <b>${V.zhoda}</b> jázd má vo výkaze zhodný deň${V.nedoplnene?` · z toho <b>${V.nedoplnene}</b> ešte nemá doplnený účel`:` · všetky už doplnené`}
+        <b>${V.zhoda}</b> jázd má vo výkaze zhodný deň${V.nedoplnene?` · z toho <b>${V.nedoplnene}</b> ešte nemá doplnený účel`:(V.vlastny?'':` · všetky už doplnené`)}${V.vlastny?` · <b>${V.vlastny}</b> má vlastný účel, ten sa nemení`:''}
         ${_kjW.hotovo.vykaz?`<div style="color:var(--pos);margin-top:6px">✓ Doplnené pri ${_kjW.hotovo.vykaz} jazdách</div>`:''}
       </div>
       ${V.nedoplnene?`<button class="aabtn pri" style="width:100%;justify-content:center;margin-top:12px" onclick="kjwApplyVykaz();kjwRender()">↳ Doplniť účel z výkazu (${V.nedoplnene})</button>
@@ -16862,9 +16870,7 @@ function editJazda(idx){
         <input type="checkbox" id="m_sukromna" ${jazdaSukromna(j)?"checked":""} style="width:auto" onchange="mSukromnaPozn()">
         <b>Súkromná jazda</b></label>
       <div id="m_sukromnaPozn" style="font-size:11.5px;color:var(--ink-soft);margin-top:5px;line-height:1.5">
-        ${jazdaSukromna(j)
-          ? "Jazda ostane v knihe kvôli spojitosti tachometra, ale nezapočíta sa do podnikateľských kilometrov ani do náhrad."
-          : "Zaškrtnite pri ceste, ktorá s podnikaním nesúvisí. Kilometre ostanú v knihe, len sa neuplatnia."}
+        ${jazdaSukromnaVeta(jazdaSukromna(j))}
       </div>
     </div>
     ${nova?`<div style="background:var(--bg);border-radius:9px;padding:11px 14px;margin-top:4px;font-size:12.5px;color:var(--ink-soft);line-height:1.55">
@@ -16901,11 +16907,15 @@ function nastavAutoSukromne(hodnota){
   if(aktualnaApp==="uzavierka" && typeof appUzavierka==="function") appUzavierka();
   else if(aktualnaApp==="jazdy" && typeof appJazdy==="function") appJazdy();
 }
-function mSukromnaPozn(){
-  const p=document.getElementById("m_sukromnaPozn"); if(!p) return;
-  p.textContent = chk("m_sukromna")
+// Jedna veta pre editor jazdy aj záver meranej jazdy — bola trikrát.
+function jazdaSukromnaVeta(sukromna){
+  return sukromna
     ? "Jazda ostane v knihe kvôli spojitosti tachometra, ale nezapočíta sa do podnikateľských kilometrov ani do náhrad."
     : "Zaškrtnite pri ceste, ktorá s podnikaním nesúvisí. Kilometre ostanú v knihe, len sa neuplatnia.";
+}
+function mSukromnaPozn(){
+  const p=document.getElementById("m_sukromnaPozn"); if(!p) return;
+  p.textContent = jazdaSukromnaVeta(chk("m_sukromna"));
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -17133,7 +17143,7 @@ function jazdaVysvetli(){
       <p style="margin:0;color:var(--ink-soft);font-size:12.5px">Súradnice zostávajú v telefóne.
       Do knihy jázd sa uloží len počet kilometrov, čas a názov trasy.</p>
     </div>`,
-  ()=>{ gpsUloz("ez_jazda_vysvetlene","1"); jazdaBez(); });
+  ()=>{ gpsUloz("ez_jazda_vysvetlene","1"); jazdaBez(); }, null, null, "Spustiť meranie");
 }
 function jazdaBez(){
   _jazda={zac:Date.now(), km:0, kmOdhad:0, prerusenia:0, zahodene:0, zastavky:[]};
@@ -17557,9 +17567,9 @@ function jazdaZaver(){
     </div>
     <div class="mfield" style="margin-top:2px">
       <label style="display:flex;align-items:center;gap:9px;cursor:pointer;font-size:13.5px">
-        <input type="checkbox" id="m_sukromna" style="width:auto"><b>Súkromná jazda</b></label>
-      <div style="font-size:11.5px;color:var(--ink-soft);margin-top:5px;line-height:1.5">
-        Zaškrtnite pri ceste, ktorá s podnikaním nesúvisí. Kilometre ostanú v knihe, len sa neuplatnia.</div>
+        <input type="checkbox" id="m_sukromna" style="width:auto" onchange="mSukromnaPozn()"><b>Súkromná jazda</b></label>
+      <div id="m_sukromnaPozn" style="font-size:11.5px;color:var(--ink-soft);margin-top:5px;line-height:1.5">
+        ${jazdaSukromnaVeta(false)}</div>
     </div>
     <div style="text-align:center;margin-top:14px;padding-top:12px;border-top:1px solid var(--line-soft)">
       <button type="button" class="aabtn" style="font-size:12px;color:var(--neg)" onclick="jazdaZahod()">Zahodiť jazdu</button>
@@ -21943,7 +21953,9 @@ let modalSave=null, modalDelete=null;
 // odísť. Riešenie patrí sem, do `openModal`/`closeModal`, nie do posluchača
 // pri `spristupniOvladace` — ten nevie, ktoré okno je práve otvorené.
 // Spec kap. 48.9, bod 2.
-function openModal(title, bodyHTML, onSave, onDelete, trieda){
+// `okText` — tlačidlo, ktoré neukladá, nesmie sa volať „Uložiť" (Meranie jazdy
+// ním spúšťa GPS). Nastavuje sa pri KAŽDOM otvorení, inak by text ostal viseť.
+function openModal(title, bodyHTML, onSave, onDelete, trieda, okText){
   modalSave=onSave; modalDelete=onDelete||null;
   const karta=document.querySelector("#modal .modalcard");
   if(karta){ karta.classList.remove("siroky"); if(trieda) karta.classList.add(trieda); }
@@ -21951,7 +21963,8 @@ function openModal(title, bodyHTML, onSave, onDelete, trieda){
   document.getElementById("modalBody").innerHTML=bodyHTML;
   const del=document.getElementById("modalDelete");
   if(onDelete) del.classList.remove("hidden"); else del.classList.add("hidden");
-  const ok=document.getElementById("modalOk"); if(ok) ok.style.display=onSave?"":"none";
+  const ok=document.getElementById("modalOk");
+  if(ok){ ok.style.display=onSave?"":"none"; ok.textContent=okText||"Uložiť"; }
   document.getElementById("modal").classList.add("on");
 }
 function closeModal(){
