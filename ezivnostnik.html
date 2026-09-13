@@ -7798,7 +7798,16 @@ function mUcetFS(){
   const icdph=val("m_dodIcDph"), iban=String(val("m_ibanVyd")||"").replace(/[^A-Za-z0-9]/g,"").toUpperCase();
   // Bez oboch údajov nie je čo porovnávať — a trvalý prvok, ktorý väčšinou
   // hlási „nič", na 390 px miesto nezaberá.
-  if(!iban || !/^SK\d{10}$/.test(normalizujICDPH(icdph))){ el.textContent=""; return; }
+  if(!iban){ el.textContent=""; return; }
+  // Preklep v IBAN sa povie hneď a register FS sa nevolá: účet s preklepom
+  // v ňom nie je nikdy, takže by nápoveda tvrdila „dodávateľ tento účet
+  // neoznámil" — obvinenie dodávateľa za chybu v prepise (ROZHODNUTIA,
+  // rozhodnuté bez dialógu). Pravidlo je to isté ako pri uložení (`ibanPlatny`).
+  if(!ibanPlatny(iban)){
+    el.textContent="⚠ IBAN má preklep — nesedia kontrolné číslice. Opravte ho podľa dokladu.";
+    el.style.color="var(--neg)"; return;
+  }
+  if(!/^SK\d{10}$/.test(normalizujICDPH(icdph))){ el.textContent=""; return; }
   el.textContent="overujem účet v registri FS…"; el.style.color="var(--ink-soft)";
   overUcetFS(icdph).then(r=>{
     const teraz=document.getElementById("m_ibanVydStav"); if(!teraz) return;
@@ -12429,7 +12438,9 @@ function appVydavky(){
     : dphSaldoRok(+vRok||new Date().getFullYear()).inp;
   const statuSpolu=vydStatu.reduce((a,x)=>a+(+x.spolu||+x.bez||0),0);
   const fakt=vydBezne.filter(x=>x.druh==="Došlá faktúra").length;
-  const blocky=vydBezne.filter(x=>x.druh==="Bloček").length;
+  // Bloček jedným pravidlom s kontrolou IČ DPH (`vydavokJeBlocek`) — aj doklad
+  // z eKasy, ktorému človek zmenil druh (ROZHODNUTIA č. 34).
+  const blocky=vydBezne.filter(vydavokJeBlocek).length;
   // mesiace v roku
   // Ponuka mesiacov sa stavia TÝM ISTÝM pravidlom ako filter. Kým sa stavala
   // z dátumu dokladu a filter porovnával obdobie dane, mesiac, v ktorom bola
@@ -12438,7 +12449,7 @@ function appVydavky(){
     .filter(m=>/^\d{4}-\d{2}$/.test(m) && m.slice(0,4)===vRok))].sort().reverse();
   let list=vyd;
   if(vFilter==="faktury") list=vyd.filter(x=>x.druh==="Došlá faktúra");
-  else if(vFilter==="blocky") list=vyd.filter(x=>x.druh==="Bloček");
+  else if(vFilter==="blocky") list=vyd.filter(vydavokJeBlocek);
   // Bez podmienky na číslo: nezaplatený bloček bez čísla je presne to, čo
   // človek v tomto filtri hľadá. Stav úhrady sa pýta cez `dokladKluc`, ktorý
   // doklad bez čísla pozná podľa id (kap. 109.11, oprava 13. 9. 2026).
@@ -31143,6 +31154,9 @@ async function faktPdfSpracuj(e){
     try{
       const R=await spracujDokladSubor(f, setStav);
       R._nazovSuboru=f.name;
+      // Súbor sa drží pri doklade až do uloženia — nahrá sa, až keď sa doklad
+      // naozaj ukladá (nie pri náhľade a nie pri preskočenom riadku).
+      R._subor=f;
       if(!R._chyba){
         // Doklad, ktorý si sám odporuje, sa neprepašuje do evidencie ani tu.
         // Pri hromadnom importe sa nepýtame na každý súbor zvlášť — to by pri
@@ -31169,8 +31183,11 @@ async function faktPdfSpracuj(e){
     closeModal();
     // Originál z predošlého okna dokladu tu nesmie ostať — nahral by sa k tomuto
     // dokladu. Odkedy sa originál nahráva až po otázkach, ostáva po zrušenom
-    // okne dlhšie. Import súborov originál neukladá (dev/opravy/vydavky-cesta.md).
-    _ocrFile=null; _ocrArchiv=null;
+    // okne dlhšie. Originálom je súbor tohto importu: okno dokladu ho nahrá
+    // pri uložení tou istou cestou ako fotku (`ulozVydavokZFormulara`). Do
+    // 13. 9. 2026 sa tu vynuloval a e-faktúra z importu ostala bez originálu
+    // (§ 76 ZDPH, ROZHODNUTIA č. 27).
+    _ocrFile=citatelne[0]._subor||null; _ocrArchiv=null;
     otvorOcrVysledok(citatelne[0]);
   } else {
     faktPdfNahlad();
@@ -31218,43 +31235,112 @@ function faktPdfNahlad(){
     const opravBadge = R._opravene
       ? '<span class="apill warn" style="font-size:9px" title="Základ '+eur(R._povodneBez||0)+' + DPH '+eur(R._povodneDph||0)+' nesedeli so sumou '+eur(R.spolu||0)+'. Prepočítali sme ich zo sumy Spolu — skontrolujte podľa originálu.">prepočítané</span>'
       : '';
+    // IBAN dodávateľa s preklepom (ROZHODNUTIA č. 33) — tá istá kontrola ako
+    // vo formulári (`ibanPlatny`), ale bez otázky pri každom doklade: náhľad je
+    // miesto, kde človek dávku kontroluje. V druhom riadku, lebo prvý sa na
+    // mobile pri dlhom mene dodávateľa oreže aj s odznakmi.
+    const ibanBadge = (R.iban && !ibanPlatny(R.iban))
+      ? ` · <span class="ibanPreklep" style="color:var(--neg)" title="Na účet s preklepom banka platbu neodošle. Opravte IBAN podľa originálu po importe.">⚠ IBAN ${esc(ibanTlacou(R.iban))} má preklep</span>`
+      : '';
     return `<div class="arow" style="grid-template-columns:auto 2fr 1fr;align-items:start;gap:8px">
       <input type="checkbox" ${R._import?'checked':''} ${R._duplicita?'':''} onchange="_faktPdfData[${i}]._import=this.checked" style="margin-top:3px">
-      <div style="min-width:0"><div class="acol-strong" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(R.partner||"—")} ${efaktBadge}${vlastnaBadge}${dupBadge}${zahrBadge}${viacBadge}${icdphBadge}${opravBadge}</div><div class="acol-muted">${R.cislo?'č. '+esc(R.cislo)+' · ':''}${R.datum?fmtDatum(R.datum):'bez dátumu'}${(R.dodavatelIcDph||R.icdph)?' · '+esc(R.dodavatelIcDph||R.icdph):''}</div></div>
+      <div style="min-width:0"><div class="acol-strong" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(R.partner||"—")} ${efaktBadge}${vlastnaBadge}${dupBadge}${zahrBadge}${viacBadge}${icdphBadge}${opravBadge}</div><div class="acol-muted" style="overflow-wrap:anywhere">${R.cislo?'č. '+esc(R.cislo)+' · ':''}${R.datum?fmtDatum(R.datum):'bez dátumu'}${(R.dodavatelIcDph||R.icdph)?' · '+esc(R.dodavatelIcDph||R.icdph):''}${ibanBadge}</div></div>
       <div class="acol-sum">${eur(R.spolu||0)}</div>
     </div>`;
   }).join('');
   const pocetOk=_faktPdfData.filter(R=>!R._chyba).length;
   const pocetDup=_faktPdfData.filter(R=>R._duplicita).length;
   const pocetBezIcDph=_faktPdfData.filter(R=>!R._chyba && !R.zahranicny && !(R.dodavatelIcDph||R.icdph)).length;
+  const pocetIban=_faktPdfData.filter(R=>!R._chyba && R.iban && !ibanPlatny(R.iban)).length;
   openModal("Import faktúr", `
-    <div class="csub" style="margin-bottom:12px">Rozpoznaných ${pocetOk} faktúr${pocetDup?` · ${pocetDup} duplicít (nezaškrtnuté)`:''}. Skontrolujte a vyberte, ktoré importovať. <b>Údaje si po importe overte.</b></div>
+    <div class="csub" style="margin-bottom:12px">Rozpoznaných ${pocetOk} faktúr${pocetDup?` · ${pocetDup} duplicít (nezaškrtnuté)`:''}${pocetIban?` · <span style="color:var(--neg)">${pocetIban} s preklepom v IBAN</span>`:''}. Skontrolujte a vyberte, ktoré importovať. <b>Údaje si po importe overte.</b></div>
     ${pocetBezIcDph?`<div style="background:var(--sfc-warn);border-left:3px solid var(--warn);border-radius:8px;padding:9px 12px;margin-bottom:12px;font-size:12px">
       <b>${pocetBezIcDph} ${pocetBezIcDph===1?'doklad nemá':'dokladov nemá'} IČ DPH dodávateľa.</b> Bez neho bude doklad neúplný v kontrolnom výkaze DPH.
       <button class="aabtn" style="margin-top:8px;padding:5px 10px;font-size:12px" onclick="faktPdfDoplnIcDph()"> Doplniť z registra</button>
       <span id="faktPdfDoplnStav" style="font-size:11px;margin-left:8px"></span>
     </div>`:''}
     <div class="alist" style="max-height:50vh;overflow-y:auto" data-scroll="faktPdf">${rows||'<div class="aempty">Nič sa nerozpoznalo.</div>'}</div>
-  `, ()=>{
-    let pridane=0, preskocene=0;
+  `, faktPdfUlozImport);
+}
+// Uloženie hromadného importu. Nahrávanie originálov trvá — druhé ťuknutie na
+// Uložiť by kým beží naimportovalo dávku druhý raz (duplicita sa posudzuje
+// až nad uloženými dokladmi). Poistka to odmietne a okno nechá otvorené.
+let _faktPdfUklada=false;
+async function faktPdfUlozImport(){
+  if(_faktPdfUklada) return false;
+  _faktPdfUklada=true;
+  try{ return await faktPdfUlozImportRaz(); }
+  finally{ _faktPdfUklada=false; }
+}
+async function faktPdfUlozImportRaz(){
+    let preskocene=0;
+    const prijate=[];   // {R, obj} — doklady, ktoré sa naozaj uložia
     _faktPdfData.forEach(R=>{
       if(!R._import || R._chyba) return;
       const obj=faktPdfNaVydavok(R);
-      if(!firmaData.vydavky) firmaData.vydavky=[];
       // Duplicitu, ktorú náhľad ukázal a človek ju aj tak zaškrtol, rozhodol
       // človek — naimportuje sa (ROZHODNUTIA č. 21). Preskočí sa len duplicita,
-      // ktorú náhľad neukázal (doklad medzičasom pribudol).
-      if(!R._duplicita && najdiDuplicityVydavku(obj).length){ preskocene++; return; }
-      obj.id="v"+Date.now()+Math.random().toString(36).slice(2,7);
-      firmaData.vydavky.push(obj); zapamatajPartnera(obj); pridane++;
+      // ktorú náhľad neukázal (doklad medzičasom pribudol). Skoršie riadky tej
+      // istej dávky sa počítajú, akoby už boli uložené.
+      if(!R._duplicita && najdiDuplicityVydavku(obj, null, prijate.map(P=>P.obj)).length){ preskocene++; return; }
+      prijate.push({R, obj});
     });
+
+    // ── ORIGINÁL PRI HROMADNOM IMPORTE ──
+    // Pri e-faktúre zákonná povinnosť: § 76 zákona o DPH, 10 rokov v pôvodnom
+    // formáte, a poštár obsah maže (PLAN_EFAKTURA §1.4) — sme jediní, kto
+    // originál drží. Do 13. 9. 2026 import súbor nenahral vôbec (ROZHODNUTIA
+    // č. 27). Nahráva sa AŽ TU: len doklady, ktoré prešli výberom a duplicitou,
+    // tou istou funkciou a s tým istým prefixom ako okno dokladu
+    // (`ulozVydavokZFormulara`). Nahraný súbor si riadok pamätá — keď človek
+    // import zruší a skúsi znova, druhý raz sa nenahráva.
+    //
+    // Chyba sa nezhltne. Pri e-faktúre sa človek opýta RAZ za celú dávku, nie
+    // pri každom doklade; Zrušiť = neuloží sa nič a okno ostane otvorené.
+    const efaktury=prijate.filter(P=>P.R._efaktura && P.R._subor);
+    const lokalnaVeta=(localMode && efaktury.length) ? "Originál e-faktúry sa neuložil — v lokálnom režime nie je archív. Odložte si XML sami." : "";
+    if(localMode){
+      // Lokálny režim nie je porucha — cloud tam nie je vôbec (rovnako ako okno
+      // dokladu). `#cloudMsg` je len na obrazovke Nastavení, preto veta ide aj
+      // do záverečného okna importu, ktoré človek naozaj uvidí.
+      if(efaktury.length && typeof cloudMsg==="function") cloudMsg(lokalnaVeta,"warn");
+    } else {
+      const neulozene=[];
+      for(const P of prijate){
+        if(!P.R._subor) continue;
+        const jeEf=!!P.R._efaktura;
+        if(!P.R._originalCesta){
+          let chyba="";
+          try{ P.R._originalCesta=await dokladUpload(P.R._subor, jeEf?"efaktura":"vydavok"); }
+          catch(e){ chyba=(e&&e.message)||String(e); console.error("archív dokladu:",e); }
+          if(!P.R._originalCesta && jeEf) neulozene.push({nazov:P.R._nazovSuboru||P.obj.cislo||P.obj.partner, chyba});
+        }
+        if(P.R._originalCesta) P.obj.doklad=P.R._originalCesta;
+      }
+      if(neulozene.length){
+        const dovody=[...new Set(neulozene.map(n=>n.chyba).filter(Boolean))];
+        if(!confirm("⚠ Originál "+(neulozene.length===1?"e-faktúry":neulozene.length+" e-faktúr")+" sa NEULOŽIL do archívu:\n\n"
+          +neulozene.slice(0,5).map(n=>"• "+n.nazov).join("\n")+(neulozene.length>5?"\n• … a ďalšie "+(neulozene.length-5):"")+"\n\n"
+          +(dovody.length?"Dôvod: "+dovody.join(" · ")+"\n\n":"")
+          +"Zákon žiada uchovať doklad 10 rokov v pôvodnom formáte a digitálny poštár\n"
+          +"ho neuchováva — obsah zvyčajne maže do 14 dní. Odložte si XML sami.\n\n"
+          +"OK = importovať aj tak · Zrušiť = neimportovať nič, skúsim znova")) return false;
+      }
+    }
+
+    if(!firmaData.vydavky) firmaData.vydavky=[];
+    prijate.forEach(({obj})=>{
+      obj.id="v"+Date.now()+Math.random().toString(36).slice(2,7);
+      firmaData.vydavky.push(obj); zapamatajPartnera(obj);
+    });
+    const pridane=prijate.length;
     poZmene(); appVydavky();
     const opravenych=_faktPdfData.filter(R=>R._import&&R._opravene).length;
     setTimeout(()=>alert("Importovaných "+pridane+" faktúr."
       +(preskocene?"\nPreskočených "+preskocene+" duplicít (už evidované).":"")
+      +(lokalnaVeta?"\n\n"+lokalnaVeta:"")
       +(opravenych?"\n\n⚠ Pri "+opravenych+" dokladoch nesedel základ + DPH so sumou Spolu — "
         +"prepočítali sme ich zo sumy Spolu. Skontrolujte ich podľa originálov.":"")),100);
-  });
 }
 // ── eKASA: čítanie QR kódu z pokladničného bločku (Release 10) ──
 // QR na slovenskom eKasa bločku obsahuje URL s ID dokladu (O-...) na overenie na FS.
