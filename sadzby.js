@@ -176,10 +176,102 @@ const SADZBY = {
   luxAutoCena:    {n:"Limitovaná vstupná cena auta", sk:"majetok", mienaSa:"zriedka", overenost:"zdroj", kontrola:"2026-07-21",
     h:[{od:null, v:48000, zdroj:"§ 17 ods. 34 ZDP"}]},
   luxAutoOdpis:   {n:"Ročný limit odpisu drahého auta", sk:"majetok", mienaSa:"zriedka", overenost:"zdroj", kontrola:"2026-07-21",
-    h:[{od:null, v:12000, zdroj:"48 000 € / 4 roky"}]}
+    h:[{od:null, v:12000, zdroj:"48 000 € / 4 roky"}]},
+  // ── DNI PRACOVNÉHO POKOJA ──
+  // Koniec lehoty podľa daňového poriadku (§ 27 ods. 4) sa posúva cez sobotu,
+  // nedeľu aj deň pracovného pokoja (dphTermin v appke, dev/opravy/dph.md).
+  // Deň pracovného pokoja podľa zákona 241/1993 Z. z. (znenie od 1. 11. 2025):
+  //  · § 1 písm. a)–c) — 1. 1., 5. 7., 29. 8.
+  //  · § 2 ods. 2 — 6. 1., Veľký piatok, Veľkonočný pondelok, 1. 5., 8. 5.,
+  //    15. 9., 1. 11., 24.–26. 12.
+  //  · § 2 ods. 3 — 1. 9., 28. 10. a 17. 11. sú štátne sviatky, ale NIE dni
+  //    pracovného pokoja (odkedy — 1. 9. od 2024, 17. 11. od 2025 — je zo
+  //    sekundárnych zdrojov, ip.gov.sk a Wikipédia; žiadnej lehoty sa to netýka).
+  //  · § 4b — v roku 2026 nie sú dňom pracovného pokoja 8. 5. a 15. 9.
+  // Staršie znenia sa zámerne nedopĺňajú: 1. 9. ani 17. 11. sa žiadnej lehoty
+  // appky nedotknú. Preto od:null — zoznam platí aj pre staršie roky ako doteraz.
+  // Tvar hodnoty (kontroluje ho dniPokojaChyby):
+  //  · pevne    — deň MM-DD, každý rok
+  //  · velkaNoc — posun v dňoch od Veľkonočnej nedele; tú počíta appka
+  //  · okrem    — celý dátum RRRR-MM-DD, ktorý v tom roku voľnom nie je (ako § 4b)
+  // Deň sa posudzuje záznamom platným V TEN DEŇ. Novela je nový záznam s `od`
+  // a CELÝM zoznamom vrátane výnimiek, ktoré ešte majú platiť.
+  dniPracovnehoPokoja:{n:"Dni pracovného pokoja", sk:"lehoty", mienaSa:"zriedka", overenost:"zdroj", kontrola:"2026-09-13",
+    h:[{od:null, v:{
+        pevne:[
+          {d:"01-01", n:"Deň vzniku Slovenskej republiky", zdroj:"§ 1 písm. a)"},
+          {d:"07-05", n:"Sviatok svätého Cyrila a svätého Metoda", zdroj:"§ 1 písm. b)"},
+          {d:"08-29", n:"Výročie Slovenského národného povstania", zdroj:"§ 1 písm. c)"},
+          {d:"01-06", n:"Zjavenie Pána (Traja králi)", zdroj:"§ 2 ods. 2"},
+          {d:"05-01", n:"Sviatok práce", zdroj:"§ 2 ods. 2"},
+          {d:"05-08", n:"Deň víťazstva nad fašizmom", zdroj:"§ 2 ods. 2"},
+          {d:"09-15", n:"Sedembolestná Panna Mária", zdroj:"§ 2 ods. 2"},
+          {d:"11-01", n:"Sviatok Všetkých svätých", zdroj:"§ 2 ods. 2"},
+          {d:"12-24", n:"Štedrý deň", zdroj:"§ 2 ods. 2"},
+          {d:"12-25", n:"Prvý sviatok vianočný", zdroj:"§ 2 ods. 2"},
+          {d:"12-26", n:"Druhý sviatok vianočný", zdroj:"§ 2 ods. 2"}],
+        velkaNoc:[
+          {posun:-2, n:"Veľký piatok", zdroj:"§ 2 ods. 2"},
+          {posun:1, n:"Veľkonočný pondelok", zdroj:"§ 2 ods. 2"}],
+        okrem:[
+          {d:"2026-05-08", n:"Deň víťazstva nad fašizmom", zdroj:"§ 4b"},
+          {d:"2026-09-15", n:"Sedembolestná Panna Mária", zdroj:"§ 4b"}]},
+      zdroj:"zákon 241/1993 Z. z. o štátnych sviatkoch, dňoch pracovného pokoja a pamätných dňoch, znenie od 1. 11. 2025 (zakonypreludi.sk)"}]}
 };
 const SADZBY_SKUPINY={dan:"Daň z príjmov", odvody:"Odvody SZČO", nczd:"Nezdaniteľné časti",
-  bonus:"Daňový bonus", dph:"DPH a obrat", auto:"Auto a náhrady", majetok:"Majetok"};
+  bonus:"Daňový bonus", dph:"DPH a obrat", auto:"Auto a náhrady", majetok:"Majetok",
+  lehoty:"Lehoty a dni pracovného pokoja"};
+
+// Kontrola tvaru zoznamu dní pracovného pokoja. Vracia zoznam chýb — prázdny
+// znamená, že sa dá použiť. Zákonnosť dní nekontroluje (to je zdroj pri položke),
+// len to, aby appka zo súboru nedostala nič, s čím by nevedela počítať.
+function dniPokojaChyby(v){
+  if(!v || typeof v!=="object" || Array.isArray(v)) return ["zoznam dní musí byť objekt {pevne, velkaNoc, okrem}"];
+  const chyby=[];
+  const jeDatum=(r,m,d)=>{ const x=new Date(r,m-1,d); return x.getFullYear()===r && x.getMonth()===m-1 && x.getDate()===d; };
+  const over=(pole, zlaHodnota)=>{
+    if(!Array.isArray(v[pole])){ chyby.push("chýba zoznam `"+pole+"`"); return; }
+    const videne={};
+    v[pole].forEach((x,i)=>{
+      const kde=pole+"["+i+"]: ";
+      if(!x || typeof x!=="object"){ chyby.push(kde+"nie je položka"); return; }
+      const zla=zlaHodnota(x); if(zla) chyby.push(kde+zla);
+      if(!x.n || !String(x.n).trim()) chyby.push(kde+"chýba názov");
+      if(!x.zdroj || !String(x.zdroj).trim()) chyby.push(kde+"chýba zdroj");
+      const kluc=String(pole==="velkaNoc" ? x.posun : x.d);
+      if(videne[kluc]) chyby.push(kde+"«"+kluc+"» je v zozname dvakrát");
+      videne[kluc]=true;
+    });
+  };
+  over("pevne", x=>{ const m=/^(\d{2})-(\d{2})$/.exec(String(x.d)); return m && jeDatum(2024,+m[1],+m[2]) ? "" : "zlý deň «"+x.d+"» (MM-DD)"; });
+  over("velkaNoc", x=>Number.isInteger(x.posun) && Math.abs(x.posun)<=60 ? "" : "zlý posun od Veľkej noci «"+x.posun+"»");
+  over("okrem", x=>{ const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(String(x.d)); return m && jeDatum(+m[1],+m[2],+m[3]) ? "" : "zlý dátum výnimky «"+x.d+"» (RRRR-MM-DD)"; });
+  if(Array.isArray(v.pevne) && !v.pevne.length) chyby.push("zoznam `pevne` je prázdny");
+  return chyby;
+}
+// Zoznam dní ako text na úpravu v admine — jeden deň na riadok, „deň | názov | zdroj“.
+// dniPokojaZTextu je presný opak; stráži to test_oprava_sviatky.
+function dniPokojaText(v){
+  const riadok=(den, x)=>den+" | "+x.n+" | "+x.zdroj;
+  return [].concat(
+    v.pevne.map(x=>riadok(x.d, x)),
+    v.velkaNoc.map(x=>riadok("Veľká noc "+(x.posun>0?"+":"")+x.posun, x)),
+    v.okrem.map(x=>riadok("okrem "+x.d, x))).join("\n");
+}
+function dniPokojaZTextu(text){
+  const v={pevne:[], velkaNoc:[], okrem:[]}, chyby=[];
+  String(text||"").split(/\r?\n/).forEach((r,i)=>{
+    if(!r.trim()) return;
+    const c=r.split("|").map(s=>s.trim()), kde="riadok "+(i+1)+": ";
+    if(c.length!==3 || !c[1] || !c[2]){ chyby.push(kde+"čakám tri časti „deň | názov | zdroj“"); return; }
+    let m;
+    if((m=/^(\d{2}-\d{2})$/.exec(c[0]))) v.pevne.push({d:m[1], n:c[1], zdroj:c[2]});
+    else if((m=/^Veľká noc\s*([+-]?\d+)$/i.exec(c[0]))) v.velkaNoc.push({posun:+m[1], n:c[1], zdroj:c[2]});
+    else if((m=/^okrem\s+(\d{4}-\d{2}-\d{2})$/i.exec(c[0]))) v.okrem.push({d:m[1], n:c[1], zdroj:c[2]});
+    else chyby.push(kde+"nerozumiem «"+c[0]+"» — čakám MM-DD, „Veľká noc -2“ alebo „okrem RRRR-MM-DD“");
+  });
+  return {v, chyby: chyby.length ? chyby : dniPokojaChyby(v)};
+}
 
 // Hodnota platná k dátumu. Berie posledný záznam, ktorého účinnosť už nastala.
 function sadzbaKuDnu(kluc, datum){
@@ -246,6 +338,9 @@ const SADZBY_ROZSAHY = {
   suma:     {min:0, max:1000000},  // hranice, limity, náhrady
 };
 function sadzbaJeRozumna(kluc, v){
+  // Zoznam dní má vlastný tvar a vlastnú kontrolu; iný kľúč ho mať nesmie (objekt
+  // pod číselnou sadzbou neprejde nižšie cez typeof).
+  if(kluc==="dniPracovnehoPokoja") return !dniPokojaChyby(v).length;
   if(Array.isArray(v)){
     if(!v.length) return false;
     return v.every((b,i)=>typeof b.s==="number" && b.s>0 && b.s<1 &&
@@ -268,7 +363,8 @@ function sadzbyOverSubor(data){
     if(!S || !Array.isArray(S.h) || !S.h.length){ chyby.push(k+": chýba história `h`"); return; }
     S.h.forEach((z,i)=>{
       if(z.od!==null && !/^\d{4}-\d{2}-\d{2}$/.test(String(z.od))) chyby.push(k+"["+i+"]: zlý dátum «"+z.od+"»");
-      if(!sadzbaJeRozumna(k, z.v)) chyby.push(k+"["+i+"]: hodnota mimo rozumného rozsahu ("+JSON.stringify(z.v)+")");
+      if(k==="dniPracovnehoPokoja") dniPokojaChyby(z.v).forEach(c=>chyby.push(k+"["+i+"]: "+c));
+      else if(!sadzbaJeRozumna(k, z.v)) chyby.push(k+"["+i+"]: hodnota mimo rozumného rozsahu ("+JSON.stringify(z.v)+")");
       if(!z.zdroj) chyby.push(k+"["+i+"]: chýba zdroj");
     });
   });
@@ -496,6 +592,10 @@ function sadzbyPrehlad(dnes){
   return {polozky, chceKontrolu:polozky.filter(p=>p.chceKontrolu).length, spolu:polozky.length};
 }
 function sadzbaFormat(k, v){
+  if(k==="dniPracovnehoPokoja" && v && Array.isArray(v.pevne)){
+    const dni=v.pevne.length+(v.velkaNoc||[]).length, vyn=(v.okrem||[]).length;
+    return dni+" dní"+(vyn ? " · "+vyn+(vyn===1?" výnimka":vyn<5?" výnimky":" výnimiek") : "");
+  }
   if(Array.isArray(v)) return v.map(b=>`${Math.round(b.s*100)} %${b.do!=null?" do "+sadzbaEur(b.do):""}`).join(" · ");
   if(/Sadzba|sadzba|Koef|danPrijem|zdravSadzba|vzKoef/.test(k) && v<1 && v>0)
     return (v*100).toFixed(v*100%1?4:0).replace(".",",")+" %";

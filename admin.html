@@ -940,6 +940,7 @@ async function gdprZmazat(){
 // ═══════════════════════════════════════════════════════════════
 let _edSadzba = "";
 let _edChyby = [], _edUpoz = [];
+let _edText = null;   // rozpísaný zoznam dní — pri chybe sa nesmie stratiť prekreslením
 
 async function vykresliSadzby(){
   try { await sadzbyNacitaj(); } catch(e){ /* ostane zabudovaná tabuľka */ }
@@ -951,13 +952,20 @@ async function vykresliSadzby(){
   document.getElementById("sadzbyBody").innerHTML = sadzbyFormular() + sadzbyKonceptHtml() + sadzbyZoznamHtml();
 }
 
-function sadzbyVyber(k){ _edSadzba = k; _edChyby = []; _edUpoz = []; vykresliSadzby(); }
+function sadzbyVyber(k){ _edSadzba = k; _edChyby = []; _edUpoz = []; _edText = null; vykresliSadzby(); }
 function sadzbyPridaj(){
-  const hod = parseFloat(String(document.getElementById("s_hodnota").value).replace(",", "."));
+  const text = String(document.getElementById("s_hodnota").value);
+  let hod;
+  if(_edSadzba === "dniPracovnehoPokoja"){
+    _edText = text;
+    const P = dniPokojaZTextu(text);
+    if(P.chyby.length){ _edChyby = P.chyby; _edUpoz = []; vykresliSadzby(); return; }
+    hod = P.v;
+  } else hod = parseFloat(text.replace(",", "."));
   const v = konceptPridaj(_edSadzba, hod,
     document.getElementById("s_od").value, document.getElementById("s_zdroj").value);
   _edChyby = v.chyby || []; _edUpoz = v.upozornenia || [];
-  if(v.ok) _edSadzba = "";
+  if(v.ok){ _edSadzba = ""; _edText = null; }
   vykresliSadzby();
 }
 function sadzbyOdober(i){ konceptOdober(i); vykresliSadzby(); }
@@ -985,11 +993,19 @@ function sadzbyFormular(){
   let telo = "";
   if(S){
     const jePole = Array.isArray(akt.v);
+    // Zoznam dní pracovného pokoja sa upravuje ako text, celý naraz: nový záznam
+    // nahrádza zoznam od svojho dátumu, preto pole začína súčasným zoznamom.
+    const pole = _edSadzba === "dniPracovnehoPokoja"
+      ? `<textarea id="s_hodnota" rows="16" spellcheck="false" style="font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12.5px;line-height:1.5;white-space:pre">${esc(_edText != null ? _edText : dniPokojaText(akt.v))}</textarea>
+        <div class="muted">Celý zoznam, jeden deň na riadok: <b>deň | názov | zdroj</b>. Deň je <b>MM-DD</b> (každý rok),
+          <b>Veľká noc -2</b> (posun od Veľkonočnej nedele) alebo <b>okrem RRRR-MM-DD</b> (v tom roku nie je voľno).
+          Výnimky, ktoré majú platiť ďalej, v zozname nechaj.</div>`
+      : `<input id="s_hodnota" ${jePole?"disabled":""} placeholder="${jePole?"pásma sa upravujú priamo v súbore":esc(String(akt.v))}">`;
     telo = `
       <div class="hint"><b>Teraz:</b> ${esc(sadzbaFormat(_edSadzba, akt.v))}${akt.od ? " od " + sadzbaDatum(akt.od) : " (odjakživa)"}
         <br><span class="muted">${esc(akt.zdroj)}</span></div>
       <div class="field"><label>Nová hodnota</label>
-        <input id="s_hodnota" ${jePole?"disabled":""} placeholder="${jePole?"pásma sa upravujú priamo v súbore":esc(String(akt.v))}"></div>
+        ${pole}</div>
       <div class="field"><label>Platí od</label><input type="date" id="s_od"></div>
       <div class="field"><label>Zdroj</label><input id="s_zdroj" placeholder="paragraf, oznámenie alebo číslo predpisu">
         <div class="muted">Bez zdroja sa hodnota uložiť nedá — je to jediné, čo o rok povie, odkiaľ to číslo je.</div></div>
