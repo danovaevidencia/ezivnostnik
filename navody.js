@@ -30,7 +30,7 @@ moduly: {
 // ─────────────────────────────────────────────────────────────── FAKTÚRY
 faktury: {
   vJednejVete: "Vystaviť faktúru, poslať ju a vidieť, kto zaplatil",
-  uvod: "Tu vystavujete faktúry odberateľom a vidíte, ktoré sú zaplatené. Ak do appky nahrávate [[app:banka|výpisy z banky]], zaplatenie sa doplní <b>samo</b>.",
+  uvod: "Tu vystavujete faktúry odberateľom a vidíte, ktoré sú zaplatené. Ak do appky nahrávate [[navod:banka/vypis|výpisy z banky]], zaplatenie sa doplní <b>samo</b>.",
   ulohy: [
     {
       id: "vystavit",
@@ -77,7 +77,7 @@ faktury: {
         { text: "Pri nezaplatenej faktúre ťuknite na <b>✓</b>.", snimka: "faktury-uhrada-1" },
         { text: "Vyberte, ako peniaze prišli — kartou, prevodom alebo v hotovosti.", tlacidlo: "Ako bol doklad uhradený?", snimka: "faktury-uhrada-2" },
       ],
-      tip: "Ak nahrávate [[app:banka|výpisy z banky]], netreba nič označovať — appka platbu priradí k faktúre sama podľa sumy a variabilného symbolu. Ručne označujte len to, čo cez účet neprešlo.",
+      tip: "Ak nahrávate [[navod:banka/vypis|výpisy z banky]], netreba nič označovať — appka platbu priradí k faktúre sama podľa sumy a variabilného symbolu. Ručne označujte len to, čo cez účet neprešlo.",
       podrobnosti: [
         { nadpis: "Viac faktúr naraz",
           html: "<p>Zaškrtnite faktúry v zozname — ukáže sa pás <b>✓ Označiť uhradené</b>.</p>" },
@@ -170,7 +170,7 @@ pohladavky: {
         { text: "Hore vidíte, koľko vám dlhujú spolu a koľko z toho je po splatnosti.", snimka: "pohladavky-prehlad-1" },
         { text: "V zozname sú faktúry <b>po splatnosti</b> označené aj s počtom dní.", tlacidlo: "po splatnosti", snimka: "pohladavky-prehlad-2" },
       ],
-      tip: "Keď appka nájde platbu vo [[app:banka|výpise z banky]], faktúra sa označí ako uhradená sama.",
+      tip: "Keď appka nájde platbu vo [[navod:banka/vypis|výpise z banky]], faktúra sa označí ako uhradená sama.",
       podrobnosti: [
         { nadpis: "Čo sú záväzky",
           html: "<p>Na záložke <b>Záväzky</b> je opak — [[app:vydavky|došlé faktúry]], ktoré ešte nemáte zaplatené vy.</p>" },
@@ -228,7 +228,7 @@ efaktury: {
       kroky: [
         { text: "V [[app:efaktury|module E-faktúry Peppol]] ťuknite na <b>Skontrolovať schránku</b>.", tlacidlo: "Skontrolovať schránku" },
         { text: "Pri faktúre v časti <b>Prijaté zo siete</b> ťuknite na <b>Zaevidovať</b>.", tlacidlo: "Zaevidovať" },
-        { text: "Appka predvyplní výdavok. Skontrolujte ho a ťuknite na <b>Uložiť</b>." },
+        { text: "Appka predvyplní výdavok v tom istom okne ako pri [[navod:vydavky/fotka|doklade z fotky]]. Skontrolujte ho a ťuknite na <b>Uložiť</b>." },
       ],
       tip: "Originál e-faktúry treba uchovať 10 rokov — appka ho pri zaevidovaní uloží sama, netreba ho odkladať zvlášť.",
       podrobnosti: [
@@ -290,6 +290,8 @@ vydavky: {
           html: "<p>Pri bežných kategóriách je vo formulári pole <b>Koľko z toho je na podnikanie</b>. Zadajte len podnikateľskú časť — do daní appka započíta len tú. Tankovanie a doklady k osobnému autu majú vlastné pravidlá.</p>" },
         { nadpis: "Odvody a preddavky",
           html: "<p>Preddavky na zdravotné a sociálne poistenie a platby dane zapisujete tiež sem, s kategóriou podľa platby. V prehľade sú na dlaždici <b>Odvody a dane</b>, mimo súčtu výdavkov.</p>" },
+        { nadpis: "Kúpili ste vec, ktorá poslúži roky",
+          html: "<p>Počítač, auto či stroj po uložení výdavku zaraďte do majetku — [[navod:majetok/zaradit|ako zaradiť kúpu do majetku]].</p>" },
       ],
     },
     {
@@ -311,7 +313,7 @@ vydavky: {
         { nadpis: "Ako appka pozná, že doklad už máte",
           html: "<p>Rovnaké číslo dokladu, alebo rovnaká suma aj dátum od toho istého dodávateľa. Pri preposlaných faktúrach sa to stáva ľahko — napríklad keď ste ju predtým už odfotili.</p>" },
         { nadpis: "Výpis z banky e-mailom",
-          html: "<p>Na adresu môžete poslať aj výpis z účtu. Pri ňom je namiesto <b>Spracovať →</b> tlačidlo <b>Importovať →</b> a pohyby pribudnú do [[app:banka|banky]].</p>" },
+          html: "<p>Na adresu môžete poslať aj výpis z účtu. Pri ňom je namiesto <b>Spracovať →</b> tlačidlo <b>Importovať →</b> — [[navod:banka/email|ako posielať výpisy e-mailom]].</p>" },
       ],
     },
     {
@@ -323,16 +325,16 @@ vydavky: {
         { text: "Vyberte, ako ste platili — kartou, prevodom, v hotovosti alebo inak.", tlacidlo: "Ako bol doklad uhradený?", snimka: "vydavky-uhrada-2",
           tip: "Pri karte a prevode appka ešte počká na výpis z banky a úhradu podľa neho overí; hotovosť ostane potvrdená ručne." },
       ],
-      tip: "Ak nahrávate [[app:banka|výpisy z banky]], platbu k výdavku appka priradí sama, keď je zhoda jednoznačná. Ručne označujte hlavne hotovosť.",
+      tip: "Ak nahrávate [[navod:banka/vypis|výpisy z banky]], platbu k výdavku appka priradí sama, keď je zhoda jednoznačná. Ručne označujte hlavne hotovosť.",
       podrobnosti: [
         { nadpis: "Čo znamenajú značky v stĺpci Stav",
-          html: "<p>○ neuhradené · ◐ potvrdené ručne · ● overené výpisom · ◑ čiastočne uhradené · ✕ výpis úhradu nepotvrdzuje. Ťuknutím na značku (okrem ●) priradíte platbu z banky ručne.</p>" },
+          html: "<p>○ neuhradené · ◐ potvrdené ručne · ● overené výpisom · ◑ čiastočne uhradené · ✕ výpis úhradu nepotvrdzuje. Ťuknutím na značku (okrem ●) priradíte platbu z banky ručne — [[navod:banka/rucne|ako priradiť platbu k dokladu]].</p>" },
         { nadpis: "Viac výdavkov naraz",
           html: "<p>Zaškrtnite výdavky v zozname — ukáže sa pás <b>✓ Označiť uhradené</b>.</p>" },
         { nadpis: "Označil som omylom",
           html: "<p>Pri ručne potvrdenom výdavku je v riadku tlačidlo <b>✕</b>, ktoré úhradu zruší.</p>" },
         { nadpis: "Komu ešte dlžím",
-          html: "<p>Nezaplatené došlé faktúry nájdete v [[app:pohladavky|pohľadávkach]] na záložke <b>Záväzky</b>.</p>" },
+          html: "<p>Nezaplatené došlé faktúry nájdete v pohľadávkach na záložke <b>Záväzky</b> — [[navod:pohladavky/prehlad|ako zistiť, kto komu dlží]].</p>" },
       ],
     },
     {
@@ -399,6 +401,8 @@ banka: {
           html: "<p>Prepošlite aj e-maily, ktorými banka hlási jednotlivé platby. V schránke sú v časti <b>Pohyby na účte</b> a do Banky ich dostanete tlačidlom <b>Pridať</b>. V zozname pohybov majú značku ✉ — mesačný výpis ich neskôr nahradí.</p>" },
         { nadpis: "V ukážkovej firme to nejde",
           html: "<p>Schránka dokladov funguje len s vlastným účtom, nie v ukážke.</p>" },
+        { nadpis: "Adresa je tá istá ako na doklady",
+          html: "<p>Na výpisy aj na faktúry od dodávateľov máte jednu adresu a jednu schránku. Blokovanie odosielateľov a novú adresu opisuje [[navod:vydavky/email|návod k dokladom e-mailom]].</p>" },
       ],
     },
     {
@@ -435,7 +439,7 @@ banka: {
         { nadpis: "Jedna platba za viac dokladov",
           html: "<p>Po priradení prvého dokladu appka povie, koľko z platby ešte ostáva. Ťuknite na ďalší doklad.</p>" },
         { nadpis: "Doklad v ponuke nie je",
-          html: "<p>Appka ponúka doklady, pri ktorých sedí suma alebo variabilný symbol, prípadne partner s dátumom do 30 dní. Zaplatené doklady vynecháva.</p><p>Ak doklad chýba, skontrolujte jeho sumu a dátum. Alebo ho nájdite vo [[app:faktury|faktúrach]] či [[app:vydavky|výdavkoch]] a ťuknite na jeho stav úhrady — appka ukáže platby, ktoré k nemu sedia.</p>" },
+          html: "<p>Appka ponúka doklady, pri ktorých sedí suma alebo variabilný symbol, prípadne partner s dátumom do 30 dní. Zaplatené doklady vynecháva.</p><p>Ak doklad chýba, skontrolujte jeho sumu a dátum. Alebo ho nájdite vo [[app:faktury|faktúrach]] či [[app:vydavky|výdavkoch]] a ťuknite na jeho stav úhrady — appka ukáže platby, ktoré k nemu sedia.</p><p>Keď doklad v appke ešte vôbec nie je, najprv ho [[navod:vydavky/rucne|zapíšte]].</p>" },
         { nadpis: "Priradil som omylom",
           html: "<p>V okne platby je pod <b>Touto platbou máte zaplatené</b> pri každom doklade <b>odobrať</b>. Platba sa vráti medzi nespárované.</p>" },
       ],
@@ -470,7 +474,7 @@ banka: {
         { text: "Príjmy a výdaje v dvoch stĺpcoch ukáže <b>⇄ vedľa seba</b>.", tlacidlo: "vedľa seba", snimka: "banka-prehlad-2" },
         { text: "Dole v časti <b>Pokrytie výpismi</b> appka upozorní, ak medzi nahratými výpismi chýba mesiac.", tlacidlo: "Pokrytie výpismi", snimka: "banka-prehlad-3" },
       ],
-      tip: "V platenom pláne overí, či nechýba jediná platba, [[app:knihy#dennikBox|peňažný denník]] — porovná zostatky, ktoré hlási banka, so súčtom pohybov.",
+      tip: "V platenom pláne overí, či nechýba jediná platba, [[navod:knihy/dennik|peňažný denník]] — porovná zostatky, ktoré hlási banka, so súčtom pohybov.",
       podrobnosti: [
         { nadpis: "Prečo niektoré platby v súčtoch nie sú",
           html: "<p>Súčty sú bez skrytých a ignorovaných platieb. Appka to pod nimi napíše a odkazom <b>zobraziť</b> ich ukáže.</p>" },
@@ -523,6 +527,8 @@ dph: {
       ],
       tip: "IČ DPH, názov firmy, ulicu, obec a PSČ appka overí pred každým stiahnutím — keď niečo chýba, povie čo.",
       podrobnosti: [
+        { nadpis: "Ostatné údaje firmy",
+          html: "<p>Tu sú len údaje, ktoré potrebujú podania k DPH. Doplnenie z registra, IBAN a ostatné opisuje [[navod:data/firma|návod k údajom firmy]].</p>" },
         { nadpis: "DIČ",
           html: "<p>Do priznania k DPH appka zapisuje aj [[app:data#set_dic|DIČ]], pred stiahnutím ho však nekontroluje. Skontrolujte, či ho máte vyplnené.</p>" },
         { nadpis: "Prečo si appka nič nedomýšľa",
@@ -677,7 +683,7 @@ uzavierka: {
       tip: "Upozornenie, ktoré je v poriadku, schováte zo zoznamu tlačidlom <b>🔕 Skryť nález</b>.",
       podrobnosti: [
         { nadpis: "Čo appka kontroluje",
-          html: "<p>Doklady bez dátumu a pri platiteľovi DPH doklady zmenené po vygenerovaní výkazu — tieto dve veci uzavretie zastavia. Na pozretie ukáže výdavky s nulovou sumou, faktúry bez adresy odberateľa, nespárované pohyby na účte, chýbajúci výkaz DPH za mesiac a pri aute v majetku tankovanie bez jázd.</p>" },
+          html: "<p>Doklady bez dátumu a pri platiteľovi DPH doklady zmenené po vygenerovaní výkazu — tieto dve veci uzavretie zastavia. Na pozretie ukáže výdavky s nulovou sumou, faktúry bez adresy odberateľa, [[navod:banka/rucne|nespárované pohyby na účte]], chýbajúci [[navod:dph/podat|výkaz DPH]] za mesiac a pri aute v majetku [[navod:jazdy/miesto|tankovanie bez jázd]].</p>" },
         { nadpis: "Nie je to zámok proti vám",
           html: "<p>Uzávierka je poistka proti dokladu, ktorý sa omylom uloží spätne do obdobia, za ktoré ste už podali. Keď sa to stane, appka zápis zastaví a povie, ktorý mesiac je uzavretý.</p>" },
         { nadpis: "Ročná kontrola",
@@ -734,9 +740,9 @@ knihy: {
         { nadpis: "Doklady z minulého roka",
           html: "<p>Kniha nesie aj doklady zo starších rokov, ktoré k 1. januáru neboli vyrovnané — aby bolo vidieť, kedy sa doplatili.</p>" },
         { nadpis: "Úhrada označená ručne",
-          html: "<p>Keď ste zaplatenie [[navod:faktury/uhrada|označili ručne]], kniha doklad započíta ako uhradený, ale stĺpec <b>Uhradené dňa</b> ostane prázdny — appka deň platby nepozná. Preto ho ako uhradený ukáže aj v knihe k skoršiemu dňu.</p><p>Deň úhrady nesie až platba spárovaná z [[app:banka|výpisu z banky]].</p>" },
+          html: "<p>Keď ste zaplatenie [[navod:faktury/uhrada|označili ručne]], kniha doklad započíta ako uhradený, ale stĺpec <b>Uhradené dňa</b> ostane prázdny — appka deň platby nepozná. Preto ho ako uhradený ukáže aj v knihe k skoršiemu dňu.</p><p>Deň úhrady nesie až platba spárovaná z [[navod:banka/vypis|výpisu z banky]].</p>" },
         { nadpis: "Všetko v jednom súbore",
-          html: "<p>[[app:data#xkBox|Kompletný export v nastaveniach]] obsahuje knihu pohľadávok aj záväzkov ako hárky jedného Excelu. Peňažný denník doň pridáte zaškrtnutím.</p>" },
+          html: "<p>[[navod:data/excel|Kompletný export pre účtovníka]] obsahuje knihu pohľadávok aj záväzkov ako hárky jedného Excelu. Peňažný denník doň pridáte zaškrtnutím.</p>" },
       ],
     },
     {
@@ -755,7 +761,7 @@ knihy: {
         { nadpis: "Čo je pokladňa",
           html: "<p>Príjmové doklady a doklady uhradené v hotovosti, ktoré neprešli účtom.</p>" },
         { nadpis: "Zostatok sa nedá overiť",
-          html: "<p>Zostatok appka pozná len z výpisu alebo notifikácie, ktorá ho nesie. Staršie importy zostatky neukladali — [[app:banka|výpis naimportujte znova]].</p>" },
+          html: "<p>Zostatok appka pozná len z výpisu alebo notifikácie, ktorá ho nesie. Staršie importy zostatky neukladali — [[navod:banka/vypis|výpis naimportujte znova]].</p>" },
       ],
     },
   ],
@@ -813,11 +819,11 @@ majetok: {
       tip: "Prvý a posledný rok sa odpisuje len za mesiace od zaradenia — preto sú odpisy v nich menšie.",
       podrobnosti: [
         { nadpis: "Kam sa odpis započíta",
-          html: "<p>Pri skutočných výdavkoch ho appka sama pripočíta k výdavkom v [[app:priznanieB|daňovom priznaní]]. Pri paušálnych výdavkoch sa odpis nepoužije.</p><p>Appka odpisuje rovnomerne — zrýchlené odpisovanie nepozná.</p>" },
+          html: "<p>Pri skutočných výdavkoch ho appka sama pripočíta k výdavkom v [[navod:priznanieB/vyplnit|daňovom priznaní]]. Pri paušálnych výdavkoch sa odpis nepoužije.</p><p>Appka odpisuje rovnomerne — zrýchlené odpisovanie nepozná.</p>" },
         { nadpis: "Odpisy tento rok daň neznížia",
           html: "<p>Keď je základ dane pod nezdaniteľnou časťou, [[app:priznania|priznania]] ukážu kartu <b>Odpisy vám tento rok daň neznížia</b> s tlačidlom na prerušenie odpisovania. Prerušiť sa dá len celý rok a odpisy sa posunú, nestratia sa.</p>" },
         { nadpis: "Odpisový plán v Exceli",
-          html: "<p>[[app:data#xkBox|Kompletný export v nastaveniach]] má hárok <b>Majetok a odpisy</b> s plánom každej veci.</p>" },
+          html: "<p>[[navod:data/excel|Kompletný export pre účtovníka]] má hárok <b>Majetok a odpisy</b> s plánom každej veci.</p>" },
       ],
     },
     {
@@ -871,7 +877,7 @@ dokumenty: {
         { text: "Od 60 dní pred koncom ho appka ukáže hore v zozname dokumentov.", tlacidlo: "Blížiaca sa expirácia", snimka: "dokumenty-platnost-1" },
         { text: "Od 30 dní pred koncom pripomenie aj v zvončeku a na úvodnej obrazovke." },
       ],
-      tip: "V [[app:kalendar|kalendári]] je koniec platnosti vidieť už 90 dní vopred.",
+      tip: "V kalendári je koniec platnosti vidieť už 90 dní vopred — [[navod:kalendar/terminy|ako čítať termíny]].",
       podrobnosti: [
         { nadpis: "Zmluvu ste predĺžili",
           html: "<p>Upravte dokument a zmeňte <b>Platnosť do</b> — pripomienky sa posunú na nový dátum.</p>" },
@@ -1054,7 +1060,7 @@ jazdy: {
       tip: "Ten istý výpis môžete načítať aj druhý raz — nabíjanie, ktoré už v knihe je, sa nepridá znova.",
       podrobnosti: [
         { nadpis: "Výpis som nahral medzi doklady",
-          html: "<p>Keď výpis nahráte ako doklad do [[app:vydavky|výdavkov]], appka ho spozná a opýta sa, či ho má načítať medzi nabíjania. Faktúra za ten istý mesiac je samostatný doklad a do výdavkov patrí ona.</p>" },
+          html: "<p>Keď výpis nahráte [[navod:vydavky/fotka|ako doklad do výdavkov]], appka ho spozná a opýta sa, či ho má načítať medzi nabíjania. Faktúra za ten istý mesiac je samostatný doklad a do výdavkov patrí ona.</p>" },
         { nadpis: "Na čo sú nabíjania v knihe",
           html: "<p>Appka z nich porovná nabitú elektrinu so spotrebou podľa jázd a [[navod:jazdy/sprievodca|sprievodca]] z nich vypočíta domáce nabíjanie.</p>" },
       ],
@@ -1073,7 +1079,7 @@ jazdy: {
         { nadpis: "Ako appka porovnáva",
           html: "<p>Hľadá slová z miesta v trasách jázd z toho dňa, bez ohľadu na diakritiku a veľké písmená — „Senec“ sedí na trase „Bratislava – Senec – Trnava“. Miesto je nepovinné a prázdne pole nekontroluje nič.</p>" },
         { nadpis: "Odkiaľ sa tankovania berú",
-          html: "<p>Tankovanie v Knihe jázd nepridáte — vznikne samo z dokladu za pohonné hmoty s vyplnenými litrami vo [[app:vydavky|výdavkoch]]. Sumu preto opravujte vo výdavku, nie tu.</p>" },
+          html: "<p>Tankovanie v Knihe jázd nepridáte — vznikne samo z dokladu za pohonné hmoty s vyplnenými litrami, ktorý [[navod:vydavky/rucne|zapíšete vo výdavkoch]]. Sumu preto opravujte vo výdavku, nie tu.</p>" },
       ],
     },
   ],
@@ -1179,7 +1185,7 @@ superdash: {
       tip: "Keď od jedného odberateľa príde 60 % príjmu alebo viac, appka na to upozorní — pri 90 % pripomenie aj otázku, či nejde o závislú prácu.",
       podrobnosti: [
         { nadpis: "Podľa čoho sa počíta",
-          html: "<p>Podľa dátumu úhrady a bez DPH — teda čo naozaj prišlo, nie čo bolo vystavené. Kto vám ešte nezaplatil, uvidíte v [[app:pohladavky|nezaplatených faktúrach]].</p>" },
+          html: "<p>Podľa dátumu úhrady a bez DPH — teda čo naozaj prišlo, nie čo bolo vystavené. Kto vám ešte nezaplatil, [[navod:pohladavky/prehlad|zistíte v pohľadávkach]].</p>" },
       ],
     },
   ],
@@ -1204,7 +1210,7 @@ data: {
       tip: "Kým neťuknete na <b>Uložiť všetky nastavenia</b>, vyplnené polia sa neuložia — ani to, čo doplnil register.",
       podrobnosti: [
         { nadpis: "Čo bez DIČ a IČ DPH nefunguje",
-          html: "<p>Bez <b>DIČ</b> sa nedajú posielať faktúry sieťou Peppol — [[navod:efaktury/zapnut|ako zapnúť odosielanie]].</p><p>Bez <b>IČ DPH</b>, názvu a adresy appka nevytvorí [[app:dph|priznanie k DPH ani kontrolný výkaz]]. Priznanie k DPH a súhrnný výkaz potrebujú aj <b>Daňový úrad</b> — appka si ho nedomýšľa.</p>" },
+          html: "<p>Bez <b>DIČ</b> sa nedajú posielať faktúry sieťou Peppol — [[navod:efaktury/zapnut|ako zapnúť odosielanie]].</p><p>Bez <b>IČ DPH</b>, názvu, adresy a daňového úradu appka nevytvorí priznanie k DPH — čo presne podania potrebujú, opisuje [[navod:dph/udaje|návod k údajom pre DPH]].</p>" },
         { nadpis: "IBAN a QR kód",
           html: "<p>Appka IBAN nekontroluje — preklep skončí v QR kóde. Po uložení si otvorte PDF [[navod:faktury/poslat|faktúry]] a QR kód skúšobne naskenujte v banke.</p>" },
         { nadpis: "Register neodpovedá",
@@ -1215,18 +1221,16 @@ data: {
       id: "doklady",
       nazov: "Posielať doklady do appky e-mailom",
       kedy: "Faktúry od dodávateľov vám chodia e-mailom a nechcete ich sťahovať a nahrávať.",
+      // Postup so schránkou je opísaný RAZ — vo Výdavkoch (doklady) a v Banke
+      // (výpisy). Tu je len miesto, kde adresa v nastaveniach je, a rozcestník.
       kroky: [
         { text: "V časti <b>Doklady e-mailom</b> skopírujte svoju prijímaciu adresu tlačidlom <b>⧉</b>.", tlacidlo: "Doklady e-mailom" },
-        { text: "Doklad na ňu prepošlite ako prílohu e-mailu." },
-        { text: "Ťuknite na <b>📨 Schránka dokladov</b> a pri doklade na <b>Spracovať →</b>.", tlacidlo: "Schránka dokladov" },
-        { text: "Appka doklad prečíta a predvyplní [[app:vydavky|výdavok]] — skontrolujte ho a uložte." },
+        { text: "Doklady od dodávateľov na ňu preposielajte a spracujte ich podľa návodu [[navod:vydavky/email|doklady e-mailom]]; výpis z účtu podľa návodu [[navod:banka/email|výpisy e-mailom]]." },
       ],
       tip: "Doklad, ktorý príde, sa do evidencie sám nedostane — vždy čaká na vaše potvrdenie.",
       podrobnosti: [
         { nadpis: "V ukážkovom režime časť chýba",
           html: "<p>Doklady e-mailom fungujú len s vlastným účtom prihláseným v cloude — bez neho sa časť Doklady e-mailom v nastaveniach nezobrazí.</p>" },
-        { nadpis: "Adresa sa dostala k nesprávnemu človeku",
-          html: "<p>V Schránke dokladov vytvoríte novú adresu tlačidlom <b>↻ Nová adresa</b> — stará okamžite prestane fungovať. Jednotlivých odosielateľov zablokujete cez <b>🚫 Blokované adresy</b>.</p>" },
       ],
     },
     {
