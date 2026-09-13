@@ -12375,6 +12375,7 @@ function vydavokDoplnkovePolia(obj){
   const spl=val("m_splatnostVyd"); if(spl) obj.splatnost=spl;
   const ib=String(val("m_ibanVyd")||"").replace(/\s/g,"").toUpperCase(); if(ib) obj.iban=ib;
   const odd=val("m_oddielRucne"); if(odd) obj.oddielRucne=odd;
+  citajSamozdanenie(obj);
   const opr=val("m_opravuje"); if(opr) obj.opravujeDoklad=opr;
   // väzba na vozidlo — kvôli nej sa doklad dostane do knihy jázd a odpisov
   const ad=document.getElementById("m_autoDoklad");
@@ -12417,6 +12418,18 @@ function vydavokDoplnkovePolia(obj){
 // hodnota niesla ďalej aj po prepnutí kategórie a ticho posúvala platbu na iný
 // rok. Prázdne pole znamená „rok úhrady" a to je správne prázdno, nie chýbajúci
 // údaj.
+// ── PRENESENIE DAŇOVEJ POVINNOSTI — JEDEN ČITATEĽ ──────────────────────────
+// 🔴 13. 9. 2026: parser e-faktúry rozpoznal tuzemský prenos (kategória AE od
+// slovenského dodávateľa, § 69 ods. 12) a zapísal `samozdanenieTyp`, ale
+// formulár výdavku ten údaj nemal kam uložiť. Doklad s DPH 0 potom
+// `dphOddielVydavok` zaradil do „X" a z kontrolného výkazu (B.1) aj z priznania
+// (samozdanenie na výstupe aj odpočet) ticho vypadol. Príznak nesie skryté pole
+// formulára, takže ho uloží import z dokladu aj editor.
+function citajSamozdanenie(obj){
+  const t=String(val("m_samozdanenieTyp")||"").trim();
+  if(SAMOZD_DRUHY[t]) obj.samozdanenieTyp=t; else delete obj.samozdanenieTyp;
+  return obj;
+}
 function citajZaRok(obj){
   const K=KATEGORIE_VYDAVKOV[val("m_kategoria")||((obj||{}).kategoria)];
   const zr=parseInt(val("m_zaRok"),10);
@@ -12499,7 +12512,9 @@ function vydavokFormHtml(x, nova, idx){
   // 695 px v obsahu modálu, teda 109 px pod ohybom a za ôsmimi poľami, z ktorých
   // štyri vypĺňajú samy. Skratka umiestnená za prácou, ktorú má ušetriť, nie je
   // skratka; Roman ich v appke jednoducho nikdy nevidel.
-  return `    ${_uhrHtml}${nova?vzoryHtml():""}<div class="mfield"><label>Druh dokladu</label><select id="m_druh" onchange="mDruhZmeneny()"><option ${x.druh==="Došlá faktúra"?"selected":""}>Došlá faktúra</option><option ${x.druh==="Bloček"?"selected":""}>Bloček</option><option ${x.druh==="PHM (tankovanie)"?"selected":""}>PHM (tankovanie)</option><option ${x.druh==="Interný doklad"?"selected":""}>Interný doklad</option></select></div>
+  // Skryté `m_samozdanenieTyp`: prenesenie daňovej povinnosti nevyberá človek,
+  // nesie ho doklad (e-faktúra). Bez poľa by ho uloženie zahodilo (citajSamozdanenie).
+  return `    ${_uhrHtml}${nova?vzoryHtml():""}<input type="hidden" id="m_samozdanenieTyp" value="${esc(x.samozdanenieTyp||"")}"><div class="mfield"><label>Druh dokladu</label><select id="m_druh" onchange="mDruhZmeneny()"><option ${x.druh==="Došlá faktúra"?"selected":""}>Došlá faktúra</option><option ${x.druh==="Bloček"?"selected":""}>Bloček</option><option ${x.druh==="PHM (tankovanie)"?"selected":""}>PHM (tankovanie)</option><option ${x.druh==="Interný doklad"?"selected":""}>Interný doklad</option></select></div>
     <div class="mfield" style="position:relative"><label>Partner</label>
       <input id="m_partner" value="${esc(x.partner)}" autocomplete="off" oninput="feHladajFirmu(this.value,'m_partner')" placeholder="Začnite písať názov alebo IČO dodávateľa…">
       <div id="feNasepP" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:30;background:var(--paper);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px -8px rgba(19,28,43,.25);max-height:240px;overflow-y:auto;margin-top:2px"></div>
@@ -12765,6 +12780,7 @@ function editVydavok(idx){
       citajUcetFS(obj);
       citajOsobitnu(obj);
       citajZaRok(obj);
+      citajSamozdanenie(obj);
       d.vydavky.push(obj);
       zapamatajPartnera(obj);
     } else {
@@ -12774,6 +12790,7 @@ function editVydavok(idx){
       citajUcetFS(obj);
       citajOsobitnu(obj);
       citajZaRok(obj);
+      citajSamozdanenie(obj);
       if(obj.podnikPct==null) delete d.vydavky[idx].podnikPct;   // Object.assign staré pole neodstráni
       // To isté pre rok povinnosti: po prepnutí na kategóriu, ktorá ho nemá,
       // by starý rok v doklade ostal a ďalej priraďoval platbu inému roku.
@@ -24995,6 +25012,7 @@ function mAktualizujOddiel(){
   const viac=chk("m_viacSadzieb");
   const x={
     oddielRucne: val("m_oddielRucne"),
+    samozdanenieTyp: val("m_samozdanenieTyp"),
     druh: val("m_druh"),
     dodavatelIcDph: val("m_dodIcDph"),
     zahranicny: chk("m_zahranicny"),
@@ -28845,8 +28863,21 @@ function parseFakturaText(text){
     spolu = r2(R.bez + R.dph);
   }
   R.spolu=spolu||r2(R.bez+R.dph);
+  // ── tuzemský prenos daňovej povinnosti (§ 69 ods. 12) ──
+  // Veta „prenesenie daňovej povinnosti" je na faktúrach SLOVENSKÝCH dodávateľov
+  // (stavebné práce, kovový odpad). Do 13. 9. 2026 ju appka brala ako znak
+  // zahraničnej faktúry: doklad dostal `zahranicny` a skončil ako služba zo
+  // zahraničia — mimo kontrolného výkazu, hoci tam do B.1 patrí. Rozhoduje
+  // slovenské IČ DPH dodávateľa; bez neho ostáva pôvodné správanie.
+  const icDodavatela=String(R.dodavatelIcDph||R.icdph||"").replace(/\s/g,"");
+  if(jeReverseCharge && /^SK\d{10}$/i.test(icDodavatela)){
+    R.druh="Došlá faktúra";
+    R.bez=R.spolu;   // bez DPH — daň platí odberateľ
+    R.dph=0;
+    R.samozdanenieTyp="tuzemsky";
+  }
   // ── reverse charge: zahraničný doklad, DPH = 0, samozdanenie ──
-  if(jeReverseCharge || (jeAnglicka && R.dph===0)){
+  else if(jeReverseCharge || (jeAnglicka && R.dph===0)){
     R.zahranicny=true;
     R.druh="Došlá faktúra";
     R.bez=R.spolu;   // celá suma je základ (bez DPH)
@@ -30040,6 +30071,7 @@ function faktPdfNaVydavok(R){
     druh:"Došlá faktúra", partner:R.partner||"", cislo:R.cislo||"", datum:(R.datum||"").slice(0,10)||dnes.slice(0,10),
     bez:+R.bez||0, dph:+R.dph||0, spolu:+R.spolu||0, mesiac:((R.datum||"").slice(0,7))||dnes.slice(0,7),
     zahranicny:!!R.zahranicny, kodKrajiny:R.kodKrajiny||"", dodavatelIco:R.dodavatelIco||"", dodavatelIcDph:R.dodavatelIcDph||R.icdph||"", iban:R.iban||"", zdroj:R._efaktura?(R._isdoc?"efaktura-isdoc":"efaktura-ubl"):"pdf-import"};
+  if(SAMOZD_DRUHY[R.samozdanenieTyp]) obj.samozdanenieTyp=R.samozdanenieTyp;   // tuzemský prenos z e-faktúry
   if(R.rozpis&&R.rozpis.length>1){ obj.rozpis=R.rozpis; normalizujRozpis(obj); }
   return obj;
 }
@@ -31103,6 +31135,7 @@ function ocrNaVydavok(R){
     iban: R.iban || "",
     kategoria: R.kategoria || "",
     oddielRucne: R.oddielRucne || "",
+    samozdanenieTyp: R.samozdanenieTyp || "",
     opravujeDoklad: R.opravujeDoklad || "",
     autoDoklad: R.autoDoklad || false,
     opakovanie: R.opakovanie || null
@@ -31171,6 +31204,7 @@ function otvorOcrVysledok(R){
       v QR je ${eur(R._qrRozporSumy.qr)}. Použili sme sumu z QR — je chránená kontrolným súčtom, kým text môže byť prečítaný zle.
       <div style="margin-top:7px;color:var(--ink-soft);font-size:11.5px">Ak na doklade vidíte ${eur(R._qrRozporSumy.ocr)}, prepíšte sumu ručne — mohlo ísť o zálohovú platbu alebo o splátku.</div>
     </div>`:''}
+    ${(R.samozdanenieTyp==="tuzemsky" && !R.zahranicny)?`<div style="background:var(--sfc-info);color:var(--ink);font-size:12px;padding:9px 12px;border-radius:9px;margin-bottom:14px;line-height:1.55">🏗 <b>Prenesenie daňovej povinnosti (§ 69 ods. 12).</b> Slovenský dodávateľ faktúruje bez DPH a daň platíte vy — appka ju dopočíta do výstupu aj odpočtu a doklad pôjde do kontrolného výkazu (B.1). IČ DPH dodávateľa je preto povinné.</div>`:''}
     ${R._vlastnaFaktura?`<div style="background:var(--sfc-neg);color:#8f2d26;font-size:12px;padding:9px 12px;border-radius:9px;margin-bottom:14px">⚠ <b>Dodávateľom na tomto doklade je vaša firma.</b> Ide o faktúru, ktorú ste vystavili vy — nepatrí medzi výdavky. Skontrolujte, či ste nenačítali nesprávny súbor.</div>`:''}
     ${R.reverseCharge?`<div style="background:var(--sfc-info);color:#6b4fbf;font-size:12px;padding:9px 12px;border-radius:9px;margin-bottom:14px">🌍 <b>Zahraničná faktúra s prenesením daňovej povinnosti (reverse charge).</b> Označili sme ju ako zahraničnú — appka dopočíta slovenskú DPH 23% (samozdanenie) do výstupu aj odpočtu.</div>`:''}
     ${(!R.ekasaId && R._qrChyba)?`<div id="qrVarovanie" style="background:var(--sfc-warn);font-size:12px;padding:9px 12px;border-radius:9px;margin-bottom:14px;line-height:1.55">
