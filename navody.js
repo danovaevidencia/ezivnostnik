@@ -1212,7 +1212,7 @@ data: {
         { nadpis: "Čo bez DIČ a IČ DPH nefunguje",
           html: "<p>Bez <b>DIČ</b> sa nedajú posielať faktúry sieťou Peppol — [[navod:efaktury/zapnut|ako zapnúť odosielanie]].</p><p>Bez <b>IČ DPH</b>, názvu, adresy a daňového úradu appka nevytvorí priznanie k DPH — čo presne podania potrebujú, opisuje [[navod:dph/udaje|návod k údajom pre DPH]].</p>" },
         { nadpis: "IBAN a QR kód",
-          html: "<p>Appka IBAN nekontroluje — preklep skončí v QR kóde. Po uložení si otvorte PDF [[navod:faktury/poslat|faktúry]] a QR kód skúšobne naskenujte v banke.</p>" },
+          html: "<p>Pri uložení appka IBAN skontroluje podľa kontrolných číslic. Preklep v číslici alebo prehodené číslice odhalí — taký IBAN neuloží, ponechá pôvodný a pod poľom napíše, čo nesedí. Ostatné nastavenia sa uložia.</p><p>Kontrola nepozná, či je účet váš: platný IBAN cudzieho účtu prejde. Po uložení si preto otvorte PDF [[navod:faktury/poslat|faktúry]] a QR kód skúšobne naskenujte v banke.</p>" },
         { nadpis: "Register neodpovedá",
           html: "<p>Údaje berie appka z registra právnických osôb Štatistického úradu. Keď neodpovie, vyplňte ich ručne — uložia sa rovnako.</p>" },
       ],
@@ -1267,10 +1267,10 @@ data: {
       kedy: "Potrebujete sa vrátiť k stavu, ktorý máte uložený v zálohe.",
       kroky: [
         { text: "Ťuknite na <b>📥 Importovať JSON</b> a vyberte súbor zálohy.", tlacidlo: "Importovať JSON", snimka: "data-obnovit-1" },
-        { text: "Appka ukáže názov firmy a koľko faktúr, výdavkov a jázd v súbore je — potvrďte." },
-        { text: "Ťuknite na <b>☁ Uložiť do cloudu</b> — až tým sa načítané dáta uložia.", tlacidlo: "Uložiť do cloudu", snimka: "data-obnovit-2" },
+        { text: "Appka ukáže názov firmy a koľko faktúr, výdavkov a jázd v súbore je — potvrďte. Pred nahradením stiahne zálohu terajších dát." },
+        { text: "Appka načítané dáta hneď uloží a v okne napíše, či sa to podarilo. Keď nie, ťuknite na <b>☁ Uložiť do cloudu</b>.", tlacidlo: "Uložiť do cloudu", snimka: "data-obnovit-2" },
       ],
-      tip: "Import nič nezlučuje — všetko, čo máte v appke teraz, nahradí obsahom súboru. Ak si nie ste istí, stiahnite si najprv zálohu terajšieho stavu.",
+      tip: "Import nič nezlučuje — všetko, čo máte v appke teraz, nahradí obsahom súboru. Súbor so zálohou predošlých dát (…_pred_importom_….json) si nechajte, kým si nie ste istí, že je všetko v poriadku.",
     },
     {
       id: "excel",

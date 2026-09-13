@@ -17947,7 +17947,7 @@ async function dmVykresliKartu(){
     adresa=await dokladyAdresa(false);
     await nacitajCakajuce(true);
     pocet=cakajucePocty().spolu;
-  }catch(_){}
+  }catch(e){ console.error("Doklady e-mailom — karta v Nastaveniach:", e); }
 
   if(!adresa){
     // Dôvod sa vypisuje zámerne: bez neho je „nepodarilo sa" len konštatovanie,
@@ -18201,14 +18201,7 @@ function appData(){
         <span>Odosielať faktúry <b>sieťou Peppol</b> (skúšobná prevádzka)</span>
       </label>
       <div class="ocr-hint" style="margin-top:5px">Zapne v menu faktúry voľbu „Odoslať sieťou Peppol“. Odoslanie je <b>nezvratné</b>: doklad dostane odberateľ, poštár ho nahlási Finančnej správe a faktúra sa tým zamkne — meniť sa bude dať už len dobropisom alebo ťarchopisom. Nič sa neodošle samo; pri každom doklade sa appka spýta na sumu aj príjemcu.</div>
-      ${(()=>{
-        // Bez DIČ firma v sieti neexistuje a poštár nevie, kto posiela. Je to
-        // tvrdá podmienka `postarDostupny()` — povedať to treba TU, nie až
-        // pri prvom odoslaní, keď už má človek doklad rozpísaný.
-        const dic=String(((d.meta||{}).dic)||((d.meta||{}).icdph)||"").trim();
-        if(dic) return "";
-        return `<div class="ocr-hint" style="margin-top:8px;color:var(--ink-warn)">⚠ Firma nemá vyplnené DIČ — bez neho sa v sieti Peppol nedá vystupovať a voľba odosielania sa neponúkne. Doplňte ho vyššie v údajoch firmy.</div>`;
-      })()}
+      <div id="set_postarDic">${nastDicUpozornenieHtml(d.meta)}</div>
     </div>
 
     <div class="card" style="margin-bottom:14px">
@@ -18230,7 +18223,7 @@ function appData(){
 
     <div class="card">
       <h2 style="font-size:16px;margin-bottom:4px">Firemné údaje</h2>
-      <div class="csub" style="margin-bottom:14px">Zadajte IČO a doplňte údaje z obchodného registra automaticky.</div>
+      <div class="csub" style="margin-bottom:14px">Zadajte IČO a doplňte údaje automaticky z registra právnických osôb Štatistického úradu.</div>
       <div class="mfield"><label>IČO</label>
         <div style="display:flex;gap:8px">
           <input id="set_ico" value="${esc((d.meta||{}).ico||'')}" placeholder="napr. 12345678" style="flex:1">
@@ -18275,7 +18268,7 @@ function appData(){
         <div class="mfield"><label>Názov projektu</label><input id="set_projekt" value="${esc((d.settings||{}).projektNazov||'')}"></div>
       </div>
       <div class="mrow2">
-        <div class="mfield"><label>IBAN (pre QR platbu na faktúre)</label><input id="set_iban" value="${esc((d.meta||{}).iban||'')}" placeholder="SK00 0000 0000 0000 0000 0000"></div>
+        <div class="mfield"><label>IBAN (pre QR platbu na faktúre)</label><input id="set_iban" value="${esc((d.meta||{}).iban||'')}" placeholder="SK00 0000 0000 0000 0000 0000"><div id="set_ibanStav" style="font-size:11.5px;margin-top:5px;color:var(--neg)"></div></div>
         <div class="mfield"><label>SWIFT / BIC (nepovinné)</label><input id="set_swift" value="${esc((d.meta||{}).swift||'')}" placeholder="napr. TATRSKBX"></div>
       </div>
       <div style="border-top:1px solid var(--line-soft);margin:14px 0 12px"></div>
@@ -18330,6 +18323,36 @@ async function doplnFirmuPodlaICO(){
   }catch(err){
     if(stav){ stav.textContent="Register sa nepodarilo osloviť — vyplňte údaje ručne."; stav.style.color="var(--warn)"; }
   }
+}
+// Upozornenie v karte E-faktúry. Funkcia, nie výraz v šablóne: `ulozNastavenia`
+// obrazovku neprekresľuje a upozornenie by po doplnení DIČ ostalo visieť až do
+// ďalšieho otvorenia modulu.
+function nastDicUpozornenieHtml(meta){
+  // Bez DIČ firma v sieti neexistuje a poštár nevie, kto posiela. Je to
+  // tvrdá podmienka `postarDostupny()` — povedať to treba TU, nie až
+  // pri prvom odoslaní, keď už má človek doklad rozpísaný.
+  const dic=String(((meta||{}).dic)||((meta||{}).icdph)||"").trim();
+  if(dic) return "";
+  return `<div class="ocr-hint" style="margin-top:8px;color:var(--ink-warn)">⚠ Firma nemá vyplnené DIČ — bez neho sa v sieti Peppol nedá vystupovať a voľba odosielania sa neponúkne. Doplňte ho vyššie v údajoch firmy.</div>`;
+}
+// IBAN — kontrolné číslice podľa ISO 13616 (mod 97): prvé štyri znaky idú na
+// koniec, písmená sa nahradia číslami (A=10 … Z=35) a zvyšok po delení 97 musí
+// byť 1. Chytí preklep v jednej číslici aj prehodenie dvoch susedných. Bez
+// kontroly skončil preklep v QR kóde na faktúre aj v e-faktúre.
+function ibanPlatny(iban){
+  const s=String(iban||"").replace(/\s/g,"").toUpperCase();
+  if(!/^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/.test(s)) return false;
+  let zvysok=0;
+  for(const znak of s.slice(4)+s.slice(0,4)){
+    const cisla=znak<="9" ? znak : String(znak.charCodeAt(0)-55);
+    for(const c of cisla) zvysok=(zvysok*10+Number(c))%97;
+  }
+  return zvysok===1;
+}
+// Tlačený tvar IBAN (po štyroch znakoch). PDF faktúry ho vypisuje tak, ako je
+// uložený; QR kód aj UBL si medzery odstránia samy.
+function ibanTlacou(iban){
+  return String(iban||"").replace(/\s/g,"").toUpperCase().replace(/(.{4})(?=.)/g,"$1 ");
 }
 async function ulozNastavenia(){
   // ── IČO musí byť jedinečné naprieč účtami ──
@@ -18402,7 +18425,11 @@ async function ulozNastavenia(){
   s.odberatelAdresa=val("set_odbAdresa")||"";
   if(!firmaData.meta) firmaData.meta={};
   firmaData.meta=firmaData.meta||{};
-  firmaData.meta.iban=val("set_iban")||"";
+  // IBAN s preklepom sa neuloží (ostane pôvodný), ostatné nastavenia áno —
+  // zahodiť kvôli jednému poľu všetko ostatné, čo človek vyplnil, by bolo horšie.
+  const ibanZadany=String(val("set_iban")||"").replace(/\s/g,"");
+  const ibanZly=!!ibanZadany && !ibanPlatny(ibanZadany);
+  if(!ibanZly) firmaData.meta.iban=ibanTlacou(ibanZadany);
   if(document.getElementById("set_swift")) firmaData.meta.swift=val("set_swift")||"";
   if(document.getElementById("set_tel")) firmaData.meta.tel=val("set_tel")||"";
   if(document.getElementById("set_email")) firmaData.meta.email=val("set_email")||"";
@@ -18414,7 +18441,28 @@ async function ulozNastavenia(){
   if(document.getElementById("set_icdph")) firmaData.meta.icdph=val("set_icdph")||"";
   if(document.getElementById("set_danovyUrad")) firmaData.meta.danovyUrad=val("set_danovyUrad")||"";
   poZmene();
-  const m=document.getElementById("cloudMsg2"); if(m){ m.textContent="✓ Nastavenia uložené. Výpočty sa aktualizovali."; m.className="cloudmsg ok"; }
+  const dicBox=document.getElementById("set_postarDic");
+  if(dicBox) dicBox.innerHTML=nastDicUpozornenieHtml(firmaData.meta);
+  const ibanStav=document.getElementById("set_ibanStav");
+  if(ibanStav) ibanStav.textContent=ibanZly
+    ? "Nesedia kontrolné číslice — v IBAN je preklep. Uložený ostal pôvodný"+(firmaData.meta.iban?" ("+firmaData.meta.iban+")":"")+"."
+    : "";
+  const m=document.getElementById("cloudMsg2");
+  if(m){
+    // Demo neukladá nič (`ulozFirmuRaz`) — hláška o uložení by klamala.
+    if(ibanZly){
+      m.textContent="IBAN sa neuložil — nesedia mu kontrolné číslice, takže je v ňom preklep. "+
+        (demoMode?"Ostatné nastavenia sa použili, v ukážkovom režime sa však neukladajú.":"Ostatné nastavenia sú uložené.")+
+        " Opravte IBAN a uložte znova.";
+      m.className="cloudmsg err";
+    }else if(demoMode){
+      m.textContent="Ukážkový režim — nastavenia sa použili vo výpočtoch, ale neuložia sa. Vytvorte si účet pre trvalé uloženie.";
+      m.className="cloudmsg info";
+    }else{
+      m.textContent="✓ Nastavenia uložené. Výpočty sa aktualizovali.";
+      m.className="cloudmsg ok";
+    }
+  }
 }
 // načítanie obrázka podpisu do base64 (pre akceptačný protokol)
 function nacitajPodpis(e){
@@ -31325,7 +31373,10 @@ function danoveTerminy(dnes, s, mesiacovDopredu){
   s=s||{}; mesiacovDopredu=mesiacovDopredu||4;
   const y=dnes.getFullYear(), m=dnes.getMonth();
   const list=[];
-  const jePlatitelDPH = !!(s.icDph || (firmaData.meta&&firmaData.meta.icdph));
+  // Platiteľa určuje jedno pravidlo pre celú appku, vrátane admin konfigurácie
+  // `platca_dph`. Kalendár ho predtým čítal z IČ DPH sám a s priznaním DPH
+  // sa rozchádzal (dev/opravy/nastavenia.md).
+  const jePlatitelDPH = jePlatcaDPH();
   const mesacnyDPH = (s.dphObdobie||"mesacne")!=="stvrtrocne";
   // prejdi horizont mesiacov
   for(let off=0; off<=mesiacovDopredu; off++){
@@ -31387,7 +31438,13 @@ function danoveTerminy(dnes, s, mesiacovDopredu){
   });
   return list;
 }
-const TERMIN_IKONA={dph:"%", zp:"⚕", sp:"◉", dan:"§", priznanie:"✎", auto:"🚗", info:"★", vlastne:"●", fs:"🏛", dokument:"📄"};
+// Typy termínov: ikona a popis do legendy Kalendára. Jedna tabuľka — legenda
+// bola kópia ikon a chýbali v nej ★ 🏛 📄.
+const TERMIN_TYPY={dph:{ic:"%", popis:"DPH"}, zp:{ic:"⚕", popis:"zdravotné"}, sp:{ic:"◉", popis:"sociálne"},
+  dan:{ic:"§", popis:"preddavky"}, priznanie:{ic:"✎", popis:"priznanie"}, auto:{ic:"🚗", popis:"vozidlo"},
+  info:{ic:"★", popis:"míľnik"}, vlastne:{ic:"●", popis:"vlastné"}, fs:{ic:"🏛", popis:"termín FS"},
+  dokument:{ic:"📄", popis:"platnosť dokumentu"}};
+const TERMIN_IKONA=Object.fromEntries(Object.entries(TERMIN_TYPY).map(([k,v])=>[k,v.ic]));
 // widget termíny (najbližšie 4)
 function vypocitajTerminy(dnes, s){
   const auto=danoveTerminy(dnes, s, 3);
@@ -34567,7 +34624,7 @@ function appKalendar(){
     </div>`:prazdnyStav("Žiadne nadchádzajúce termíny. Daňové a odvodové sa dopočítajú z profilu — vlastné si pridajte sami.",
       {popis:"＋ Udalosť", kod:"kalPridajUdalost()"})}
     <div style="background:var(--bg);border-radius:10px;padding:12px 14px;font-size:12px;color:var(--ink-soft)">
-      <b style="color:var(--ink)">Legenda termínov:</b> % DPH · ⚕ zdravotné · ◉ sociálne · § preddavky · ✎ priznanie · 🚗 vozidlo · ● vlastné
+      <b style="color:var(--ink)">Legenda termínov:</b> ${Object.values(TERMIN_TYPY).map(v=>v.ic+" "+v.popis).join(" · ")}
     </div>`;
   setCrumb(`kalendár · ${nadchadzajuce.length} nadchádzajúcich termínov`);
 }
@@ -34705,7 +34762,7 @@ async function kalNacitajFS(){
         });
         if(res.ok){ _proxyFunguje=true; const d=await res.json(); if(d.ok) text=d.text; }
         else if(res.status===404){ _proxyFunguje=false; }
-      }catch(_){}
+      }catch(e){ console.error("Kalendár FS cez proxy zlyhal, skúšam priamo:", e); }
     }
     // 2) fallback: priame volanie (často zlyhá na CORS)
     if(text==null){
@@ -34724,6 +34781,7 @@ async function kalNacitajFS(){
     poZmene(); appKalendar();
     if(stav){ stav.textContent="✓ Načítaných "+firmaData.udalostiFS.length+" oficiálnych termínov FS."; stav.style.color="var(--pos)"; }
   }catch(err){
+    console.error("Kalendár FS sa nepodarilo načítať:", err);
     if(stav){ stav.innerHTML="Priame načítanie zlyhalo. Kalendár FS si otvorte/importujte cez <a href='"+FS_KALENDAR_ICS+"' target='_blank' style='color:var(--brand)'>oficiálny odkaz</a>."; stav.style.color="var(--warn)"; }
   }
 }
@@ -34739,7 +34797,7 @@ function importJSON(e){
   // poistka 1: varovanie pred stratou neuložených zmien
   if(firmaData && firmaDirty && !confirm("Máte neuložené zmeny v aktuálnej firme. Načítaním súboru sa prepíšu. Pokračovať?")) return;
   const r=new FileReader();
-  r.onload=(ev)=>{
+  r.onload=async(ev)=>{
     let obj;
     try{ obj=JSON.parse(ev.target.result); }
     catch(err){ cloudMsg("Súbor sa nepodarilo prečítať — je to platný JSON?","err"); return; }
@@ -34751,9 +34809,31 @@ function importJSON(e){
     // poistka 3: potvrdenie s názvom firmy zo súboru
     const nazov=(obj.meta&&obj.meta.nazov)?obj.meta.nazov:"(bez názvu)";
     const pocty=`${(obj.faktury||[]).length} faktúr, ${(obj.vydavky||[]).length} výdavkov, ${(obj.jazdy||[]).length} jázd`;
-    if(!confirm(`Načítať firmu „${nazov}“?\n(${pocty})\n\nAktuálne dáta v prehliadači sa prepíšu.`)) return;
+    // poistka 4: záloha terajšieho stavu. Import nič nezlučuje — nahradí všetko
+    // a po uložení sa k pôvodným dátam inak nedá vrátiť (CLAUDE.md, Poučenia:
+    // nezvratná operácia potrebuje zálohu). Demo sa nezálohuje — ukážkové dáta
+    // sa neukladajú a dajú sa otvoriť znova.
+    const zalohovat=!!firmaData && !demoMode;
+    if(!confirm(`Načítať firmu „${nazov}“?\n(${pocty})\n\nVšetky dáta v appke sa nahradia obsahom súboru — nič sa nezlučuje.`+
+      (zalohovat?`\nPred nahradením sa stiahne záloha terajších dát.`:""))) return;
+    const zaloha=zalohovat ? stiahniZalohuJson(firmaData, "pred_importom") : "";
     firmaData=obj; firmaDirty=true; zobrazFirmu();
-    cloudMsg("Firma „"+nazov+"“ načítaná ("+((file.size/1024)|0)+" KB). Kliknite „Uložiť“ pre uloženie.","ok");
+    // Uloží sa hneď. Polovičný stav „nahradené, ale neuložené“ nebol spoľahlivý:
+    // `zobrazFirmu` vie uložiť aj sama (poZmene po párovaní), takže hláška
+    // „kliknite Uložiť“ raz platila a raz nie. Výsledok sa číta až po dobehnutí
+    // všetkých ukladaní — naše volanie sa pri prebiehajúcom len zaradí.
+    await ulozFirmu();
+    while(_ukladaSa) await new Promise(res=>setTimeout(res,100));
+    const kb=((file.size/1024)|0);
+    const stav = demoMode
+      ? "Ste v ukážkovom režime — načítané dáta sa neuložia a po zatvorení appky zmiznú."
+      : !firmaDirty
+        ? "Dáta sú uložené "+((localMode||!sb)?"v tomto prehliadači.":"do cloudu.")
+        : "Uložiť sa ich nepodarilo — skúste „☁ Uložiť do cloudu“ v Nastaveniach a dátach. Kým sa neuložia, obnovenie stránky vráti predošlé dáta.";
+    // Výsledok ide do okna, nie do #cloudMsg: ten zmaže najbližšie prekreslenie
+    // obrazovky (napr. keď dorazia články) skôr, než si ho človek prečíta.
+    alert("Firma „"+nazov+"“ načítaná zo súboru ("+kb+" KB, "+pocty+").\n\n"+stav+
+      (zaloha?"\n\nPredošlé dáta sú v stiahnutom súbore "+zaloha+".":""));
   };
   r.readAsText(file);
 }
@@ -34909,12 +34989,19 @@ async function ulozFirmuRaz(){
   }
 }
 
+// Stiahne dáta firmy ako JSON a vráti meno súboru. Spoločné pre zálohu
+// a zálohu pred importom.
+function stiahniZalohuJson(data, druh){
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
+  const url=URL.createObjectURL(blob); const a=document.createElement("a");
+  const nazov=(data.meta&&data.meta.nazov)?data.meta.nazov.replace(/[^\w]+/g,"_"):"firma";
+  const subor=nazov+"_"+druh+"_"+new Date().toISOString().slice(0,10)+".json";
+  a.href=url; a.download=subor; a.click(); URL.revokeObjectURL(url);
+  return subor;
+}
 function exportFirmu(){
   if(!firmaData){ cloudMsg("Nie sú žiadne dáta na stiahnutie.","err"); return; }
-  const blob=new Blob([JSON.stringify(firmaData,null,2)],{type:"application/json"});
-  const url=URL.createObjectURL(blob); const a=document.createElement("a");
-  const nazov=(firmaData.meta&&firmaData.meta.nazov)?firmaData.meta.nazov.replace(/[^\w]+/g,"_"):"firma";
-  a.href=url; a.download=nazov+"_zaloha_"+new Date().toISOString().slice(0,10)+".json"; a.click(); URL.revokeObjectURL(url);
+  stiahniZalohuJson(firmaData, "zaloha");
   // zaznač čas poslednej zálohy
   if(!firmaData.settings) firmaData.settings={};
   firmaData.settings.poslednaZaloha=new Date().toISOString();
