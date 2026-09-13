@@ -1214,6 +1214,27 @@ h1,h2,h3,h4,.chead,.wbig,.sbox .sn,.sp-title b,.splittitle{text-wrap:balance}
   /* Bez hlavičky by pri výdavku nebolo vidieť, ktoré z dvoch čísel je DPH. */
   .rdok.rv>.c-sub::before{content:"DPH ";font-family:var(--sans);font-weight:600;color:var(--ink-soft)}
 }
+/* Riadok Pohľadávok a záväzkov. Stĺpce boli v inline štýle, ktorý mobilné
+   pravidlo neprebije: na 375 px zobrali dva pevné stĺpce (110 + 150 px)
+   260 z 341 px, meno odberateľa dostalo 9 px a lámalo sa po slove, riadok
+   mal 250 px a suma prekrývala odznak (zmerané 13. 9. 2026). Tie isté bunky
+   sa preto preskladajú do dvoch riadkov: meno a suma hore, stav a tlačidlá
+   dole. Hranica je 999 px ako pri `.rdok`, nie 560: pod ňou je bočný panel
+   a riadok úzky aj na tablete — pri 767 px malo meno 105 px a pretekalo,
+   pri 1000 px 239 px. Suma a tlačidlá NEZDIEĽAJÚ stĺpec: tri tlačidlá
+   (168 px) by rozšírili stĺpec sumy a meno by kleslo na 133 px. */
+.rpz{grid-template-columns:1.6fr 1fr 110px 150px}
+.rpz.rzv{grid-template-columns:1.6fr 1fr auto}
+.rpz>.pz-stav{text-align:right}
+.rpz>.pz-act{display:flex;gap:4px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+@media(max-width:999px){
+  .rpz,.rpz.rzv{gap:6px 10px;grid-template-columns:minmax(0,1fr) auto auto;
+                grid-template-areas:"main main sum" "stav act act"}
+  .rpz>.pz-main{grid-area:main}
+  .rpz>.pz-sum{grid-area:sum;align-self:start;white-space:nowrap}
+  .rpz>.pz-stav{grid-area:stav;text-align:left}
+  .rpz>.pz-act{grid-area:act}
+}
 /* ══ A4 — RIADOK POHYBU (kap. 48.4) ══════════════════════════════════════
    Riadok mal tri riadky textu: názov, VS so stavom a pás tlačidiel. Na 390 px
    to bolo správne, na monitore zbytočné — štyri pohyby zabrali dvanásť
@@ -1989,7 +2010,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.12-NV";  // Odoslanie Peppol s ukážkou, výsledkom v okne a vlastným tlačidlom
+const APP_VERZIA = "2026.09.13-NX";  // Pohľadávky a záväzky na mobile v dvoch riadkoch
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -18208,15 +18229,15 @@ function appPohladavky(){
     <div class="csub" style="margin:0 2px 12px">${pzTab==='pohl'?'Vystavené faktúry — komu a koľko dlhujú vám. Klik otvorí faktúru; pri faktúre po splatnosti viete vygenerovať PDF upomienku.':'Došlé faktúry — komu dlhujete vy. Klik otvorí výdavok.'}</div>
     <div class="alist">
       ${pzTab==='pohl'
-        ? (pohlZobraz.length?pohlZobraz.map(p=>`<div class="arow" style="grid-template-columns:1.6fr 1fr 110px 150px;cursor:pointer;${p.poSplat?'background:var(--sfc-neg)':p.uhradena?'opacity:.6':''}" onclick="editFaktura(${p.idx})" title="Otvoriť faktúru">
-            <div><div class="acol-strong">${esc(p.partner||"—")}</div><div class="acol-muted">${esc(p.cislo||"")} · splatnosť ${fmtDatum(p.splatnost)}</div></div>
-            <div class="acol-muted" style="text-align:right">${p.uhradena?'<span class="apill ok">uhradená</span>':p.poSplat?'<span class="apill neg">po splatnosti '+p.dni+' dní</span>':'<span class="apill warn">otvorená</span>'}</div>
-            <div class="acol-sum">${eur(p.suma)}</div>
-            <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;justify-content:flex-end">${p.uhradena?'':`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vyberSposobUhrady(null,_s=>{oznacDokladUhradeny('faktura','${esc(p.kluc)}',_s);appPohladavky();})" title="Označiť ako uhradenú">✓</button>`}${p.poSplat?`<button class="aabtn" style="padding:5px 8px;font-size:11px${p.neupominat?';opacity:.5':''}" onclick="event.stopPropagation();faktToggleNeupominat('${esc(p.kluc)}')" title="${p.neupominat?'Faktúra je vylúčená z upomienok — ťuknutím vrátiť':'Vylúčiť faktúru z upomienok (odklad, spor, dohoda)'}"${zam("faktury")}>${p.neupominat?'🔕':'🔔'}</button>`:''}${p.poSplat&&!p.neupominat?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();upomienkaPDF('${esc(p.partner)}')" title="Vygenerovať PDF upomienku — jedna na odberateľa, so všetkými jeho faktúrami po splatnosti">📄 ${upomienkaStupenSkratka(upomienkaStupenPre(upomienkaKandidati(p.partner, new Date().toISOString().slice(0,10)).map(x=>x.cislo)))}</button>`:''}</div></div>`).join(''):'<div class="aempty">Žiadne pohľadávky v tomto roku.</div>')
-        : (zavZobraz.length?zavZobraz.map(z=>`<div class="arow" style="grid-template-columns:1.6fr 1fr auto;cursor:pointer;${z.uhradeny?'opacity:.6':''}" onclick="editVydavok(${z.idx})" title="Otvoriť výdavok">
-            <div><div class="acol-strong">${esc(z.partner||"—")}</div><div class="acol-muted">${fmtDatum(z.vznik)}</div></div>
-            <div class="acol-muted" style="text-align:right">${z.uhradeny?'<span class="apill ok">uhradený</span>':'<span class="apill warn">neuhradený</span>'}</div>
-            <div class="acol-sum">${eur(z.suma)}</div></div>`).join(''):'<div class="aempty">Žiadne záväzky v tomto roku.</div>')}
+        ? (pohlZobraz.length?pohlZobraz.map(p=>`<div class="arow rpz" style="cursor:pointer;${p.poSplat?'background:var(--sfc-neg)':p.uhradena?'opacity:.6':''}" onclick="editFaktura(${p.idx})" title="Otvoriť faktúru">
+            <div class="pz-main"><div class="acol-strong">${esc(p.partner||"—")}</div><div class="acol-muted">${esc(p.cislo||"")} · splatnosť ${fmtDatum(p.splatnost)}</div></div>
+            <div class="acol-muted pz-stav">${p.uhradena?'<span class="apill ok">uhradená</span>':p.poSplat?'<span class="apill neg">po splatnosti '+p.dni+' dní</span>':'<span class="apill warn">otvorená</span>'}</div>
+            <div class="acol-sum pz-sum">${eur(p.suma)}</div>
+            <div class="pz-act">${p.uhradena?'':`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vyberSposobUhrady(null,_s=>{oznacDokladUhradeny('faktura','${esc(p.kluc)}',_s);appPohladavky();})" title="Označiť ako uhradenú">✓</button>`}${p.poSplat?`<button class="aabtn" style="padding:5px 8px;font-size:11px${p.neupominat?';opacity:.5':''}" onclick="event.stopPropagation();faktToggleNeupominat('${esc(p.kluc)}')" title="${p.neupominat?'Faktúra je vylúčená z upomienok — ťuknutím vrátiť':'Vylúčiť faktúru z upomienok (odklad, spor, dohoda)'}"${zam("faktury")}>${p.neupominat?'🔕':'🔔'}</button>`:''}${p.poSplat&&!p.neupominat?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();upomienkaPDF('${esc(p.partner)}')" title="Vygenerovať PDF upomienku — jedna na odberateľa, so všetkými jeho faktúrami po splatnosti">📄 ${upomienkaStupenSkratka(upomienkaStupenPre(upomienkaKandidati(p.partner, new Date().toISOString().slice(0,10)).map(x=>x.cislo)))}</button>`:''}</div></div>`).join(''):'<div class="aempty">Žiadne pohľadávky v tomto roku.</div>')
+        : (zavZobraz.length?zavZobraz.map(z=>`<div class="arow rpz rzv" style="cursor:pointer;${z.uhradeny?'opacity:.6':''}" onclick="editVydavok(${z.idx})" title="Otvoriť výdavok">
+            <div class="pz-main"><div class="acol-strong">${esc(z.partner||"—")}</div><div class="acol-muted">${fmtDatum(z.vznik)}</div></div>
+            <div class="acol-muted pz-stav">${z.uhradeny?'<span class="apill ok">uhradený</span>':'<span class="apill warn">neuhradený</span>'}</div>
+            <div class="acol-sum pz-sum">${eur(z.suma)}</div></div>`).join(''):'<div class="aempty">Žiadne záväzky v tomto roku.</div>')}
     </div>`;
   setCrumb(`${pzRok} · ${otvPohl.length} pohľadávok · ${otvZav.length} záväzkov`);
 }
