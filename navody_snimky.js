@@ -2298,14 +2298,14 @@ window.NAVODY_SNIMKY = {
  },
  "pohladavky-prehlad-2": {
   "m": {
-   "subor": "navody/pohladavky-prehlad-2.m.c08b7b6a.webp",
+   "subor": "navody/pohladavky-prehlad-2.m.a7a55ce0.webp",
    "w": 390,
    "h": 600,
    "ciel": {
-    "x": 62,
-    "y": 277,
-    "w": 69,
-    "h": 45
+    "x": 32,
+    "y": 290,
+    "w": 127,
+    "h": 19
    }
   },
   "d": {
@@ -2322,7 +2322,7 @@ window.NAVODY_SNIMKY = {
  },
  "pohladavky-upomienka-1": {
   "m": {
-   "subor": "navody/pohladavky-upomienka-1.m.4b3295c8.webp",
+   "subor": "navody/pohladavky-upomienka-1.m.a7a55ce0.webp",
    "w": 390,
    "h": 600,
    "ciel": {
