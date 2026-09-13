@@ -377,7 +377,7 @@ banka: {
       tip: "Ten istý výpis nahratý druhýkrát nič nezdvojí — appka pozná pohyby, ktoré už má, a pridá len nové.",
       podrobnosti: [
         { nadpis: "Banka dáva len PDF",
-          html: "<p>Výber súboru ponúka XML a ZIP. V internet bankingu hľadajte export označený „XML“, „SEPA“ alebo „camt.053“ — býva pri výpise hneď vedľa PDF.</p>" },
+          html: "<p>PDF výpis appka načíta z Prima banky a Tatra banky. Pri ostatných bankách hľadajte v internet bankingu export označený „XML“, „SEPA“ alebo „camt.053“ — býva pri výpise hneď vedľa PDF.</p>" },
         { nadpis: "Výpis v zaheslovanom ZIP",
           html: "<p>Appka sa na heslo opýta. Heslo posiela banka, zvyčajne v sprievodnom e-maile. Keď sedí, ponúkne, že si ho zapamätá — len na tomto zariadení, do cloudu sa neposiela.</p>" },
         { nadpis: "Plán Free",
