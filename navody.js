@@ -780,7 +780,7 @@ majetok: {
         { text: "Skontrolujte názov, cenu bez DPH a dátum zaradenia a vyberte <b>Odpisovú skupinu</b>.", tlacidlo: "Odpisová skupina" },
         { text: "V poli <b>Režim</b> vyberte, či sa vec odpisuje, alebo je drobná, a ťuknite na <b>Uložiť</b>.", tlacidlo: "Režim", snimka: "majetok-zaradit-2" },
       ],
-      tip: "Kúpu, ktorá je vo výdavkoch, zaraďte vždy takto, nie cez <b>＋ Pridať majetok</b> — ručne pridaná vec výdavok nevyníma a suma by išla do výdavkov dvakrát.",
+      tip: "Kúpu, ktorá je vo výdavkoch, zaraďte takto — priamo z dokladu. Keď ju pridáte cez <b>＋ Pridať majetok</b>, appka hľadá doklad za rovnakú sumu a spýta sa, či ho má prepojiť; bez prepojenia by suma išla do výdavkov dvakrát.",
       podrobnosti: [
         { nadpis: "Odpisovaný, alebo drobný",
           html: "<p><b>Odpisovaný</b> — appka doklad z výdavkov vyníme a nahradí ho odpismi po rokoch.</p><p><b>Drobný</b> — doklad ostane vo výdavkoch celý a v majetku sa vec len eviduje.</p>" },
