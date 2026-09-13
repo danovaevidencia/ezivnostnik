@@ -2021,7 +2021,7 @@ html[data-jazda] .jazdapruh{display:flex}
 
 <!-- skryté: file inputy -->
 <input type="file" id="fileInput" accept="application/json,.json" style="display:none" onchange="importJSON(event)">
-<input type="file" id="vypisInput" accept=".xml,.zip,text/xml,application/xml,application/zip" style="display:none" onchange="spracujVypis(event)">
+<input type="file" id="vypisInput" accept=".xml,.zip,text/xml,application/xml,application/zip,.pdf,application/pdf" style="display:none" onchange="spracujVypis(event)">
 <input type="file" id="ocrInput" accept="image/*,application/pdf" capture="environment" style="display:none" onchange="spracujOCR(event)">
 <input type="file" id="ocrInputFile" accept="image/*,application/pdf" style="display:none" onchange="spracujOCR(event)">
 <input type="file" id="faktPdfInput" accept="application/pdf,application/xml,text/xml,.xml,.isdoc,.zip,application/zip" multiple style="display:none" onchange="faktPdfSpracuj(event)">
@@ -3393,8 +3393,11 @@ function zobrazFirmu(){
     const _sp=autoParujPohyby();
     if(_sp){
       poZmene();
+      // Veta z toho, čo sa naozaj spárovalo (`parovanieText`), nie „k faktúram
+      // podľa VS" — automatika páruje aj výdavky podľa skóre.
+      const P=parovanieText(parovanieTypy(autoParujPosledne));
       setTimeout(()=>alert("Appka za vás priradila "+_sp+" "+(_sp===1?"platbu":_sp<5?"platby":"platieb")+
-        " k faktúram podľa variabilného symbolu.\n\nFaktúry sú tým označené ako uhradené. "+
+        " "+P.komu+".\n\nPriradila ich "+P.ako+".\n"+P.doklady+" sú tým označené ako uhradené. "+
         "Ak niektoré priradenie nesedí, odoberiete ho v Banka → Párovanie.\n\n"+
         "Záznam ostáva v zvončeku."), 400);
     }
@@ -5664,10 +5667,16 @@ function notifPrecitajVsetko(){
 //
 // Texty sú tu, nie na mieste zápisu: rovnaká udalosť sa hlási z viacerých
 // ciest (načítanie, import, tlačidlo) a tri kópie tej istej vety by sa rozišli.
+//
+// `fotka(kluce)` (voliteľná) si k záznamu odloží, čo veta potrebuje vedieť
+// okrem počtu — v okamihu zápisu, z rovnakého dôvodu ako kľúče. Vracia polia;
+// pri zlúčení dňa sa zjednotia. `nazov` a `detail` dostanú celý záznam.
 const AUTOMAT_TEXTY={
   parovanie:{ ic:"🤖", modul:"banka",
-    nazov:n=>"Priradených "+n+" "+(n===1?"platba":n<5?"platby":"platieb")+" k faktúram",
-    detail:"Appka ich spárovala podľa variabilného symbolu a faktúry označila ako uhradené. Ak niektoré priradenie nesedí, odoberiete ho v Banka → Párovanie." },
+    fotka:kluce=>({typy:parovanieTypy(kluce)}),
+    nazov:(n,z)=>"Priradených "+n+" "+(n===1?"platba":n<5?"platby":"platieb")+" "+parovanieText(z&&z.typy).komu,
+    detail:z=>{ const P=parovanieText(z&&z.typy);
+      return "Appka ich priradila "+P.ako+". "+P.doklady+" sú tým označené ako uhradené. Ak niektoré priradenie nesedí, odoberiete ho v Banka → Párovanie."; } },
   kolizia:{ ic:"🤖", modul:"vydavky",
     nazov:n=>"Odlíšených "+n+" dokladov s rovnakým číslom",
     detail:"Číslo na doklade sa nezmenilo — appka ich odteraz rozoznáva podľa vlastnej identity, aby si navzájom neprepisovali úhrady. Skontrolujte v Banke, či platby sedia na správne doklady." },
@@ -5675,6 +5684,31 @@ const AUTOMAT_TEXTY={
     nazov:n=>"Doplnené IČ DPH k "+n+" "+(n===1?"dokladu":n<5?"dokladom":"dokladom"),
     detail:"Appka ho prevzala od toho istého dodávateľa z iných dokladov. Ak dodávateľ platiteľom DPH nie je, opravte to v editore dokladu." }
 };
+// K AKÝM dokladom automatika platby priradila. Páruje príjmy s faktúrami
+// (istý variabilný symbol alebo skóre) aj výdaje s výdavkami (skóre) —
+// `autoParujKolo`. Veta „k faktúram podľa variabilného symbolu" platila len
+// pre prvú cestu; v deme boli všetky tri priradenia výdavky (13. 9. 2026).
+// Pohyb, ktorý automatika párovala, predtým žiadnu úhradu nemal, takže jeho
+// `uhrady` sú práve to, čo priradila.
+function parovanieTypy(kluce){
+  const id=new Set((kluce||[]).map(String)), typy=new Set();
+  ((firmaData&&firmaData.vypis)||[]).forEach(t=>{
+    if(id.has(txId(t))) (t.uhrady||[]).forEach(u=>{ if(u.typ) typy.add(u.typ); });
+  });
+  return [...typy].sort();
+}
+// Jedna veta pre zvonček aj hlášku pri načítaní. Bez rozpisu (záznam spred
+// 13. 9. 2026) povie len to, čo vie: „k dokladom".
+function parovanieText(typy){
+  const f=(typy||[]).includes("faktura"), v=(typy||[]).includes("vydavok");
+  return {
+    komu: f&&v ? "k faktúram a výdavkom" : f ? "k faktúram" : v ? "k výdavkom" : "k dokladom",
+    doklady: f&&v ? "Faktúry a výdavky" : f ? "Faktúry" : v ? "Výdavky" : "Doklady",
+    // Prahy sú v `autoParujKolo` a `parJednoznacny` (skóre ≥ 90, náskok ≥ 25).
+    ako: "len pri istej zhode — "+(f ? "podľa variabilného symbolu faktúry, alebo " : "")
+       + "keď k platbe jasne najlepšie sedel jediný doklad (suma, symbol, účet, partner, dátum)"
+  };
+}
 // Koľko identít si denník k jednej udalosti odloží. Nad tým sa už len počíta:
 // notifikácia povie pravdivý počet, výber ukáže prvých 200 a POVIE, že ich
 // ukazuje 200 zo 400. Zoznam sa synchronizuje do cloudu, takže neobmedzený
@@ -5704,7 +5738,9 @@ const VYBER_STROP = 200;
 // zoznamom tvrdil, že zvyšok „odvtedy zmizol" — a to by bola lož.
 function zapisAutomat(druh, kluce, mimoModul){
   if(!firmaData || !AUTOMAT_TEXTY[druh]) return;
+  const T=AUTOMAT_TEXTY[druh];
   const zoz = Array.isArray(kluce) ? [...new Set(kluce.map(String).filter(Boolean))] : [];
+  const foto = T.fotka ? T.fotka(zoz) : null;
   const mimo = +mimoModul||0;
   const pocet = Array.isArray(kluce) ? zoz.length+mimo : (+kluce||0);
   if(!pocet) return;
@@ -5720,13 +5756,19 @@ function zapisAutomat(druh, kluce, mimoModul){
     uz.pocet  = uz.celkom + uz.mimo;          // koľko ich naozaj bolo — to hlási veta
     uz.kluce  = spolu.slice(0, VYBER_STROP);
     uz.kedy=new Date().toISOString();
+    // Záznam spred fotky ju nemá — dopočíta sa z jeho kľúčov, inak by veta
+    // hovorila len o druhom behu dňa.
+    if(foto) Object.keys(foto).forEach(p=>{
+      const bolo = Array.isArray(uz[p]) ? uz[p] : (T.fotka(uz.kluce||[])[p]||[]);
+      uz[p]=[...new Set([...bolo, ...foto[p]])].sort();
+    });
     // Po zlúčení musí notifikácia vyskočiť znova — inak by sa nový počet
     // schoval pod hlásenie, ktoré si používateľ prečítal, keď bol nižší.
     const P=(firmaData.settings||{}).notifPrecitane;
     if(P && P[kluc]) delete P[kluc];
   } else {
-    firmaData.automat.push({kluc, kedy:new Date().toISOString(), druh,
-      pocet, celkom:zoz.length, mimo, kluce:zoz.slice(0, VYBER_STROP)});
+    firmaData.automat.push(Object.assign({kluc, kedy:new Date().toISOString(), druh,
+      pocet, celkom:zoz.length, mimo, kluce:zoz.slice(0, VYBER_STROP)}, foto||{}));
   }
   // Denník je pomôcka, nie archív — celý sa synchronizuje do cloudu.
   if(firmaData.automat.length>40) firmaData.automat=firmaData.automat.slice(-40);
@@ -5948,7 +5990,7 @@ function zbierNotifikacie(){
       // ktorá množinu nemá, by bol sľub, ktorý sa nedá splniť.
       const kl=Array.isArray(z.kluce)?z.kluce:[];
       out.push({kluc:z.kluc, ic:T.ic, nal:"info",
-        nazov:T.nazov(z.pocet), detail:T.detail,
+        nazov:T.nazov(z.pocet, z), detail:typeof T.detail==="function" ? T.detail(z) : T.detail,
         akcia: kl.length
           ? ()=>otvorSVyberom(T.modul, kl, "z upozornenia", +z.celkom||kl.length)
           : ()=>otvorApp(T.modul)});
@@ -13101,7 +13143,7 @@ function ignorujProtiucet(iban){
   if(!firmaData.settings.ignorPravidla) firmaData.settings.ignorPravidla=[];
   if(firmaData.settings.ignorPravidla.some(p=>p.typ==="iban" &&
       String(p.hodnota||"").replace(/\s/g,"").toUpperCase()===ib)){
-    alert("Pravidlo na tento účet už existuje.\n\nNájdete ho v Banka → Pravidlá."); return;
+    alert("Pravidlo na tento účet už existuje.\n\nNájdete ho v Banka → Pravidlá ignorovania."); return;
   }
   const dotkne=(firmaData.vypis||[]).filter(t=>
     String(t.ibanProti||t.iban||"").replace(/\s/g,"").toUpperCase()===ib);
@@ -13115,7 +13157,7 @@ function ignorujProtiucet(iban){
     + "Hodí sa to na vlastné vklady a presuny medzi vlastnými účtami — nie na účet, "
     + "z ktorého vám chodia tržby.\n"
     + (sDokladom.length ? "\n⚠ "+sDokladom.length+" z nich už má priradený doklad. Tie priradenia ostanú, pravidlo ich nezruší.\n" : "")
-    + "\nPravidlo kedykoľvek zmažete v Banka → Pravidlá.")) return;
+    + "\nPravidlo kedykoľvek zmažete v Banka → Pravidlá ignorovania.")) return;
   firmaData.settings.ignorPravidla.push({typ:"iban", hodnota:ib});
   poZmene();
   alert("Pravidlo pridané. "+dotkne.length+" pohybov sa už nebude hlásiť.");
@@ -33211,11 +33253,16 @@ function odoberUhradu(tx, typ, cislo){
 // keď jedného z nich medzitým obsadí iný doklad, druhý sa stane jednoznačným.
 // Na ostrých dátach pribudlo v druhom kole ďalšie priradenie. Bez slučky by
 // človek musel appku otvoriť dvakrát, aby dostal to isté.
+// Kľúče POSLEDNÉHO behu — pre hlášku volajúceho. Denník dňa je zjednotený
+// cez všetky behy, takže by hláške pri načítaní pridal aj ranný import.
+// Vracia sa ďalej počet: päť volajúcich a testy s ním rátajú ako s číslom.
+let autoParujPosledne=[];
 function autoParujPohyby(pohyby){
   // Kolá vracajú KĽÚČE spárovaných pohybov, nie počet. Zvonček z nich spraví
   // výber, takže klik vedie presne na tie pohyby — nie do Banky, kde ich má
   // človek hľadať (12. 9. 2026).
   const kluce=[];
+  autoParujPosledne=kluce;
   for(let kolo=0; kolo<10; kolo++){
     const k=autoParujKolo(pohyby);
     if(!k.length) break;
@@ -33714,12 +33761,16 @@ function splitKandidati(tx, ajNerelevantne){
   return {rel, zvysok:ine.length, vsetky: ajNerelevantne ? [...rel, ...ine] : rel};
 }
 let splitVsetciKand=false;
-function splitUkazVsetkychKand(){ splitVsetciKand=true; renderSplit(); }
+// Tieto ovládače žijú v karte pohybu, a tá je aj modál. `renderSplit` modál
+// neprekreslí — „zobraziť ďalšie doklady", mesiac aj hľadanie v okne platby
+// preto nerobili nič (zmerané 13. 9. 2026: telo okna 2 269 znakov pred aj po
+// kliku). O prekreslení rozhoduje `parPrekresli`, rovnako ako pri akciách.
+function splitUkazVsetkychKand(){ splitVsetciKand=true; parPrekresli(); }
 // Filter dokladov v pravom paneli (Romanova požiadavka z monitora): mesiac
 // + fulltext. Aktívny filter automaticky prehľadáva VŠETKY doklady, nielen
 // relevantné — kto filtruje na júl, hľadá doklad, nie návrh párovania.
 let splitDokladyMesiac="";
-function splitNastavDokladyMesiac(v){ splitDokladyMesiac=v; renderSplit(); }
+function splitNastavDokladyMesiac(v){ splitDokladyMesiac=v; parPrekresli(); }
 function splitDokladyFilterAktivny(){ return !!(splitDokladyMesiac || (_hladaj.splitDoklady||"").trim()); }
 function txId(tx){ return tx.id||String(tx.datum)+String(tx.suma); }
 // je aktuálna kombinácia párovací režim? (banka + doklady)
@@ -33867,7 +33918,7 @@ function pohybKartaHtml(tx){
             <option value="">všetky obdobia</option>
             ${dokMes.map(m=>`<option value="${m}" ${splitDokladyMesiac===m?'selected':''}>${m.slice(5)}/${m.slice(0,4)}</option>`).join("")}
           </select>
-          ${hladatkoHtml('splitDoklady','renderSplit','🔍 Číslo, partner, suma…')}
+          ${hladatkoHtml('splitDoklady','parPrekresli','🔍 Číslo, partner, suma…')}
         </div>`; })()}
         ${(()=>{
           // NÁVRH VRÁTENIA — najdôležitejšia akcia, keď existuje protikus.
