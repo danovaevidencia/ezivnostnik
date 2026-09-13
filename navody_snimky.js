@@ -338,6 +338,126 @@ window.NAVODY_SNIMKY = {
    }
   }
  },
+ "dokumenty-platnost-1": {
+  "m": {
+   "subor": "navody/dokumenty-platnost-1.m.15390c03.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 18,
+    "y": 267,
+    "w": 354,
+    "h": 66
+   }
+  },
+  "d": {
+   "subor": "navody/dokumenty-platnost-1.d.170fae88.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 254,
+    "y": 228,
+    "w": 752,
+    "h": 51
+   }
+  }
+ },
+ "dokumenty-pridat-1": {
+  "m": {
+   "subor": "navody/dokumenty-pridat-1.m.7fe811e5.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 16,
+    "y": 266,
+    "w": 358,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/dokumenty-pridat-1.d.cb460b5f.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 899,
+    "y": 101,
+    "w": 109,
+    "h": 37
+   }
+  }
+ },
+ "dokumenty-pridat-2": {
+  "m": {
+   "subor": "navody/dokumenty-pridat-2.m.cd92f3b7.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 42,
+    "y": 378,
+    "w": 306,
+    "h": 44
+   }
+  },
+  "d": {
+   "subor": "navody/dokumenty-pridat-2.d.ed0f2644.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 294,
+    "y": 373,
+    "w": 436,
+    "h": 44
+   }
+  }
+ },
+ "dovolenka-vykaz-1": {
+  "m": {
+   "subor": "navody/dovolenka-vykaz-1.m.e77e0dcf.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 285,
+    "y": 354,
+    "w": 21,
+    "h": 14
+   }
+  },
+  "d": {
+   "subor": "navody/dovolenka-vykaz-1.d.7b4d1074.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 857,
+    "y": 357,
+    "w": 21,
+    "h": 14
+   }
+  }
+ },
+ "dovolenka-zapisat-1": {
+  "m": {
+   "subor": "navody/dovolenka-zapisat-1.m.156a371c.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 269,
+    "y": 285,
+    "w": 64,
+    "h": 30
+   }
+  },
+  "d": {
+   "subor": "navody/dovolenka-zapisat-1.d.8294f8d1.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 903,
+    "y": 285,
+    "w": 64,
+    "h": 30
+   }
+  }
+ },
  "dph-odlozit-1": {
   "m": {
    "subor": "navody/dph-odlozit-1.m.52696737.webp",
@@ -974,6 +1094,270 @@ window.NAVODY_SNIMKY = {
    "w": 1024,
    "h": 600,
    "ciel": null
+  }
+ },
+ "knihy-dennik-1": {
+  "m": {
+   "subor": "navody/knihy-dennik-1.m.23220b3e.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 67,
+    "y": 281,
+    "w": 103,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/knihy-dennik-1.d.0044bf19.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 303,
+    "y": 281,
+    "w": 103,
+    "h": 37
+   }
+  }
+ },
+ "knihy-dennik-2": {
+  "m": {
+   "subor": "navody/knihy-dennik-2.m.f68c8c04.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 41,
+    "y": 211,
+    "w": 308,
+    "h": 177
+   }
+  },
+  "d": {
+   "subor": "navody/knihy-dennik-2.d.094dd05a.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 277,
+    "y": 271,
+    "w": 706,
+    "h": 149
+   }
+  }
+ },
+ "knihy-kniha-1": {
+  "m": {
+   "subor": "navody/knihy-kniha-1.m.38d5287c.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 67,
+    "y": 281,
+    "w": 153,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/knihy-kniha-1.d.9a944d45.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 303,
+    "y": 281,
+    "w": 153,
+    "h": 37
+   }
+  }
+ },
+ "knihy-kniha-2": {
+  "m": {
+   "subor": "navody/knihy-kniha-2.m.ddef02a1.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 55,
+    "y": 281,
+    "w": 137,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/knihy-kniha-2.d.cfeb2923.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 291,
+    "y": 281,
+    "w": 336,
+    "h": 37
+   }
+  }
+ },
+ "majetok-odpisy-1": {
+  "m": {
+   "subor": "navody/majetok-odpisy-1.m.537bccd2.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 41,
+    "y": 213,
+    "w": 308,
+    "h": 174
+   }
+  },
+  "d": {
+   "subor": "navody/majetok-odpisy-1.d.7123ed4d.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 277,
+    "y": 213,
+    "w": 706,
+    "h": 174
+   }
+  }
+ },
+ "majetok-pridat-1": {
+  "m": {
+   "subor": "navody/majetok-pridat-1.m.923cacd2.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 16,
+    "y": 266,
+    "w": 358,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/majetok-pridat-1.d.7eb131d9.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 872,
+    "y": 101,
+    "w": 136,
+    "h": 37
+   }
+  }
+ },
+ "majetok-pridat-2": {
+  "m": {
+   "subor": "navody/majetok-pridat-2.m.0d5b6c24.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 42,
+    "y": 296,
+    "w": 306,
+    "h": 169
+   }
+  },
+  "d": {
+   "subor": "navody/majetok-pridat-2.d.5dc800c6.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 294,
+    "y": 315,
+    "w": 436,
+    "h": 153
+   }
+  }
+ },
+ "majetok-vyradit-1": {
+  "m": {
+   "subor": "navody/majetok-vyradit-1.m.55fafb35.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 290,
+    "y": 281,
+    "w": 59,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/majetok-vyradit-1.d.7eb131d9.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 924,
+    "y": 258,
+    "w": 59,
+    "h": 37
+   }
+  }
+ },
+ "majetok-vyradit-2": {
+  "m": {
+   "subor": "navody/majetok-vyradit-2.m.3e3e2528.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 42,
+    "y": 296,
+    "w": 306,
+    "h": 86
+   }
+  },
+  "d": {
+   "subor": "navody/majetok-vyradit-2.d.715662c2.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 294,
+    "y": 343,
+    "w": 436,
+    "h": 54
+   }
+  }
+ },
+ "majetok-zaradit-1": {
+  "m": {
+   "subor": "navody/majetok-zaradit-1.m.71a37ad4.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 42,
+    "y": 429,
+    "w": 306,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/majetok-zaradit-1.d.dc234546.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 294,
+    "y": 431,
+    "w": 436,
+    "h": 37
+   }
+  }
+ },
+ "majetok-zaradit-2": {
+  "m": {
+   "subor": "navody/majetok-zaradit-2.m.4cd66969.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 42,
+    "y": 405,
+    "w": 306,
+    "h": 41
+   }
+  },
+  "d": {
+   "subor": "navody/majetok-zaradit-2.d.36e4a94a.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 294,
+    "y": 386,
+    "w": 436,
+    "h": 41
+   }
   }
  },
  "pohladavky-prehlad-1": {
