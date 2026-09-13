@@ -285,7 +285,7 @@ vydavky: {
       tip: "Nájom, energie či predplatné, ktoré chodia každý mesiac, zaškrtnite v doklade ako <b>Tento doklad mi chodí pravidelne</b> — appka vám ich potom pripomenie pod <b>🔁 Opakované</b>.",
       podrobnosti: [
         { nadpis: "Kategória a daň",
-          html: "<p>Kategória rozhoduje, či výdavok zníži daň. <b>Neovplyvňuje základ dane</b> je pre súkromné nákupy, pohostenie klienta (reprezentáciu), splátky istiny úveru či prevody medzi vlastnými účtami — do daní nevstupuje a DPH z neho si neodpočítate. Ostatné bežné kategórie daň znižujú.</p><p>Vlastnú kategóriu pridať nejde, zoznam je pevný.</p>" },
+          html: "<p>Kategória rozhoduje, či výdavok zníži daň. <b>Neovplyvňuje základ dane</b> je pre súkromné nákupy, pohostenie klienta (reprezentáciu), splátky istiny úveru či prevody medzi vlastnými účtami — do daní nevstupuje a DPH z neho si neodpočítate. Pri službe zo zahraničia alebo prenose daňovej povinnosti daň zaplatiť treba, len odpočet k nej nie je. Ostatné bežné kategórie daň znižujú.</p><p>Vlastnú kategóriu pridať nejde, zoznam je pevný.</p>" },
         { nadpis: "Vec používate aj súkromne",
           html: "<p>Pri bežných kategóriách je vo formulári pole <b>Koľko z toho je na podnikanie</b>. Zadajte len podnikateľskú časť — do daní appka započíta len tú. Tankovanie a doklady k osobnému autu majú vlastné pravidlá.</p>" },
         { nadpis: "Odvody a preddavky",

@@ -13766,7 +13766,7 @@ function autoEvidenciaRok(rok){
     s.pocet++;
     s.bez=r2(s.bez+(+x.bez||0));
     s.dph=r2(s.dph+(+x.dph||0));
-    s.odpocet=r2(s.odpocet+danNaOdpocet(+x.dph||0, x));
+    s.odpocet=r2(s.odpocet+vydavokOdpocetDane(+x.dph||0, x));   // bez nároku 0, ako priznanie
     s.doVydavkov=r2(s.doVydavkov+vydavokDoZakladu(x));
   });
   const riadky=Object.values(skupiny).sort((a,b)=>b.bez-a.bez);
@@ -25877,6 +25877,28 @@ const DRUHY_DOKLADU = {
 // príznaku — Roman, 13. 9. 2026 (dev/opravy/ROZHODNUTIA.md, bod 15). Výnimku
 // rieši ručné „Zaradenie do výkazu", ktoré má v `dphOddielVydavok` prednosť.
 function vydavokBezNarokuNaOdpocet(x){ return !!x && x.kategoria==="neovplyv"; }
+// Uplatňuje si doklad odpočet? Kategóriu (vyššie) prebije ručné „Zaradenie do
+// výkazu" — rovnaká poistka pre výnimku ako v `dphOddielVydavok`.
+function vydavokUplatnujeOdpocet(x){
+  return !vydavokBezNarokuNaOdpocet(x) || !!(x && x.oddielRucne && DPH_ODDIELY[x.oddielRucne]);
+}
+// Koľko DPH z dokladu si naozaj odpočítate: nárok (kategória) aj krátenie
+// (auto, podiel na podnikaní). Zber pre priznanie aj prehľad výdavkov na vozidlo.
+function vydavokOdpocetDane(dan, x){ return vydavokUplatnujeOdpocet(x) ? danNaOdpocet(dan, x) : 0; }
+// Odpočet dane zo samozdanenia (riadok zberu v B.1). Daň platí príjemca bez
+// ohľadu na to, na čo nákup použije — povinnosť ho viaže ako príjemcu služby
+// od zahraničnej osoby (§ 69 ods. 3 zákona 222/2004 o DPH), pri tuzemskom
+// prenose (§ 69 ods. 12) aj pri tovare z EÚ (§ 11). Odpočet tej istej dane je
+// len pri použití na zdaniteľné plnenia (§ 49 ods. 2) a pri reprezentácii je
+// vylúčený (§ 49 ods. 7). Do 13. 9. 2026 sa pri kategórii „neovplyv" rátala
+// daň aj odpočet; oddiel X by zasa zahodil aj povinnú daň. Preto doklad ostáva
+// v B.1 a nulový je len odpočet — Roman, ROZHODNUTIA č. 24. Jedno miesto pre
+// priznanie (`dphSumare` → r18/r19), kontrolný výkaz (B.1, atribút O) aj
+// dlaždicu „DPH na odpočet" (`dphOdpocetDokladov`).
+function dphOdpocetSamozdanenia(dk){
+  if(!dk || dk.oddiel!=="B1" || !dk.samozdanenie || dk.bezNaroku) return 0;
+  return r2(dk.danSamozdanenie||0);
+}
 function dphOddielVydavok(x, riadok){
   // 1) ručné prepísanie má vždy prednosť
   if(x.oddielRucne && DPH_ODDIELY[x.oddielRucne]) return x.oddielRucne;
@@ -25958,7 +25980,8 @@ function dphZberMesiac(mk){
         cislo:x.cislo||"", datum:(x.datum||"").slice(0,10), partner:x.partner||x.dodavatel||x.nazov||"", icDph,
         sadzba:r.sadzba||Math.round(sadzbaDef*100), zaklad:r2(r.bez), dan:r2(r.dph),
         zahranicny:zahr, kodKrajiny:kraj, samozdanenieTyp:samozdDruh(x), opravujeDoklad:x.opravujeDoklad||"",
-        autoDoklad:!!x.autoDoklad, odpocetPct:odpocetPercent(x), danOdpocet:danNaOdpocet(r.dph, x),
+        autoDoklad:!!x.autoDoklad, odpocetPct:odpocetPercent(x), danOdpocet:vydavokOdpocetDane(r.dph, x),
+        bezNaroku:!vydavokUplatnujeOdpocet(x),
         cudziaDph:(zahr && r.dph>0), kategoria:x.kategoria||"",
         viacSadzieb:viac, rozpisRiadok:viac
       });
@@ -26003,15 +26026,16 @@ function dphSumare(doklady){
     // KV DPH oddiel (B1 sa uvádza so samozdaňovacou daňou)
     const dKV = (d.oddiel==="B1" && d.samozdanenie) ? (d.danSamozdanenie||0) : d.dan;
     if(S[d.oddiel]){ S[d.oddiel].z=r2(S[d.oddiel].z+d.zaklad); S[d.oddiel].d=r2(S[d.oddiel].d+dKV); }
-    // B1 samozdanenie: základ+daň do výstupu A ZÁROVEŇ do odpočtu (100% platiteľ)
+    // B1 samozdanenie: základ+daň do výstupu vždy, do odpočtu len pri nároku
+    // (doklad bez nároku má odpočet 0 — `dphOdpocetSamozdanenia`)
     if(d.oddiel==="B1" && d.samozdanenie){
-      const dan=d.danSamozdanenie||0;
+      const dan=d.danSamozdanenie||0, odp=dphOdpocetSamozdanenia(d);
       S.samozdZaklad=r2(S.samozdZaklad+d.zaklad); S.samozdDan=r2(S.samozdDan+dan);
-      S.vstupZaklad=r2(S.vstupZaklad+d.zaklad); S.vstupDan=r2(S.vstupDan+dan);
+      if(odp){ S.vstupZaklad=r2(S.vstupZaklad+d.zaklad); S.vstupDan=r2(S.vstupDan+odp); }
       const s=+d.sadzba||23;
       const druh=samozdDruh(d), c=S.sz[druh];
-      if(s===19){ c.z19=r2(c.z19+d.zaklad); c.d19=r2(c.d19+dan); S.vstup19=r2(S.vstup19+dan); S.vstupSamozd19=r2(S.vstupSamozd19+dan); }
-      else      { c.z23=r2(c.z23+d.zaklad); c.d23=r2(c.d23+dan); S.vstup23=r2(S.vstup23+dan); S.vstupSamozd23=r2(S.vstupSamozd23+dan); }
+      if(s===19){ c.z19=r2(c.z19+d.zaklad); c.d19=r2(c.d19+dan); S.vstup19=r2(S.vstup19+odp); S.vstupSamozd19=r2(S.vstupSamozd19+odp); }
+      else      { c.z23=r2(c.z23+d.zaklad); c.d23=r2(c.d23+dan); S.vstup23=r2(S.vstup23+odp); S.vstupSamozd23=r2(S.vstupSamozd23+odp); }
       return;
     }
     // ── OPRAVY (dobropisy a ťarchopisy) ──
@@ -27134,7 +27158,10 @@ function rocnaKontrola(rok){
     // Tá istá podmienka, akú používa kontrola pri zápise — z jednej tabuľky.
     const P=PRAVIDLA_DOKLADU.find(p=>p.k==="dphBezIc");
     const bezIc=P ? vydavky.filter(x=>{ try{ return P.plati(x); }catch(_){ return false; } }) : [];
-    if(bezIc.length){
+    // Neplatiteľ odpočet nemá a kontrolný výkaz nepodáva — nález by mu tvrdil
+    // niečo, čo neplatí (Roman, ROZHODNUTIA č. 31). Pravidlo pri zápise dokladu
+    // (`vydavokPotrebujeIcDph`, č. 16) sa tým nemení.
+    if(bezIc.length && jePlatcaDPH()){
       const dan=r2(bezIc.reduce((a,x)=>a+(+x.dph||0),0));
       // Tlačidlo len vtedy, keď má čo robiť. Ponuka „opraviť", ktorá po kliknutí
       // nič neurobí, je horšia než žiadna — nabudúce ju človek preskočí.
@@ -28400,7 +28427,8 @@ function dphGenerujKV(mk){
   // Samozdanenie zo zahraničia sem NEPATRÍ — to sa vykazuje len v priznaní.
   doklady.filter(d=>d.oddiel==="B1" && samozdDruh(d)==="tuzemsky").forEach(d=>{
     const dan=r2(d.danSamozdanenie||d.dan||0);
-    R.B1.push(`<B1 ${atr({Dod:d.icDph, F:d.cislo, Den:d.datum, Z:n(d.zaklad), D:n(dan), S:d.sadzba, O:n(dan)})}/>`);
+    // O = odpočítaná daň; pri doklade bez nároku 0 (`dphOdpocetSamozdanenia`)
+    R.B1.push(`<B1 ${atr({Dod:d.icDph, F:d.cislo, Den:d.datum, Z:n(d.zaklad), D:n(dan), S:d.sadzba, O:n(dphOdpocetSamozdanenia(d))})}/>`);
   });
 
   doklady.filter(d=>d.oddiel==="B2").forEach(d=>{
