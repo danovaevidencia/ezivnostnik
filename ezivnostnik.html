@@ -2868,6 +2868,14 @@ function strazZapis(modul){
     : "🔒 Túto agendu vedie váš účtovník.\n\nAk chcete zapisovať aj sami, požiadajte ho, nech vám zapne „klient môže účtovať\u201c.");
   return false;
 }
+// Pole, ktoré zapisuje hneď pri zmene (onchange priamo v HTML). Keď zápis
+// neprejde, v poli by ostala hodnota, ktorá sa neuložila — preto sa modul
+// prekreslí a pole ukáže to, čo naozaj platí.
+function strazPole(modul, prekresli){
+  if(strazZapis(modul)) return true;
+  prekresli();
+  return false;
+}
 // Značka pre ovládací prvok, ktorý zapisuje. Vyhodnocuje sa pri kreslení —
 // po prepnutí firmy sa obrazovka aj tak prekresľuje celá. Stlmenie robí CSS,
 // takže sa nedá zabudnúť na prechod DOM po prekreslení.
@@ -2951,16 +2959,27 @@ async function nacitajPristupyDetail(){
 }
 
 async function appZdielanie(){
+  if(prekresliVRamci("zdielanie")) return;   // rámec super apky (GY)
+  // Modul je asynchrónny, ale rámec (renderSuperApka) si obsah preberá hneď po
+  // synchrónnej časti. Kým beží tá, píše sa do #appScreen; čo príde po await,
+  // patrí do `.saMain` — zápis do celého #appScreen by rámec zmazal. Keď sa
+  // medzitým prepla záložka, neskorý obsah už nepatrí nikam.
+  const vRamci=_vRamci;
+  const kresli=html=>{
+    const s=document.getElementById("appScreen");
+    if(!vRamci || _vRamci){ s.innerHTML=html; return; }
+    const m=aktualnaZalozka==="zdielanie" && s.querySelector(".saMain");
+    if(m) m.innerHTML=html;
+  };
   if(localMode || !sb){
-    document.getElementById("appScreen").innerHTML =
-      appHlavicka("zdielanie")+`<div class="aempty">Zdieľanie funguje len s prihlásením do cloudu.</div>`;
+    kresli(appHlavicka("zdielanie")+`<div class="aempty">Zdieľanie funguje len s prihlásením do cloudu.</div>`);
     return;
   }
   if(mojaRolaVFirme()!=="vlastnik"){
-    document.getElementById("appScreen").innerHTML =
-      appHlavicka("zdielanie")+`<div class="aempty">Prístupy môže spravovať len vlastník firmy.</div>`;
+    kresli(appHlavicka("zdielanie")+`<div class="aempty">Prístupy môže spravovať len vlastník firmy.</div>`);
     return;
   }
+  kresli(appHlavicka("zdielanie")+`<div class="aempty">Načítavam prístupy…</div>`);
   const poz=await nacitajPozvanky();
   // Bez `plati_do` sa pozvánka považuje za platnú. Stĺpec má v databáze
   // predvolenú hodnotu, ale porovnanie s `undefined` je vždy nepravdivé —
@@ -2983,7 +3002,7 @@ async function appZdielanie(){
        </div>` : "";
   zdielanieChyba=null;
 
-  document.getElementById("appScreen").innerHTML = appHlavicka("zdielanie")+chybaHtml+`
+  kresli(appHlavicka("zdielanie")+chybaHtml+`
     <div class="csub" style="margin-bottom:12px">${pristupyFirmy.length} prístupov · ${cakajuce.length} pozvánok čaká</div>
     <div class="card" style="margin-bottom:14px">
       <div class="csub" style="margin-bottom:10px">Účtovník uvidí vaše doklady a bude môcť viesť Banku, DPH a priznania. Vy fakturujete a nahrávate bločky ako doteraz.</div>
@@ -3044,7 +3063,7 @@ async function appZdielanie(){
           <button class="aabtn neg" style="padding:3px 9px;font-size:11px" onclick="zrusPozvanku('${p.id}')">✕</button>
         </div>`).join("")}
       </div>
-    </div>`:''}`;
+    </div>`:''}`);
 }
 
 function pozvankaOdkaz(token){
@@ -15573,7 +15592,7 @@ function appDovolenka(){
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
         <b class="chead" style="flex:1">Čerpanie ${dovRok}</b>
         <span style="font-size:12px;color:var(--ink-soft)">Ročný nárok:</span>
-        <input type="number" value="${esc(narok)}" onchange="dovEnsure('${dovRok}').narok=parseFloat(this.value)||0;poZmene();appDovolenka()" style="width:64px;border:1.5px solid var(--line);border-radius:8px;padding:5px 8px;font:inherit"> dní
+        <input type="number" value="${esc(narok)}" onchange="if(!strazPole('dovolenka',appDovolenka))return;dovEnsure('${dovRok}').narok=parseFloat(this.value)||0;poZmene();appDovolenka()" style="width:64px;border:1.5px solid var(--line);border-radius:8px;padding:5px 8px;font:inherit"> dní
       </div>
       <div class="wchart" style="height:110px;margin-bottom:14px">${cerpanePoMes.map((v,i)=>{const h=Math.max(4,Math.round(v/maxV*100));return `<div class="wbar" style="height:${h}%;--bar:${c}">${v>0?`<b>${v}</b>`:''}<i>${MES_SK[i]}</i></div>`;}).join("")}</div>
       <div class="alist">
@@ -15600,11 +15619,13 @@ function appDovolenka(){
   setCrumb(`dovolenka · ${dovRok} · zostatok ${zostatok} dní`);
 }
 function dovUpd(rok, mi, val){
+  if(!strazPole("dovolenka", appDovolenka)) return;
   const d=dovEnsure(rok);
   d.mesiace[mi] = val===""?"":(parseFloat(String(val).replace(",","."))||0);
   poZmene(); appDovolenka();
 }
 function dovPridajRok(){
+  if(!strazZapis("dovolenka")) return;
   const existujuce=Object.keys(firmaData.dovolenka||{}).map(Number).filter(n=>!isNaN(n));
   const novy=existujuce.length?Math.max(...existujuce)+1:new Date().getFullYear();
   dovEnsure(String(novy)); dovRok=String(novy); poZmene(); appDovolenka();
@@ -19379,8 +19400,12 @@ function appPriznanieB(){
   setCrumb(`priznanie B · ${pbRok}${otvoreny?` · krok ${pbKrok+1}/${PB_KROKY.length}`:" · zamknuté"}`);
 }
 function pbRiadok(label, val, kod, bold){ return `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line-soft);${bold?'font-weight:700':''}"><span>${label}${kod?` <span style="font-size:10px;opacity:.5">${kod}</span>`:''}</span><span>${typeof val==="number"?eur(val):val}</span></div>`; }
+// Stráž pre polia sprievodcu — zapisujú priamo z onchange v HTML. Priznanie B
+// je účtovnícky modul: vlastník firmy s účtovníkom doň nepíše, Náhľad nikto.
+const PB_STRAZ="if(!strazPole('priznanieB',appPriznanieB))return;";
 // Doťah názvu neziskovky z registra (RPO) podľa IČO — využíva existujúci rpoDotiahni.
 async function pbDotiahniNNO(){
+  if(!strazZapis("priznanieB")) return;
   const S=firmaData.settings; const dN=S.darNNO=S.darNNO||{};
   const ico=String(dN.ico||"").replace(/\s/g,"");
   if(!/^\d{6,8}$/.test(ico)){ alert("Zadajte platné IČO prijímateľa (6–8 číslic)."); return; }
@@ -19393,18 +19418,18 @@ function pbDarSekcia(v, S){
   const dN=S.darNNO||{}, dR=S.darRodic||{}, rA=dR.a||{}, rB=dR.b||{};
   const setN="firmaData.settings.darNNO=firmaData.settings.darNNO||{};firmaData.settings.darNNO";
   const setR="firmaData.settings.darRodic=firmaData.settings.darRodic||{};firmaData.settings.darRodic";
-  const inp=(val,ph,onch,w)=>`<input value="${esc(String(val||''))}" placeholder="${ph}" onchange="${onch}" style="width:${w||'100%'};padding:6px 8px;border:1px solid var(--line);border-radius:7px;font-size:13px">`;
+  const inp=(val,ph,onch,w)=>`<input value="${esc(String(val||''))}" placeholder="${ph}" onchange="${PB_STRAZ}${onch}" style="width:${w||'100%'};padding:6px 8px;border:1px solid var(--line);border-radius:7px;font-size:13px">`;
   return `<div style="margin:16px 0 8px;font-weight:700;font-size:14px">Poukázanie podielu zaplatenej dane (2 % / 3 %)</div>
-    <div class="mfield" style="margin-bottom:8px"><label style="display:flex;align-items:center;gap:8px"><input type="checkbox" ${dN.aktivny?'checked':''} onchange="${setN}.aktivny=this.checked;poZmene();appPriznanieB()" style="width:auto"> Neziskovej organizácii (§ 50)</label></div>
+    <div class="mfield" style="margin-bottom:8px"><label style="display:flex;align-items:center;gap:8px"><input type="checkbox" ${dN.aktivny?'checked':''} onchange="${PB_STRAZ}${setN}.aktivny=this.checked;poZmene();appPriznanieB()" style="width:auto"> Neziskovej organizácii (§ 50)</label></div>
     ${dN.aktivny?`<div style="padding:8px 10px;border:1px solid var(--line);border-radius:9px;margin-bottom:10px;display:flex;flex-direction:column;gap:7px">
       <div style="display:flex;gap:7px;align-items:center">${inp(dN.ico,'IČO prijímateľa',setN+".ico=this.value.trim();poZmene()", '130px')}
         <button class="aabtn" onclick="pbDotiahniNNO()" style="white-space:nowrap">Dotiahnuť z RPO</button></div>
       ${inp(dN.nazov,'Obchodné meno organizácie',setN+".nazov=this.value;poZmene();appPriznanieB()")}
-      <label style="display:flex;align-items:center;gap:8px;font-size:12.5px"><input type="checkbox" ${dN.treProcenta?'checked':''} onchange="${setN}.treProcenta=this.checked;poZmene();appPriznanieB()" style="width:auto"> Poukazujem 3 % (dobrovoľník 40+ hodín, s potvrdením)</label>
-      <label style="display:flex;align-items:center;gap:8px;font-size:12.5px"><input type="checkbox" ${dN.suhlas?'checked':''} onchange="${setN}.suhlas=this.checked;poZmene()" style="width:auto"> Súhlasím so zaslaním údajov (meno a adresa) prijímateľovi</label>
+      <label style="display:flex;align-items:center;gap:8px;font-size:12.5px"><input type="checkbox" ${dN.treProcenta?'checked':''} onchange="${PB_STRAZ}${setN}.treProcenta=this.checked;poZmene();appPriznanieB()" style="width:auto"> Poukazujem 3 % (dobrovoľník 40+ hodín, s potvrdením)</label>
+      <label style="display:flex;align-items:center;gap:8px;font-size:12.5px"><input type="checkbox" ${dN.suhlas?'checked':''} onchange="${PB_STRAZ}${setN}.suhlas=this.checked;poZmene()" style="width:auto"> Súhlasím so zaslaním údajov (meno a adresa) prijímateľovi</label>
       <div style="font-size:12.5px;color:var(--ink-soft)">Suma na poukázanie (r. 152): <b>${eur(v.darSuma||0)}</b>${(v.darSuma||0)===0&&dN.aktivny?` <span style="color:var(--accent-deep)">— ${(v.danPoBonuse||0)>0?'menej než minimum 3 €':'daň je 0'}, nedá sa poukázať</span>`:` (${dN.treProcenta?'3':'2'} % z dane po bonuse)`}</div>
     </div>`:''}
-    <div class="mfield" style="margin-bottom:8px"><label style="display:flex;align-items:center;gap:8px"><input type="checkbox" ${dR.aktivny?'checked':''} onchange="${setR}.aktivny=this.checked;poZmene();appPriznanieB()" style="width:auto"> Rodičovi/rodičom (§ 50aa — 2 % každému)</label></div>
+    <div class="mfield" style="margin-bottom:8px"><label style="display:flex;align-items:center;gap:8px"><input type="checkbox" ${dR.aktivny?'checked':''} onchange="${PB_STRAZ}${setR}.aktivny=this.checked;poZmene();appPriznanieB()" style="width:auto"> Rodičovi/rodičom (§ 50aa — 2 % každému)</label></div>
     ${dR.aktivny?`<div style="padding:8px 10px;border:1px solid var(--line);border-radius:9px;margin-bottom:6px;display:flex;flex-direction:column;gap:7px">
       <div style="font-size:12px;color:var(--ink-soft)">Rodič musí byť k 31. 12. ${v.rok} poberateľom dôchodku. Uveďte meno, priezvisko a rodné číslo.</div>
       <div style="font-weight:600;font-size:12.5px">1. rodič</div>
@@ -19413,7 +19438,7 @@ function pbDarSekcia(v, S){
       <div style="font-weight:600;font-size:12.5px;margin-top:3px">2. rodič (nepovinné)</div>
       <div style="display:flex;gap:7px">${inp(rB.meno,'Meno',setR+".b=(firmaData.settings.darRodic.b||{});firmaData.settings.darRodic.b.meno=this.value;poZmene()")}${inp(rB.priezvisko,'Priezvisko',setR+".b=(firmaData.settings.darRodic.b||{});firmaData.settings.darRodic.b.priezvisko=this.value;poZmene()")}</div>
       ${inp(rB.rc,'Rodné číslo (bez lomky)',setR+".b=(firmaData.settings.darRodic.b||{});firmaData.settings.darRodic.b.rc=this.value.replace(/\\D/g,'');poZmene()", '170px')}
-      <label style="display:flex;align-items:center;gap:8px;font-size:12.5px"><input type="checkbox" ${dR.zvereny?'checked':''} onchange="${setR}.zvereny=this.checked;poZmene()" style="width:auto"> Bol som zverený do náhradnej starostlivosti (priložiť rozhodnutie)</label>
+      <label style="display:flex;align-items:center;gap:8px;font-size:12.5px"><input type="checkbox" ${dR.zvereny?'checked':''} onchange="${PB_STRAZ}${setR}.zvereny=this.checked;poZmene()" style="width:auto"> Bol som zverený do náhradnej starostlivosti (priložiť rozhodnutie)</label>
     </div>`:''}
     <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:6px">Neziskovku aj rodičov možno poukázať naraz jedným vyhlásením. Podmienka: daň zaplatená a bez nedoplatku nad 5 €.</div>`;
 }
@@ -19421,7 +19446,7 @@ function pbDarSekcia(v, S){
 function pbZamInput(label, key, val){
   return `<div class="mfield" style="margin-bottom:8px"><label style="font-size:12.5px">${label}</label>
     <input type="number" step="0.01" inputmode="decimal" value="${esc(String(val!=null&&val!==''?val:''))}" placeholder="0.00"
-      onchange="firmaData.settings.${key}=+this.value||0;poZmene();appPriznanieB()"
+      onchange="${PB_STRAZ}firmaData.settings.${key}=+this.value||0;poZmene();appPriznanieB()"
       style="width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:8px"></div>`;
 }
 // Druh priznania za rok (poučenie DPFOBv25, bod 2 a 3): riadne; opravné pred
@@ -19604,11 +19629,11 @@ function pbKrokObsah(krok, v, S){
       <div style="margin:14px 0 8px;font-weight:700;font-size:14px">Daňový bonus na deti</div>
       <div style="margin-bottom:10px">
         ${deti.length?deti.map((dt,i)=>`<div style="display:flex;gap:8px;align-items:center;margin-bottom:5px">
-          <input type="number" value="${esc(String(dt.vek!=null?dt.vek:''))}" placeholder="vek" onchange="firmaData.settings.deti[${i}].vek=+this.value;delete firmaData.settings.deti[${i}].narodenie;poZmene();appPriznanieB()" style="width:70px;padding:5px;border:1px solid var(--line);border-radius:7px">
+          <input type="number" value="${esc(String(dt.vek!=null?dt.vek:''))}" placeholder="vek" onchange="${PB_STRAZ}firmaData.settings.deti[${i}].vek=+this.value;delete firmaData.settings.deti[${i}].narodenie;poZmene();appPriznanieB()" style="width:70px;padding:5px;border:1px solid var(--line);border-radius:7px">
           <span style="font-size:12.5px;color:var(--ink-soft)">${detiVek(dt,v.rok)<15?`do 15 r. (${eur(B.do15)}/mes)`:detiVek(dt,v.rok)<18?`15–17 r. (${eur(B.do18)}/mes)`:'nad 18 r. (bez nároku)'}</span>
-          <span onclick="firmaData.settings.deti.splice(${i},1);poZmene();appPriznanieB()" style="cursor:pointer;color:var(--neg);margin-left:auto">✕</span>
+          <span onclick="${PB_STRAZ}firmaData.settings.deti.splice(${i},1);poZmene();appPriznanieB()" style="cursor:pointer;color:var(--neg);margin-left:auto">✕</span>
         </div>`).join(''):'<div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:8px">Žiadne deti. Pridajte vek dieťaťa.</div>'}
-        <button class="aabtn" onclick="firmaData.settings.deti=firmaData.settings.deti||[];firmaData.settings.deti.push({vek:10});poZmene();appPriznanieB()">+ Pridať dieťa</button>
+        <button class="aabtn" onclick="${PB_STRAZ}firmaData.settings.deti=firmaData.settings.deti||[];firmaData.settings.deti.push({vek:10});poZmene();appPriznanieB()">+ Pridať dieťa</button>
       </div>
       ${deti.length?`<div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:8px">
         ${bd.opravnenych} detí s nárokom · plná suma ${eur(bd.maxBonus)} · limit ${Math.round(bd.pctLimit*100)} % zo základu = ${eur(bd.limitZoZakladu||0)}${v.zaklad>B.hranicaKratenia?` · po krátení vysokým príjmom ${eur(bd.poVysokomPrijme||0)}`:''}</div>`:''}
@@ -35010,6 +35035,7 @@ function appDokumenty(){
   setCrumb(`dokumenty · ${zoznam.length} evidovaných`);
 }
 function dokPridaj(idx){
+  if(!strazZapis("dokumenty")) return;
   const d = idx!=null ? dokEnsure()[idx] : {};
   openModal(idx!=null?"Upraviť dokument":"Nový dokument", `
     <div class="mfield"><label>Názov</label><input id="dok_nazov" value="${esc(d.nazov||'')}" placeholder="napr. Rámcová zmluva s odberateľom"></div>
@@ -35079,6 +35105,7 @@ async function dokOtvor(idx){
   else alert("Súbor sa nepodarilo načítať (možno ste v lokálnom režime).");
 }
 function dokZmaz(idx){
+  if(!strazZapis("dokumenty")) return;
   const zoznam=dokEnsure(); const d=zoznam[idx]; if(!d) return;
   if(!confirm("Zmazať dokument „"+d.nazov+"\"? Odstráni sa aj priložený súbor.")) return;
   if(d.subor) dokladZmaz(d.subor);
