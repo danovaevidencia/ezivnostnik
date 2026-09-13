@@ -1212,7 +1212,7 @@ data: {
         { nadpis: "Čo bez DIČ a IČ DPH nefunguje",
           html: "<p>Bez <b>DIČ</b> sa nedajú posielať faktúry sieťou Peppol — [[navod:efaktury/zapnut|ako zapnúť odosielanie]].</p><p>Bez <b>IČ DPH</b>, názvu, adresy a daňového úradu appka nevytvorí priznanie k DPH — čo presne podania potrebujú, opisuje [[navod:dph/udaje|návod k údajom pre DPH]].</p>" },
         { nadpis: "IBAN a QR kód",
-          html: "<p>Pri uložení appka IBAN skontroluje podľa kontrolných číslic. Preklep v číslici alebo prehodené číslice odhalí — taký IBAN neuloží, ponechá pôvodný a pod poľom napíše, čo nesedí. Ostatné nastavenia sa uložia.</p><p>Kontrola nepozná, či je účet váš: platný IBAN cudzieho účtu prejde. Po uložení si preto otvorte PDF [[navod:faktury/poslat|faktúry]] a QR kód skúšobne naskenujte v banke.</p>" },
+          html: "<p>Pri uložení appka IBAN skontroluje podľa kontrolných číslic. Preklep v číslici alebo prehodené číslice odhalí — taký IBAN neuloží, ponechá pôvodný a pod poľom napíše, čo nesedí. Ostatné nastavenia sa uložia.</p><p>Keď sa IBAN s preklepom dostal do dát inak (napríklad obnovením staršej zálohy), appka na to upozorní pri vystavení faktúry a pred vytvorením PDF, QR kód nevytvorí a sieťou Peppol faktúru neodošle, kým IBAN neopravíte.</p><p>Kontrola nepozná, či je účet váš: platný IBAN cudzieho účtu prejde. Po uložení si preto otvorte PDF [[navod:faktury/poslat|faktúry]] a QR kód skúšobne naskenujte v banke.</p>" },
         { nadpis: "Register neodpovedá",
           html: "<p>Údaje berie appka z registra právnických osôb Štatistického úradu. Keď neodpovie, vyplňte ich ručne — uložia sa rovnako.</p>" },
       ],
