@@ -12251,7 +12251,10 @@ function appVydavky(){
   let list=vyd;
   if(vFilter==="faktury") list=vyd.filter(x=>x.druh==="Došlá faktúra");
   else if(vFilter==="blocky") list=vyd.filter(x=>x.druh==="Bloček");
-  else if(vFilter==="neuhradene") list=vyd.filter(x=>x.cislo && !vydJeUhradeny(x));
+  // Bez podmienky na číslo: nezaplatený bloček bez čísla je presne to, čo
+  // človek v tomto filtri hľadá. Stav úhrady sa pýta cez `dokladKluc`, ktorý
+  // doklad bez čísla pozná podľa id (kap. 109.11, oprava 13. 9. 2026).
+  else if(vFilter==="neuhradene") list=vyd.filter(x=>!vydJeUhradeny(x));
   else if(vFilter==="statu") list=vydStatu;
   else if(vFilter==="kontrola") list=vyd.filter(x=>x && x.naKontrolu);
   if((_hladaj.vydavky||"").trim()) list=list.filter(x=>hladajZhoda(_hladaj.vydavky, x.cislo, x.partner, x.popis, x.variabilny, x.spolu));
@@ -12636,6 +12639,52 @@ function vydavokFormHtml(x, nova, idx){
     ${!nova?(x.zaradenyMajetokId?`<div style="background:var(--sfc-pos);color:var(--pos);font-size:12.5px;padding:9px 12px;border-radius:9px">✓ Tento výdavok je zaradený do majetku.</div>`:`<button type="button" class="aabtn" style="width:100%;justify-content:center" onclick="closeModal();vydavokDoMajetku(${idx})">⌂ Zaradiť do majetku</button>`):''}`;
 }
 
+// ── IČ DPH DODÁVATEĽA: KEDY HO DOKLAD NAOZAJ POTREBUJE ─────────────────────
+// Jedno pravidlo pre ručný formulár aj doklad z OCR. Do 13. 9. 2026 stálo
+// v appke dvakrát a obe kópie žiadali IČ DPH pri KAŽDEJ došlej faktúre: faktúra
+// od neplatiteľa DPH sa bez neho neuložila, hoci ho dodávateľ nemá, a hláška
+// tvrdila „obsahuje DPH (0,00 €)" (kap. 109.11).
+//
+// IČ DPH dodávateľa treba, keď si doklad odpočítava DPH (odpočet sa uplatňuje
+// na základe faktúry s náležitosťami podľa § 74 zákona o DPH), alebo keď ide do
+// kontrolného výkazu do oddielu, ktorý IČ DPH dodávateľa uvádza — napríklad
+// tuzemský prenos (§ 69 ods. 12) má DPH 0 a patrí do B.1. Faktúra bez DPH, ktorá
+// do výkazu nevstupuje (oddiel „X" podľa `dphOddielVydavok`), ho nepotrebuje.
+function vydavokPotrebujeIcDph(x){
+  if(!x || x.zahranicny) return null;
+  if((+x.dph||0)>0) return {odpocet:true};
+  if(String(x.druh||"")!=="Došlá faktúra") return null;
+  const odd=dphOddielVydavok(x);
+  return odd==="X" ? null : {oddiel:odd};
+}
+// Vráti false, keď doklad bez (platného) IČ DPH uložiť nejde. `kdeHladat` je
+// rada, ktorá patrí k oknu, z ktorého sa ukladá.
+function vydavokOverIcDph(x, kdeHladat){
+  const dovod=vydavokPotrebujeIcDph(x);
+  if(!dovod) return true;
+  const ic=String(x.dodavatelIcDph||"").trim();
+  if(!ic){
+    alert((dovod.odpocet
+        ? "Tento doklad obsahuje DPH ("+eur(+x.dph)+"), takže potrebuje IČ DPH dodávateľa.\n\n"
+          +"Je povinné pre odpočet DPH a kontrolný výkaz."
+        : "Tento doklad ide do kontrolného výkazu DPH ("+(DPH_ODDIELY[dovod.oddiel]||dovod.oddiel)+"), "
+          +"takže potrebuje IČ DPH dodávateľa, hoci DPH na ňom nie je.")
+      +(kdeHladat ? "\n\n"+kdeHladat : "")
+      +(dovod.odpocet
+        ? "\n\nAk dodávateľ platiteľom DPH nie je, alebo ide o zahraničného predajcu, ktorý naúčtoval "
+          +"cudziu DPH (Allegro, Temu, eBay…), odpočet spravidla nemáte nárok uplatniť — vtedy nastavte "
+          +"DPH na 0 a do základu dajte celú sumu."
+        : ""));
+    return false;
+  }
+  if(!platneICDPH(ic)){
+    alert("IČ DPH dodávateľa \""+ic+"\" neprešlo kontrolou platnosti (deliteľnosť 11).\n\n"
+      +"Nesprávne IČ DPH Finančná správa v kontrolnom výkaze odmietne. Opravte ho podľa dokladu.");
+    return false;
+  }
+  return true;
+}
+
 function editVydavok(idx){
   const d=firmaData; const nova=idx==null;
   // limit plánu — len pri novom výdavku
@@ -12650,8 +12699,6 @@ function editVydavok(idx){
     if(!overDopadNaPodanie(datum, nova?"Pridanie tohto dokladu":"Úprava tohto dokladu")) return false;
     if(!nova && x.datum && String(x.datum).slice(0,7)!==String(datum).slice(0,7)
        && !overDopadNaPodanie(x.datum, "Presun dokladu z tohto obdobia")) return false;
-    // kontrola IČ DPH dodávateľa (dôležité pre KV DPH) — ak vyplnené a neplatné, upozorni
-    const icDphVal=val("m_dodIcDph")||"";
     const viacSadzieb=chk("m_viacSadzieb");
     const obj={druh:val("m_druh"),partner:val("m_partner"),cislo:val("m_cislo")||"",variabilny:val("m_vs")||"",popis:val("m_popis"),datum:datum,mesiac:datum.slice(0,7),
       vystavenie:val("m_vystavenie")||"", splatnost:val("m_splatnostVyd")||"", kategoria:val("m_kategoria")||"sluzby",
@@ -12690,22 +12737,8 @@ function editVydavok(idx){
         return false;
       }
     }
-    // KV DPH: doklad s DPH (od slovenského platiteľa) MUSÍ mať platné IČ DPH pre odpočet
-    const dphSuma=(+obj.dph)||0;
-    const vyzadujeICDPH = !obj.zahranicny && (obj.druh==="Došlá faktúra" || dphSuma>0);
-    if(vyzadujeICDPH){
-      if(!icDphVal){
-        alert("Tento doklad obsahuje DPH ("+eur(dphSuma)+"), takže potrebuje IČ DPH dodávateľa.\n\n"+
-              "Je povinné pre odpočet DPH a kontrolný výkaz.\n\n"+
-              "Ak ide o zahraničného predajcu, ktorý naúčtoval cudziu DPH (Allegro, Temu, eBay…), "+
-              "odpočet spravidla nemáte nárok uplatniť — vtedy nastavte DPH na 0 a do základu dajte celú sumu.");
-        return false;
-      }
-      if(!platneICDPH(icDphVal)){
-        alert("IČ DPH dodávateľa \""+icDphVal+"\" neprešlo kontrolou platnosti (deliteľnosť 11).\n\nNesprávne IČ DPH Finančná správa v kontrolnom výkaze odmietne. Opravte ho podľa dokladu.");
-        return false;
-      }
-    }
+    // IČ DPH dodávateľa — to isté pravidlo ako pri doklade z OCR
+    if(!vydavokOverIcDph(obj)) return false;
     if(!d.vydavky)d.vydavky=[];
     // litre (PHM) — ulož a synchronizuj s prehľadom tankovaní
     const litreVal=parseFloat(val("m_litre"))||0;
@@ -23453,7 +23486,9 @@ function odvodyDoplnitHtml(){
   // tuší; skryť ju za odkaz inam je horšie než ju priznať (kap. 84).
   const spornyRiadok=O.sporne.length
     ? `<div style="margin-top:10px;border-top:1px solid var(--line);padding-top:9px">
-        <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:7px">${O.sporne.length===1?"Jedna platba sa":"${O.sporne.length} platieb sa"} nedá zaradiť automaticky — suma nesedí na obvyklú. Rozhodnite ju vy:</div>
+        <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:7px">${O.sporne.length===1
+          ? "Jedna platba sa nedá zaradiť automaticky — suma nesedí na obvyklú. Rozhodnite ju vy:"
+          : O.sporne.length+" "+sklon(O.sporne.length,"platba","platby","platieb")+" sa nedajú zaradiť automaticky — sumy nesedia na obvyklé. Rozhodnite ich vy:"}</div>
         ${O.sporne.map(p=>{
           const kluc=esc(txId(p.tx));
           const menoA=menoKat(p.kategoria);
@@ -29991,9 +30026,22 @@ function ocrVydavokFile(){ document.getElementById("ocrInputFile").click(); } //
 // ── HROMADNÝ IMPORT FAKTÚR Z PDF (Release 3) ──
 let _faktPdfData=[];
 function faktPdfImport(){ document.getElementById("faktPdfInput").click(); }
-function faktPdfJeDuplicita(cislo, spolu){
-  if(!cislo) return false;
-  return (firmaData.vydavky||[]).some(x=>String(x.cislo||"")===String(cislo));
+// Doklad z hromadného importu presne tak, ako sa uloží. Skladá ho náhľad aj
+// uloženie — duplicita sa tak posudzuje nad tými istými údajmi.
+//
+// Náhľad mal do 13. 9. 2026 vlastné pravidlo duplicity (len zhoda čísla),
+// uloženie `najdiDuplicityVydavku`. Doklad bez čísla, ktorý už v evidencii bol,
+// sa v náhľade tváril ako nový a zaškrtnutý — a pri importe ticho vypadol
+// medzi „preskočené" (kap. 109.11).
+function faktPdfNaVydavok(R){
+  const dnes=new Date().toISOString();
+  // Id už pri zložení — doklad bez čísla by inak mal prázdnu identitu.
+  const obj={id:"v"+Date.now().toString(36)+Math.random().toString(36).slice(2,7),
+    druh:"Došlá faktúra", partner:R.partner||"", cislo:R.cislo||"", datum:(R.datum||"").slice(0,10)||dnes.slice(0,10),
+    bez:+R.bez||0, dph:+R.dph||0, spolu:+R.spolu||0, mesiac:((R.datum||"").slice(0,7))||dnes.slice(0,7),
+    zahranicny:!!R.zahranicny, kodKrajiny:R.kodKrajiny||"", dodavatelIco:R.dodavatelIco||"", dodavatelIcDph:R.dodavatelIcDph||R.icdph||"", iban:R.iban||"", zdroj:R._efaktura?(R._isdoc?"efaktura-isdoc":"efaktura-ubl"):"pdf-import"};
+  if(R.rozpis&&R.rozpis.length>1){ obj.rozpis=R.rozpis; normalizujRozpis(obj); }
+  return obj;
 }
 // kontrola: doklad patrí do iného než aktuálneho mesiaca? (chytí OCR chybu v roku/mesiaci alebo omylom starý doklad)
 // vráti true = pokračovať, false = zrušiť (používateľ nepotvrdil)
@@ -30010,8 +30058,11 @@ function overMesiacDokladu(datum){
   return confirm("⚠ Doklad je z iného mesiaca!\n\nDátum dokladu je "+popis+" ("+smer+"), nie aktuálny mesiac.\n\nSkontrolujte, či je dátum správny — pri OCR sa občas zle prečíta rok. Ak je dátum v poriadku, pokračujte.\n\nPridať doklad s týmto dátumom?");
 }
 // Vráti pole podozrivých existujúcich výdavkov (zhoda dátum+suma, príp. partner/číslo).
-function najdiDuplicityVydavku(nov, ignorujId){
-  const vyd=firmaData.vydavky||[];
+// Jediné pravidlo duplicity výdavku — ručný formulár, OCR, e-mail aj hromadné
+// importy. `navyse` = doklady, ktoré ešte nie sú uložené, ale uložia sa pred
+// týmto (skoršie riadky tej istej dávky importu).
+function najdiDuplicityVydavku(nov, ignorujId, navyse){
+  const vyd=(firmaData.vydavky||[]).concat(navyse||[]);
   const nSpolu=Math.round((+nov.spolu||0)*100);
   const nDatum=String(nov.datum||"").slice(0,10);
   const nCislo=String(nov.cislo||"").trim();
@@ -30296,7 +30347,10 @@ async function faktPdfSpracuj(e){
           R.bez=nez.navrhBez; R.dph=nez.navrhDph;
           R._opravene=true;
         }
-        R._duplicita=faktPdfJeDuplicita(R.cislo, R.spolu);
+        // Tým istým pravidlom ako uloženie nižšie — vrátane dokladu, ktorý je
+        // v dávke dvakrát: uloženie druhý kus preskočí, náhľad to má povedať.
+        const skorsie=_faktPdfData.filter(P=>!P._chyba && !P._duplicita).map(faktPdfNaVydavok);
+        R._duplicita=najdiDuplicityVydavku(faktPdfNaVydavok(R), null, skorsie).length>0;
         R._import=!R._duplicita;
       }
       _faktPdfData.push(R);
@@ -30374,11 +30428,7 @@ function faktPdfNahlad(){
     let pridane=0, preskocene=0;
     _faktPdfData.forEach(R=>{
       if(!R._import || R._chyba) return;
-      const obj={id:"v"+Date.now().toString(36)+Math.random().toString(36).slice(2,7),
-        druh:"Došlá faktúra", partner:R.partner||"", cislo:R.cislo||"", datum:(R.datum||"").slice(0,10)||new Date().toISOString().slice(0,10),
-        bez:+R.bez||0, dph:+R.dph||0, spolu:+R.spolu||0, mesiac:((R.datum||"").slice(0,7))||new Date().toISOString().slice(0,7),
-        zahranicny:!!R.zahranicny, kodKrajiny:R.kodKrajiny||"", dodavatelIco:R.dodavatelIco||"", dodavatelIcDph:R.dodavatelIcDph||R.icdph||"", iban:R.iban||"", zdroj:R._efaktura?(R._isdoc?"efaktura-isdoc":"efaktura-ubl"):"pdf-import"};
-      if(R.rozpis&&R.rozpis.length>1){ obj.rozpis=R.rozpis; normalizujRozpis(obj); }
+      const obj=faktPdfNaVydavok(R);
       if(!firmaData.vydavky) firmaData.vydavky=[];
       // preskoč duplicity (rovnaké číslo, alebo dátum+suma+partner)
       if(najdiDuplicityVydavku(obj).length){ preskocene++; return; }
@@ -31167,20 +31217,6 @@ function otvorOcrVysledok(R){
     const druh=val("m_druh");
     const dodIcDph=val("m_dodIcDph")||"";
     const jeZahr=document.getElementById("m_zahranicny").checked;
-    const dphSuma=parseFloat(val("m_dph"))||0;
-    // KV DPH: každý doklad s DPH (od slovenského platiteľa) MUSÍ mať platné IČ DPH pre odpočet.
-    // Týka sa došlých faktúr aj bločkov/PHM, kde si odpočítavaš DPH.
-    const vyzadujeICDPH = !jeZahr && (druh==="Došlá faktúra" || dphSuma>0);
-    if(vyzadujeICDPH){
-      if(!dodIcDph){
-        alert("Tento doklad obsahuje DPH ("+eur(dphSuma)+"), takže potrebuje IČ DPH dodávateľa.\n\nJe povinné pre odpočet DPH a kontrolný výkaz. Doplňte ho z dokladu — nájdete ho aj v sekcii „Čo appka prečítala z dokladu\".\n\n(Ak si DPH neodpočítavaš, nastav DPH na 0.)");
-        return false;
-      }
-      if(!platneICDPH(dodIcDph)){
-        alert("IČ DPH dodávateľa \""+dodIcDph+"\" neprešlo kontrolou platnosti (deliteľnosť 11).\n\nToto je dôležité pre kontrolný výkaz DPH — nesprávne IČ DPH Finančná správa odmietne. Skontrolujte a opravte ho podľa dokladu.");
-        return false;
-      }
-    }
     const litre=parseFloat(val("m_litre"))||0;
 
     // ── Doklad musí sedieť sám so sebou ──
@@ -31233,6 +31269,14 @@ function otvorOcrVysledok(R){
     vydavokDoplnkovePolia(obj);
     if(R.ekasaId){ obj.ekasaId=R.ekasaId; obj.cislo=obj.cislo||R.ekasaId; }
     if(litre>0) obj.litre=litre;
+    // Tie isté kontroly pred zápisom ako v ručnom formulári (`editVydavok`)
+    // a v tom istom poradí: IČ DPH, potom pravidlá nad dokladom. Pravidlá
+    // z `PRAVIDLA_DOKLADU` (napr. „tankovanie bez jazdy") doklad z fotky, súboru
+    // aj e-mailu do 13. 9. 2026 obchádzal — dostal ich len doklad zadaný rukou
+    // (kap. 109.11). Stoja pred nahratím originálu: odmietnutý doklad nemá čo
+    // v úložisku nechať.
+    if(!vydavokOverIcDph(obj, "Doplňte ho z dokladu — nájdete ho aj v sekcii „Čo appka prečítala z dokladu\".")) return false;
+    if(!dokladKontrolaPriZapise(obj, "vydavok")) return false;
     // ── ORIGINÁL DOKLADU DO ÚLOŽISKA ──
     // Pri fotke bločka je to pohodlie. Pri e-faktúre je to zákonná povinnosť:
     // § 76 zákona o DPH žiada uchovať doklad 10 rokov V PÔVODNOM FORMÁTE
@@ -31288,9 +31332,13 @@ function otvorOcrVysledok(R){
     // Pred `poZmene()`, aby stav odišiel do cloudu v tom istom uložení.
     if(typeof oznacEfakturuZaevidovanu==="function") oznacEfakturuZaevidovanu();
     poZmene();
-    if(aktualnaApp==="vydavky") appVydavky();
     // Doklad prišiel e-mailom a je uložený — až teraz zmizne zo schránky.
     if(typeof oznacCakajuciSpracovany==="function") oznacCakajuciSpracovany();
+    // Nový doklad si hľadá svoju platbu (kap. 47.7) rovnako ako z ručného
+    // formulára — dovtedy sa doklad z fotky spároval až pri ďalšom importe
+    // výpisu. Až po `poZmene`, aby automatika videla doklad, ktorý práve vznikol.
+    oznamAutoUhradu(autoParujDoklad("vydavok", dokladKluc(obj)), "vydavok", dokladKluc(obj));
+    if(aktualnaApp==="vydavky") appVydavky();
   });
   // eKasa doklad → dotiahni z FS hneď, bez čakania na klik
   if(R.ekasaId) setTimeout(()=>ekasaAutoDoplnenie(R.ekasaId), 60);
