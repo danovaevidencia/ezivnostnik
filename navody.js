@@ -246,7 +246,115 @@ efaktury: {
 // ════════════════════════════════════════════════════════════════════════
 
 // ─────────────────────────────────────────────────────────────── VÝDAVKY
-// (miesto pre návody skupiny Výdavky: vydavky)
+vydavky: {
+  vJednejVete: "Zapísať, čo ste za podnikanie zaplatili, a vidieť, koľko to je",
+  uvod: "Sem patria bločky, došlé faktúry aj tankovanie. Doklad stačí <b>odfotiť alebo preposlať e-mailom</b> — appka z neho vytiahne sumu aj DPH a vy údaje len skontrolujete.",
+  ulohy: [
+    {
+      id: "fotka",
+      nazov: "Zapísať bloček alebo faktúru z fotky",
+      kedy: "Máte v ruke bloček alebo faktúru v PDF a nechcete ju prepisovať.",
+      kroky: [
+        { text: "Ťuknite na <b>🧾 Odfotiť / načítať doklad</b>.", tlacidlo: "Odfotiť / načítať doklad", snimka: "vydavky-fotka-1" },
+        { text: "Vyberte <b>📷 Odfotiť bloček / doklad</b>, alebo <b>🖼 Načítať zo súboru (PDF / foto)</b>, keď doklad už máte v telefóne či počítači.", tlacidlo: "Odfotiť bloček / doklad", snimka: "vydavky-fotka-2",
+          tip: "Bloček z pokladnice má QR kód — appka podľa neho načíta údaje priamo z Finančnej správy a nemusí nič čítať z fotky." },
+        { text: "Appka doklad prečíta a ukáže okno <b>Skontrolujte údaje z dokladu</b>. Prejdite dodávateľa, dátum a sumy a opravte, čo nesedí.", tlacidlo: "Skontrolujte údaje z dokladu", snimka: "vydavky-fotka-3" },
+        { text: "Ťuknite na <b>Uložiť</b>.", tlacidlo: "Uložiť", snimka: "vydavky-fotka-4" },
+      ],
+      tip: "Ak ten istý doklad už máte zapísaný, okno to povie hneď hore — <b>⚠ Tento doklad už evidujete.</b> Vtedy ho zavrite, inak sa náklad do daní započíta dvakrát.",
+      podrobnosti: [
+        { nadpis: "Čo appka z dokladu prečíta",
+          html: "<p>Dodávateľa, IČO, IČ DPH, číslo dokladu, dátumy, sumu bez DPH, DPH a sumu spolu. Text sa rozpoznáva priamo vo vašom prehliadači — prvýkrát si appka stiahne jazykové dáta (asi 15 MB).</p><p>Rozpoznanie z fotky nie je vždy presné, preto okno s kontrolou. Keď PDF nesie e-faktúru alebo ide o bloček s QR kódom, údaje sú presné a okno to napíše.</p>" },
+        { nadpis: "Prečo appka pýta IČ DPH dodávateľa",
+          html: "<p>Keď je na slovenskom doklade DPH, appka ho bez platného IČ DPH dodávateľa neuloží — bez neho si DPH neodpočítate. Nájdete ho na doklade, prípadne v okne pod <b>📄 Čo appka prečítala z dokladu</b>.</p>" },
+        { nadpis: "Viac faktúr naraz",
+          html: "<p>Viac došlých faktúr v PDF alebo XML načítate spolu cez <b>📥 Import faktúr (XML/PDF)</b>.</p>" },
+      ],
+    },
+    {
+      id: "rucne",
+      nazov: "Zapísať výdavok ručne",
+      kedy: "Doklad nemáte po ruke na odfotenie alebo je rýchlejšie ho prepísať.",
+      kroky: [
+        { text: "Ťuknite na <b>＋ Nový výdavok</b>.", tlacidlo: "Nový výdavok", snimka: "vydavky-rucne-1" },
+        { text: "V časti <b>Rýchle vyplnenie</b> ťuknite na to, čo ste kúpili — appka predvyplní druh dokladu aj kategóriu.", tlacidlo: "Rýchle vyplnenie", snimka: "vydavky-rucne-2" },
+        { text: "Doplňte dodávateľa a v poli <b>Do čoho to patrí</b> skontrolujte kategóriu.", tlacidlo: "Do čoho to patrí", snimka: "vydavky-rucne-3",
+          tip: "Dodávateľa stačí začať písať a vybrať zo zoznamu — appka doplní jeho IČO z registra, IČ DPH vtedy, keď ho register pozná." },
+        { text: "Vyplňte dátum dodania a sumu a ťuknite na <b>Uložiť</b>.", snimka: "vydavky-rucne-4" },
+      ],
+      tip: "Nájom, energie či predplatné, ktoré chodia každý mesiac, zaškrtnite v doklade ako <b>Tento doklad mi chodí pravidelne</b> — appka vám ich potom pripomenie pod <b>🔁 Opakované</b>.",
+      podrobnosti: [
+        { nadpis: "Kategória a daň",
+          html: "<p>Kategória rozhoduje, či výdavok zníži daň. <b>Neovplyvňuje základ dane</b> je pre súkromné nákupy, splátky istiny úveru či prevody medzi vlastnými účtami — do daní nevstupuje. Ostatné bežné kategórie daň znižujú.</p><p>Vlastnú kategóriu pridať nejde, zoznam je pevný.</p>" },
+        { nadpis: "Vec používate aj súkromne",
+          html: "<p>Pri bežných kategóriách je vo formulári pole <b>Koľko z toho je na podnikanie</b>. Zadajte len podnikateľskú časť — do daní appka započíta len tú. Tankovanie a doklady k osobnému autu majú vlastné pravidlá.</p>" },
+        { nadpis: "Odvody a preddavky",
+          html: "<p>Preddavky na zdravotné a sociálne poistenie a platby dane zapisujete tiež sem, s kategóriou podľa platby. V prehľade sú na dlaždici <b>Odvody a dane</b>, mimo súčtu výdavkov.</p>" },
+      ],
+    },
+    {
+      id: "email",
+      nazov: "Posielať doklady e-mailom",
+      kedy: "Dodávateľ vám faktúru posiela e-mailom a nechcete ju sťahovať a nahrávať.",
+      kroky: [
+        { text: "Ťuknite na <b>🧾 Odfotiť / načítať doklad</b> a vyberte <b>📨 Doklady e-mailom</b>.", tlacidlo: "Doklady e-mailom", snimka: "vydavky-email-1" },
+        { text: "Skopírujte adresu z poľa <b>Vaša prijímacia adresa</b> a faktúry na ňu preposielajte.", tlacidlo: "Vaša prijímacia adresa" },
+        { text: "Keď doklad príde, v tom istom okne pri ňom ťuknite na <b>Spracovať →</b>.", tlacidlo: "Spracovať →" },
+        { text: "Skontrolujte údaje a ťuknite na <b>Uložiť</b>. Ak doklad už evidujete, okno to povie hneď hore.", tlacidlo: "Tento doklad už evidujete", snimka: "vydavky-email-4" },
+      ],
+      tip: "Koľko dokladov čaká, ukazuje číslo pri <b>📨 Doklady e-mailom</b>. Adresu si uložte medzi kontakty — preposlať faktúru je potom otázka pár ťuknutí.",
+      podrobnosti: [
+        { nadpis: "Funguje po prihlásení",
+          html: "<p>Doklady e-mailom potrebujú účet v cloude. V ukážkovom režime appka namiesto okna ukáže upozornenie. Adresu nájdete aj v [[app:data#dmKarta|nastaveniach]].</p>" },
+        { nadpis: "Kto môže na adresu posielať",
+          html: "<p>Ktokoľvek. Odosielateľa, od ktorého nič nechcete, zablokujete v tom istom okne cez <b>🚫 Blokované adresy</b>. Keď adresa unikne, <b>↻ Nová adresa</b> vám pridelí inú a stará prestane fungovať.</p>" },
+        { nadpis: "Ako appka pozná, že doklad už máte",
+          html: "<p>Rovnaké číslo dokladu, alebo rovnaká suma aj dátum od toho istého dodávateľa. Pri preposlaných faktúrach sa to stáva ľahko — napríklad keď ste ju predtým už odfotili.</p>" },
+        { nadpis: "Výpis z banky e-mailom",
+          html: "<p>Na adresu môžete poslať aj výpis z účtu. Pri ňom je namiesto <b>Spracovať →</b> tlačidlo <b>Importovať →</b> a pohyby pribudnú do [[app:banka|banky]].</p>" },
+      ],
+    },
+    {
+      id: "uhrada",
+      nazov: "Označiť, že výdavok je zaplatený",
+      kedy: "Zaplatili ste v hotovosti alebo appka platbu vo výpise nenašla.",
+      kroky: [
+        { text: "Pri nezaplatenom výdavku ťuknite na <b>✓</b>.", snimka: "vydavky-uhrada-1" },
+        { text: "Vyberte, ako ste platili — kartou, prevodom, v hotovosti alebo inak.", tlacidlo: "Ako bol doklad uhradený?", snimka: "vydavky-uhrada-2",
+          tip: "Pri karte a prevode appka ešte počká na výpis z banky a úhradu podľa neho overí; hotovosť ostane potvrdená ručne." },
+      ],
+      tip: "Ak nahrávate [[app:banka|výpisy z banky]], platbu k výdavku appka priradí sama, keď je zhoda jednoznačná. Ručne označujte hlavne hotovosť.",
+      podrobnosti: [
+        { nadpis: "Čo znamenajú značky v stĺpci Stav",
+          html: "<p>○ neuhradené · ◐ potvrdené ručne · ● overené výpisom · ◑ čiastočne uhradené · ✕ výpis úhradu nepotvrdzuje. Ťuknutím na značku (okrem ●) priradíte platbu z banky ručne.</p>" },
+        { nadpis: "Viac výdavkov naraz",
+          html: "<p>Zaškrtnite výdavky v zozname — ukáže sa pás <b>✓ Označiť uhradené</b>.</p>" },
+        { nadpis: "Označil som omylom",
+          html: "<p>Pri ručne potvrdenom výdavku je v riadku tlačidlo <b>✕</b>, ktoré úhradu zruší.</p>" },
+        { nadpis: "Komu ešte dlžím",
+          html: "<p>Nezaplatené došlé faktúry nájdete v [[app:pohladavky|pohľadávkach]] na záložke <b>Záväzky</b>.</p>" },
+      ],
+    },
+    {
+      id: "prehlad",
+      nazov: "Zistiť, koľko som minul za mesiac alebo rok",
+      kedy: "Chcete vedieť, koľko ste minuli, alebo kontrolujete podklady k DPH.",
+      kroky: [
+        { text: "Hore vidíte výdavky bez DPH, pod nimi tú istú sumu s DPH a vedľa DPH na odpočet (ak ste platiteľ DPH).", snimka: "vydavky-prehlad-1" },
+        { text: "Nad zoznamom vyberte rok a mesiac — predvolený je <b>celý rok</b>.", tlacidlo: "celý rok", snimka: "vydavky-prehlad-2" },
+        { text: "V treťom výbere určte, podľa ktorého dátumu sa výdavky zaraďujú — predvolené je <b>podľa obdobia dane</b>.", tlacidlo: "podľa obdobia dane", snimka: "vydavky-prehlad-3",
+          tip: "Pri kontrole DPH prepnite na <b>podľa dátumu dodania</b> — tak sa doklady zaraďujú do DPH." },
+      ],
+      tip: "Hľadáte konkrétny doklad? Do poľa s lupou napíšte partnera, číslo, popis alebo sumu.",
+      podrobnosti: [
+        { nadpis: "Tri dátumy, tri otázky",
+          html: "<p><b>podľa obdobia dane</b> — mesiac, v ktorom ste doklad zaplatili; kým zaplatený nie je, mesiac dokladu. Tak appka počíta daň z príjmov a na to sedia súčty hore.</p><p><b>podľa dátumu dodania</b> — obdobie DPH, podľa neho sa kontroluje priznanie k DPH a kontrolný výkaz.</p><p><b>podľa dátumu úhrady</b> — len zaplatené doklady. Nezaplatené tu nie sú, v tom období peniaze neodišli.</p><p>Pri dodaní a úhrade idú súčty hore za zobrazené doklady, nie za základ dane.</p>" },
+        { nadpis: "Prečo odvody nie sú vo výdavkoch",
+          html: "<p>Preddavky na poistné a platby dane sú na dlaždici <b>Odvody a dane</b>, mimo súčtu výdavkov. Do dane vstupujú inou cestou než bežný nákup — keby boli aj medzi výdavkami, poistné by sa odpočítalo dvakrát.</p>" },
+      ],
+    },
+  ],
+},
 // ───────────────────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────────────────── BANKA
