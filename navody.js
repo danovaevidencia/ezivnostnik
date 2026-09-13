@@ -266,7 +266,7 @@ vydavky: {
         { nadpis: "Čo appka z dokladu prečíta",
           html: "<p>Dodávateľa, IČO, IČ DPH, číslo dokladu, dátumy, sumu bez DPH, DPH a sumu spolu. Text sa rozpoznáva priamo vo vašom prehliadači — prvýkrát si appka stiahne jazykové dáta (asi 15 MB).</p><p>Rozpoznanie z fotky nie je vždy presné, preto okno s kontrolou. Keď PDF nesie e-faktúru alebo ide o bloček s QR kódom, údaje sú presné a okno to napíše.</p>" },
         { nadpis: "Prečo appka pýta IČ DPH dodávateľa",
-          html: "<p>Keď je na slovenskom doklade DPH, appka ho bez platného IČ DPH dodávateľa neuloží — bez neho si DPH neodpočítate. Nájdete ho na doklade, prípadne v okne pod <b>📄 Čo appka prečítala z dokladu</b>.</p>" },
+          html: "<p>Keď je na slovenskom doklade DPH a nejde o bloček z pokladnice, appka ho bez platného IČ DPH dodávateľa neuloží — bez neho si DPH neodpočítate. Nájdete ho na doklade, prípadne v okne pod <b>📄 Čo appka prečítala z dokladu</b>.</p>" },
         { nadpis: "Viac faktúr naraz",
           html: "<p>Viac došlých faktúr v PDF alebo XML načítate spolu cez <b>📥 Import faktúr (XML/PDF)</b>.</p>" },
       ],
