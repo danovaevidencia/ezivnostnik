@@ -3940,7 +3940,12 @@ function prerusOdpisovanie(rok){
     m.prerusene=[...z].sort((a,b)=>a-b);
   });
   poZmene();
-  alert("Odpisovanie prerušené v "+ciel.length+(ciel.length===1?" položke":" položkách")+" majetku.\n\nZrušiť sa to dá na karte majetku.");
+  // Karta s prerušením je len v Štatistikách (pohľad Dane) — karta majetku
+  // tlačidlo na obnovenie nemá. Názvy sa berú z navigácie, aby hláška
+  // neposielala na miesto, ktoré sa medzitým premenovalo.
+  alert("Odpisovanie prerušené v "+ciel.length+(ciel.length===1?" položke":" položkách")+" majetku.\n\n"
+    + "Späť to vrátite v "+APPS.superdash.n+" → "+((SD_POHLADY.find(p=>p.id==="dane")||{}).n||"Dane")
+    + " tlačidlom „Obnoviť odpisovanie v roku "+rok+"“.");
   if(typeof renderSuperDashboard==="function" && aktualnaApp==="superdash") renderSuperDashboard();
   else if(typeof appMajetok==="function" && aktualnaApp==="majetok") appMajetok();
 }
@@ -5038,6 +5043,40 @@ function otvorMajetokNaRozhodnutie(){
         </div></div>`; }).join("");
   openModal("Majetok, alebo výdavok?", telo);
 }
+// Väzba majetku na doklad o kúpe — jedno miesto pre zaradenie z výdavku aj
+// pre ručné pridanie. Odpisovaný majetok výdavok vyníma (uplatní sa odpismi),
+// drobný ho nechá vo výdavkoch a vec len eviduje.
+function majetokPrepojVydavok(m, vyd){
+  m.zdrojVydavok=vyd.cislo;
+  vyd.zaradenyMajetokId=m.id;
+  delete vyd.mozeBytMajetok;
+  majetokVyniatieVydavku(m, vyd);
+}
+// Pravidlo na jednom mieste: odpisovaný majetok výdavok vyníma, drobný nie.
+// Volá sa pri prepojení aj pri zmene režimu už prepojeného majetku.
+function majetokVyniatieVydavku(m, vyd){
+  if(m.typMajetku==="odpisovany") vyd.zaradenyOdpisovany=true; else delete vyd.zaradenyOdpisovany;
+}
+// Výdavky, ktoré na majetok ukazujú — kúpa aj zhodnotenia.
+function majetokPrepojeneVydavky(idMaj){
+  return (firmaData.vydavky||[]).filter(v=>v.zaradenyMajetokId!=null && String(v.zaradenyMajetokId)===String(idMaj));
+}
+// Opak väzby pri zmazaní majetku: prepojené výdavky sa vrátia do nákladov.
+// Inak by suma vypadla z výdavkov (vyňatá) aj z odpisov (majetok už nie je).
+function majetokUvolniVydavky(idMaj){
+  majetokPrepojeneVydavky(idMaj).forEach(v=>{ delete v.zaradenyOdpisovany; delete v.zaradenyMajetokId; });
+}
+// Ručne pridávaný majetok, ktorého kúpa už je vo výdavkoch: nezaradený doklad
+// s rovnakou sumou bez DPH (tou istou, ktorú berie `vydavokDoMajetku`), dátumom
+// najbližší k zaradeniu. Istota to nie je — preto sa appka pýta, nerozhoduje.
+function majetokKupaVoVydavkoch(m){
+  const cena=+m.vstupnaCena||0;
+  if(!cena) return null;
+  const den=s=>Date.parse(String(s||"").slice(0,10))||0, ciel=den(m.datumZaradenia);
+  return (firmaData.vydavky||[])
+    .filter(v=>!v.zaradenyMajetokId && !v.zaradenyOdpisovany && Math.abs((+v.bez||0)-cena)<0.005)
+    .sort((a,b)=>Math.abs(den(a.datum)-ciel)-Math.abs(den(b.datum)-ciel))[0]||null;
+}
 // zaradenie výdavku do majetku
 function vydavokDoMajetku(idx){
   const vyd=firmaData.vydavky[idx];
@@ -5099,11 +5138,9 @@ function vydavokDoMajetku(idx){
     if(!nazov||!cena2||!datum){ alert("Vyplňte názov, cenu a dátum."); return false; }
     const id="m"+Date.now();
     if(!firmaData.majetok) firmaData.majetok=[];
-    firmaData.majetok.push({id,nazov,vstupnaCena:cena2,datumZaradenia:datum,odpisovaSkupina:skup,zdrojVydavok:vyd.cislo,typMajetku:rezim});
-    // väzba na výdavok
-    vyd.zaradenyMajetokId=id;
-    delete vyd.mozeBytMajetok;
-    if(rezim==="odpisovany") vyd.zaradenyOdpisovany=true; else delete vyd.zaradenyOdpisovany;
+    const m={id,nazov,vstupnaCena:cena2,datumZaradenia:datum,odpisovaSkupina:skup,typMajetku:rezim};
+    firmaData.majetok.push(m);
+    majetokPrepojVydavok(m, vyd);
     poZmene();
     if(aktualnaApp==="vydavky") appVydavky();
     alert(rezim==="drobny"?"Drobný majetok zaevidovaný (výdavok ostáva).":"Majetok zaradený, výdavok nahradený odpisom.");
@@ -17772,6 +17809,7 @@ function editMajetok(id){
   const m=nova?{id:"maj_"+Date.now(),nazov:"",vstupnaCena:"",datumZaradenia:new Date().toISOString().slice(0,10),odpisovaSkupina:1,typMajetku:"odpisovany"}
     :JSON.parse(JSON.stringify((firmaData.majetok||[]).find(x=>String(x.id)===String(id))));
   const preradene=preradenieDatum(m);
+  const povodnyTyp=m.typMajetku;   // režim pred úpravou — jeho zmena mení aj výdavok o kúpe
   // Náhľad kreslí samostatná funkcia, ktorá nevidí do tejto uzávery —
   // polia mimo formulára (zhodnotenia, prerušené roky) jej treba podať.
   _majetokNahladZdroj=m;
@@ -17786,7 +17824,7 @@ function editMajetok(id){
     </select></div>
     <div class="mfield"><label>Režim</label><select id="m_rezim" onchange="mMajetokNahlad()">
       <option value="odpisovany" ${m.typMajetku!=='drobny'?'selected':''}>Odpisovaný majetok (nad 1 700 €)</option>
-      <option value="drobny" ${m.typMajetku==='drobny'?'selected':''}>Drobný majetok (jednorazovo do výdavkov)</option>
+      <option value="drobny" ${m.typMajetku==='drobny'?'selected':''}>Drobný majetok (len evidencia)</option>
     </select></div>
     <div class="mfield"><label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;font-weight:400">
       <input type="checkbox" id="m_auto" ${(m.jeOsobneAuto!=null?m.jeOsobneAuto:jeOsobneAutoOdhad(m))?"checked":""} onchange="mMajetokNahlad()" style="width:auto;margin-top:2px">
@@ -17825,12 +17863,35 @@ function editMajetok(id){
     const pov=val("m_povodne");
     if(pov && pov>=m.datumZaradenia){ alert("Dátum pôvodnej kúpy musí byť skôr než dátum zaradenia do podnikania."); return false; }
     if(pov) m.povodneNadobudnutie=pov; else delete m.povodneNadobudnutie;
+    // Zhodnotenie appka uplatňuje len v odpisoch. Drobný majetok sa neodpisuje,
+    // takže zhodnotenie by z výdavkov vypadlo úplne (vyňaté a bez odpisu).
+    if(m.typMajetku==="drobny" && tzZoznam(m).length){
+      alert("Tento majetok má technické zhodnotenie, ktoré sa uplatňuje v odpisoch. Drobný majetok sa neodpisuje, takže by zhodnotenie z výdavkov vypadlo.\n\nAk má byť drobný, najprv zhodnotenia na karte majetku zmažte — ich výdavky sa vrátia do nákladov.");
+      return false;
+    }
     if(!firmaData.majetok) firmaData.majetok=[];
+    // Zmena režimu mení aj to, či je kúpa vo výdavkoch. Bez zosúladenia
+    // odpisovaný → drobný sumu stratí (vyňatá, bez odpisu) a drobný →
+    // odpisovaný ju uplatní dvakrát (vo výdavkoch aj v odpisoch).
+    const prepojene=nova?[]:majetokPrepojeneVydavky(m.id);
+    if(!nova && m.typMajetku!==povodnyTyp) prepojene.forEach(v=>majetokVyniatieVydavku(m, v));
+    // Kúpa zapísaná vo výdavkoch by sa inak uplatnila dvakrát — celá vo
+    // výdavkoch a k tomu odpismi. Pýta sa pri novom majetku a pri prepnutí
+    // na odpisovaný, ak väzba ešte nie je. Drobný výdavok nevyníma, takže
+    // tam dvakrát nejde nič a netreba sa pýtať.
+    if(m.typMajetku==="odpisovany" && (nova || povodnyTyp!=="odpisovany") && !prepojene.length){
+      const kupa=majetokKupaVoVydavkoch(m);
+      if(kupa && confirm("Vo výdavkoch je doklad za rovnakú sumu:\n"
+          + [kupa.cislo, kupa.partner||kupa.popis, fmtDatum(kupa.datum), eur(+kupa.bez||0)+" bez DPH"].filter(Boolean).join(" · ")
+          + "\n\nJe to kúpa tejto veci? OK ho prepojí — výdavok sa nahradí odpismi, inak by sa suma uplatnila dvakrát."
+          + "\n\nZrušiť uloží majetok bez prepojenia a doklad ostane vo výdavkoch celý."))
+        majetokPrepojVydavok(m, kupa);
+    }
     if(nova) firmaData.majetok.push(m);
     else { const i=firmaData.majetok.findIndex(x=>String(x.id)===String(id)); if(i>=0) firmaData.majetok[i]=m; }
     poZmene(); appMajetok();
   },
-  nova?null:()=>{ const i=firmaData.majetok.findIndex(x=>String(x.id)===String(id)); if(i>=0) firmaData.majetok.splice(i,1); poZmene(); appMajetok(); });
+  nova?null:()=>{ const i=firmaData.majetok.findIndex(x=>String(x.id)===String(id)); if(i>=0){ firmaData.majetok.splice(i,1); majetokUvolniVydavky(id); } poZmene(); appMajetok(); });
   setTimeout(mMajetokNahlad,50);
 }
 let _majetokNahladZdroj=null;
@@ -17838,7 +17899,10 @@ function mMajetokNahlad(){
   const el=document.getElementById("mMajetokNahlad"); if(!el) return;
   const cena=parseFloat(val("m_cena"))||0;
   const rezim=val("m_rezim");
-  if(rezim==="drobny"){ el.innerHTML=`Drobný majetok sa <b>jednorazovo</b> zaradí do výdavkov v roku zaradenia (${eur(cena)}). Neodpisuje sa.`; return; }
+  // Výdavky sa v celej appke berú z dokladov vo Výdavkoch. Ručne pridaná drobná
+  // vec doklad o úhrade nemá — keby sa pripočítala, kúpa zapísaná vo Výdavkoch
+  // by išla dvakrát. Náhľad preto nesmie sľubovať, že do výdavkov pôjde.
+  if(rezim==="drobny"){ el.innerHTML=`Drobný majetok sa neodpisuje a appka ho do výdavkov <b>nepripočíta</b> — výdavkom je doklad o kúpe vo Výdavkoch (${eur(cena)}). Tu sa vec len eviduje. Ak doklad ešte nemáte zapísaný, zapíšte ho tam a vec zaraďte priamo z neho tlačidlom „Zaradiť do majetku“.`; return; }
   const z=_majetokNahladZdroj||{};
   const m={nazov:val("m_nazov"),vstupnaCena:cena,datumZaradenia:val("m_datum"),odpisovaSkupina:+val("m_skupina"),typMajetku:"odpisovany",osobnaPotreba:+val("m_osobna")||100,
            povodneNadobudnutie:val("m_povodne")||"", tz:z.tz, prerusene:z.prerusene, dobaOdpisu:z.dobaOdpisu};
@@ -20620,7 +20684,7 @@ function xkMajetokSheet(X, S, D, wb, fmtSk){
   M.forEach((m,i)=>{ const z=i%2===1, sc=z?S.cellZ:S.cell, se=z?S.eurZ:S.eur, sn=z?S.numZ:S.num;
     const P=odpisPlan(m);
     const typ = m.typMajetku==="drobny" ? "drobný" : (m.typMajetku==="neodpisovany" ? "neodpisovaný" : "odpisovaný");
-    const sk = (m.typMajetku==="odpisovany") ? ((ODPIS_SKUPINY[m.odpisovaSkupina]||{}).n || String(m.odpisovaSkupina)) : "—";
+    const sk = (m.typMajetku==="odpisovany") ? ((ODPIS_SKUPINY[m.odpisovaSkupina]||{}).nazov || String(m.odpisovaSkupina)) : "—";
     const stav = (m.vyradeny&&m.vyradeny.datum) ? ("vyradený "+fmtSk(m.vyradeny.datum)) : "v evidencii";
     const op = (m.osobnaPotreba!=null && +m.osobnaPotreba<100) ? (m.osobnaPotreba+" %") : "—";
     // So zhodnotením je vstupná cena vyššia a odpis sa počíta z nej —
@@ -26549,7 +26613,9 @@ function rocnaKontrola(rok){
       if(m.typMajetku==="drobny") return false;
       if(m.vyradeny && m.vyradeny.datum && String(m.vyradeny.datum).slice(0,4)<R) return false;
       if(String(m.datumZaradenia||"").slice(0,4)>R) return false;
-      return !(+m.vstupnaCena>0) || !m.odpisovaSkupina;
+      // Skupina 0 (elektromobil, plug-in hybrid) je platná — `!m.odpisovaSkupina`
+      // ju hlásil ako chýbajúcu. Chýba skupina, ktorú ODPIS_SKUPINY nepozná.
+      return !(+m.vstupnaCena>0) || !ODPIS_SKUPINY[m.odpisovaSkupina];
     });
     if(bezOdpisu.length)
       pridaj("chyba","majetokBezOdpisu", bezOdpisu.length+" položiek majetku nemá vstupnú cenu alebo odpisovú skupinu",
