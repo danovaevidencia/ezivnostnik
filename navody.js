@@ -645,7 +645,7 @@ priznanieB: {
         { nadpis: "Blokujúce kontroly",
           html: "<p>Keď kontroly našli niečo označené ⛔, appka sa pred stiahnutím spýta, či exportovať aj tak. Nie je to zámok.</p>" },
         { nadpis: "Opravné a dodatočné priznanie",
-          html: "<p>Sprievodca vyrába len riadne priznanie a v kroku <b>4. Zhrnutie</b> to aj píše. Opravné ani dodatočné nevyrobí — dodatočné priznanie potrebuje rozdiely oproti pôvodnému priznaniu, ktoré appka nemá.</p>" },
+          html: "<p>V kroku <b>4. Zhrnutie</b> v časti <b>Druh priznania</b> vyberiete riadne, opravné alebo dodatočné. Opravné sa podáva pred uplynutím lehoty a je to celé priznanie znova.</p><p>Dodatočné sa podáva po lehote. Appka si vypýta dátum zistenia a čísla z pôvodného priznania a dopočíta rozdiely v X. oddiele. Ak malo pôvodné priznanie bonus na poukázanie (r. 121), riadky 141 a 142 nevyplní — kontroly to povedia.</p>" },
         { nadpis: "Ako formulár",
           html: "<p><b>▦ Ako formulár</b> v poslednom kroku ukáže priznanie v podobe tlačiva. Je to náhľad na kontrolu, nie oficiálne tlačivo.</p>" },
         { nadpis: "Zamknutý rok",

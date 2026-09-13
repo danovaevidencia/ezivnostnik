@@ -2770,9 +2770,15 @@ function pausalMoznyVRoku(rok){ return !dphPlatcaCelyRok(rok); }
 // Obe čísla sú v sadzby.js po rokoch. Predtým stáli 0.6 a 20000 natvrdo
 // v ročnom súhrne, prognóze, priznaní B a v porovnaní režimov.
 function pausalVydavky(prijmy, rok){
-  const sadzba=sadzbaFirmy("pausalSadzba", rok), strop=sadzbaFirmy("pausalStrop", rok);
+  const S=(firmaData&&firmaData.settings)||{};   // onboarding volá aj bez firmy
+  const sadzba=sadzbaFirmy("pausalSadzba", rok, S), strop=sadzbaFirmy("pausalStrop", rok, S);
   const plny=r2((+prijmy||0)*sadzba);
   return {suma:r2(Math.min(plny, strop)), sadzba, strop, zastropovany: plny>strop};
+}
+// Text paušálu pre obrazovky ("60 %", "20 000 €") — z tých istých sadzieb ako výpočet.
+function pausalPopis(rok){
+  const P=pausalVydavky(0, rok);
+  return {pct:Math.round(P.sadzba*100)+" %", strop:eur0(P.strop)};
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -3592,7 +3598,7 @@ function pausalPorovnanie(rok){
     // Strop sa dosiahne pri príjmoch nad 33 333 € — nad ním paušál prestáva rásť
     // a každé ďalšie euro príjmu ho zhoršuje. Používateľ o tom má vedieť.
     pausalZastropovany: pausalVydavky(R.prijmy, rok).zastropovany,
-    rezim: (typeof vydavkyRezimEfektivny==="function") ? vydavkyRezimEfektivny() : "skutocne",
+    rezim: vydavkyRezimEfektivny(rok),   // režim TOHO roka, nie aktuálny (kap. 89.3)
   };
 }
 
@@ -5394,7 +5400,7 @@ function _dashWidgetKatalogVypocet(){
           return `<div class="wbig">${eur0(P.zakladSkut)}</div><div class="wmeta">základ dane pri skutočných výdavkoch</div>
             <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid var(--line-soft)">
               <div><div style="font-size:15px;font-weight:700">${eur(P.zakladPausal)}</div><div style="font-size:10.5px;color:var(--ink-soft)">pri paušále</div></div>
-              <div><div style="font-size:15px;font-weight:700">${eur(P.pausal)}</div><div style="font-size:10.5px;color:var(--ink-soft)">paušál 60 %${P.pausalZastropovany?" (strop)":""}</div></div>
+              <div><div style="font-size:15px;font-weight:700">${eur(P.pausal)}</div><div style="font-size:10.5px;color:var(--ink-soft)">paušál ${pausalPopis(rok).pct}${P.pausalZastropovany?" (strop)":""}</div></div>
             </div>`;
         }}
       ]
@@ -7750,6 +7756,7 @@ function nastVydavkyRezimHtml(){
   const rok=nastRezimRok;
   const platca=!pausalMoznyVRoku(rok);      // platiteľ po CELÝ ten rok
   const rezim = vydavkyRezimEfektivny(rok);
+  const PP = pausalPopis(rok);
   let porovnanie="";
   try{
     const P=pausalPorovnanie(rok);
@@ -7759,7 +7766,7 @@ function nastVydavkyRezimHtml(){
       <div class="ob-sum" style="margin-top:12px">
         <div class="sr"><span>Príjmy ${rok} (doteraz)</span><b>${eur(P.prijmy)}</b></div>
         <div class="sr"><span>Skutočné výdavky (vr. odpisu)</span><b>${eur(P.vydavkySkut)}</b></div>
-        <div class="sr"><span>Paušál 60 %${P.pausalZastropovany?" — strop 20 000 €":""}</span><b>${eur(P.pausal)}</b></div>
+        <div class="sr"><span>Paušál ${PP.pct}${P.pausalZastropovany?" — strop "+PP.strop:""}</span><b>${eur(P.pausal)}</b></div>
         <div class="sr"><span>Základ dane — skutočné / paušál</span><b>${eur(P.zakladSkut)} / ${eur(P.zakladPausal)}</b></div>
         <div class="sr"><span>Daň — skutočné / paušál</span><b>${eur(P.danSkut)} / ${eur(P.danPausal)}</b></div>
         <div class="sr"><span><b>${P.usporaDane<0.5?"Zatiaľ vychádzajú rovnako"
@@ -7771,7 +7778,7 @@ function nastVydavkyRezimHtml(){
         Čísla sú priebežné — počítajú sa z toho, čo je v evidencii dnes, a do konca roka sa ešte zmenia.
         Spôsob výdavkov sa záväzne volí až v daňovom priznaní; do vtedy nič nie je rozhodnuté.
         Porovnanie nezahŕňa dopad na odvody v ďalšom roku — tie sa odvíjajú od základu dane, takže voľba
-        ovplyvní aj ich.${P.pausalZastropovany?" Paušál už narazil na strop 20 000 €: každé ďalšie euro príjmu ho zhoršuje.":""}
+        ovplyvní aj ich.${P.pausalZastropovany?" Paušál už narazil na strop "+PP.strop+": každé ďalšie euro príjmu ho zhoršuje.":""}
       </div>` : "";
   }catch(e){}
   const zapisane=(S.vydavkyRezimRoky||{});
@@ -7784,9 +7791,9 @@ function nastVydavkyRezimHtml(){
     </div>`:""}
     <div class="ob-toggle" style="max-width:420px">
       <button class="${rezim==='skutocne'?'on':''}" onclick="nastavVydavkyRezim('skutocne',${rok})">Skutočné výdavky</button>
-      <button class="${rezim==='pausal'?'on':''}" onclick="${platca?'':'nastavVydavkyRezim(\'pausal\','+rok+')'}" ${platca?'disabled style="opacity:.5;cursor:not-allowed"':''}>Paušálne (60 %)</button>
+      <button class="${rezim==='pausal'?'on':''}" onclick="${platca?'':'nastavVydavkyRezim(\'pausal\','+rok+')'}" ${platca?'disabled style="opacity:.5;cursor:not-allowed"':''}>Paušálne (${PP.pct})</button>
     </div>
-    <div class="ob-hint" style="margin-top:8px">Paušál: 60 % z príjmov, najviac 20 000 € ročne. Odvody sa uplatňujú navyše. Nedá sa kombinovať so skutočnými výdavkami — platí pre celý rok, a volí sa na každý rok zvlášť.${inyRok?" Zapísané roky: "+inyRok+".":""}</div>
+    <div class="ob-hint" style="margin-top:8px">Paušál: ${PP.pct} z príjmov, najviac ${PP.strop} ročne. Odvody sa uplatňujú navyše. Nedá sa kombinovať so skutočnými výdavkami — platí pre celý rok, a volí sa na každý rok zvlášť.${inyRok?" Zapísané roky: "+inyRok+".":""}</div>
     ${platca?`<div class="ob-hint warn" style="margin-top:8px">V roku ${rok} ste boli platiteľom DPH po celý rok, preto paušál nie je možný. Zákon ho dovoľuje aj platiteľovi, ale len v roku, v ktorom sa ním stal (§ 6 ods. 10). Ak ste sa registrovali počas niektorého roka, doplňte dátum nižšie.</div>`:""}
     ${rok<new Date().getFullYear()?`<div class="ob-field" style="margin-top:10px;max-width:420px">
       <label>Zaplatené poistné v roku ${rok}</label>
@@ -7806,6 +7813,9 @@ function nastVydavkyRezimHtml(){
 // Zápis spôsobu výdavkov pre rok. Jediné miesto zápisu — volajú ho Nastavenia
 // aj sprievodca priznaním B (ten mal predtým vlastný prepínač pre všetky roky).
 function zapisVydavkyRezim(rezim, rok){
+  // Spôsob výdavkov je údaj priznania (priznanieB je v UCTOVNICKE_MODULY): náhľad
+  // ani vlastník firmy s účtovníkom ho nemení — ani z Nastavení, ani zo sprievodcu.
+  if(!strazZapis("priznanieB")) return;
   const r=(rezim==="pausal") ? "pausal" : "skutocne";
   const y=+rok||new Date().getFullYear();
   if(r==="pausal" && !pausalMoznyVRoku(y)) return;   // platiteľ po celý rok nemôže (vráti undefined = nezapísané)
@@ -18138,7 +18148,7 @@ function appData(){
     </div>
     <div class="card" style="margin-bottom:14px">
       <h2 style="font-size:16px;margin-bottom:4px">Režim výdavkov</h2>
-      <div class="csub" style="margin-bottom:14px">${jePlatcaDPH()?'Ste platiteľ DPH — paušálne výdavky nie sú dostupné (zákon ich umožňuje len neplatiteľom).':'Vyberte, ako uplatňujete výdavky. Appka pod voľbou ukáže, ktorá možnosť vychádza výhodnejšie.'}</div>
+      <div class="csub" style="margin-bottom:14px">${jePlatcaDPH()?'Ste platiteľ DPH. Paušálne výdavky zákon dovoľuje neplatiteľovi a aj v roku, v ktorom ste sa platiteľom stali (§ 6 ods. 10) — pri roku, keď ste boli platiteľom celý, ich appka nepustí.':'Vyberte, ako uplatňujete výdavky. Appka pod voľbou ukáže, ktorá možnosť vychádza výhodnejšie.'}</div>
       ${nastVydavkyRezimHtml()}
     </div>
     <div class="card" style="margin-bottom:14px">
@@ -18739,12 +18749,13 @@ function zmazPriznanie(rok){
 // po rokoch. Predtým tu stála kópia sadzieb roku 2026, ktorá rok 2025 krátila
 // od hranice 27 432 € namiesto 25 740 € (poučenie DPFOBv25).
 function detiBonusSadzby(rok){
+  const S=(firmaData&&firmaData.settings)||{};
   return {
-    do15: sadzbaFirmy("bonusDo15", rok),              // €/mesiac na dieťa do 15 rokov
-    do18: sadzbaFirmy("bonus15az18", rok),            // €/mesiac na dieťa 15–17 rokov
-    hranicaKratenia: sadzbaFirmy("bonusKratHranica", rok),   // ročný základ, nad ktorým sa kráti
+    do15: sadzbaFirmy("bonusDo15", rok, S),              // €/mesiac na dieťa do 15 rokov
+    do18: sadzbaFirmy("bonus15az18", rok, S),            // €/mesiac na dieťa 15–17 rokov
+    hranicaKratenia: sadzbaFirmy("bonusKratHranica", rok, S),   // ročný základ, nad ktorým sa kráti
     // percentuálny limit zo základu podľa počtu detí s nárokom (6 a viac = jeden limit)
-    pctLimit: pocet=>sadzbaFirmy("bonusLimitSadzba"+Math.min(Math.max(pocet,1),6), rok),
+    pctLimit: pocet=>sadzbaFirmy("bonusLimitSadzba"+Math.min(Math.max(pocet,1),6), rok, S),
   };
 }
 // vek dieťaťa k danému roku
@@ -18902,6 +18913,22 @@ function pbKontroly(rok){
     blok.push("Chýba DIČ (riadok 01). Doplňte ho v Nastaveniach, časť Firemné údaje.");
   if((v.prijmy||0)>0 && (!O.k1 || !O.cinnost))
     blok.push(`Chýba kód SK NACE alebo hlavná činnosť za rok ${rok} (riadok 03). Doplňte ich v kroku Zhrnutie.`);
+  // 1c) Druh priznania (poučenie DPFOBv25, bod 2 a 3; tlačivo, X. a XII. oddiel)
+  const Dr=pbDruh(rok), dnes=new Date().toISOString().slice(0,10), lehota=pbLehotaZakladna(rok);
+  if(Dr.typ==="opravne" && dnes>lehota)
+    upoz.push(`Opravné priznanie sa podáva pred uplynutím lehoty (${sadzbaDatum(lehota)}, pri odklade neskôr). Po lehote sa podáva dodatočné.`);
+  if(Dr.typ==="dodatocne"){
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(Dr.datumZistenia))
+      blok.push("Dodatočné priznanie: chýba dátum zistenia skutočností na jeho podanie.");
+    if(Dr.pov.r116==null)
+      blok.push("Dodatočné priznanie: chýba daň z r. 116 pôvodného priznania — bez nej sa X. oddiel nedá vyplniť.");
+    if(+Dr.pov.r121>0)
+      blok.push("Dodatočné priznanie: pôvodné priznanie malo bonus na poukázanie (r. 121). Appka r. 121 nepočíta, riadky 141 a 142 ostanú prázdne — doplňte ich na portáli.");
+    if(dnes<=lehota)
+      upoz.push(`Lehota na podanie (${sadzbaDatum(lehota)}) ešte neuplynula — pred jej uplynutím sa podáva opravné priznanie, nie dodatočné.`);
+    if((S.darNNO&&S.darNNO.aktivny)||(S.darRodic&&S.darRodic.aktivny)||(+Dr.pov.r152>0))
+      upoz.push("Dodatočné priznanie: už poukázaný podiel dane sa neupravuje (§ 50 ods. 10, § 50aa ods. 8). Ak bol vyšší než 2 % alebo 3 % z novej dane, rozdiel sa pripočíta v r. 140; pri poukázaní rodičom sa preplatok upravuje podľa § 50aa ods. 8.");
+  }
   // 2) Hotovostný princíp — prelom rokov (príjem sa počíta podľa úhrady, nie vystavenia)
   let von=0, dovnutra=0; const nespar=[];
   fakt.forEach(f=>{
@@ -18951,6 +18978,8 @@ function pbNahladFormular(rok){
   const V=pbVypocet(rok);
   const m=firmaData.meta||{};
   const S=firmaData.settings||{};
+  const O=pbDanovnikUdaje(rok), X=pbDodatocneRozdiely(rok, V);
+  const menoCele=[O.titul, O.meno, O.priezvisko].filter(Boolean).join(" ")+(O.titulZa?", "+O.titulZa:"");
   const eur2=v=>(+v||0).toFixed(2).replace(".",",");
   const rr=(cislo, popis, hodnota, zvyrazni)=>`
     <div class="pbf-r ${zvyrazni||''}">
@@ -18968,8 +18997,9 @@ function pbNahladFormular(rok){
     </div>
 
     <div class="pbf-ident">
-      <div class="pbf-irow"><span>Daňovník</span><b>${esc(m.nazov||"—")}</b></div>
+      <div class="pbf-irow"><span>Daňovník</span><b>${esc((O.meno||O.priezvisko)?menoCele:(m.nazov||"—"))}</b></div>
       <div class="pbf-irow"><span>DIČ</span><b>${esc(m.dic||"—")}</b></div>
+      <div class="pbf-irow"><span>Druh</span><b>${PB_DRUHY[pbTypDP(rok)]} priznanie</b></div>
       <div class="pbf-irow"><span>Adresa</span><b>${esc(m.adresa||"—")}</b></div>
     </div>
 
@@ -19007,6 +19037,11 @@ function pbNahladFormular(rok){
     ${rr("131","Zaplatené preddavky na daň", R.r131)}
     ${R.r135?rr("135","Daň na úhradu (doplatok)", R.r135, "pay"):""}
     ${R.r136?rr("136","Daňový preplatok (vrátenie)", R.r136, "ret"):""}
+    ${X?`<div class="pbf-sec">X. oddiel – Rozdiely z dodatočného priznania</div>
+    ${rr("137","Daň z r. 116 pôvodného priznania", X.r137)}
+    ${rr("138","Zvýšenie (+) alebo zníženie (−) dane", X.r138)}
+    ${rr("139","Úhrada (+) alebo preplatok (−) z pôvodného priznania", X.r139)}
+    ${rr("140","Rozdiel: na úhradu (+) alebo preplatok (−)", X.r140, "sub")}`:""}
     ${((S.darNNO&&S.darNNO.aktivny)||(S.darRodic&&S.darRodic.aktivny))?`
     <div class="pbf-sec">XII. oddiel – Vyhlásenie o poukázaní podielu dane (2 % / 3 %)</div>
     ${(S.darNNO&&S.darNNO.aktivny)?rr("152","Neziskovej organizácii"+(S.darNNO.nazov?" — "+esc(S.darNNO.nazov):"")+(S.darNNO.treProcenta?" (3 %)":" (2 %)"), V.darSuma):""}
@@ -19151,13 +19186,76 @@ function pbZamInput(label, key, val){
       onchange="firmaData.settings.${key}=+this.value||0;poZmene();appPriznanieB()"
       style="width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:8px"></div>`;
 }
-// Druh priznania, ktorý sprievodca vyrába: len riadne. Opravné a dodatočné nie —
-// dodatočné potrebuje X. oddiel (r. 137 až 144, rozdiely oproti pôvodnému
-// priznaniu) a deň zistenia, a tie appka nemá (poučenie DPFOBv25, bod 3).
-// Rozsah podpory čaká na rozhodnutie (dev/opravy/priznanieB.md). Predtým sa druh
-// čítal z importovaného priznania, ktoré ho nikdy nenastavilo — vždy vyšlo
-// riadne, len to kód nepovedal.
-function pbTypDP(rok){ return "riadne"; }
+// Druh priznania za rok (poučenie DPFOBv25, bod 2 a 3): riadne; opravné pred
+// uplynutím lehoty (celé priznanie znova, iný príznak); dodatočné po lehote,
+// s dňom zistenia skutočností a X. oddielom — rozdielmi oproti priznaniu podanému
+// v lehote alebo naposledy podanému dodatočnému (poznámka 33 tlačiva). Pôvodné
+// čísla appka nemá, zadávajú sa z podaného priznania. Predtým sa druh čítal
+// z importovaného priznania, ktoré ho nikdy nenastavilo — vždy vyšlo riadne.
+const PB_DRUHY={riadne:"Riadne", opravne:"Opravné", dodatocne:"Dodatočné"};
+function pbDruh(rok){
+  const D=((((firmaData&&firmaData.settings)||{}).pbDruhRoky)||{})[String(rok)]||{};
+  return {typ:PB_DRUHY[D.typ]?D.typ:"riadne", datumZistenia:String(D.datumZistenia||""), pov:D.pov||{}};
+}
+function pbTypDP(rok){ return pbDruh(rok).typ; }
+// Posledný deň lehoty (§ 49 ZDP: do troch kalendárnych mesiacov po skončení roka).
+// Odklad ani posun na pracovný deň appka nepozná — dátum slúži len na upozornenie.
+function pbLehotaZakladna(rok){ return (+rok+1)+"-03-31"; }
+// X. oddiel dodatočného priznania podľa tlačiva DPFOBv25:
+//  r137 daň z r. 116 pôvodného · r138 = r116 − r137
+//  r139 daň na úhradu (+) z r. 135 alebo preplatok (−) z r. 136 pôvodného
+//  r140 = (r135 alebo r136) − r139 + [(r152 pôvodného − 2 % alebo 3 % z r124) > 0]
+//  r141/r142 bonus na poukázanie (r. 121) — appka r. 121 nepočíta, ostávajú prázdne
+//  r143/r144 bonus na úroky (§ 33a) — appka nepodporuje, ostávajú prázdne
+function pbDodatocneRozdiely(rok, v){
+  const Dr=pbDruh(rok);
+  if(Dr.typ!=="dodatocne") return null;
+  const P=Dr.pov, c=x=>r2(+x||0);
+  const pct=((((firmaData&&firmaData.settings)||{}).darNNO)||{}).treProcenta ? 0.03 : 0.02;
+  const r137=c(P.r116), r139=r2(c(P.r135)-c(P.r136));
+  const podielNavyse=r2(Math.max(0, c(P.r152)-r2(c(v.r.r124)*pct)));
+  return {r137, r138:r2(c(v.r.r116)-r137), r139,
+          r140:r2(c(v.r.r135)-c(v.r.r136)-r139+podielNavyse)};
+}
+function pbNastavDruh(rok, pole, hodnota){
+  if(!strazZapis("priznanieB")){ appPriznanieB(); return; }   // pole sa vráti na uloženú hodnotu
+  const S=firmaData.settings=firmaData.settings||{}, R=String(rok);
+  S.pbDruhRoky=S.pbDruhRoky||{};
+  const D=Object.assign({}, S.pbDruhRoky[R]);
+  if(pole==="typ"){ if(!PB_DRUHY[hodnota]) return; D.typ=hodnota; }
+  else if(pole==="datumZistenia"){ D.datumZistenia=String(hodnota||"").slice(0,10); }
+  else if(["r116","r135","r136","r121","r152"].includes(pole)){
+    const t=String(hodnota==null?"":hodnota).trim().replace(",",".");
+    D.pov=Object.assign({}, D.pov);
+    if(t==="") delete D.pov[pole];
+    else if(isNaN(+t)){ alert("Zadajte sumu v eurách, napríklad 1234,56."); appPriznanieB(); return; }
+    else D.pov[pole]=r2(+t);
+  } else return;
+  S.pbDruhRoky[R]=D;
+  poZmene(); appPriznanieB();
+}
+function pbDruhSekcia(rok, v){
+  const Dr=pbDruh(rok), P=Dr.pov, w=zam("priznanieB"), X=pbDodatocneRozdiely(rok, v);
+  const st="width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:8px";
+  const cis=(label, pole)=>`<div class="mfield" style="margin-bottom:8px"><label style="font-size:12.5px">${label}</label>
+    <input inputmode="decimal" value="${esc(P[pole]!=null?String(P[pole]):"")}" placeholder="z podaného priznania"${w} onchange="pbNastavDruh(${rok},'${pole}',this.value)" style="${st}"></div>`;
+  return `<div style="margin:0 0 12px;padding:10px 12px;border-radius:10px;border:1px solid var(--line)">
+    <div style="font-weight:700;font-size:13px;margin-bottom:6px">Druh priznania</div>
+    <select${w} onchange="pbNastavDruh(${rok},'typ',this.value)" style="${st}">
+      ${Object.keys(PB_DRUHY).map(k=>`<option value="${k}" ${Dr.typ===k?'selected':''}>${PB_DRUHY[k]}</option>`).join("")}
+    </select>
+    <div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px">Opravné sa podáva pred uplynutím lehoty na podanie a je to celé priznanie znova. Dodatočné sa podáva po lehote — povinne do konca mesiaca po zistení, že daň má byť vyššia.</div>
+    ${X?`
+    <div class="mfield" style="margin:10px 0 8px"><label style="font-size:12.5px">Dátum zistenia skutočností na podanie dodatočného priznania</label>
+      <input type="date" value="${esc(Dr.datumZistenia)}"${w} onchange="pbNastavDruh(${rok},'datumZistenia',this.value)" style="${st}"></div>
+    <div style="font-size:12.5px;font-weight:600;margin:6px 0">Z pôvodného priznania (podaného v lehote alebo posledného dodatočného)</div>
+    <div class="mrow2">${cis("Daň — r. 116","r116")}${cis("Poukázaný podiel dane — r. 152","r152")}</div>
+    <div class="mrow2">${cis("Daň na úhradu — r. 135","r135")}${cis("Daňový preplatok — r. 136","r136")}</div>
+    ${cis("Daňový bonus na poukázanie — r. 121","r121")}
+    ${pbRiadok("Zvýšenie (+) alebo zníženie (−) dane", X.r138, "r138")}
+    ${pbRiadok("Rozdiel: na úhradu (+) alebo preplatok (−)", X.r140, "r140", true)}`:""}
+  </div>`;
+}
 // SK NACE Rev. 2 v tvare 00.00.0 → k1 (2 číslice), k2 (2), k3 (1) podľa skNaceType
 // v XSD DPFOBv25. Neúplný kód vráti null — do XML nejde nič, kontrola to povie.
 function pbNaceRozloz(kod){
@@ -19214,11 +19312,12 @@ function pbKrokObsah(krok, v, S){
     const PV=pausalVydavky(v.prijmy, v.rok), pctP=Math.round(PV.sadzba*100);
     return `<h2 style="font-size:16px;margin-bottom:12px">Príjmy a výdavky ${v.rok}</h2>
       <div class="mfield" style="margin-bottom:12px"><label>Spôsob výdavkov</label>
-        <select${zam("priznanieB")} onchange="if(strazZapis('priznanieB'))zapisVydavkyRezim(this.value,${v.rok});appPriznanieB()">
+        <select${zam("priznanieB")} onchange="zapisVydavkyRezim(this.value,${v.rok});appPriznanieB()">
           <option value="skutocne" ${!v.pausalne?'selected':''}>Skutočné výdavky (z evidencie + odpis)</option>
           <option value="pausal" ${v.pausalne?'selected':''}${pausalMoznyVRoku(v.rok)?'':' disabled'}>Paušálne ${pctP} % (max ${eur(PV.strop)})</option>
         </select>
         <div style="font-size:11.5px;color:var(--ink-soft);margin-top:4px">Platí pre rok ${v.rok} — je to ten istý výber ako v Nastaveniach.${pausalMoznyVRoku(v.rok)?'':` V roku ${v.rok} ste boli platiteľom DPH po celý rok, paušál nie je možný.`}</div></div>
+      ${(S.pbPausalne!==undefined && !(S.vydavkyRezimRoky||{})[String(v.rok)])?`<div class="csub" style="margin:-4px 0 12px;color:var(--accent-deep)">⚠ Voľba sa tu predtým ukladala naraz pre všetky roky (${S.pbPausalne?"paušál":"skutočné výdavky"}). Teraz platí pre každý rok zvlášť a pre rok ${v.rok} ešte nie je zapísaná — vyberte ju.</div>`:""}
       ${pbRiadok("Príjmy z podnikania", v.prijmy, "r39")}
       ${pbRiadok("Výdavky"+(v.pausalne?` (paušál ${pctP} % + odvody)`:" (skutočné + odpis)"), v.vydavky, "r40")}
       ${pbRiadok("Zaplatené odvody (ZP+SP)", v.odvody)}
@@ -19231,7 +19330,7 @@ function pbKrokObsah(krok, v, S){
       ${pbZamInput("Zrazený preddavok na daň (r. 131)","pbZamZrazenaDan",S.pbZamZrazenaDan)}
       ${(+S.pbZamPrijmy)?pbRiadok("Čiastkový základ dane §5 (r. 38)", v.zaklad5, "r38", true):""}
       <div style="margin:16px 0 6px;font-weight:700;font-size:14px">Prenájom nehnuteľnosti (§ 6 ods. 3) — nepovinné</div>
-      <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:8px">Oslobodených je prvých 500 € príjmu; výdavky sa krátia v rovnakom pomere. Paušál 60 % pri prenájme neplatí.</div>
+      <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:8px">Oslobodených je prvých 500 € príjmu; výdavky sa krátia v rovnakom pomere. Paušál ${pctP} % pri prenájme neplatí.</div>
       ${pbZamInput("Príjmy z prenájmu","pbNajomPrijmy",S.pbNajomPrijmy)}
       ${pbZamInput("Skutočné výdavky k prenájmu","pbNajomVydavky",S.pbNajomVydavky)}
       ${(+S.pbNajomPrijmy)?pbRiadok("Základ z prenájmu (po oslobodení 500 €)", v.najomZaklad):""}
@@ -19282,6 +19381,7 @@ function pbKrokObsah(krok, v, S){
   // zhrnutie
   return `<h2 style="font-size:16px;margin-bottom:12px">Zhrnutie priznania ${v.rok}</h2>
     ${pbDanovnikSekcia(v.rok)}
+    ${pbDruhSekcia(v.rok, v)}
     ${pbKontrolyHtml(v.rok)}
     ${pbRiadok("Príjmy", v.prijmy, "r39")}
     ${pbRiadok("Výdavky", v.vydavky, "r40")}
@@ -19295,8 +19395,7 @@ function pbKrokObsah(krok, v, S){
     ${pbDarSekcia(v, S)}
     <div style="margin-top:12px;padding:12px;border-radius:10px;background:${v.doplatok>0?'#fdf2f2':'var(--sfc-pos)'}">
       ${pbRiadok(v.doplatok>0?"Daň na úhradu":"Daňový preplatok", Math.abs(v.doplatok), v.doplatok>0?"r135":"r136", true)}
-    </div>
-    <div style="margin-top:10px;font-size:11.5px;color:var(--ink-soft)">Sprievodca vyrába len riadne priznanie. Opravné ani dodatočné nevyrobí — dodatočné potrebuje rozdiely oproti pôvodnému priznaniu (X. oddiel), ktoré appka nemá.</div>`;
+    </div>`;
 }
 function pbExportXml(){
   if(!strazZapis("priznania")) return;
@@ -19313,6 +19412,9 @@ function pbExportXml(){
   // Údaje o daňovníkovi patria k priznaniu, nie k firme. Dátum narodenia ostáva
   // prázdny: riadok 02 je len pre daňovníka bez DIČ aj rodného čísla.
   const O=pbDanovnikUdaje(pbRok);
+  const Dr=pbDruh(pbRok), X=pbDodatocneRozdiely(pbRok, v)||{};
+  // datumDDP: DD.MM.RRRR (typ date v XSD), len pri dodatočnom
+  const datumDDP=(typ==="dodatocne" && /^\d{4}-\d{2}-\d{2}$/.test(Dr.datumZistenia)) ? Dr.datumZistenia.split("-").reverse().join(".") : "";
   const n=x=>{const q=(+x||0);return q?q.toFixed(2):"";};
   const b=x=>x?"1":"0";
   const esc=s=>String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
@@ -19334,7 +19436,7 @@ function pbExportXml(){
     </typDP>
     <zdanovacieObdobie>
       <rok>${pbRok}</rok>
-      <datumDDP></datumDDP>
+      <datumDDP>${datumDDP}</datumDDP>
     </zdanovacieObdobie>
     <skNace>
       <k1>${esc(O.k1)}</k1>
@@ -19819,10 +19921,10 @@ function pbExportXml(){
     <r134></r134>
     <r135>${n(v.r.r135)}</r135>
     <r136>${n(v.r.r136)}</r136>
-    <r137></r137>
-    <r138></r138>
-    <r139></r139>
-    <r140></r140>
+    <r137>${n(X.r137)}</r137>
+    <r138>${n(X.r138)}</r138>
+    <r139>${n(X.r139)}</r139>
+    <r140>${n(X.r140)}</r140>
     <r141></r141>
     <r142></r142>
     <r143></r143>
@@ -20447,7 +20549,7 @@ function sdPausalKarta(rok){
     <div class="csub" style="margin-bottom:12px">Spôsob výdavkov sa volí na každý rok zvlášť. Toto je porovnanie oboch scenárov na dátach roka ${rok}.</div>
     <div class="dphline"><span>Príjmy</span><b>${eur(P.prijmy)}</b></div>
     <div class="dphline"><span>Skutočné výdavky</span><b>${eur(P.vydavkySkut)}</b></div>
-    <div class="dphline"><span>Paušál 60 %${P.pausalZastropovany?" (zastropovaný na 20 000 €)":""}</span><b>${eur(P.pausal)}</b></div>
+    <div class="dphline"><span>Paušál ${pausalPopis(rok).pct}${P.pausalZastropovany?" (zastropovaný na "+pausalPopis(rok).strop+")":""}</span><b>${eur(P.pausal)}</b></div>
     <div class="dphline"><span>Daň pri skutočných</span><b>${eur(P.danSkut)}</b></div>
     <div class="dphline"><span>Daň pri paušále</span><b>${eur(P.danPausal)}</b></div>
     <div class="dphline" style="border-top:1px solid var(--line);font-size:15px"><span><b>Výhodnejšie: ${lepsi}</b></span><b style="color:var(--pos)">o ${eur(P.usporaDane)}</b></div>
@@ -35151,19 +35253,6 @@ document.addEventListener("keydown", e=>{
 let _ob = null;
 const OB_KROKOV = 6;
 
-// daňové konštanty 2026 (predvyplnené centrálne — používateľ ich nemusí hľadať)
-const KONST_2026 = {
-  danPrijem:0.15, sadzbaDPH:0.23, zdravSadzba:0.16,
-  vzKoef:0.672948, minVZmesZP:762, minOdvodZP:121.92,
-  nezdanitCast2026:5966.73, nczdHranicaPlna:26083.13, nczdKonstanta:14661.11, nczdZanik:43983.32,
-  // NČZD na manželku 2026
-  nczdManzelMax:5455.30, nczdManzelHranica:43983.32, nczdManzelKonst:20116.40,
-  // III. pilier — doplnkové dôchodkové sporenie, strop odpočtu
-  nczd3pilierMax:180,
-  // daňový bonus na deti 2026
-  bonusDo15:100, bonus15az18:50, bonusKratHranica:27432,
-  bonusPct:{1:0.29,2:0.36,3:0.43,4:0.50,5:0.57,6:0.64}
-};
 
 function spustiOnboarding(){
   if(!_ob) _ob = {
@@ -35261,14 +35350,14 @@ function obKrokObsah(k){
     const pausalMozny = o.platca===false || _registrovanyTentoRok;
     const jePausal = o.vydavkyRezim==='pausal';
     return `<h2>Ako uplatňujete výdavky?</h2>
-      <div class="ob-lead">Skutočné výdavky sa počítajú z vašich dokladov. Paušálne výdavky sú 60 % z príjmov (max. 20 000 € ročne) — jednoduchšie, bez evidencie dokladov, ale dostupné len pre neplatiteľov DPH.</div>
+      <div class="ob-lead">Skutočné výdavky sa počítajú z vašich dokladov. Paušálne výdavky sú ${pausalPopis(_rokTeraz).pct} z príjmov (max. ${pausalPopis(_rokTeraz).strop} ročne) — jednoduchšie, bez evidencie dokladov, ale dostupné len pre neplatiteľov DPH.</div>
       ${!pausalMozny?`<div class="ob-hint warn" style="margin-bottom:14px">Ste platiteľ DPH po celý rok, preto paušálne výdavky nie sú dostupné. Zákon ich dovoľuje neplatiteľovi — alebo tomu, kto bol platiteľom len časť roka; ak ste sa registrovali počas tohto roka, doplňte dátum v predchádzajúcom kroku.</div>`:`<div class="ob-hint" style="margin-bottom:14px">${o.platca===true?'Platiteľom ste sa stali počas tohto roka, takže paušál je pre tento rok ešte možný (§ 6 ods. 10). Od budúceho roka už nie.':''}</div>`}
       <div class="ob-opts">
         <div class="ob-opt ${!jePausal?'sel':''}" onclick="obSetVydavky('skutocne')">
           <div class="ri"></div><div class="ot"><b>Skutočné výdavky</b><span>Podľa reálnych dokladov a faktúr. Vhodné, ak máte vyššie náklady (auto, materiál, subdodávky).</span></div>
         </div>
         <div class="ob-opt ${jePausal?'sel':''} ${!pausalMozny?'ob-opt-off':''}" onclick="${pausalMozny?"obSetVydavky('pausal')":''}" style="${!pausalMozny?'opacity:.5;cursor:not-allowed':''}">
-          <div class="ri"></div><div class="ot"><b>Paušálne výdavky (60 %)</b><span>60 % z príjmov, max. 20 000 € ročne. Odvody sa uplatňujú navyše. Bez evidencie dokladov.</span></div>
+          <div class="ri"></div><div class="ot"><b>Paušálne výdavky (${pausalPopis(_rokTeraz).pct})</b><span>${pausalPopis(_rokTeraz).pct} z príjmov, max. ${pausalPopis(_rokTeraz).strop} ročne. Odvody sa uplatňujú navyše. Bez evidencie dokladov.</span></div>
         </div>
       </div>
       <div class="ob-hint">Túto voľbu môžete zmeniť neskôr v Nastaveniach. Appka vám vždy ukáže, ktorá možnosť vychádza výhodnejšie.</div>
@@ -35276,7 +35365,7 @@ function obKrokObsah(k){
   }
   if(k===4){
     return `<h2>Nezdaniteľné časti a bonus</h2>
-      <div class="ob-lead">Tieto úľavy znižujú vašu daň. Na seba máte nárok automaticky (${eur(KONST_2026.nezdanitCast2026)} ročne pre 2026). Doplňte, či si uplatňujete aj na manžela/manželku a deti.</div>
+      <div class="ob-lead">Tieto úľavy znižujú vašu daň. Na seba máte nárok automaticky (${eur(sadzbaRoka("nezdanitCast", new Date().getFullYear()))} ročne pre ${new Date().getFullYear()}). Doplňte, či si uplatňujete aj na manžela/manželku a deti.</div>
 
       <div class="ob-field">
         <label>NČZD na manžela/manželku?</label>
@@ -35286,14 +35375,14 @@ function obKrokObsah(k){
         </div>
         ${o.manzel?`<div class="ob-field" style="margin-top:10px"><label>Vlastný ročný príjem manžela/manželky (€)</label>
           <input id="ob_manzelPrijem" type="number" step="0.01" value="${o.manzelPrijem||''}" placeholder="0" oninput="_ob.manzelPrijem=+this.value||0">
-          <div class="ob-hint">Max. NČZD ${eur(KONST_2026.nczdManzelMax)}. Nárok len pri splnení podmienok (spoločná domácnosť + starostlivosť o dieťa do 3/6 r., evidencia ÚP, ZŤP alebo opatrovanie). Do príjmu sa počíta aj materské, nemocenské a dôchodky.</div>`:''}
+          <div class="ob-hint">Max. NČZD ${eur(sadzbaRoka("nczdManzelMax", new Date().getFullYear()))}. Nárok len pri splnení podmienok (spoločná domácnosť + starostlivosť o dieťa do 3/6 r., evidencia ÚP, ZŤP alebo opatrovanie). Do príjmu sa počíta aj materské, nemocenské a dôchodky.</div>`:''}
       </div>
 
       <div class="ob-field">
         <label>Daňový bonus na deti?</label>
         <div id="ob_detiList">${obDetiHtml()}</div>
         <button class="ob-add" onclick="obPridajDieta()">＋ Pridať dieťa</button>
-        <div class="ob-hint">2026: ${eur(KONST_2026.bonusDo15)}/mes do 15 r., ${eur(KONST_2026.bonus15az18)}/mes 15–18 r. Bonus je obmedzený percentom zo základu dane podľa počtu detí a kráti sa pri základe nad ${eur(KONST_2026.bonusKratHranica)}.</div>
+        <div class="ob-hint">${new Date().getFullYear()}: ${eur(sadzbaRoka("bonusDo15", new Date().getFullYear()))}/mes do 15 r., ${eur(sadzbaRoka("bonus15az18", new Date().getFullYear()))}/mes 15–18 r. Bonus je obmedzený percentom zo základu dane podľa počtu detí a kráti sa pri základe nad ${eur(sadzbaRoka("bonusKratHranica", new Date().getFullYear()))}.</div>
       </div>
       ${obNav(4, true)}`;
   }
@@ -35323,7 +35412,7 @@ function obKrokObsah(k){
   if(k===6){
     const o2=_ob;
     const detiTxt = o2.deti.length ? o2.deti.map(d=>d.vek+" r.").join(", ") : "žiadne";
-    const vydTxt = (!o2.platca && o2.vydavkyRezim==='pausal') ? 'Paušálne (60 %, max 20 000 €)' : 'Skutočné (podľa dokladov)';
+    const vydTxt = (!o2.platca && o2.vydavkyRezim==='pausal') ? 'Paušálne ('+pausalPopis(new Date().getFullYear()).pct+', max '+pausalPopis(new Date().getFullYear()).strop+')' : 'Skutočné (podľa dokladov)';
     return `<h2>Všetko pripravené ✓</h2>
       <div class="ob-lead">Skontrolujte nastavenie. Po dokončení sa vytvorí vaša firma a otvorí dashboard.</div>
       <div class="ob-sum">
