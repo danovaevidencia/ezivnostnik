@@ -1051,6 +1051,9 @@ h1,h2,h3,h4,.chead,.wbig,.sbox .sn,.sp-title b,.splittitle{text-wrap:balance}
 .nv-tipic{flex:none;line-height:1.4}
 .nv-ktext{min-width:0;flex:1}
 .nv-odkaz{color:var(--brand);font-weight:600;text-decoration:underline;text-underline-offset:2px}
+/* Modul mimo plánu: návod sa ukáže, ale povie to vopred. */
+.nv-plan{display:flex;gap:9px;align-items:flex-start;margin:0 0 14px;padding:10px 12px;border-radius:10px;background:var(--paper);border:1px solid var(--line);border-left:3px solid var(--warn);font-size:13px;line-height:1.5;color:var(--ink)}
+.nv-rtext .nv-planmini{font-size:11.5px;color:var(--ink-soft);margin-top:2px}
 /* Prvok, na ktorý odkaz z návodu ukázal. */
 .nv-blik{outline:3px solid var(--warn);outline-offset:4px;border-radius:10px}
 /* Krúžok aj stmavenie okolia jedným tieňom — okolie prvku ustúpi, prvok nie. */
@@ -2647,11 +2650,13 @@ async function nacitajFirmaConfig(fid){
   }catch(e){ firmaConfigChyba = e.message; }
 }
 // je modul povolený? Rozhoduje PLÁN; admin konfigurácia ho môže prepísať (napr. darovaný prístup).
+// konfiguračné kategórie → appkový modul, ktorý kategóriu v PLANY zastupuje.
+// Mimo funkcie, lebo podľa neho pomenúva plány aj poznámka v návodoch —
+// druhá kópia by sa rozišla.
+const MODUL_ZASTUPCA = { faktury:"faktury", vydavky:"vydavky", banka:"banka",
+                         dph:"dph", priznanie:"priznanieB", jazdy:"jazdy" };
 function modulPovoleny(kod){
-  // konfiguračné kategórie → appkové moduly, ktoré do nej patria
-  const zastupca = { faktury:"faktury", vydavky:"vydavky", banka:"banka",
-                     dph:"dph", priznanie:"priznanieB", jazdy:"jazdy" };
-  const modul = zastupca[kod] || kod;
+  const modul = MODUL_ZASTUPCA[kod] || kod;
   // 1) PLÁN JE ZÁKLAD — čo je v zaplatenom pláne, je vždy dostupné.
   //    (Platený prístup nesmie nič „prebiť" — inak by starý admin override
   //     zasekol zákazníka pod úroveň, ktorú si zaplatil.)
@@ -8434,8 +8439,27 @@ function nvOdkaz(druh, modul, uloha, prvok){
 // Modul zo skupiny sa otvára v rámci skupiny — tak ho človek pozná z plochy.
 // Prvok sa ukáže a nakrátko zvýrazní. Hľadá sa opakovane, lebo niektoré
 // obrazovky sa dokresľujú až chvíľu po otvorení.
+// Návod k modulu, ktorý plán firmy nemá, sa ukáže tiež — s poznámkou, v ktorom
+// pláne modul je (Roman, 13. 9. 2026). Otvoriť sa z návodu nedá: otvorApp plán
+// nekontroluje a obišla by sa tým dlaždica, ktorú plán skryl. Namiesto modulu
+// sa otvorí cenník.
+function nvDostupny(id){ return typeof modulPovolenyPreModul!=="function" || modulPovolenyPreModul(id); }
+function nvPlanyPreModul(id){
+  if(typeof MODUL_KATEGORIA==="undefined" || typeof PLANY==="undefined") return [];
+  const kat=MODUL_KATEGORIA[id]; if(!kat) return [];
+  const zast=(typeof MODUL_ZASTUPCA!=="undefined" && MODUL_ZASTUPCA[kat]) || kat;
+  return Object.values(PLANY).filter(p=>Array.isArray(p.moduly) && p.moduly.includes(zast)).map(p=>p.nazov);
+}
+function nvPlanPoznamkaHtml(id){
+  if(nvDostupny(id)) return "";
+  const plany=nvPlanyPreModul(id);
+  const kde=plany.length ? ` Je súčasťou ${plany.length>1?"plánov":"plánu"} <b>${plany.map(esc).join("</b>, <b>")}</b>.` : "";
+  return `<div class="nv-plan"><span aria-hidden="true">🔒</span><span>Tento modul vo vašom pláne nie je.${kde}
+    Návod si pozrieť môžete. <a href="#" class="nv-odkaz" onclick="event.preventDefault();zobrazCennik()">Zobraziť plány</a></span></div>`;
+}
 function nvOtvorModul(modul, prvok){
   nvZastav();
+  if(!nvDostupny(modul)){ zobrazCennik(); return; }
   const g=SKUPINY.find(x=>x.moduly.includes(modul));
   if(g && typeof otvorSuperApku==="function") otvorSuperApku(g.id, modul); else otvorApp(modul);
   if(!prvok) return;
@@ -8456,6 +8480,7 @@ function nvOtvorModul(modul, prvok){
 function nvSpatHtml(text, akcia){ return `<div class="clSpat" onclick="${akcia}">‹ ${esc(text)}</div>`; }
 function nvOtvorModulHtml(id){
   const a=APPS[id]; if(!a) return "";
+  if(!nvDostupny(id)) return `<button class="aabtn pri" onclick="zobrazCennik()">Zobraziť plány</button>`;
   return `<button class="aabtn pri" onclick="nvOtvorModul('${id}')">Otvoriť ${esc(a.n)}</button>`;
 }
 // Vrstva 0: zoznam návodov po skupinách, v tom poradí, v akom sú moduly na ploche.
@@ -8464,7 +8489,7 @@ function nvZoznamHtml(N){
     const a=APPS[id], m=N[id]; if(!a||!m) return "";
     return `<button class="nv-riadok" onclick="otvorNavod('${id}')">
       <span class="appic nv-ic" style="background:${a.c}">${a.ic}</span>
-      <span class="nv-rtext"><b>${esc(a.n)}</b><span>${esc(m.vJednejVete||"")}</span></span>
+      <span class="nv-rtext"><b>${esc(a.n)}</b><span>${esc(m.vJednejVete||"")}</span>${nvDostupny(id) ? "" : `<span class="nv-planmini">🔒 nie je vo vašom pláne</span>`}</span>
       <span class="nv-sip">›</span></button>`;
   };
   const skupiny=SKUPINY.map(g=>{
@@ -8493,6 +8518,7 @@ function nvModulHtml(id, m){
       <span class="nv-sip">›</span></button>`).join("");
   return `${nvSpatHtml("Všetky návody","otvorNavod()")}
     <div class="nv-hlava"><h3>${esc(a.n)}</h3><p>${nvText(m.uvod)}</p></div>
+    ${nvPlanPoznamkaHtml(id)}
     <div class="card nv-zoznam">${ulohy}</div>
     <div class="nv-pata">${nvOtvorModulHtml(id)}</div>`;
 }
@@ -8505,6 +8531,7 @@ function nvUlohaHtml(id, m, u){
   const podrobnosti=u.podrobnosti||[];
   return `${nvSpatHtml(a.n+" — návody",`otvorNavod('${id}')`)}
     <div class="nv-hlava"><h3>${esc(u.nazov)}</h3>${u.kedy?`<p>${esc(u.kedy)}</p>`:""}</div>
+    ${nvPlanPoznamkaHtml(id)}
     ${nvPrehravacHtml(kroky)}
     <ol class="nv-kroky">${kroky.map((k,j)=>`<li data-nv-krok="${j}" onclick="nvKrok(${j})">
       <span class="nv-cislo">${j+1}</span><span class="nv-ktext">${nvText(k.text)}${k.tip?nvTipHtml(k.tip):""}</span></li>`).join("")}</ol>
