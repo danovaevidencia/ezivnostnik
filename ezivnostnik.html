@@ -2076,7 +2076,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.13-OA";  // E-faktúra: appka neposiela používateľa k vlastnému poštárovi (Peppol platí eživnostník)
+const APP_VERZIA = "2026.09.13-OB";  // E-faktúry: odosielanie len v pláne Platiteľ DPH a Účtovník, príjem v každom
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -2510,6 +2510,10 @@ const PLANY = {
     cenaMes:12.18, cenaRok:119,   // 12,18 s DPH = 9,90 bez DPH (viď komentár nad plánom)
     popis:"Navyše kontrolný výkaz, súhrnný výkaz a priznania DPH",
     limity:{ faktury:0, odberatelia:0, doklady:0, bankaImporty:0, ulozisko:0 },
+    // Odosielanie e-faktúr sieťou Peppol (PLAN_EFAKTURA §6.3, spec 96.9). Príjem
+    // má každý plán; odosielať musí zo zákona platiteľ DPH a poštára platí
+    // eživnostník. Rovnaký zoznam drží edge funkcia `postar` (test_peppol_plan).
+    peppolOdosielanie:true,
     moduly:["faktury","vykazy","pohladavky","vydavky","banka","kalendar",
             "jazdy","majetok","dokumenty","dovolenka","knihy","priznania","priznanieB","dph"]
   },
@@ -2547,6 +2551,7 @@ const PLANY = {
     tiery:[{firmy:2, cenaMes:24.35},{firmy:5, cenaMes:29.52},{firmy:10, cenaMes:39.36}],
     popis:"Vy účtujete, klient nahráva doklady. Jeden účet, dve role.",
     limity:{ faktury:0, odberatelia:0, doklady:0, bankaImporty:0, ulozisko:0, firmy:2 },
+    peppolOdosielanie:true,   // za toľko IČO, koľko je zaplatené (firmy_limit, admin_38)
     moduly:["faktury","vykazy","pohladavky","vydavky","banka","kalendar",
             "jazdy","majetok","dokumenty","dovolenka","knihy","priznania","priznanieB","dph"]
   }
@@ -10450,7 +10455,7 @@ function appFaktury(){
     </div>`:''}
     <div class="alist">
       <div class="arow head rdok rf"><div class="c-cb"><input type="checkbox" ${vsetkyVybrane?'checked':''} onclick="fakVyberVsetky(this.checked)" title="Vybrať všetky" style="cursor:pointer"></div><div class="c-sub">Číslo</div><div class="c-main">Odberateľ</div><div class="c-date">Dátum</div><div class="c-sum" style="text-align:right">Suma</div><div class="c-stav">Stav</div><div class="c-act"></div></div>
-      ${list.length?list.map(f=>{const idx=_fIdx.get(f);const fk=dokladKluc(f);const st=uhradaStav("faktura", fk);const fb=UHRADA_FARBY[st.stav]||UHRADA_FARBY.neznamy;const uhradena=faktJeUhradena(f);const RZ=rozporRiadok(st);return `<div class="arow rdok rf${RZ.trieda}"><div class="c-cb"><input type="checkbox" ${fakVybrane.has(fk)?'checked':''} onclick="event.stopPropagation();fakToggleVyber('${esc(fk)}',this.checked)" style="cursor:pointer"></div><div class="acol-strong c-sub" style="color:${c}" onclick="otvorDoklad(${idx})">${esc(f.cislo||"—")}</div><div class="c-main" onclick="otvorDoklad(${idx})">${esc(f.odberatel||"—")}</div><div class="acol-muted c-date" onclick="otvorDoklad(${idx})">${fmtDatum(f.datum||f.vystavenie)}</div><div class="acol-sum c-sum" onclick="otvorDoklad(${idx})">${eur(+f.spolu||0)}</div><div class="c-stav" ${st.stav!=="overene"?`onclick="event.stopPropagation();otvorVyberPlatby('faktura','${esc(fk)}')"${zam("faktury")}`:`onclick="otvorDoklad(${idx})"`} style="${st.stav!=="overene"?"cursor:pointer":""}" title="${esc((st.text||'')+(st.stav!=="overene"?" · ťuknutím priradíte platbu z banky":""))}"><span style="display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:600;color:${fb.f}">${fb.ic}${fb.tichy?'':' '+fb.n}</span></div><div class="c-act" style="display:flex;gap:5px;align-items:center">${!uhradena?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vyberSposobUhrady(null,_s=>{oznacDokladUhradeny('faktura','${esc(fk)}',_s);appFaktury();})"${zam("faktury")} title="Označiť ako uhradené">✓</button>`:((st.zdroj==='rucne'||st.zdroj==='legacy')?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();zrusDokladUhradu('faktura','${esc(fk)}');appFaktury()"${zam("faktury")} title="Zrušiť potvrdenie úhrady">✕</button>`:'')}<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();exportFakturaPDF(${idx})" title="${f.originalSubor?'Stiahnuť pôvodný PDF':'Vygenerovať PDF faktúry'}">${f.originalSubor?'📎':'PDF'}</button><button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();exportEFakturaUBL(${idx})" title="E-faktúra UBL 2.1 / Peppol (povinné od 2027)">e-fa</button>${(!faktOdoslana(f) && postarDostupny())?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();faktOdosliSietou(${idx})"${zam("faktury")} title="Odoslať sieťou Peppol — najprv sa ukáže, čo presne odíde">📮</button>`:(faktOdoslana(f)?`<span title="Odoslaná sieťou Peppol" style="font-size:12px;padding:0 3px">📮✓</span>`:'')}<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();faktMenu(${idx},this)" title="Dobropis, ťarchopis, storno alebo kópia">⋯</button></div>${RZ.nota}</div>`;}).join(''):prazdnyAleboFilter(!(d.faktury||[]).length,
+      ${list.length?list.map(f=>{const idx=_fIdx.get(f);const fk=dokladKluc(f);const st=uhradaStav("faktura", fk);const fb=UHRADA_FARBY[st.stav]||UHRADA_FARBY.neznamy;const uhradena=faktJeUhradena(f);const RZ=rozporRiadok(st);return `<div class="arow rdok rf${RZ.trieda}"><div class="c-cb"><input type="checkbox" ${fakVybrane.has(fk)?'checked':''} onclick="event.stopPropagation();fakToggleVyber('${esc(fk)}',this.checked)" style="cursor:pointer"></div><div class="acol-strong c-sub" style="color:${c}" onclick="otvorDoklad(${idx})">${esc(f.cislo||"—")}</div><div class="c-main" onclick="otvorDoklad(${idx})">${esc(f.odberatel||"—")}</div><div class="acol-muted c-date" onclick="otvorDoklad(${idx})">${fmtDatum(f.datum||f.vystavenie)}</div><div class="acol-sum c-sum" onclick="otvorDoklad(${idx})">${eur(+f.spolu||0)}</div><div class="c-stav" ${st.stav!=="overene"?`onclick="event.stopPropagation();otvorVyberPlatby('faktura','${esc(fk)}')"${zam("faktury")}`:`onclick="otvorDoklad(${idx})"`} style="${st.stav!=="overene"?"cursor:pointer":""}" title="${esc((st.text||'')+(st.stav!=="overene"?" · ťuknutím priradíte platbu z banky":""))}"><span style="display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:600;color:${fb.f}">${fb.ic}${fb.tichy?'':' '+fb.n}</span></div><div class="c-act" style="display:flex;gap:5px;align-items:center">${!uhradena?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vyberSposobUhrady(null,_s=>{oznacDokladUhradeny('faktura','${esc(fk)}',_s);appFaktury();})"${zam("faktury")} title="Označiť ako uhradené">✓</button>`:((st.zdroj==='rucne'||st.zdroj==='legacy')?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();zrusDokladUhradu('faktura','${esc(fk)}');appFaktury()"${zam("faktury")} title="Zrušiť potvrdenie úhrady">✕</button>`:'')}<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();exportFakturaPDF(${idx})" title="${f.originalSubor?'Stiahnuť pôvodný PDF':'Vygenerovať PDF faktúry'}">${f.originalSubor?'📎':'PDF'}</button><button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();exportEFakturaUBL(${idx})" title="E-faktúra UBL 2.1 / Peppol (povinné od 2027)">e-fa</button>${(!faktOdoslana(f) && postarMozeOdosielat())?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();faktOdosliSietou(${idx})"${zam("faktury")} title="Odoslať sieťou Peppol — najprv sa ukáže, čo presne odíde">📮</button>`:(faktOdoslana(f)?`<span title="Odoslaná sieťou Peppol" style="font-size:12px;padding:0 3px">📮✓</span>`:'')}<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();faktMenu(${idx},this)" title="Dobropis, ťarchopis, storno alebo kópia">⋯</button></div>${RZ.nota}</div>`;}).join(''):prazdnyAleboFilter(!(d.faktury||[]).length,
         "Zatiaľ nemáte žiadnu faktúru. Vystavte prvú — číslo, dátumy aj DPH doplní appka podľa nastavení.",
         {popis:"＋ Nová faktúra", kod:"editFaktura()"},
         "fFilter='vsetky';fRok='';fMesiac='';_hladaj.faktury='';appFaktury()")}
@@ -11348,7 +11353,7 @@ function faktMenu(idx, zdroj){
   const pol=(akcia,ikona,text)=>`<button onclick="${akcia}" style="${TB_POLOZKA}">${ikona} ${text}</button>`;
   // Odoslanie sieťou stojí PRVÉ, ale len kým doklad neodišiel — potom je
   // ponuka na mieste, kde predtým bolo odoslanie, past na druhé odoslanie.
-  const mozeOdoslat = !faktOdoslana(f) && postarDostupny();
+  const mozeOdoslat = !faktOdoslana(f) && postarMozeOdosielat();
   tbMenu("fakMenu", btn,
     (mozeOdoslat ? pol(`faktMenuAkcia(${idx},'odosli')`,"📮","Odoslať sieťou Peppol")+TB_CIARA : "")
     +pol(`faktMenuAkcia(${idx},'dobropis')`,"➖","Dobropis")
@@ -18635,6 +18640,7 @@ function appData(){
       </label>
       <div class="ocr-hint" style="margin-top:5px">Zapne v menu faktúry voľbu „Odoslať sieťou Peppol“. Odoslanie je <b>nezvratné</b>: doklad dostane odberateľ, poštár ho nahlási Finančnej správe a faktúra sa tým zamkne — meniť sa bude dať už len dobropisom alebo ťarchopisom. Nič sa neodošle samo; pri každom doklade sa appka spýta na sumu aj príjemcu.</div>
       <div id="set_postarDic">${nastDicUpozornenieHtml(d.meta)}</div>
+      ${nastPeppolPlanHtml()}
     </div>
 
     <div class="card" style="margin-bottom:14px">
@@ -18768,6 +18774,12 @@ async function doplnFirmuPodlaICO(){
 // Upozornenie v karte E-faktúry. Funkcia, nie výraz v šablóne: `ulozNastavenia`
 // obrazovku neprekresľuje a upozornenie by po doplnení DIČ ostalo visieť až do
 // ďalšieho otvorenia modulu.
+// Voľba v karte E-faktúry zapína aj PRÍJEM, ten má každý plán — preto sa
+// neskrýva. Len povie, že odosielanie plán nedá (spec 96.9).
+function nastPeppolPlanHtml(){
+  if(planOdosielaPeppol(aktualnyPlan())) return "";
+  return `<div class="ocr-hint" style="margin-top:8px">Váš plán e-faktúry <b>prijíma</b>. Odosielať ich sieťou Peppol môžete v pláne Platiteľ DPH alebo Účtovník.</div>`;
+}
 function nastDicUpozornenieHtml(meta){
   // Bez DIČ firma v sieti neexistuje a poštár nevie, kto posiela. Je to
   // tvrdá podmienka `postarDostupny()` — povedať to treba TU, nie až
@@ -21526,6 +21538,8 @@ function kartaPlanu(p){
         ${riadok("Kniha jázd, majetok, dokumenty", p.moduly.includes("jazdy"))}
         ${riadok("Daňové priznanie typ B", p.moduly.includes("priznanieB"))}
         ${riadok("DPH — priznanie a kontrolný výkaz", p.moduly.includes("dph"))}
+        ${riadok("Príjem e-faktúr Peppol", true)}
+        ${riadok("Odosielanie e-faktúr Peppol", !!p.peppolOdosielanie)}
         ${(tier?tier.firmy:lim.firmy)?riadok(`Až ${tier?tier.firmy:lim.firmy} firiem klientov v jednom účte`, true):""}
       </div>
       ${(()=>{
@@ -24693,7 +24707,7 @@ function efakturaInfo(){
   // Do 13. 9. 2026 tu stálo „vyberte si poštára, ~5–12 €/mes" a „appka
   // neodosiela" — od NI appka odosiela sama a poštára platí eživnostník
   // (spec 96.9). Doručuje poštár, nie my (spec 38.13); stráži test_efaktura_texty.
-  alert("Povinná e-fakturácia od 1.1.2027\n\n• Platitelia DPH musia tuzemské B2B faktúry vystavovať a všetci podnikatelia ich musia prijímať v štruktúrovanom formáte (UBL 2.1 / Peppol BIS Billing 3.0, norma EN 16931).\n• PDF ani papier už nebudú stačiť.\n• Faktúry prenáša sieť Peppol cez certifikovaného digitálneho poštára, ktorý ich doručí odberateľovi a údaje oznámi Finančnej správe.\n• Zaniká kontrolný a súhrnný výkaz (od 2030).\n• Sankcie: až 10 000 € (prvé porušenie), až 100 000 € (opakované).\n\nČo robí táto appka:\n• Faktúru odošle sieťou Peppol cez digitálneho poštára, s ktorým spolupracuje (Verteco) — v menu faktúry voľba „Odoslať sieťou Peppol“. Zapnete ju v Nastavenia a dáta → E-faktúry.\n• Prijaté e-faktúry prevezme a ponúkne na zaevidovanie do výdavkov.\n• Vlastného poštára si vyberať ani platiť nemusíte.\n\nČo musíte spraviť vy:\n• Mať vo firemných údajoch vyplnené DIČ — podľa neho vás sieť nájde.\n• V roku 2026 je to dobrovoľné a dá sa to skúšať.");
+  alert("Povinná e-fakturácia od 1.1.2027\n\n• Platitelia DPH musia tuzemské B2B faktúry vystavovať a všetci podnikatelia ich musia prijímať v štruktúrovanom formáte (UBL 2.1 / Peppol BIS Billing 3.0, norma EN 16931).\n• PDF ani papier už nebudú stačiť.\n• Faktúry prenáša sieť Peppol cez certifikovaného digitálneho poštára, ktorý ich doručí odberateľovi a údaje oznámi Finančnej správe.\n• Zaniká kontrolný a súhrnný výkaz (od 2030).\n• Sankcie: až 10 000 € (prvé porušenie), až 100 000 € (opakované).\n\nČo robí táto appka:\n• Prijaté e-faktúry prevezme a ponúkne na zaevidovanie do výdavkov — v každom pláne.\n• V pláne Platiteľ DPH a Účtovník faktúru aj odošle sieťou Peppol cez digitálneho poštára, s ktorým spolupracuje (Verteco) — v menu faktúry voľba „Odoslať sieťou Peppol“. Zapnete ju v Nastavenia a dáta → E-faktúry.\n• Vlastného poštára si vyberať ani platiť nemusíte.\n\nČo musíte spraviť vy:\n• Mať vo firemných údajoch vyplnené DIČ — podľa neho vás sieť nájde.\n• V roku 2026 je to dobrovoľné a dá sa to skúšať.");
 }
 // ═══ E-FAKTÚRA UBL 2.1 / Peppol BIS Billing 3.0 (povinné od 1.1.2027) ═══
 // Generuje štruktúrovaný XML podľa EN 16931. Súbor sa dá nahrať Digitálnemu poštárovi.
@@ -25025,7 +25039,7 @@ function exportEFakturaUBL(idx){
   const ib=v.ibanChyba ? "\n\n⚠ "+v.ibanChyba+" Odberateľ podľa tejto e-faktúry nezaplatí. Opravte IBAN v Nastavenia a dáta → Firemné údaje a e-faktúru vygenerujte znova." : "";
   setTimeout(()=>alert((v.chyba.length
     ? "E-faktúra (UBL 2.1) vygenerovaná, ale sieť Peppol ju takto nedoručí.\n\nChýba: "+v.chyba.join(", ")+".\n\nÚčastník sa v sieti hľadá podľa DIČ; bez neho poštár nevie, komu doklad patrí."
-    : "E-faktúra (UBL 2.1) vygenerovaná ako súbor.\n\nOdberateľovi ju pošlete sieťou Peppol priamo z appky — v menu faktúry voľba „Odoslať sieťou Peppol“ (zapnete v Nastavenia a dáta → E-faktúry). Od 1.1.2027 je elektronická fakturácia povinná, v roku 2026 sa dá skúšať dobrovoľne.")+ib),150);
+    : "E-faktúra (UBL 2.1) vygenerovaná ako súbor.\n\nV pláne Platiteľ DPH a Účtovník ju odberateľovi pošlete sieťou Peppol priamo z appky — v menu faktúry voľba „Odoslať sieťou Peppol“ (zapnete v Nastavenia a dáta → E-faktúry). Od 1.1.2027 je elektronická fakturácia povinná, v roku 2026 sa dá skúšať dobrovoľne.")+ib),150);
 }
 // ═══════════════════════════════════════════════════════════════
 //  JEDINÁ HRANICA VOLANIA DIGITÁLNEHO POŠTÁRA
@@ -25067,6 +25081,13 @@ function postarDostupny(){
   if(!String(m.dic||m.icdph||"").trim()) return false;
   return !!((firmaData.settings||{}).postarZapnuty);
 }
+// Kto smie ODOSIELAŤ: plán s `peppolOdosielanie` (Platiteľ DPH, Účtovník).
+// Príjem má každý plán a ide cez `postarDostupny` — preto plán NIE JE v nej:
+// Free a Neplatiteľ DPH by prestali prijímať, čo je od 2027 zákonná povinnosť.
+// Poštára platí eživnostník (spec 96.9), klient sa dá obísť, a tak to isté
+// pravidlo stráži aj edge funkcia `postar`; test_peppol_plan porovnáva obe.
+function planOdosielaPeppol(kod){ return !!((PLANY[kod]||{}).peppolOdosielanie); }
+function postarMozeOdosielat(){ return postarDostupny() && planOdosielaPeppol(aktualnyPlan()); }
 // ═══════════════════════════════════════════════════════════════
 //  MODUL E-FAKTÚRY — čo odišlo a čo prišlo sieťou Peppol
 //
@@ -25288,6 +25309,13 @@ async function efakturaZaevidujte(id){
 let _peppolOkno=null;
 async function faktOdosliSietou(idx){
   if(!strazZapis("faktury")) return;
+  // Ponuka sa podľa plánu skrýva, ale funkcia sa dá zavolať aj inak — a server
+  // by odmietol až po zložení dokladu. Povedať to hneď a ukázať cenník.
+  if(!planOdosielaPeppol(aktualnyPlan())){
+    alert("Odosielanie e-faktúr sieťou Peppol je v pláne Platiteľ DPH a Účtovník.\n\nPrijímať e-faktúry môžete v každom pláne.");
+    if(typeof zobrazCennik==="function") zobrazCennik();
+    return;
+  }
   const f=(firmaData.faktury||[])[idx];
   if(!f){ alert("Faktúra sa nenašla."); return; }
   const uz=faktOdoslana(f);
