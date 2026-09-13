@@ -3994,8 +3994,8 @@ function prerusOdpisovanie(rok){
   alert("Odpisovanie prerušené v "+ciel.length+(ciel.length===1?" položke":" položkách")+" majetku.\n\n"
     + "Späť to vrátite v "+APPS.superdash.n+" → "+((SD_POHLADY.find(p=>p.id==="dane")||{}).n||"Dane")
     + " tlačidlom „Obnoviť odpisovanie v roku "+rok+"“.");
-  if(typeof renderSuperDashboard==="function" && aktualnaApp==="superdash") renderSuperDashboard();
-  else if(typeof appMajetok==="function" && aktualnaApp==="majetok") appMajetok();
+  if(typeof renderSuperDashboard==="function" && modulNaObrazovke()==="superdash") renderSuperDashboard();
+  else if(typeof appMajetok==="function" && modulNaObrazovke()==="majetok") appMajetok();
 }
 function zrusPrerusenie(rok){
   if(!strazZapis("majetok")) return;
@@ -4006,8 +4006,8 @@ function zrusPrerusenie(rok){
     if(!m.prerusene.length) delete m.prerusene;
   });
   poZmene();
-  if(typeof renderSuperDashboard==="function" && aktualnaApp==="superdash") renderSuperDashboard();
-  else if(typeof appMajetok==="function" && aktualnaApp==="majetok") appMajetok();
+  if(typeof renderSuperDashboard==="function" && modulNaObrazovke()==="superdash") renderSuperDashboard();
+  else if(typeof appMajetok==="function" && modulNaObrazovke()==="majetok") appMajetok();
 }
 
 // Koľko by sa v tomto roku odpísalo, keby prerušené nebolo — potrebné na to,
@@ -5085,7 +5085,7 @@ function oznacNieJeMajetok(idx){
   vyd.nieJeMajetokKedy=new Date().toISOString();
   poZmene();
   if(typeof vykresliDashboard==="function") vykresliDashboard();
-  if(aktualnaApp==="vydavky") appVydavky();
+  if(modulNaObrazovke()==="vydavky") appVydavky();
 }
 // Zoznam na rozhodnutie. Rovnaký tvar ako `rozporyModal` — dve tlačidlá
 // pri každom doklade, aby sa rozhodlo tam, kde sa o tom človek dozvedel.
@@ -5191,7 +5191,7 @@ function vydavokDoMajetku(idx){
       vyd.zaradenyOdpisovany=true;      // zhodnotenie sa uplatní odpisom, nie naraz
       delete vyd.mozeBytMajetok;
       poZmene();
-      if(aktualnaApp==="vydavky") appVydavky();
+      if(modulNaObrazovke()==="vydavky") appVydavky();
       alert("Zhodnotenie pridané k majetku „"+(m.nazov||"—")+"“. Výdavok sa nahradil vyšším odpisom.");
       return;
     }
@@ -5203,7 +5203,7 @@ function vydavokDoMajetku(idx){
     firmaData.majetok.push(m);
     majetokPrepojVydavok(m, vyd);
     poZmene();
-    if(aktualnaApp==="vydavky") appVydavky();
+    if(modulNaObrazovke()==="vydavky") appVydavky();
     alert(rezim==="drobny"?"Drobný majetok zaevidovaný (výdavok ostáva).":"Majetok zaradený, výdavok nahradený odpisom.");
   });
 }
@@ -7748,7 +7748,7 @@ async function overOsobitnuUpravu(rok){
       +"DPH z nich si odpočítate až v období, keď ich zaplatíte. Appka ich do priznania zaradí sama podľa úhrady."
     : "Žiadny z overených dodávateľov osobitnú úpravu neuplatňuje."
     + (neznamych?"\n\nPri "+neznamych+" dodávateľoch register neodpovedal — tí ostali neoverení.":""));
-  if(aktualnaApp==="uzavierka") appUzavierka(); else if(aktualnaApp==="dph") appDPH();
+  if(modulNaObrazovke()==="uzavierka") appUzavierka(); else if(modulNaObrazovke()==="dph") appDPH();
 }
 
 // Doklady, na ktorých sa dá účet overiť: platiteľ DPH, slovenské IČ DPH
@@ -7789,7 +7789,7 @@ async function overUctyDodavatelov(rok){
   alert("Overené: "+zapisanych+" z "+zoz.length+" dokladov."
     +(neznamych?"\nRegister neodpovedal pri "+neznamych+" dodávateľoch — tie ostali neoverené.":"")
     +(zle?"\n\n⚠ "+zle+" dokladov je zaplatených na účet, ktorý dodávateľ Finančnej správe neoznámil.":"\n\nVšetky overené účty sú oznámené."));
-  if(aktualnaApp==="uzavierka") appUzavierka(); else if(aktualnaApp==="vydavky") appVydavky();
+  if(modulNaObrazovke()==="uzavierka") appUzavierka(); else if(modulNaObrazovke()==="vydavky") appVydavky();
 }
 
 // živý oznam pod poľom účtu
@@ -8249,12 +8249,35 @@ function pasRolyPlocha(){
 let aktualnaApp=null;
 let aktualnaSuperApka=null;   // ktorá super apka je otvorená (skupina)
 let aktualnaZalozka=null;     // ktorá podsekcia je aktívna vnútri super apky
+// Modul, ktorý je práve na obrazovke: samostatne otvorený (aj "split"), alebo
+// záložka otvorenej skupiny. Háčiky „po zmene prekresli modul, ak je otvorený“
+// sa pýtajú TU. Do 13. 9. 2026 sa ~35 z nich pýtalo `aktualnaApp` — ten je
+// v rámci skupiny null, takže import výpisu, notifikácia, párovanie ani
+// uloženie obrazovku v skupine neprekreslili (ROZHODNUTIA.md 35).
+// Rozhoduje `aktualnaSuperApka`, nie `aktualnaZalozka||aktualnaApp`:
+// záložka sa pri odchode zo skupiny nenuluje a v Párovaní otvorenom z Banky
+// by háčik kreslil skrytú Banku.
+function modulNaObrazovke(){
+  if(aktualnaApp) return aktualnaApp;
+  return aktualnaSuperApka ? aktualnaZalozka : null;
+}
+// Modul, ktorý plán firmy nemá, sa neotvorí odnikiaľ — zvonček, odkaz, návod,
+// bočná lista. Namiesto neho cenník s poznámkou, o ktorý modul ide (Roman,
+// 13. 9. 2026, ROZHODNUTIA.md 30). Dlaždicu plán skryje, odkazy ju obchádzali.
+function modulMimoPlanu(id){
+  if(modulPovolenyPreModul(id)) return false;
+  vyberPlatiPre(modulNaObrazovke());   // výber zo zvončeka pre neotvorený modul nevisí
+  zobrazCennik(id);
+  return true;
+}
+// Vráti false, keď sa modul neotvoril (DPH neplatiteľa, plán).
 function otvorApp(id){
   // neplatiteľ DPH → DPH modul neotvárame (obrana pri priamom volaní)
   if(id==="dph" && !jePlatcaDPH()){
     alert("DPH modul je dostupný len pre platiteľov DPH.\n\nAk ste sa stali platiteľom, doplňte IČ DPH v Nastaveniach → Firemné údaje.");
-    return;
+    return false;
   }
+  if(modulMimoPlanu(id)) return false;
   // Výber zo zvončeka platí pre JEDEN modul. Odchodom inam stráca zmysel a
   // nechať ho žiť by znamenalo, že sa človek o týždeň vráti do Banky a nájde
   // tam filtrovaný zoznam bez toho, aby vedel prečo.
@@ -8264,12 +8287,13 @@ function otvorApp(id){
   // odkazy aj návody: do 13. 9. 2026 rámec vedel otvoriť len `nvOtvorModul`
   // a zvonček otváral Banku bez hlavičky skupiny a bez záložiek.
   const sk=skupinaSRamcom(id);
-  if(sk){ otvorSuperApku(sk, id); return; }
+  if(sk){ otvorSuperApku(sk, id); return true; }
   aktualnaApp=id;
   aktualnaSuperApka=null;
   zobrazObrazovku("app");
   window.scrollTo(0,0);
   renderApp(id);
+  return true;
 }
 // otvor super apku (skupinu) — zoskupené moduly so záložkami / split
 // Ktoré skupiny sú pre túto firmu dostupné a s akými modulmi. JEDEN zdroj pre
@@ -8278,9 +8302,7 @@ function otvorApp(id){
 function skupinyDostupne(){
   const out=[];
   SKUPINY.forEach(g=>{
-    let moduly=g.moduly.filter(m=>APPS[m]);
-    if(!jePlatcaDPH()) moduly=moduly.filter(m=>m!=="dph");
-    moduly=moduly.filter(m=>modulPovolenyPreModul(m));
+    const moduly=modulySkupiny(g.id);
     if(!moduly.length) return;
     out.push({g, moduly});
   });
@@ -8483,10 +8505,10 @@ function listaNastav(pozicia, id){
 }
 
 function otvorSuperApku(skupinaId, zalozka){
-  const g=SKUPINY.find(s=>s.id===skupinaId); if(!g) return;
-  let moduly=g.moduly.filter(m=>APPS[m]);
-  if(!jePlatcaDPH()) moduly=moduly.filter(m=>m!=="dph");
-  moduly=moduly.filter(m=>modulPovolenyPreModul(m));
+  // Bočná lista a odkazy žiadajú konkrétnu záložku. Mimo plánu by sa namiesto
+  // nej ticho otvorila prvá — rovnaké pravidlo ako v `otvorApp`.
+  if(zalozka && modulMimoPlanu(zalozka)) return;
+  const moduly=modulySkupiny(skupinaId);
   if(!moduly.length) return;
   // ak má skupina len jednu záložku, otvor modul priamo (netreba super apku)
   if(skupinaPocetTabov(skupinaId, moduly)===1){ otvorApp(moduly[0]); return; }
@@ -8584,8 +8606,8 @@ function appNavody(){
   nvZastav();
   if(!navodyNacitane()){
     box.innerHTML=hlavicka+`<div class="csub" style="margin:14px 2px">Načítavam návody…</div>`;
-    navodyNacitaj().then(()=>{ if(aktualnaApp==="navody") appNavody(); })
-      .catch(()=>{ if(aktualnaApp==="navody") box.innerHTML=hlavicka+`<div class="card"><div class="csub">
+    navodyNacitaj().then(()=>{ if(modulNaObrazovke()==="navody") appNavody(); })
+      .catch(()=>{ if(modulNaObrazovke()==="navody") box.innerHTML=hlavicka+`<div class="card"><div class="csub">
         Návody sa nepodarilo načítať. Skúste to znova, keď budete pripojení na internet.</div></div>`; });
     return;
   }
@@ -8602,7 +8624,7 @@ function appNavody(){
 // s druhou variantou snímok, inak by na mobile ostala desktopová a naopak.
 let _nvVykreslenaVarianta=null;
 if(window.addEventListener) window.addEventListener("resize", ()=>{
-  if(aktualnaApp!=="navody" || !document.getElementById("nvPrehravac")) return;
+  if(modulNaObrazovke()!=="navody" || !document.getElementById("nvPrehravac")) return;
   if(nvVarianta()!==_nvVykreslenaVarianta) appNavody();
 });
 // Odkazy v texte návodu. Keď návod na niečo odkazuje, je to PREKLIK, nie
@@ -8628,9 +8650,9 @@ function nvOdkaz(druh, modul, uloha, prvok){
 // Prvok sa ukáže a nakrátko zvýrazní. Hľadá sa opakovane, lebo niektoré
 // obrazovky sa dokresľujú až chvíľu po otvorení.
 // Návod k modulu, ktorý plán firmy nemá, sa ukáže tiež — s poznámkou, v ktorom
-// pláne modul je (Roman, 13. 9. 2026). Otvoriť sa z návodu nedá: otvorApp plán
-// nekontroluje a obišla by sa tým dlaždica, ktorú plán skryl. Namiesto modulu
-// sa otvorí cenník.
+// pláne modul je (Roman, 13. 9. 2026). Otvoriť sa z návodu nedá — namiesto
+// modulu sa otvorí cenník. To pravidlo je v `otvorApp` (`modulMimoPlanu`) pre
+// všetky odkazy, návod nemá vlastnú kópiu; `nvDostupny` tu len mení vzhľad.
 function nvDostupny(id){ return typeof modulPovolenyPreModul!=="function" || modulPovolenyPreModul(id); }
 function nvPlanyPreModul(id){
   if(typeof MODUL_KATEGORIA==="undefined" || typeof PLANY==="undefined") return [];
@@ -8638,17 +8660,19 @@ function nvPlanyPreModul(id){
   const zast=(typeof MODUL_ZASTUPCA!=="undefined" && MODUL_ZASTUPCA[kat]) || kat;
   return Object.values(PLANY).filter(p=>Array.isArray(p.moduly) && p.moduly.includes(zast)).map(p=>p.nazov);
 }
+// „ Je súčasťou plánu X.“ — spoločné pre poznámku v návode aj v cenníku.
+function planyModuluHtml(id){
+  const plany=nvPlanyPreModul(id);
+  return plany.length ? ` Je súčasťou ${plany.length>1?"plánov":"plánu"} <b>${plany.map(esc).join("</b>, <b>")}</b>.` : "";
+}
 function nvPlanPoznamkaHtml(id){
   if(nvDostupny(id)) return "";
-  const plany=nvPlanyPreModul(id);
-  const kde=plany.length ? ` Je súčasťou ${plany.length>1?"plánov":"plánu"} <b>${plany.map(esc).join("</b>, <b>")}</b>.` : "";
-  return `<div class="nv-plan"><span aria-hidden="true">🔒</span><span>Tento modul vo vašom pláne nie je.${kde}
+  return `<div class="nv-plan"><span aria-hidden="true">🔒</span><span>Tento modul vo vašom pláne nie je.${planyModuluHtml(id)}
     Návod si pozrieť môžete. <a href="#" class="nv-odkaz" onclick="event.preventDefault();zobrazCennik()">Zobraziť plány</a></span></div>`;
 }
 function nvOtvorModul(modul, prvok){
   nvZastav();
-  if(!nvDostupny(modul)){ zobrazCennik(); return; }
-  otvorApp(modul);   // modul zo skupiny otvorí v jej rámci
+  if(!otvorApp(modul)) return;   // v rámci skupiny; mimo plánu otvorí cenník
   if(!prvok) return;
   let pokus=0;
   const ukaz=()=>{
@@ -9000,7 +9024,7 @@ function appClanky(){
 
   if(!_clModul){
     box.innerHTML=hlavicka+`<div class="csub" style="margin:14px 2px">Načítavam…</div>`;
-    clankyModul().then(()=>{ if(aktualnaApp==="clanky") appClanky(); });
+    clankyModul().then(()=>{ if(modulNaObrazovke()==="clanky") appClanky(); });
     return;
   }
   const C=_clModul;
@@ -9106,7 +9130,8 @@ function prepniZalozku(m){
   prekresliRamec();
 }
 // Moduly skupiny, po filtroch plánu a platiteľstva DPH. Bolo to na troch
-// miestach trikrát to isté.
+// miestach trikrát to isté — `otvorSuperApku` a `skupinyDostupne` mali vlastnú
+// kópiu ešte do 13. 9. 2026 (ROZHODNUTIA.md 35).
 function modulySkupiny(skupinaId){
   const g=SKUPINY.find(s=>s.id===skupinaId); if(!g) return [];
   let m=g.moduly.filter(x=>APPS[x]&&modulPovolenyPreModul(x));
@@ -10959,7 +10984,7 @@ async function importSaasJson(subor){
     + "✓ pridaných: "+pridanych+"\n"
     + (preskocenych ? "• preskočených (už evidované): "+preskocenych+"\n" : "")
     + (pridanych ? "\nSú označené ako uhradené kartou a vstupujú do príjmov aj do kontrolného výkazu." : ""));
-  if(pridanych && aktualnaApp==="faktury") appFaktury();
+  if(pridanych && modulNaObrazovke()==="faktury") appFaktury();
 }
 let _faktImportData=null;
 // rozpozná typ a spracuje 1+ súborov
@@ -13161,7 +13186,7 @@ async function ulozVydavokZFormulara(idx, R){
   // automatika videla doklad, ktorý práve vznikol.
   if(nova) oznamAutoUhradu(autoParujDoklad("vydavok", dokladKluc(obj)), "vydavok", dokladKluc(obj));
   // Okno dokladu sa otvára aj z E-faktúr a z plochy — tam sa Výdavky nekreslia.
-  if(R){ if(aktualnaApp==="vydavky") appVydavky(); }
+  if(R){ if(modulNaObrazovke()==="vydavky") appVydavky(); }
   else obnovPoEditacii("vydavky");
   return true;
 }
@@ -13511,8 +13536,8 @@ function ignorujProtiucet(iban){
   firmaData.settings.ignorPravidla.push({typ:"iban", hodnota:ib});
   poZmene();
   alert("Pravidlo pridané. "+dotkne.length+" pohybov sa už nebude hlásiť.");
-  if(aktualnaApp==="uzavierka" && typeof appUzavierka==="function") appUzavierka();
-  else if(aktualnaApp==="banka" && typeof appBanka==="function") appBanka();
+  if(modulNaObrazovke()==="uzavierka" && typeof appUzavierka==="function") appUzavierka();
+  else if(modulNaObrazovke()==="banka" && typeof appBanka==="function") appBanka();
 }
 
 // ── DPH A DANE ──
@@ -15390,14 +15415,14 @@ function skryNalez(zdroj, k, popis){
   if(!firmaData.kontrolyIgnor) firmaData.kontrolyIgnor={};
   firmaData.kontrolyIgnor[zdroj+":"+k]={kedy:new Date().toISOString(), t:popis, zdroj};
   poZmene();
-  if(typeof appUzavierka==="function" && aktualnaApp==="uzavierka") appUzavierka();
-  else if(typeof appPriznanieB==="function" && aktualnaApp==="priznanieB") appPriznanieB();
+  if(typeof appUzavierka==="function" && modulNaObrazovke()==="uzavierka") appUzavierka();
+  else if(typeof appPriznanieB==="function" && modulNaObrazovke()==="priznanieB") appPriznanieB();
 }
 function odkryNalez(zdroj, k){
   if(!strazZapis("uzavierka")) return;
   if(firmaData.kontrolyIgnor) delete firmaData.kontrolyIgnor[zdroj+":"+k];
   poZmene();
-  if(typeof appUzavierka==="function" && aktualnaApp==="uzavierka") appUzavierka();
+  if(typeof appUzavierka==="function" && modulNaObrazovke()==="uzavierka") appUzavierka();
 }
 // Tlačidlo na skrytie — vracia prázdny reťazec tam, kde sa skrývať nesmie.
 function skryTlacidloHtml(zdroj, zavaznost, k, popis){
@@ -17165,7 +17190,7 @@ function zseUlozNabijania(txns){
   let added=0;
   (txns||[]).forEach(t=>{ if(!existing.has(key(t))){ firmaData.nabijania.push(t); existing.add(key(t)); added++; } });
   firmaData.nabijania.sort((a,b)=>(a.datum||"").localeCompare(b.datum||""));
-  poZmene(); if(aktualnaApp==="jazdy") appJazdy();
+  poZmene(); if(modulNaObrazovke()==="jazdy") appJazdy();
   return added;
 }
 // Je tento text PODROBNÝ VÝPIS nabíjaní zo ZSE Drive? Vracia transakcie, alebo null.
@@ -17291,8 +17316,8 @@ function nastavAutoSukromne(hodnota){
   poZmene();
   if(hodnota==="ano") alert("Zapamätané.\n\nSúkromnú jazdu označíte v jej editore zaškrtnutím „súkromná“ — "
     +"ostane v knihe kvôli spojitosti tachometra, ale nezapočíta sa do podnikateľských kilometrov.");
-  if(aktualnaApp==="uzavierka" && typeof appUzavierka==="function") appUzavierka();
-  else if(aktualnaApp==="jazdy" && typeof appJazdy==="function") appJazdy();
+  if(modulNaObrazovke()==="uzavierka" && typeof appUzavierka==="function") appUzavierka();
+  else if(modulNaObrazovke()==="jazdy" && typeof appJazdy==="function") appJazdy();
 }
 // Jedna veta pre editor jazdy aj záver meranej jazdy — bola trikrát.
 function jazdaSukromnaVeta(sukromna){
@@ -17987,7 +18012,7 @@ function jazdaZaver(){
     firmaData.jazdy.push(jazdaDokonci(obj));
     jazdaZmazStav();
     poZmene();
-    if(aktualnaApp==="jazdy") appJazdy(); else otvorApp("jazdy");
+    if(modulNaObrazovke()==="jazdy") appJazdy(); else otvorApp("jazdy");
   });
   // Automatické dopĺňanie beží až PO vykreslení modálu — `mapaNazvyMiest` píše
   // do polí, ktoré dovtedy neexistujú. `setTimeout`, nie `requestAnimationFrame`:
@@ -19060,7 +19085,7 @@ async function upomienkaPDF(odberatel){
   // Zápis až po vygenerovaní: keby PDF spadlo, denník by tvrdil, že upomienka
   // odišla, a ďalšia by nastúpila o stupeň vyššie bez toho, aby prvá existovala.
   upomienkaZapis(odberatel, stupen, zoz);
-  if(aktualnaApp==="pohladavky") appPohladavky();
+  if(modulNaObrazovke()==="pohladavky") appPohladavky();
 }
 function dniPoSplatnosti(splat){ if(!splat) return 0; const d=new Date(splat); if(isNaN(d)) return 0; return Math.floor((Date.now()-d)/86400000); }
 function appPohladavky(){
@@ -21549,15 +21574,20 @@ function kartaPlanu(p){
       })()}
     </div>`;
 }
-function zobrazCennik(){
+// `modul` — cenník otvorený namiesto modulu mimo plánu (`modulMimoPlanu`).
+// Bez poznámky by človek klikol na „Banka“ a nevedel, prečo vidí ceny.
+function zobrazCennik(modul){
   const akt=aktualnyPlan();
+  const poznamka = (modul && APPS[modul])
+    ? `<div class="nv-plan"><span aria-hidden="true">🔒</span><span><b>${esc(APPS[modul].n)}</b> vo vašom pláne nie je.${planyModuluHtml(modul)}</span></div>`
+    : "";
   // Predvolí sa najmenší tier, ktorý pokryje to, čo účtovník UŽ spravuje.
   // Ponúknuť „do 2 firiem“ niekomu so siedmimi klientmi znamená predať plán,
   // pri ktorom mu server odmietne najbližšiu pozvánku.
   const uzSpravuje = typeof vyuzitieLimitu==="function" ? vyuzitieLimitu("firmy") : 0;
   const sedi = uctTiery().find(x=>x.firmy>=uzSpravuje);
   cennikTierFiriem = (sedi||uctTiery()[uctTiery().length-1]).firmy;
-  const html=`
+  const html=`${poznamka}
     ${(()=>{ const zm=cakajucaZmena(); if(!zm) return "";
       const kedy = zm.od ? fmtDatum(String(zm.od).slice(0,10)) : "koncom obdobia";
       const nazov = zm.plan==="free" ? "Free" : ((PLANY[zm.plan]||{}).nazov || zm.plan);
@@ -24337,7 +24367,7 @@ function importujVypisText(text, nazovSuboru, parsedVopred){
     };
   }catch(e){ console.error("zápis výsledku importu:", e); }
   poZmene();
-  if(aktualnaApp==="banka") appBanka();
+  if(modulNaObrazovke()==="banka") appBanka();
   const medzery=vypisPokrytie().medzery;
   const chybaTxt = medzery.length
     ? "\n\n⚠ V nahratých výpisoch chýba "+(medzery.length===1?"mesiac":"mesiacov: "+medzery.length)+" — "
@@ -29941,7 +29971,7 @@ function prijmiNotifikaciu(id){
       .then(({error})=>{ if(error) console.error("uzavretie notifikácie:", error.message||error);
                          nacitajCakajuce(true).then(()=>otvorCakajuce()); });
   } else { otvorCakajuce(); }
-  if(aktualnaApp==="banka") appBanka();
+  if(modulNaObrazovke()==="banka") appBanka();
   cloudMsg("Pohyb pridaný"+(sparene?" a rovno priradený k dokladu.":"."),"ok");
 }
 
@@ -29974,7 +30004,7 @@ function prijmiVsetkyNotifikacie(){
       .update({ stav:"spracovane", spracovane:new Date().toISOString() }).in("id", idcka)
       .then(({error})=>{ if(error) console.error("uzavretie notifikácií:", error.message||error); hotovo(); });
   } else hotovo();
-  if(aktualnaApp==="banka") appBanka();
+  if(modulNaObrazovke()==="banka") appBanka();
   cloudMsg("Pridaných "+nove.length+" pohybov"+(sparene?", priradených "+sparene+".":".")
     +(dvojmo?" "+dvojmo+" vyzerá ako platba, ktorú už evidujete — v Banke sú označené.":""),"ok");
 }
@@ -30586,7 +30616,7 @@ function nastavTemu(tmavy){
   // Grafy si farby čítajú pri kreslení — treba ich prekresliť, inak ostanú
   // v starej palete.
   try{ if(typeof renderHomeStrip==="function") renderHomeStrip(); }catch(_){}
-  try{ if(aktualnaApp && typeof otvorApp==="function") otvorApp(aktualnaApp); }catch(_){}
+  try{ const mod=modulNaObrazovke(); if(mod && typeof otvorApp==="function") otvorApp(mod); }catch(_){}
 }
 
 function prepniTemu(){
@@ -32248,7 +32278,7 @@ function obnovPoEditacii(modul){
   if(split && !split.classList.contains("hidden")){ renderSplit(); return; }
   // editor sa dá otvoriť aj z Pohľadávok a DPH výkazu —
   // prekresliť treba skutočne otvorenú obrazovku, nie skrytý vlastný modul
-  const otvorene=aktualnaZalozka||aktualnaApp;
+  const otvorene=modulNaObrazovke();
   if(otvorene==="pohladavky"){ appPohladavky(); return; }
   if(otvorene==="dph"){ appDPH(); return; }
   if(modul==="faktury") appFaktury(); else appVydavky();
@@ -33923,7 +33953,7 @@ function rozlisKolizneDoklady(){
   alert("Odlíšených "+pocet+" dokladov.\n\n"
     +"Platby prenesené podľa sumy: "+prenesene
     +(vratene?"\nVrátené medzi nespárované: "+vratene+" — sumu nebolo možné priradiť jednoznačne." : ""));
-  if(aktualnaApp==="uzavierka" && typeof appUzavierka==="function") appUzavierka();
+  if(modulNaObrazovke()==="uzavierka" && typeof appUzavierka==="function") appUzavierka();
 }
 
 function odoberSiroteUhrady(){
@@ -33942,8 +33972,8 @@ function odoberSiroteUhrady(){
   });
   poZmene();
   alert("Odobraných "+zoz.length+" priradení. Pohyby nájdete v Banka → nespárované.");
-  if(aktualnaApp==="uzavierka" && typeof appUzavierka==="function") appUzavierka();
-  else if(aktualnaApp==="banka" && typeof appBanka==="function") appBanka();
+  if(modulNaObrazovke()==="uzavierka" && typeof appUzavierka==="function") appUzavierka();
+  else if(modulNaObrazovke()==="banka" && typeof appBanka==="function") appBanka();
 }
 
 function odoberUhradu(tx, typ, cislo){
@@ -34164,8 +34194,8 @@ function dokladPridajPlatbu(typ, kluc, txIdVal){
   if(vSplite){ splitVybranyDoklad=null; renderSplit(); return; }
   closeModal();
   prekresliUhradyBox(typ, kluc);
-  if(aktualnaApp==="vydavky" && typeof appVydavky==="function") appVydavky();
-  else if(aktualnaApp==="faktury" && typeof appFaktury==="function") appFaktury();
+  if(modulNaObrazovke()==="vydavky" && typeof appVydavky==="function") appVydavky();
+  else if(modulNaObrazovke()==="faktury" && typeof appFaktury==="function") appFaktury();
 }
 
 // Automatika, ktorá zapíše väzbu a nepovie to, je prekvapenie, nie pomoc.
@@ -34217,7 +34247,7 @@ function doplnPartnerovDoVydavkov(){
   zapisAutomat("icdph", kluce);
   poZmene();
   alert("Doplnené v "+n+" dokladoch.\n\nZáznam nájdete aj v zvončeku — keby sa niektorý dodávateľ ukázal ako neplatiteľ DPH, opravíte to v editore dokladu.");
-  if(typeof appUzavierka==="function" && aktualnaApp==="uzavierka") appUzavierka();
+  if(typeof appUzavierka==="function" && modulNaObrazovke()==="uzavierka") appUzavierka();
 }
 
 // ── ZOSÚLADENIE KATEGÓRIE TANKOVACÍCH DOKLADOV ─────────────────────────────
@@ -34245,8 +34275,8 @@ function zosuladPhmKategorie(rok){
   ciel.forEach(x=>{ x.kategoria="phm"; if(!String(x.autoDruh||"").trim()) x.autoDruh="phm"; n++; });
   poZmene();
   alert("Zosúladené v "+n+(n===1?" doklade.":" dokladoch."));
-  if(typeof appDPH==="function" && aktualnaApp==="dph") appDPH();
-  else if(typeof appUzavierka==="function" && aktualnaApp==="uzavierka") appUzavierka();
+  if(typeof appDPH==="function" && modulNaObrazovke()==="dph") appDPH();
+  else if(typeof appUzavierka==="function" && modulNaObrazovke()==="uzavierka") appUzavierka();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -35053,8 +35083,8 @@ function zalozDokladyKOdvodom(){
     +"Platby, pri ktorých si appka nie je istá, zostanú na vás.")) return;
   let n=0;
   zoz.forEach(tx=>{ if(vytvorVydavokZPohybu(txId(tx), null, null, true)) n++; });
-  if(typeof appVydavky==="function" && aktualnaApp==="vydavky") appVydavky();
-  if(typeof appBanka==="function" && aktualnaApp==="banka") appBanka();
+  if(typeof appVydavky==="function" && modulNaObrazovke()==="vydavky") appVydavky();
+  if(typeof appBanka==="function" && modulNaObrazovke()==="banka") appBanka();
   if(typeof renderHomeStrip==="function") renderHomeStrip();
   setTimeout(()=>alert("Založených dokladov: "+n+"\n\nNájdete ich vo Výdavkoch označené ako „na kontrolu“. Potvrdením značka zmizne."),60);
 }
