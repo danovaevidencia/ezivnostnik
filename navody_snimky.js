@@ -714,7 +714,7 @@ window.NAVODY_SNIMKY = {
  },
  "jazdy-zapisat-1": {
   "m": {
-   "subor": "navody/jazdy-zapisat-1.m.1ccdc671.webp",
+   "subor": "navody/jazdy-zapisat-1.m.b631f5c9.webp",
    "w": 390,
    "h": 600,
    "ciel": {
