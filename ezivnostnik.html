@@ -5047,15 +5047,21 @@ function majetokPrepojVydavok(m, vyd){
   m.zdrojVydavok=vyd.cislo;
   vyd.zaradenyMajetokId=m.id;
   delete vyd.mozeBytMajetok;
+  majetokVyniatieVydavku(m, vyd);
+}
+// Pravidlo na jednom mieste: odpisovaný majetok výdavok vyníma, drobný nie.
+// Volá sa pri prepojení aj pri zmene režimu už prepojeného majetku.
+function majetokVyniatieVydavku(m, vyd){
   if(m.typMajetku==="odpisovany") vyd.zaradenyOdpisovany=true; else delete vyd.zaradenyOdpisovany;
 }
-// Opak väzby pri zmazaní majetku: výdavky, ktoré naň ukazujú (kúpa aj
-// zhodnotenia), sa vrátia do nákladov. Inak by suma vypadla z výdavkov
-// (vyňatá) aj z odpisov (majetok už nie je).
+// Výdavky, ktoré na majetok ukazujú — kúpa aj zhodnotenia.
+function majetokPrepojeneVydavky(idMaj){
+  return (firmaData.vydavky||[]).filter(v=>v.zaradenyMajetokId!=null && String(v.zaradenyMajetokId)===String(idMaj));
+}
+// Opak väzby pri zmazaní majetku: prepojené výdavky sa vrátia do nákladov.
+// Inak by suma vypadla z výdavkov (vyňatá) aj z odpisov (majetok už nie je).
 function majetokUvolniVydavky(idMaj){
-  (firmaData.vydavky||[]).forEach(v=>{
-    if(v.zaradenyMajetokId!=null && String(v.zaradenyMajetokId)===String(idMaj)){ delete v.zaradenyOdpisovany; delete v.zaradenyMajetokId; }
-  });
+  majetokPrepojeneVydavky(idMaj).forEach(v=>{ delete v.zaradenyOdpisovany; delete v.zaradenyMajetokId; });
 }
 // Ručne pridávaný majetok, ktorého kúpa už je vo výdavkoch: nezaradený doklad
 // s rovnakou sumou bez DPH (tou istou, ktorú berie `vydavokDoMajetku`), dátumom
@@ -17751,6 +17757,7 @@ function editMajetok(id){
   const m=nova?{id:"maj_"+Date.now(),nazov:"",vstupnaCena:"",datumZaradenia:new Date().toISOString().slice(0,10),odpisovaSkupina:1,typMajetku:"odpisovany"}
     :JSON.parse(JSON.stringify((firmaData.majetok||[]).find(x=>String(x.id)===String(id))));
   const preradene=preradenieDatum(m);
+  const povodnyTyp=m.typMajetku;   // režim pred úpravou — jeho zmena mení aj výdavok o kúpe
   // Náhľad kreslí samostatná funkcia, ktorá nevidí do tejto uzávery —
   // polia mimo formulára (zhodnotenia, prerušené roky) jej treba podať.
   _majetokNahladZdroj=m;
@@ -17804,11 +17811,23 @@ function editMajetok(id){
     const pov=val("m_povodne");
     if(pov && pov>=m.datumZaradenia){ alert("Dátum pôvodnej kúpy musí byť skôr než dátum zaradenia do podnikania."); return false; }
     if(pov) m.povodneNadobudnutie=pov; else delete m.povodneNadobudnutie;
+    // Zhodnotenie appka uplatňuje len v odpisoch. Drobný majetok sa neodpisuje,
+    // takže zhodnotenie by z výdavkov vypadlo úplne (vyňaté a bez odpisu).
+    if(m.typMajetku==="drobny" && tzZoznam(m).length){
+      alert("Tento majetok má technické zhodnotenie, ktoré sa uplatňuje v odpisoch. Drobný majetok sa neodpisuje, takže by zhodnotenie z výdavkov vypadlo.\n\nAk má byť drobný, najprv zhodnotenia na karte majetku zmažte — ich výdavky sa vrátia do nákladov.");
+      return false;
+    }
     if(!firmaData.majetok) firmaData.majetok=[];
+    // Zmena režimu mení aj to, či je kúpa vo výdavkoch. Bez zosúladenia
+    // odpisovaný → drobný sumu stratí (vyňatá, bez odpisu) a drobný →
+    // odpisovaný ju uplatní dvakrát (vo výdavkoch aj v odpisoch).
+    const prepojene=nova?[]:majetokPrepojeneVydavky(m.id);
+    if(!nova && m.typMajetku!==povodnyTyp) prepojene.forEach(v=>majetokVyniatieVydavku(m, v));
     // Kúpa zapísaná vo výdavkoch by sa inak uplatnila dvakrát — celá vo
-    // výdavkoch a k tomu odpismi. Drobný majetok výdavok nevyníma, takže
+    // výdavkoch a k tomu odpismi. Pýta sa pri novom majetku a pri prepnutí
+    // na odpisovaný, ak väzba ešte nie je. Drobný výdavok nevyníma, takže
     // tam dvakrát nejde nič a netreba sa pýtať.
-    if(nova && m.typMajetku==="odpisovany"){
+    if(m.typMajetku==="odpisovany" && (nova || povodnyTyp!=="odpisovany") && !prepojene.length){
       const kupa=majetokKupaVoVydavkoch(m);
       if(kupa && confirm("Vo výdavkoch je doklad za rovnakú sumu:\n"
           + [kupa.cislo, kupa.partner||kupa.popis, fmtDatum(kupa.datum), eur(+kupa.bez||0)+" bez DPH"].filter(Boolean).join(" · ")
