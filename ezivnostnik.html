@@ -2882,12 +2882,26 @@ function strazPole(modul, prekresli){
 // takže sa nedá zabudnúť na prechod DOM po prekreslení.
 function zam(modul){
   if(mozemPisat(modul)) return "";
-  return ' data-w="1" title="'+(mojaRolaVFirme()==="nahlad"
+  return ' data-w="1" title="'+titulokIbaCitanie()+'"';
+}
+function titulokIbaCitanie(){
+  return mojaRolaVFirme()==="nahlad"
     ? "Len na čítanie — nemáte právo zapisovať"
-    : "Túto agendu vedie váš účtovník")+'"';
+    : "Túto agendu vedie váš účtovník";
 }
 
 // Smie prihlásený používateľ v tomto module zapisovať?
+//
+// JEDINÁ odpoveď na túto otázku (rozhodnutie Romana 13. 9. 2026: jedno pravidlo
+// pre všetky moduly, nie modul po module). Pýtajú sa jej štyri miesta a žiadne
+// nemá vlastnú výnimku:
+//   pasIbaCitanie(modul)   — pás pod hlavičkou KAŽDÉHO modulu, ktorý zapisuje,
+//   zam(modul)             — stlmené zápisové tlačidlá a polia na obrazovke,
+//   zamOkno(modul)         — formulár v okne (hneď za openModal): pás, stlmené Uložiť/Zmazať,
+//   strazZapis/strazPole   — poistka na začiatku akcie a v modalConfirm.
+// Náhľad teda nevidí aktívne tlačidlo, ktoré by mu po kliknutí povedalo „nie“,
+// a vlastník firmy s účtovníkom to isté v účtovníckych moduloch (aj Priznanie B).
+// Vykresľovanie aj test (test_oprava_rola) idú po modul z obrazovky.
 function mozemPisat(modul){
   const r=mojaRolaVFirme();
   if(r==="nahlad") return false;
@@ -7913,8 +7927,8 @@ function nastVydavkyRezimHtml(){
       ${roky.map(r=>`<span class="achip ${r===rok?'on':''}" onclick="nastRezimRok=${r};appData()">${r}</span>`).join("")}
     </div>`:""}
     <div class="ob-toggle" style="max-width:420px">
-      <button class="${rezim==='skutocne'?'on':''}" onclick="nastavVydavkyRezim('skutocne',${rok})">Skutočné výdavky</button>
-      <button class="${rezim==='pausal'?'on':''}" onclick="${platca?'':'nastavVydavkyRezim(\'pausal\','+rok+')'}" ${platca?'disabled style="opacity:.5;cursor:not-allowed"':''}>Paušálne (${PP.pct})</button>
+      <button class="${rezim==='skutocne'?'on':''}" onclick="nastavVydavkyRezim('skutocne',${rok})"${zam("data")}>Skutočné výdavky</button>
+      <button class="${rezim==='pausal'?'on':''}" onclick="${platca?'':'nastavVydavkyRezim(\'pausal\','+rok+')'}"${zam("data")} ${platca?'disabled style="opacity:.5;cursor:not-allowed"':''}>Paušálne (${PP.pct})</button>
     </div>
     <div class="ob-hint" style="margin-top:8px">Paušál: ${PP.pct} z príjmov, najviac ${PP.strop} ročne. Odvody sa uplatňujú navyše. Nedá sa kombinovať so skutočnými výdavkami — platí pre celý rok, a volí sa na každý rok zvlášť.${inyRok?" Zapísané roky: "+inyRok+".":""}</div>
     ${platca?`<div class="ob-hint warn" style="margin-top:8px">V roku ${rok} ste boli platiteľom DPH po celý rok, preto paušál nie je možný. Zákon ho dovoľuje aj platiteľovi, ale len v roku, v ktorom sa ním stal (§ 6 ods. 10). Ak ste sa registrovali počas niektorého roka, doplňte dátum nižšie.</div>`:""}
@@ -7922,14 +7936,14 @@ function nastVydavkyRezimHtml(){
       <label>Zaplatené poistné v roku ${rok}</label>
       <div style="display:flex;gap:8px">
         <input type="number" step="0.01" placeholder="zdravotné" value="${esc(((S.odvodyRoky||{})[String(rok)]||{}).zp ?? "")}"
-          onchange="nastavOdvodyRoka(${rok},'zp',this.value)" style="flex:1">
+          onchange="nastavOdvodyRoka(${rok},'zp',this.value)"${zam("data")} style="flex:1">
         <input type="number" step="0.01" placeholder="sociálne" value="${esc(((S.odvodyRoky||{})[String(rok)]||{}).sp ?? "")}"
-          onchange="nastavOdvodyRoka(${rok},'sp',this.value)" style="flex:1">
+          onchange="nastavOdvodyRoka(${rok},'sp',this.value)"${zam("data")} style="flex:1">
       </div>
       <div class="ob-hint">Suma z podaného priznania. Pri uzavretom roku je to fakt — appka ju uprednostní pred odhadom z dnešných nastavení aj pred pohybmi z výpisu.</div>
     </div>`:""}
     ${jePlatcaDPH()?`<div class="ob-field" style="margin-top:10px;max-width:420px"><label>Platiteľom DPH od</label>
-      <input type="date" value="${esc(S.dphPlatcaOd||"")}" onchange="nastavDphPlatcaOd(this.value)">
+      <input type="date" value="${esc(S.dphPlatcaOd||"")}" onchange="nastavDphPlatcaOd(this.value)"${zam("data")}>
       <div class="ob-hint">Rozhoduje o paušále v roku registrácie. Kým je prázdny, appka predpokladá celý rok a paušál nepripustí.</div></div>`:""}
     ${porovnanie}`;
 }
@@ -9485,7 +9499,7 @@ function appVykazy(){
   const d=firmaData, c=APPS.vykazy.c;
   const vyk=(d.vykazy||[]);
   document.getElementById("appScreen").innerHTML=appHlavicka("vykazy",
-    `<button class="aabtn" onclick="icsImport()">📅 Import z kalendára</button><button class="aabtn" onclick="vykazImport()" title="Načítať výkaz (.xlsx) alebo akceptačný protokol (.docx) upravený v Exceli či Worde">↥ Načítať upravený</button><button class="aabtn pri" onclick="editVykaz()">＋ Nový výkaz</button>`)+`
+    `<button class="aabtn" onclick="icsImport()"${zam("vykazy")}>📅 Import z kalendára</button><button class="aabtn" onclick="vykazImport()"${zam("vykazy")} title="Načítať výkaz (.xlsx) alebo akceptačný protokol (.docx) upravený v Exceli či Worde">↥ Načítať upravený</button><button class="aabtn pri" onclick="editVykaz()"${zam("vykazy")}>＋ Nový výkaz</button>`)+pasIbaCitanie("vykazy")+`
     <div class="csub" style="margin:0 2px 14px">Výkazy prác pre fakturáciu podľa odpracovaných dní. Import z kalendára (.ics) vytvorí návrh výkazu zo stretnutí. Výkaz doladený v Exceli alebo podpísaný protokol z Wordu načítate cez „Načítať upravený“.</div>
     ${vyk.length?vyk.map((w,i)=>{
       const dni=vykazDni(w);
@@ -9703,6 +9717,7 @@ function renderVykazEditor(){
   },
   nova?null:()=>{ firmaData.vykazy.splice(idx,1); _vykazEdit=null; poZmene(); appVykazy(); },
   "siroky");
+  zamOkno("vykazy");
 }
 
 // Zápis do modelu bez prekreslenia — okrem značky, ktorá mení vzhľad riadku
@@ -10406,7 +10421,7 @@ function appFaktury(){
   fakPoslednyList=list.map(dokladKluc).filter(Boolean);
   const vsetkyVybrane=fakPoslednyList.length>0 && fakPoslednyList.every(c=>fakVybrane.has(c));
   const _fIdx=new Map((d.faktury||[]).map((x,i)=>[x,i]));   // index riadku bez O(n²) indexOf (45.8)
-  document.getElementById("appScreen").innerHTML=appHlavicka("faktury",`<button class="aabtn" onclick="faktImport()">📥 Import (XLSX/XML/ISDOC/PDF)</button><button class="aabtn" onclick="editZaloha()">📄 Zálohová faktúra</button><button class="aabtn" onclick="editPrijmovyDoklad()">💶 Príjem v hotovosti</button><button class="aabtn pri" onclick="editFaktura()">＋ Nová faktúra</button>`)+`
+  document.getElementById("appScreen").innerHTML=appHlavicka("faktury",`<button class="aabtn" onclick="faktImport()"${zam("faktury")}>📥 Import (XLSX/XML/ISDOC/PDF)</button><button class="aabtn" onclick="editZaloha()"${zam("faktury")}>📄 Zálohová faktúra</button><button class="aabtn"${zam("faktury")} onclick="editPrijmovyDoklad()">💶 Príjem v hotovosti</button><button class="aabtn pri" onclick="editFaktura()"${zam("faktury")}>＋ Nová faktúra</button>`)+pasIbaCitanie("faktury")+`
     <div class="amini">
       <div class="aminbox"><div class="al">Fakturované</div><div class="av pos">${eur(spolu)}</div></div>
       <div class="aminbox"><div class="al">Uhradené</div><div class="av">${uhr} / ${fak.length}</div></div>
@@ -10428,14 +10443,14 @@ function appFaktury(){
       <b>Od 1.1.2027 povinná e-fakturácia.</b> Platitelia DPH budú musieť tuzemské faktúry vystavovať v štruktúrovanom formáte (UBL 2.1 / Peppol) a posielať cez Digitálneho poštára. Tlačidlom <b>e-faktúra</b> vygenerujete XML už teraz — v 2026 dobrovoľne na testovanie. <span onclick="efakturaInfo()" style="color:var(--brand);cursor:pointer;text-decoration:underline">Viac</span></div>
     ${fakVybrane.size?`<div style="position:sticky;top:0;z-index:5;display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:var(--brand-lite);border:1px solid var(--line);border-radius:9px;padding:8px 12px;margin-bottom:10px">
       <b style="font-size:13px">${fakVybrane.size} vybraných</b>
-      <button class="aabtn pri" style="padding:5px 10px;font-size:12px" onclick="fakHromadneUhradit()">✓ Označiť uhradené</button>
-      <button class="aabtn" style="padding:5px 10px;font-size:12px" onclick="fakHromadneZrusit()">✕ Zrušiť úhradu</button>
-      <button class="aabtn neg" style="padding:5px 10px;font-size:12px" onclick="fakHromadneZmazat()">🗑 Zmazať</button>
+      <button class="aabtn pri" style="padding:5px 10px;font-size:12px" onclick="fakHromadneUhradit()"${zam("faktury")}>✓ Označiť uhradené</button>
+      <button class="aabtn" style="padding:5px 10px;font-size:12px" onclick="fakHromadneZrusit()"${zam("faktury")}>✕ Zrušiť úhradu</button>
+      <button class="aabtn neg" style="padding:5px 10px;font-size:12px" onclick="fakHromadneZmazat()"${zam("faktury")}>🗑 Zmazať</button>
       <span onclick="fakZrusVyber()" style="margin-left:auto;cursor:pointer;color:var(--ink-soft);font-size:12px">Zrušiť výber</span>
     </div>`:''}
     <div class="alist">
       <div class="arow head rdok rf"><div class="c-cb"><input type="checkbox" ${vsetkyVybrane?'checked':''} onclick="fakVyberVsetky(this.checked)" title="Vybrať všetky" style="cursor:pointer"></div><div class="c-sub">Číslo</div><div class="c-main">Odberateľ</div><div class="c-date">Dátum</div><div class="c-sum" style="text-align:right">Suma</div><div class="c-stav">Stav</div><div class="c-act"></div></div>
-      ${list.length?list.map(f=>{const idx=_fIdx.get(f);const fk=dokladKluc(f);const st=uhradaStav("faktura", fk);const fb=UHRADA_FARBY[st.stav]||UHRADA_FARBY.neznamy;const uhradena=faktJeUhradena(f);const RZ=rozporRiadok(st);return `<div class="arow rdok rf${RZ.trieda}"><div class="c-cb"><input type="checkbox" ${fakVybrane.has(fk)?'checked':''} onclick="event.stopPropagation();fakToggleVyber('${esc(fk)}',this.checked)" style="cursor:pointer"></div><div class="acol-strong c-sub" style="color:${c}" onclick="otvorDoklad(${idx})">${esc(f.cislo||"—")}</div><div class="c-main" onclick="otvorDoklad(${idx})">${esc(f.odberatel||"—")}</div><div class="acol-muted c-date" onclick="otvorDoklad(${idx})">${fmtDatum(f.datum||f.vystavenie)}</div><div class="acol-sum c-sum" onclick="otvorDoklad(${idx})">${eur(+f.spolu||0)}</div><div class="c-stav" ${st.stav!=="overene"?`onclick="event.stopPropagation();otvorVyberPlatby('faktura','${esc(fk)}')"`:`onclick="otvorDoklad(${idx})"`} style="${st.stav!=="overene"?"cursor:pointer":""}" title="${esc((st.text||'')+(st.stav!=="overene"?" · ťuknutím priradíte platbu z banky":""))}"><span style="display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:600;color:${fb.f}">${fb.ic}${fb.tichy?'':' '+fb.n}</span></div><div class="c-act" style="display:flex;gap:5px;align-items:center">${!uhradena?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vyberSposobUhrady(null,_s=>{oznacDokladUhradeny('faktura','${esc(fk)}',_s);appFaktury();})" title="Označiť ako uhradené">✓</button>`:((st.zdroj==='rucne'||st.zdroj==='legacy')?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();zrusDokladUhradu('faktura','${esc(fk)}');appFaktury()" title="Zrušiť potvrdenie úhrady">✕</button>`:'')}<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();exportFakturaPDF(${idx})" title="${f.originalSubor?'Stiahnuť pôvodný PDF':'Vygenerovať PDF faktúry'}">${f.originalSubor?'📎':'PDF'}</button><button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();exportEFakturaUBL(${idx})" title="E-faktúra UBL 2.1 / Peppol (povinné od 2027)">e-fa</button>${(!faktOdoslana(f) && postarDostupny())?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();faktOdosliSietou(${idx})" title="Odoslať sieťou Peppol — najprv sa ukáže, čo presne odíde">📮</button>`:(faktOdoslana(f)?`<span title="Odoslaná sieťou Peppol" style="font-size:12px;padding:0 3px">📮✓</span>`:'')}<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();faktMenu(${idx},this)" title="Dobropis, ťarchopis, storno alebo kópia">⋯</button></div>${RZ.nota}</div>`;}).join(''):prazdnyAleboFilter(!(d.faktury||[]).length,
+      ${list.length?list.map(f=>{const idx=_fIdx.get(f);const fk=dokladKluc(f);const st=uhradaStav("faktura", fk);const fb=UHRADA_FARBY[st.stav]||UHRADA_FARBY.neznamy;const uhradena=faktJeUhradena(f);const RZ=rozporRiadok(st);return `<div class="arow rdok rf${RZ.trieda}"><div class="c-cb"><input type="checkbox" ${fakVybrane.has(fk)?'checked':''} onclick="event.stopPropagation();fakToggleVyber('${esc(fk)}',this.checked)" style="cursor:pointer"></div><div class="acol-strong c-sub" style="color:${c}" onclick="otvorDoklad(${idx})">${esc(f.cislo||"—")}</div><div class="c-main" onclick="otvorDoklad(${idx})">${esc(f.odberatel||"—")}</div><div class="acol-muted c-date" onclick="otvorDoklad(${idx})">${fmtDatum(f.datum||f.vystavenie)}</div><div class="acol-sum c-sum" onclick="otvorDoklad(${idx})">${eur(+f.spolu||0)}</div><div class="c-stav" ${st.stav!=="overene"?`onclick="event.stopPropagation();otvorVyberPlatby('faktura','${esc(fk)}')"${zam("faktury")}`:`onclick="otvorDoklad(${idx})"`} style="${st.stav!=="overene"?"cursor:pointer":""}" title="${esc((st.text||'')+(st.stav!=="overene"?" · ťuknutím priradíte platbu z banky":""))}"><span style="display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:600;color:${fb.f}">${fb.ic}${fb.tichy?'':' '+fb.n}</span></div><div class="c-act" style="display:flex;gap:5px;align-items:center">${!uhradena?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vyberSposobUhrady(null,_s=>{oznacDokladUhradeny('faktura','${esc(fk)}',_s);appFaktury();})"${zam("faktury")} title="Označiť ako uhradené">✓</button>`:((st.zdroj==='rucne'||st.zdroj==='legacy')?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();zrusDokladUhradu('faktura','${esc(fk)}');appFaktury()"${zam("faktury")} title="Zrušiť potvrdenie úhrady">✕</button>`:'')}<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();exportFakturaPDF(${idx})" title="${f.originalSubor?'Stiahnuť pôvodný PDF':'Vygenerovať PDF faktúry'}">${f.originalSubor?'📎':'PDF'}</button><button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();exportEFakturaUBL(${idx})" title="E-faktúra UBL 2.1 / Peppol (povinné od 2027)">e-fa</button>${(!faktOdoslana(f) && postarDostupny())?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();faktOdosliSietou(${idx})"${zam("faktury")} title="Odoslať sieťou Peppol — najprv sa ukáže, čo presne odíde">📮</button>`:(faktOdoslana(f)?`<span title="Odoslaná sieťou Peppol" style="font-size:12px;padding:0 3px">📮✓</span>`:'')}<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();faktMenu(${idx},this)" title="Dobropis, ťarchopis, storno alebo kópia">⋯</button></div>${RZ.nota}</div>`;}).join(''):prazdnyAleboFilter(!(d.faktury||[]).length,
         "Zatiaľ nemáte žiadnu faktúru. Vystavte prvú — číslo, dátumy aj DPH doplní appka podľa nastavení.",
         {popis:"＋ Nová faktúra", kod:"editFaktura()"},
         "fFilter='vsetky';fRok='';fMesiac='';_hladaj.faktury='';appFaktury()")}
@@ -10525,6 +10540,7 @@ function editPrijmovyDoklad(idx){
   nova?null:()=>{
     if(!strazUzavierku(String(f.datum||"").slice(0,7), "Zmazanie príjmového dokladu")) return;
     firmaData.faktury.splice(idx,1); poZmene(); obnovPoEditacii("faktury"); });
+  zamOkno("faktury");
   pdPozn();
 }
 // Rozpad prijatej sumy na základ a DPH. Ukazuje sa hneď pri písaní — kto berie
@@ -11586,6 +11602,7 @@ function feModal(idx, nova, kluc){
     if(!jeZaloha && !overDopadNaPodanie(faktObdobie(_f), "Zmazanie tejto faktúry")) return;
     POLE().splice(idx,1); poZmene(); obnovPoEditacii("faktury"); },
   "siroky");
+  zamOkno("faktury");
   // Zamyká sa AŽ TU, po vykreslení — dovtedy polia formulára neexistujú.
   // Nad ne sa vloží pás, ktorý povie prečo a ponúkne, čo sa s dokladom ešte
   // dá urobiť. Veta bez východiska je len zákaz; toto je zákaz s cestou ďalej.
@@ -11605,7 +11622,7 @@ function feModal(idx, nova, kluc){
         ? "background:var(--sfc-warn);border-left:3px solid var(--warn);"
         : "background:var(--bg);border-left:3px solid var(--line);")
         +"border-radius:0 9px 9px 0;padding:10px 13px;margin-bottom:12px;font-size:12.5px;line-height:1.55";
-      const btn=(dr,popis)=>`<button class="aabtn" data-zamok="ok" style="font-size:12px" `
+      const btn=(dr,popis)=>`<button class="aabtn" data-zamok="ok"${zam("faktury")} style="font-size:12px" `
         +`onclick="vystavOpravu(${idx},'${dr}')">${popis}</button>`;
       pas.innerHTML=(_zamok ? "🔒 <b>"+esc(faktZamokVeta(_zamok))+"</b>" : "<b>Opraviť novým dokladom</b>")
         +`<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:9px">`
@@ -12437,7 +12454,7 @@ function appVydavky(){
   const vsetkyVybraneV=vydPoslednyList.length>0 && vydPoslednyList.every(c=>vydVybrane.has(c));
   const _vIdx=new Map((d.vydavky||[]).map((x,i)=>[x,i]));   // index riadku bez O(n²) indexOf (45.8)
   const _tank=vydavkySTankovanim();   // raz na vykreslenie, nie raz na riadok
-  document.getElementById("appScreen").innerHTML=appHlavicka("vydavky",`<button class="aabtn" onclick="rychlyDoklad(this)">🧾 Odfotiť / načítať doklad</button><button class="aabtn" onclick="faktPdfImport()">📥 Import faktúr (XML/PDF)</button><button class="aabtn" onclick="otvorOpakovane()">🔁 Opakované${(()=>{const n=opakovaneCakajuce().length;return n?" ("+n+")":"";})()}</button><button class="aabtn pri" onclick="editVydavok()">＋ Nový výdavok</button>`)+`
+  document.getElementById("appScreen").innerHTML=appHlavicka("vydavky",`<button class="aabtn" onclick="rychlyDoklad(this)"${zam("vydavky")}>🧾 Odfotiť / načítať doklad</button><button class="aabtn" onclick="faktPdfImport()"${zam("vydavky")}>📥 Import faktúr (XML/PDF)</button><button class="aabtn" onclick="otvorOpakovane()"${zam("vydavky")}>🔁 Opakované${(()=>{const n=opakovaneCakajuce().length;return n?" ("+n+")":"";})()}</button><button class="aabtn pri" onclick="editVydavok()"${zam("vydavky")}>＋ Nový výdavok</button>`)+pasIbaCitanie("vydavky")+`
     <div class="amini">
       <div class="aminbox"><div class="al">Výdavky bez DPH</div><div class="av">${eur(bezSpolu)}</div>${
         Math.abs(sDphSpolu-bezSpolu)>=0.01?`<div class="as">${eur(sDphSpolu)} s DPH</div>`:''}</div>
@@ -12474,14 +12491,14 @@ function appVydavky(){
     ${vyberPas(vyb, list.length)}
     ${vydVybrane.size?`<div style="position:sticky;top:0;z-index:5;display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:var(--brand-lite);border:1px solid var(--line);border-radius:9px;padding:8px 12px;margin-bottom:10px">
       <b style="font-size:13px">${vydVybrane.size} vybraných</b>
-      <button class="aabtn pri" style="padding:5px 10px;font-size:12px" onclick="vydHromadneUhradit()">✓ Označiť uhradené</button>
-      <button class="aabtn" style="padding:5px 10px;font-size:12px" onclick="vydHromadneZrusit()">✕ Zrušiť úhradu</button>
-      <button class="aabtn neg" style="padding:5px 10px;font-size:12px" onclick="vydHromadneZmazat()">🗑 Zmazať</button>
+      <button class="aabtn pri" style="padding:5px 10px;font-size:12px" onclick="vydHromadneUhradit()"${zam("vydavky")}>✓ Označiť uhradené</button>
+      <button class="aabtn" style="padding:5px 10px;font-size:12px" onclick="vydHromadneZrusit()"${zam("vydavky")}>✕ Zrušiť úhradu</button>
+      <button class="aabtn neg" style="padding:5px 10px;font-size:12px" onclick="vydHromadneZmazat()"${zam("vydavky")}>🗑 Zmazať</button>
       <span onclick="vydZrusVyber()" style="margin-left:auto;cursor:pointer;color:var(--ink-soft);font-size:12px">Zrušiť výber</span>
     </div>`:''}
     <div class="alist">
       <div class="arow head rdok rv"><div class="c-cb"><input type="checkbox" ${vsetkyVybraneV?'checked':''} onclick="vydVyberVsetky(this.checked)" title="Vybrať všetky" style="cursor:pointer"></div><div class="c-main">Partner / popis</div><div class="c-date">Dátum</div><div class="c-sum" style="text-align:right">Bez DPH</div><div class="c-sub" style="text-align:right">DPH</div><div class="c-stav" style="text-align:center">Stav</div><div class="c-act"></div></div>
-      ${list.length?list.map(x=>{const idx=_vIdx.get(x);const bezDat=!x.datum||!/^\d{4}-\d{2}/.test(String(x.datum));const kl=dokladKluc(x);const st=kl?uhradaStav("vydavok",kl):null;const fb=st?(UHRADA_FARBY[st.stav]||UHRADA_FARBY.neznamy):null;const uhr=vydJeUhradeny(x);const RZ=rozporRiadok(st);return `<div class="arow rdok rv${RZ.trieda}" onclick="editVydavok(${idx})"><div class="c-cb">${kl?`<input type="checkbox" ${vydVybrane.has(kl)?'checked':''} onclick="event.stopPropagation();vydToggleVyber('${esc(kl)}',this.checked)" style="cursor:pointer">`:''}</div><div class="c-main viWrap">${vydavokIkonaHtml(x,_tank)}<div class="viTxt"><div class="acol-strong" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(x.partner||"—")}${x.naKontrolu?' <span title="Doklad založila appka z bankového pohybu — potvrďte, že sedí" style="font-size:10.5px;font-weight:700;color:var(--ink-warn);background:var(--sfc-warn);border-radius:5px;padding:1px 5px;vertical-align:1px">na kontrolu</span>':''} ${x.doklad?'<span title="Doklad v cloude" style="cursor:pointer" onclick="event.stopPropagation();otvorDokladSubor(\''+esc(x.doklad)+'\')">📎</span>':''}</div><div class="acol-muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(x.popis||x.druh||"")}${(()=>{const kde=uhradyPopis("vydavok",kl,true);return kde?` <span style="color:var(--pos)">· zaplatené ${esc(kde)}</span>`:"";})()}</div></div></div><div class="acol-muted c-date">${bezDat?'<span class="apill neg">bez dátumu</span>':fmtDatum(x.datum)}</div><div class="acol-sum c-sum">${eur(+x.bez||0)}</div><div class="acol-sum c-sub" style="color:var(--ink-soft)">${eur(+x.dph||0)}</div><div class="c-stav" style="text-align:center">${fb?`<span title="${esc((st.n||fb.n)+(st.text?' — '+st.text:'')+(st.stav!=="overene"?" · ťuknutím priradíte platbu z banky":""))}" style="color:${fb.f};font-size:14px;${st.stav!=="overene"?"cursor:pointer":""}" ${st.stav!=="overene"?`onclick="event.stopPropagation();otvorVyberPlatby('vydavok','${esc(kl)}')"`:""}>${fb.ic}</span>`:'<span style="color:var(--ink-soft)">·</span>'}</div><div class="c-act">${x.naKontrolu?`<button class="aabtn pos" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vydavokSkontrolovany(${idx})" title="Potvrdiť, že doklad sedí">👁</button>`:''}${kl?(!uhr?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vyberSposobUhrady(null,_s=>{oznacDokladUhradeny('vydavok','${esc(kl)}',_s);appVydavky();})" title="Označiť ako uhradené">✓</button>`:((st.zdroj==='rucne'||st.zdroj==='legacy')?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();zrusDokladUhradu('vydavok','${esc(kl)}');appVydavky()" title="Zrušiť potvrdenie úhrady">✕</button>`:'')):''}</div>${RZ.nota}</div>`;}).join(''):prazdnyAleboFilter(!(d.vydavky||[]).length,
+      ${list.length?list.map(x=>{const idx=_vIdx.get(x);const bezDat=!x.datum||!/^\d{4}-\d{2}/.test(String(x.datum));const kl=dokladKluc(x);const st=kl?uhradaStav("vydavok",kl):null;const fb=st?(UHRADA_FARBY[st.stav]||UHRADA_FARBY.neznamy):null;const uhr=vydJeUhradeny(x);const RZ=rozporRiadok(st);return `<div class="arow rdok rv${RZ.trieda}" onclick="editVydavok(${idx})"><div class="c-cb">${kl?`<input type="checkbox" ${vydVybrane.has(kl)?'checked':''} onclick="event.stopPropagation();vydToggleVyber('${esc(kl)}',this.checked)" style="cursor:pointer">`:''}</div><div class="c-main viWrap">${vydavokIkonaHtml(x,_tank)}<div class="viTxt"><div class="acol-strong" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(x.partner||"—")}${x.naKontrolu?' <span title="Doklad založila appka z bankového pohybu — potvrďte, že sedí" style="font-size:10.5px;font-weight:700;color:var(--ink-warn);background:var(--sfc-warn);border-radius:5px;padding:1px 5px;vertical-align:1px">na kontrolu</span>':''} ${x.doklad?'<span title="Doklad v cloude" style="cursor:pointer" onclick="event.stopPropagation();otvorDokladSubor(\''+esc(x.doklad)+'\')">📎</span>':''}</div><div class="acol-muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(x.popis||x.druh||"")}${(()=>{const kde=uhradyPopis("vydavok",kl,true);return kde?` <span style="color:var(--pos)">· zaplatené ${esc(kde)}</span>`:"";})()}</div></div></div><div class="acol-muted c-date">${bezDat?'<span class="apill neg">bez dátumu</span>':fmtDatum(x.datum)}</div><div class="acol-sum c-sum">${eur(+x.bez||0)}</div><div class="acol-sum c-sub" style="color:var(--ink-soft)">${eur(+x.dph||0)}</div><div class="c-stav" style="text-align:center">${fb?`<span title="${esc((st.n||fb.n)+(st.text?' — '+st.text:'')+(st.stav!=="overene"?" · ťuknutím priradíte platbu z banky":""))}" style="color:${fb.f};font-size:14px;${st.stav!=="overene"?"cursor:pointer":""}" ${st.stav!=="overene"?`onclick="event.stopPropagation();otvorVyberPlatby('vydavok','${esc(kl)}')"${zam("vydavky")}`:""}>${fb.ic}</span>`:'<span style="color:var(--ink-soft)">·</span>'}</div><div class="c-act">${x.naKontrolu?`<button class="aabtn pos" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vydavokSkontrolovany(${idx})"${zam("vydavky")} title="Potvrdiť, že doklad sedí">👁</button>`:''}${kl?(!uhr?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vyberSposobUhrady(null,_s=>{oznacDokladUhradeny('vydavok','${esc(kl)}',_s);appVydavky();})"${zam("vydavky")} title="Označiť ako uhradené">✓</button>`:((st.zdroj==='rucne'||st.zdroj==='legacy')?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();zrusDokladUhradu('vydavok','${esc(kl)}');appVydavky()"${zam("vydavky")} title="Zrušiť potvrdenie úhrady">✕</button>`:'')):''}</div>${RZ.nota}</div>`;}).join(''):prazdnyAleboFilter(!(d.vydavky||[]).length,
         "Zatiaľ nemáte žiadny výdavok. Odfoťte bloček alebo prepošlite došlú faktúru e-mailom — appka z nej vytiahne sumu aj DPH.",
         {popis:"＋ Nový výdavok", kod:"editVydavok()"},
         "vFilter='vsetky';vRok='';vMesiac='';vZaklad='dane';_hladaj.vydavky='';appVydavky()")}
@@ -12984,6 +13001,7 @@ function editVydavok(idx){
     if(!overDopadNaPodanie((d.vydavky[idx]||{}).datum, "Zmazanie tohto dokladu")) return;
     d.vydavky.splice(idx,1); poZmene(); obnovPoEditacii("vydavky");
   });
+  zamOkno("vydavky");
   vydavokFormInit();
   // inicializuj rozpis editor
   setTimeout(()=>{ mRozpisData = maRozpis(x) ? x.rozpis.map(r=>({sadzba:+r.sadzba,bez:+r.bez,dph:+r.dph})) : [{sadzba:23,bez:0,dph:0}]; if(maRozpis(x)) mVykresliRozpis(); }, 30);
@@ -14125,7 +14143,7 @@ function dmvHtml(rok){
     return `<div class="card" style="margin-top:14px">
       <h2 style="font-size:16px;margin-bottom:4px">🚗 Daň z motorových vozidiel ${rok}</h2>
       <div class="csub" style="margin-bottom:12px">Platí ju každý, kto použil auto na podnikanie — <b>aj keď ho nemá v obchodnom majetku</b>. Priznanie sa podáva do ${termStr} a v ten istý deň je daň splatná.</div>
-      <button class="abtn pri" style="width:100%" onclick="editVozidlo(null)">＋ Pridať vozidlo a vypočítať daň</button>
+      <button class="abtn pri" style="width:100%" onclick="editVozidlo(null)"${zam("dph")}>＋ Pridať vozidlo a vypočítať daň</button>
     </div>`;
   }
   const riadok=(r,i)=>{
@@ -14147,7 +14165,7 @@ function dmvHtml(rok){
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px">
       <h2 style="font-size:16px;margin:0">🚗 Daň z motorových vozidiel ${rok}</h2>
       <div class="sp" style="flex:1"></div>
-      <button class="aabtn" onclick="editVozidlo(null)">＋ Vozidlo</button>
+      <button class="aabtn" onclick="editVozidlo(null)"${zam("dph")}>＋ Vozidlo</button>
     </div>
     <div class="csub" style="margin-bottom:12px">Priznanie sa podáva a daň je splatná do <b>${termStr}</b>.</div>
     <div class="alist">
@@ -14216,6 +14234,7 @@ function editVozidlo(idx){
   }, nove?null:()=>{ // zmazať — potvrdenie sa pýta `modalDeleteConfirm`, druhá otázka by bola navyše
     firmaData.vozidla.splice(idx,1); poZmene(); if(typeof appDPH==="function") appDPH();
   });
+  zamOkno("dph");
   setTimeout(vKategoriaBox, 0);
 }
 function vKategoriaBox(){
@@ -15288,7 +15307,7 @@ function rocnaKontrolaHtml(rok){
           ${x.priklady.length>=8?"<br>· …":""}
         </div>`:""}
         ${(x.akcia&&x.akcia.length)||nalezMozeSkryt(x.zavaznost,x.k)?`<div style="margin-top:9px;display:flex;gap:7px;flex-wrap:wrap">${
-          (x.akcia||[]).map(a=>`<button class="aabtn" style="padding:6px 12px;font-size:12px" onclick="${esc(a.fn)}">${esc(a.l)}</button>`).join("")
+          (x.akcia||[]).map(a=>`<button class="aabtn" style="padding:6px 12px;font-size:12px" onclick="${esc(a.fn)}"${/^otvorApp\(/.test(a.fn)?"":zam("uzavierka")}>${esc(a.l)}</button>`).join("")
         }${skryTlacidloHtml("rocna", x.zavaznost, x.k, x.t)}</div>`:""}
       </div>`).join("")}
       <div class="ob-hint">
@@ -15622,7 +15641,7 @@ function appDovolenka(){
   const narok=+d.narok||0;
   const zostatok=r2(narok-cerpane);
   const maxV=Math.max(...cerpanePoMes,1);
-  document.getElementById("appScreen").innerHTML=appHlavicka("dovolenka",`<button class="aabtn pri" onclick="dovPridajRok()">＋ Rok</button>`)+`
+  document.getElementById("appScreen").innerHTML=appHlavicka("dovolenka",`<button class="aabtn pri" onclick="dovPridajRok()"${zam("dovolenka")}>＋ Rok</button>`)+pasIbaCitanie("dovolenka")+`
     <div class="csub" style="margin:0 2px 14px">Evidencia dní voľna. Čerpanie sa dá zadať ručne alebo sa preberá z výkazov prác (dni označené ako dovolenka °). Živnostník nárok na platenú dovolenku zo zákona nemá — slúži pre vlastný prehľad a plánovanie.</div>
     <div class="atool" style="margin-bottom:14px">${roky.map(r=>`<span class="achip ${r===dovRok?'on':''}" onclick="dovRok='${r}';appDovolenka()">${r}</span>`).join('')}</div>
     <div class="amini" style="margin-bottom:16px">
@@ -15634,7 +15653,7 @@ function appDovolenka(){
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
         <b class="chead" style="flex:1">Čerpanie ${dovRok}</b>
         <span style="font-size:12px;color:var(--ink-soft)">Ročný nárok:</span>
-        <input type="number" value="${esc(narok)}" onchange="if(!strazPole('dovolenka',appDovolenka))return;dovEnsure('${dovRok}').narok=parseFloat(this.value)||0;poZmene();appDovolenka()" style="width:64px;border:1.5px solid var(--line);border-radius:8px;padding:5px 8px;font:inherit"> dní
+        <input type="number" value="${esc(narok)}"${zam("dovolenka")} onchange="if(!strazPole('dovolenka',appDovolenka))return;dovEnsure('${dovRok}').narok=parseFloat(this.value)||0;poZmene();appDovolenka()" style="width:64px;border:1.5px solid var(--line);border-radius:8px;padding:5px 8px;font:inherit"> dní
       </div>
       <div class="wchart" style="height:110px;margin-bottom:14px">${cerpanePoMes.map((v,i)=>{const h=Math.max(4,Math.round(v/maxV*100));return `<div class="wbar" style="height:${h}%;--bar:${c}">${v>0?`<b>${v}</b>`:''}<i>${MES_SK[i]}</i></div>`;}).join("")}</div>
       <div class="alist">
@@ -15646,7 +15665,7 @@ function appDovolenka(){
           return `<div class="arow" style="grid-template-columns:1.5fr 1fr 1fr;align-items:center">
             <div class="acol-strong">${m}</div>
             <div class="acol-muted" style="text-align:right">${zV?zV+' dní':'—'}</div>
-            <div style="text-align:right"><input type="number" value="${esc(hodnota)}" placeholder="${zV||0}" onchange="dovUpd('${dovRok}',${mi},this.value)" style="width:64px;border:1px solid var(--line);border-radius:7px;padding:4px 7px;font:inherit;text-align:right"></div>
+            <div style="text-align:right"><input type="number" value="${esc(hodnota)}" placeholder="${zV||0}" onchange="dovUpd('${dovRok}',${mi},this.value)"${zam("dovolenka")} style="width:64px;border:1px solid var(--line);border-radius:7px;padding:4px 7px;font:inherit;text-align:right"></div>
           </div>`;
         }).join("")}
         <div class="arow" style="grid-template-columns:1.5fr 1fr 1fr;font-weight:700;border-top:2px solid var(--line)"><div>Spolu vyčerpané</div><div></div><div class="acol-sum" style="text-align:right">${cerpane} dní</div></div>
@@ -15779,7 +15798,7 @@ function appJazdy(){
   const kontroly=jazdyKontrola();
 
   document.getElementById("appScreen").innerHTML=appHlavicka("jazdy",
-    `<button class="aabtn" onclick="vwImport()">🚗 Z vozidla</button><button class="aabtn" onclick="zseImport()">⚡ ZSE</button><button class="aabtn" onclick="kjImport()">📥 GPX/CSV</button><button class="aabtn" onclick="jazdaSpusti()">📍 ${_jazda?"Prebieha jazda":"Merať jazdu"}</button><button class="aabtn pri" onclick="editJazda()">＋ Nová</button>`)+`
+    `<button class="aabtn" onclick="vwImport()"${zam("jazdy")}>🚗 Z vozidla</button><button class="aabtn" onclick="zseImport()"${zam("jazdy")}>⚡ ZSE</button><button class="aabtn" onclick="kjImport()"${zam("jazdy")}>📥 GPX/CSV</button><button class="aabtn" onclick="jazdaSpusti()"${zam("jazdy")}>📍 ${_jazda?"Prebieha jazda":"Merať jazdu"}</button><button class="aabtn pri" onclick="editJazda()"${zam("jazdy")}>＋ Nová</button>`)+pasIbaCitanie("jazdy")+`
     <div class="amini">
       <div class="aminbox"><div class="al">${kmSukrAll?'Podnikateľské (spolu)':'Najazdené (spolu)'}</div><div class="av">${Math.round(kmSukrAll?kmPodnikAll:kmAll).toLocaleString('sk')} km</div></div>
       ${kmSukrAll
@@ -15797,8 +15816,8 @@ function appJazdy(){
           <div class="csub">${st.zhoda} jázd má zhodu s dňom vo výkaze${st.doplnene?` · ${st.doplnene} už doplnených`:''}${st.vlastny?` · ${st.vlastny} s vlastným účelom`:''}. Prázdny alebo predvolený účel sa nastaví podľa aktivity z výkazu v ten deň, vlastný ostane.</div></div>
         <div class="sp" style="flex:1"></div>
         <div style="display:flex;gap:6px;flex-wrap:wrap">
-          ${st.nedoplnene?`<button class="aabtn pri" onclick="jazdyDoplnUcelZVykazu(kjMesiac)">↳ Doplniť účel z výkazu (${st.nedoplnene})</button>`:''}
-          ${st.doplnene?`<button class="aabtn" onclick="jazdyVratVsetky(kjMesiac)">↩ Vrátiť pôvodné</button>`:''}
+          ${st.nedoplnene?`<button class="aabtn pri" onclick="jazdyDoplnUcelZVykazu(kjMesiac)"${zam("jazdy")}>↳ Doplniť účel z výkazu (${st.nedoplnene})</button>`:''}
+          ${st.doplnene?`<button class="aabtn" onclick="jazdyVratVsetky(kjMesiac)"${zam("jazdy")}>↩ Vrátiť pôvodné</button>`:''}
         </div>
       </div>
     </div>`; })()}
@@ -15807,9 +15826,9 @@ function appJazdy(){
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px">
         <b class="chead">Stav tachometra</b>
         <div class="sp" style="flex:1"></div>
-        <input id="kj_tach" type="number" value="${tachStav||''}" placeholder="napr. 48210" style="width:120px;border:1.5px solid var(--line);border-radius:9px;padding:7px 10px;font:inherit">
-        <button class="aabtn" onclick="kjUlozTachometer()">Uložiť</button>
-        <button class="aabtn" onclick="kjPrepocitajTacho()" title="Zreťazí stav tachometra naprieč celou knihou">↻ Prepočítať</button>
+        <input id="kj_tach"${zam("jazdy")} type="number" value="${tachStav||''}" placeholder="napr. 48210" style="width:120px;border:1.5px solid var(--line);border-radius:9px;padding:7px 10px;font:inherit">
+        <button class="aabtn" onclick="kjUlozTachometer()"${zam("jazdy")}>Uložiť</button>
+        <button class="aabtn" onclick="kjPrepocitajTacho()"${zam("jazdy")} title="Zreťazí stav tachometra naprieč celou knihou">↻ Prepočítať</button>
       </div>
       <div class="csub">Pole je stav tachometra pred prvou jazdou v knihe. ${tachKon?`Po poslednej jazde: <b>${tachKon.toLocaleString('sk')} km</b>`:'Ďalšie stavy appka dopočíta z kilometrov.'}</div>
       ${(()=>{ const d=tachometerDiery(); if(!d.length) return "";
@@ -16083,6 +16102,7 @@ function editNabijanie(idx){
     n.miesto=nove;
     poZmene(); prekresliSoScrollom(appJazdy);
   });
+  zamOkno("jazdy");
 }
 
 // editácia tankovania (dátum, stanica, litre, suma) + zmazanie
@@ -16120,6 +16140,7 @@ function editTankovanie(idx){
   }, ()=>{ // zmazať — potvrdenie sa pýta `modalDeleteConfirm`, druhá otázka by bola navyše
     firmaData.tankovania.splice(idx,1); poZmene(); prekresliSoScrollom(appJazdy);
   });
+  zamOkno("jazdy");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -17094,6 +17115,7 @@ function editJazda(idx){
     else d.jazdy[idx]=jazdaDokonci(Object.assign(d.jazdy[idx],obj));
     poZmene(); appJazdy();},
   nova?null:()=>{ d.jazdy.splice(idx,1); poZmene(); appJazdy(); });
+  zamOkno("jazdy");
 }
 // Odpoveď na otázku, či auto slúži aj na súkromné cesty. Ukladá sa, aby sa
 // kontrola nepýtala donekonečna — a dá sa zmeniť, lebo sa to časom mení.
@@ -18254,7 +18276,7 @@ function dmKopiruj(){
 function appData(){
   const d=firmaData||{};
   const fak=(d.faktury||[]).length, vyd=(d.vydavky||[]).length, jaz=(d.jazdy||[]).length, poh=(d.vypis||[]).length;
-  document.getElementById("appScreen").innerHTML=appHlavicka("data","")+`
+  document.getElementById("appScreen").innerHTML=appHlavicka("data","")+pasIbaCitanie("data")+`
     <div class="card">
       <h2 style="font-size:16px;margin-bottom:4px">${esc((d.meta&&d.meta.nazov)||"Vaša firma")}</h2>
       <div class="csub">${d.meta?esc((d.meta.ico?'IČO '+d.meta.ico:'')+(d.meta.icdph?' · IČ DPH '+d.meta.icdph:'')):"—"}</div>
@@ -18265,8 +18287,8 @@ function appData(){
         <div class="sbox"><div class="sn">${poh}</div><div class="sl">pohybov</div></div>
       </div>
       <div class="actions" style="margin-top:16px">
-        <button class="abtn pri" onclick="document.getElementById('fileInput').click()">📥 Importovať JSON</button>
-        <button class="abtn" onclick="ulozFirmu()">☁ Uložiť do cloudu</button>
+        <button class="abtn pri" onclick="document.getElementById('fileInput').click()"${zam("data")}>📥 Importovať JSON</button>
+        <button class="abtn" onclick="ulozFirmu()"${zam("data")}>☁ Uložiť do cloudu</button>
         <button class="abtn" onclick="exportFirmu()">⬇ Stiahnuť zálohu</button>
       </div>
       <div style="border-top:1px solid var(--line-soft);margin:14px 0 12px"></div>
@@ -18294,7 +18316,7 @@ function appData(){
         </div>
         <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:8px">
           ${[["50","Polovica DPH (bežný prípad)"],["100","Celá DPH — auto používam výlučne na podnikanie"]].map(([k,l])=>
-            `<span class="achip ${autoRezim()===k?'on':''}" onclick="nastavAutoRezim('${k}')">${l}</span>`).join("")}
+            `<span class="achip ${autoRezim()===k?'on':''}" onclick="nastavAutoRezim('${k}')"${zam("data")}>${l}</span>`).join("")}
         </div>
         ${autoRezim()==="100"?`<div style="background:var(--sfc-warn);border-left:3px solid var(--warn);border-radius:0 9px 9px 0;padding:9px 12px;font-size:12px;line-height:1.55;margin-bottom:14px">
           ⚠ Plný odpočet je podmienený <b>elektronickou knihou jázd</b> podľa § 85n a záznamy sa archivujú
@@ -18311,7 +18333,7 @@ function appData(){
         </div>
         <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:8px">
           ${Object.keys(PHL_REZIMY).map(k=>
-            `<span class="achip ${phlRezim()===k?'on':''}" onclick="nastavPhlRezim('${k}')">${esc(PHL_REZIMY[k].n)}</span>`).join("")}
+            `<span class="achip ${phlRezim()===k?'on':''}" onclick="nastavPhlRezim('${k}')"${zam("data")}>${esc(PHL_REZIMY[k].n)}</span>`).join("")}
         </div>
         <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:14px;line-height:1.5">
           ${esc(PHL_REZIMY[phlRezim()].p)}
@@ -18321,9 +18343,9 @@ function appData(){
         </div>
         ${phlRezim()==="nahrady"?`<div class="mrow2" style="margin-bottom:6px">
           <div class="mfield" style="margin-bottom:0"><label>Základná náhrada (€/km)</label>
-            <input type="number" step="0.001" value="${esc(nahradaKmSadzba())}" onchange="nastavNahraduKm(this.value)"></div>
+            <input type="number" step="0.001" value="${esc(nahradaKmSadzba())}" onchange="nastavNahraduKm(this.value)"${zam("data")}></div>
           <div class="mfield" style="margin-bottom:0"><label>Spotreba podľa TP (l/100 km)</label>
-            <input type="number" step="0.1" value="${esc(normaPHM())}" onchange="nastavNormuPHM(this.value)"></div>
+            <input type="number" step="0.1" value="${esc(normaPHM())}" onchange="nastavNormuPHM(this.value)"${zam("data")}></div>
         </div>
         <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:14px;line-height:1.5">
           Sadzba od 1. 1. 2026 je ${eur(NAHRADA_KM.osobne)} pre osobné vozidlá a ${eur(NAHRADA_KM.jednostopove)} pre jednostopové (oznámenie MPSVR č. 340/2025 Z. z.). Sadzby sa menia podľa vývoja cien — keď opatrenie sumu zvýši, prepíšte ju tu.
@@ -18336,7 +18358,7 @@ function appData(){
         </div>
         <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:8px">
           ${[["100","Celá suma — auto používam výlučne na podnikanie"],["80","80 % — auto používam aj súkromne"]].map(([k,l])=>
-            `<span class="achip ${String(autoVydavkyPercent())===k?'on':''}" onclick="nastavAutoVydavky('${k}')">${l}</span>`).join("")}
+            `<span class="achip ${String(autoVydavkyPercent())===k?'on':''}" onclick="nastavAutoVydavky('${k}')"${zam("data")}>${l}</span>`).join("")}
         </div>
         <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:14px;line-height:1.5">
           Pohonné hmoty sem nepatria — tie majú vlastný režim vyššie.
@@ -18487,7 +18509,7 @@ function appData(){
       <div class="mfield"><label>IČO</label>
         <div style="display:flex;gap:8px">
           <input id="set_ico" value="${esc((d.meta||{}).ico||'')}" placeholder="napr. 12345678" style="flex:1">
-          <button class="aabtn pri" style="white-space:nowrap" onclick="doplnFirmuPodlaICO()">Doplniť z registra</button>
+          <button class="aabtn pri" style="white-space:nowrap" onclick="doplnFirmuPodlaICO()"${zam("data")}>Doplniť z registra</button>
         </div>
         <div id="icoStav" style="font-size:11.5px;margin-top:5px;min-height:14px"></div>
       </div>
@@ -18543,12 +18565,12 @@ function appData(){
         <label>Podpis do protokolu (obrázok PNG)</label>
         <div style="display:flex;align-items:center;gap:10px">
           <input type="file" id="set_podpisFile" accept="image/png,image/jpeg" style="display:none" onchange="nacitajPodpis(event)">
-          <button type="button" class="aabtn" onclick="document.getElementById('set_podpisFile').click()">📎 Nahrať podpis</button>
+          <button type="button" class="aabtn" onclick="document.getElementById('set_podpisFile').click()"${zam("data")}>📎 Nahrať podpis</button>
           <span id="podpisStav" style="font-size:12px;color:var(--ink-soft)">${(d.settings||{}).podpisB64?'✓ podpis nahraný':'zatiaľ bez podpisu'}</span>
         </div>
         ${(d.settings||{}).podpisB64?`<img src="${(d.settings).podpisB64}" style="max-height:50px;margin-top:8px;border:1px solid var(--line);border-radius:6px;padding:4px;background:var(--paper)">`:''}
       </div>
-      <button class="abtn pri" style="margin-top:10px" onclick="ulozNastavenia()">Uložiť všetky nastavenia</button>
+      <button class="abtn pri" style="margin-top:10px" onclick="ulozNastavenia()"${zam("data")}>Uložiť všetky nastavenia</button>
       <div class="cloudmsg" id="cloudMsg2"></div>
     </div>`;
   setCrumb("firma · dáta · cloud · nastavenia");
@@ -18879,7 +18901,7 @@ function appPohladavky(){
 
   const zoznam = pzTab==="pohl" ? pohl : zav;
 
-  document.getElementById("appScreen").innerHTML=appHlavicka("pohladavky","")+`
+  document.getElementById("appScreen").innerHTML=appHlavicka("pohladavky","")+pasIbaCitanie("pohladavky")+`
     <div class="atool">
       <select onchange="pzRok=this.value;pzKuDnu='';appPohladavky()" style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:13px">
         ${roky.map(r=>`<option value="${r}" ${r===pzRok?'selected':''}>${r}</option>`).join('')}
@@ -18904,7 +18926,7 @@ function appPohladavky(){
             <div class="pz-main"><div class="acol-strong">${esc(p.partner||"—")}</div><div class="acol-muted">${esc(p.cislo||"")} · splatnosť ${fmtDatum(p.splatnost)}</div></div>
             <div class="acol-muted pz-stav">${p.uhradena?'<span class="apill ok">uhradená</span>':p.poSplat?'<span class="apill neg">po splatnosti '+p.dni+' dní</span>':'<span class="apill warn">otvorená</span>'}</div>
             <div class="acol-sum pz-sum">${eur(p.suma)}</div>
-            <div class="pz-act">${p.uhradena?'':`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vyberSposobUhrady(null,_s=>{oznacDokladUhradeny('faktura','${esc(p.kluc)}',_s);appPohladavky();})" title="Označiť ako uhradenú">✓</button>`}${p.poSplat?`<button class="aabtn" style="padding:5px 8px;font-size:11px${p.neupominat?';opacity:.5':''}" onclick="event.stopPropagation();faktToggleNeupominat('${esc(p.kluc)}')" title="${p.neupominat?'Faktúra je vylúčená z upomienok — ťuknutím vrátiť':'Vylúčiť faktúru z upomienok (odklad, spor, dohoda)'}"${zam("faktury")}>${p.neupominat?'🔕':'🔔'}</button>`:''}${p.poSplat&&!p.neupominat?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();upomienkaPDF('${esc(p.partner)}')" title="Vygenerovať PDF upomienku — jedna na odberateľa, so všetkými jeho faktúrami po splatnosti">📄 ${upomienkaStupenSkratka(upomienkaStupenPre(upomienkaKandidati(p.partner, new Date().toISOString().slice(0,10)).map(x=>x.cislo)))}</button>`:''}</div></div>`).join(''):'<div class="aempty">Žiadne pohľadávky v tomto roku.</div>')
+            <div class="pz-act">${p.uhradena?'':`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vyberSposobUhrady(null,_s=>{oznacDokladUhradeny('faktura','${esc(p.kluc)}',_s);appPohladavky();})"${zam("pohladavky")} title="Označiť ako uhradenú">✓</button>`}${p.poSplat?`<button class="aabtn" style="padding:5px 8px;font-size:11px${p.neupominat?';opacity:.5':''}" onclick="event.stopPropagation();faktToggleNeupominat('${esc(p.kluc)}')"${zam("pohladavky")} title="${p.neupominat?'Faktúra je vylúčená z upomienok — ťuknutím vrátiť':'Vylúčiť faktúru z upomienok (odklad, spor, dohoda)'}"${zam("faktury")}>${p.neupominat?'🔕':'🔔'}</button>`:''}${p.poSplat&&!p.neupominat?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();upomienkaPDF('${esc(p.partner)}')" title="Vygenerovať PDF upomienku — jedna na odberateľa, so všetkými jeho faktúrami po splatnosti">📄 ${upomienkaStupenSkratka(upomienkaStupenPre(upomienkaKandidati(p.partner, new Date().toISOString().slice(0,10)).map(x=>x.cislo)))}</button>`:''}</div></div>`).join(''):'<div class="aempty">Žiadne pohľadávky v tomto roku.</div>')
         : (zavZobraz.length?zavZobraz.map(z=>`<div class="arow rpz rzv" style="cursor:pointer;${z.uhradeny?'opacity:.6':''}" onclick="editVydavok(${z.idx})" title="Otvoriť výdavok">
             <div class="pz-main"><div class="acol-strong">${esc(z.partner||"—")}</div><div class="acol-muted">${fmtDatum(z.vznik)}</div></div>
             <div class="acol-muted pz-stav">${z.uhradeny?'<span class="apill ok">uhradený</span>':'<span class="apill warn">neuhradený</span>'}</div>
@@ -19262,7 +19284,7 @@ function pbKontrolyHtml(rok){
   const riadok=(t,farba,ik)=>`<div style="display:flex;gap:7px;align-items:flex-start;font-size:12.5px;margin:3px 0;color:${farba}"><span style="flex:0 0 auto">${ik}</span><span>${t}</span></div>`;
   if(!k.blok.length && !k.upoz.length && !k.info.length)
     return `<div style="margin:12px 0;padding:8px 12px;border-radius:9px;background:var(--sfc-pos);font-size:12.5px;color:var(--pos,#1c7a4a)">✓ Kontroly bez nálezov</div>`;
-  const zahrnutBtny=k.nespar&&k.nespar.length?`<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:6px">${k.nespar.map(f=>`<button class="aabtn" onclick="(firmaData.faktury.find(x=>String(x.cislo)==='${esc(String(f.cislo))}')||{}).pbZahrnut=true;poZmene();appPriznanieB()" style="font-size:11.5px">Zahrnúť ${esc(String(f.cislo))}</button>`).join("")}</div>`:"";
+  const zahrnutBtny=k.nespar&&k.nespar.length?`<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:6px">${k.nespar.map(f=>`<button class="aabtn" onclick="(firmaData.faktury.find(x=>String(x.cislo)==='${esc(String(f.cislo))}')||{}).pbZahrnut=true;poZmene();appPriznanieB()"${zam("priznanieB")} style="font-size:11.5px">Zahrnúť ${esc(String(f.cislo))}</button>`).join("")}</div>`:"";
   return `<div style="margin:12px 0;padding:10px 12px;border-radius:10px;border:1px solid var(--line)">
     <div style="font-weight:700;font-size:13px;margin-bottom:6px">Kontroly priznania</div>
     ${k.blok.map(t=>riadok(t,"var(--neg)","⛔")).join("")}
@@ -19420,7 +19442,7 @@ function appPriznanieB(){
     }
   }
   const otvoreny=rokPovoleny(pbRok);
-  document.getElementById("appScreen").innerHTML=appHlavicka("priznanieB","")+`
+  document.getElementById("appScreen").innerHTML=appHlavicka("priznanieB","")+pasIbaCitanie("priznanieB")+`
     <div style="background:var(--sfc-neg);border-left:3px solid #c0564a;border-radius:8px;padding:11px 14px;margin-bottom:14px;font-size:12.5px">
       <b>Predvyplňovací nástroj.</b> Vytvorí návrh priznania DPFO typ B na kontrolu. <b>Nenahrádza daňového poradcu ani oficiálne priznanie.</b> Pred podaním si všetko overte. Výpočet je postavený na 15 % sadzbe (príjmy pod 100 000 €) a pravidlách ${pbRok}.
     </div>
@@ -19432,7 +19454,7 @@ function appPriznanieB(){
     <div style="display:flex;gap:8px;margin-top:14px">
       ${pbKrok>0?`<button class="aabtn" onclick="pbKrok--;appPriznanieB()">← Späť</button>`:''}
       <div class="sp" style="flex:1"></div>
-      ${pbKrok<PB_KROKY.length-1?`<button class="aabtn pri" onclick="pbKrok++;appPriznanieB()">Pokračovať →</button>`:`<button class="aabtn" onclick="pbNahladFormular(pbRok)">▦ Ako formulár</button><button class="aabtn pri" onclick="pbExportXml()">↧ Exportovať XML</button>`}
+      ${pbKrok<PB_KROKY.length-1?`<button class="aabtn pri" onclick="pbKrok++;appPriznanieB()">Pokračovať →</button>`:`<button class="aabtn" onclick="pbNahladFormular(pbRok)">▦ Ako formulár</button><button class="aabtn pri" onclick="pbExportXml()"${zam("priznanieB")}>↧ Exportovať XML</button>`}
     </div>`:`
     <div class="card">
       <b>Rok ${pbRok} nemáte odomknutý.</b>
@@ -19463,18 +19485,18 @@ function pbDarSekcia(v, S){
   const dN=S.darNNO||{}, dR=S.darRodic||{}, rA=dR.a||{}, rB=dR.b||{};
   const setN="firmaData.settings.darNNO=firmaData.settings.darNNO||{};firmaData.settings.darNNO";
   const setR="firmaData.settings.darRodic=firmaData.settings.darRodic||{};firmaData.settings.darRodic";
-  const inp=(val,ph,onch,w)=>`<input value="${esc(String(val||''))}" placeholder="${ph}" onchange="${PB_STRAZ}${onch}" style="width:${w||'100%'};padding:6px 8px;border:1px solid var(--line);border-radius:7px;font-size:13px">`;
+  const inp=(val,ph,onch,w)=>`<input value="${esc(String(val||''))}" placeholder="${ph}" ${zam("priznanieB")} onchange="${PB_STRAZ}${onch}" style="width:${w||'100%'};padding:6px 8px;border:1px solid var(--line);border-radius:7px;font-size:13px">`;
   return `<div style="margin:16px 0 8px;font-weight:700;font-size:14px">Poukázanie podielu zaplatenej dane (2 % / 3 %)</div>
-    <div class="mfield" style="margin-bottom:8px"><label style="display:flex;align-items:center;gap:8px"><input type="checkbox" ${dN.aktivny?'checked':''} onchange="${PB_STRAZ}${setN}.aktivny=this.checked;poZmene();appPriznanieB()" style="width:auto"> Neziskovej organizácii (§ 50)</label></div>
+    <div class="mfield" style="margin-bottom:8px"><label style="display:flex;align-items:center;gap:8px"><input type="checkbox" ${dN.aktivny?'checked':''} ${zam("priznanieB")} onchange="${PB_STRAZ}${setN}.aktivny=this.checked;poZmene();appPriznanieB()" style="width:auto"> Neziskovej organizácii (§ 50)</label></div>
     ${dN.aktivny?`<div style="padding:8px 10px;border:1px solid var(--line);border-radius:9px;margin-bottom:10px;display:flex;flex-direction:column;gap:7px">
       <div style="display:flex;gap:7px;align-items:center">${inp(dN.ico,'IČO prijímateľa',setN+".ico=this.value.trim();poZmene()", '130px')}
-        <button class="aabtn" onclick="pbDotiahniNNO()" style="white-space:nowrap">Dotiahnuť z RPO</button></div>
+        <button class="aabtn" onclick="pbDotiahniNNO()"${zam("priznanieB")} style="white-space:nowrap">Dotiahnuť z RPO</button></div>
       ${inp(dN.nazov,'Obchodné meno organizácie',setN+".nazov=this.value;poZmene();appPriznanieB()")}
-      <label style="display:flex;align-items:center;gap:8px;font-size:12.5px"><input type="checkbox" ${dN.treProcenta?'checked':''} onchange="${PB_STRAZ}${setN}.treProcenta=this.checked;poZmene();appPriznanieB()" style="width:auto"> Poukazujem 3 % (dobrovoľník 40+ hodín, s potvrdením)</label>
-      <label style="display:flex;align-items:center;gap:8px;font-size:12.5px"><input type="checkbox" ${dN.suhlas?'checked':''} onchange="${PB_STRAZ}${setN}.suhlas=this.checked;poZmene()" style="width:auto"> Súhlasím so zaslaním údajov (meno a adresa) prijímateľovi</label>
+      <label style="display:flex;align-items:center;gap:8px;font-size:12.5px"><input type="checkbox" ${dN.treProcenta?'checked':''} ${zam("priznanieB")} onchange="${PB_STRAZ}${setN}.treProcenta=this.checked;poZmene();appPriznanieB()" style="width:auto"> Poukazujem 3 % (dobrovoľník 40+ hodín, s potvrdením)</label>
+      <label style="display:flex;align-items:center;gap:8px;font-size:12.5px"><input type="checkbox" ${dN.suhlas?'checked':''} ${zam("priznanieB")} onchange="${PB_STRAZ}${setN}.suhlas=this.checked;poZmene()" style="width:auto"> Súhlasím so zaslaním údajov (meno a adresa) prijímateľovi</label>
       <div style="font-size:12.5px;color:var(--ink-soft)">Suma na poukázanie (r. 152): <b>${eur(v.darSuma||0)}</b>${(v.darSuma||0)===0&&dN.aktivny?` <span style="color:var(--accent-deep)">— ${(v.danPoBonuse||0)>0?'menej než minimum 3 €':'daň je 0'}, nedá sa poukázať</span>`:` (${dN.treProcenta?'3':'2'} % z dane po bonuse)`}</div>
     </div>`:''}
-    <div class="mfield" style="margin-bottom:8px"><label style="display:flex;align-items:center;gap:8px"><input type="checkbox" ${dR.aktivny?'checked':''} onchange="${PB_STRAZ}${setR}.aktivny=this.checked;poZmene();appPriznanieB()" style="width:auto"> Rodičovi/rodičom (§ 50aa — 2 % každému)</label></div>
+    <div class="mfield" style="margin-bottom:8px"><label style="display:flex;align-items:center;gap:8px"><input type="checkbox" ${dR.aktivny?'checked':''} ${zam("priznanieB")} onchange="${PB_STRAZ}${setR}.aktivny=this.checked;poZmene();appPriznanieB()" style="width:auto"> Rodičovi/rodičom (§ 50aa — 2 % každému)</label></div>
     ${dR.aktivny?`<div style="padding:8px 10px;border:1px solid var(--line);border-radius:9px;margin-bottom:6px;display:flex;flex-direction:column;gap:7px">
       <div style="font-size:12px;color:var(--ink-soft)">Rodič musí byť k 31. 12. ${v.rok} poberateľom dôchodku. Uveďte meno, priezvisko a rodné číslo.</div>
       <div style="font-weight:600;font-size:12.5px">1. rodič</div>
@@ -19483,7 +19505,7 @@ function pbDarSekcia(v, S){
       <div style="font-weight:600;font-size:12.5px;margin-top:3px">2. rodič (nepovinné)</div>
       <div style="display:flex;gap:7px">${inp(rB.meno,'Meno',setR+".b=(firmaData.settings.darRodic.b||{});firmaData.settings.darRodic.b.meno=this.value;poZmene()")}${inp(rB.priezvisko,'Priezvisko',setR+".b=(firmaData.settings.darRodic.b||{});firmaData.settings.darRodic.b.priezvisko=this.value;poZmene()")}</div>
       ${inp(rB.rc,'Rodné číslo (bez lomky)',setR+".b=(firmaData.settings.darRodic.b||{});firmaData.settings.darRodic.b.rc=this.value.replace(/\\D/g,'');poZmene()", '170px')}
-      <label style="display:flex;align-items:center;gap:8px;font-size:12.5px"><input type="checkbox" ${dR.zvereny?'checked':''} onchange="${PB_STRAZ}${setR}.zvereny=this.checked;poZmene()" style="width:auto"> Bol som zverený do náhradnej starostlivosti (priložiť rozhodnutie)</label>
+      <label style="display:flex;align-items:center;gap:8px;font-size:12.5px"><input type="checkbox" ${dR.zvereny?'checked':''} ${zam("priznanieB")} onchange="${PB_STRAZ}${setR}.zvereny=this.checked;poZmene()" style="width:auto"> Bol som zverený do náhradnej starostlivosti (priložiť rozhodnutie)</label>
     </div>`:''}
     <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:6px">Neziskovku aj rodičov možno poukázať naraz jedným vyhlásením. Podmienka: daň zaplatená a bez nedoplatku nad 5 €.</div>`;
 }
@@ -19491,7 +19513,7 @@ function pbDarSekcia(v, S){
 function pbZamInput(label, key, val){
   return `<div class="mfield" style="margin-bottom:8px"><label style="font-size:12.5px">${label}</label>
     <input type="number" step="0.01" inputmode="decimal" value="${esc(String(val!=null&&val!==''?val:''))}" placeholder="0.00"
-      onchange="${PB_STRAZ}firmaData.settings.${key}=+this.value||0;poZmene();appPriznanieB()"
+      ${zam("priznanieB")} onchange="${PB_STRAZ}firmaData.settings.${key}=+this.value||0;poZmene();appPriznanieB()"
       style="width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:8px"></div>`;
 }
 // Druh priznania za rok (poučenie DPFOBv25, bod 2 a 3): riadne; opravné pred
@@ -19674,11 +19696,11 @@ function pbKrokObsah(krok, v, S){
       <div style="margin:14px 0 8px;font-weight:700;font-size:14px">Daňový bonus na deti</div>
       <div style="margin-bottom:10px">
         ${deti.length?deti.map((dt,i)=>`<div style="display:flex;gap:8px;align-items:center;margin-bottom:5px">
-          <input type="number" value="${esc(String(dt.vek!=null?dt.vek:''))}" placeholder="vek" onchange="${PB_STRAZ}firmaData.settings.deti[${i}].vek=+this.value;delete firmaData.settings.deti[${i}].narodenie;poZmene();appPriznanieB()" style="width:70px;padding:5px;border:1px solid var(--line);border-radius:7px">
+          <input type="number" value="${esc(String(dt.vek!=null?dt.vek:''))}" placeholder="vek" ${zam("priznanieB")} onchange="${PB_STRAZ}firmaData.settings.deti[${i}].vek=+this.value;delete firmaData.settings.deti[${i}].narodenie;poZmene();appPriznanieB()" style="width:70px;padding:5px;border:1px solid var(--line);border-radius:7px">
           <span style="font-size:12.5px;color:var(--ink-soft)">${detiVek(dt,v.rok)<15?`do 15 r. (${eur(B.do15)}/mes)`:detiVek(dt,v.rok)<18?`15–17 r. (${eur(B.do18)}/mes)`:'nad 18 r. (bez nároku)'}</span>
-          <span onclick="${PB_STRAZ}firmaData.settings.deti.splice(${i},1);poZmene();appPriznanieB()" style="cursor:pointer;color:var(--neg);margin-left:auto">✕</span>
+          <span ${zam("priznanieB")} onclick="${PB_STRAZ}firmaData.settings.deti.splice(${i},1);poZmene();appPriznanieB()" style="cursor:pointer;color:var(--neg);margin-left:auto">✕</span>
         </div>`).join(''):'<div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:8px">Žiadne deti. Pridajte vek dieťaťa.</div>'}
-        <button class="aabtn" onclick="${PB_STRAZ}firmaData.settings.deti=firmaData.settings.deti||[];firmaData.settings.deti.push({vek:10});poZmene();appPriznanieB()">+ Pridať dieťa</button>
+        <button class="aabtn" ${zam("priznanieB")} onclick="${PB_STRAZ}firmaData.settings.deti=firmaData.settings.deti||[];firmaData.settings.deti.push({vek:10});poZmene();appPriznanieB()">+ Pridať dieťa</button>
       </div>
       ${deti.length?`<div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:8px">
         ${bd.opravnenych} detí s nárokom · plná suma ${eur(bd.maxBonus)} · limit ${Math.round(bd.pctLimit*100)} % zo základu = ${eur(bd.limitZoZakladu||0)}${v.zaklad>B.hranicaKratenia?` · po krátení vysokým príjmom ${eur(bd.poVysokomPrijme||0)}`:''}</div>`:''}
@@ -21946,7 +21968,7 @@ function odkladHtml(){
       pri príjmoch zo zahraničia o šesť. Nová lehota vždy končí posledným dňom mesiaca
       a v ten deň je daň aj splatná.
     </div>
-    <select onchange="nastavOdklad(${zaRok}, this.value)" style="width:100%;border:1.5px solid var(--line);border-radius:9px;padding:9px 11px;font:inherit">
+    <select onchange="nastavOdklad(${zaRok}, this.value)"${zam("data")} style="width:100%;border:1.5px solid var(--line);border-radius:9px;padding:9px 11px;font:inherit">
       ${volby.map(([k,l])=>`<option value="${k}" ${k===zvoleny?"selected":""}>${esc(l)}</option>`).join("")}
     </select>
     <div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;line-height:1.5">
@@ -22438,7 +22460,7 @@ function exportDanXLS(rok){
 }
 
 // ── MODÁL ──
-let modalSave=null, modalDelete=null;
+let modalSave=null, modalDelete=null, modalModul=null;
 // ⚠ Okno NIE JE uzavreté pre klávesnicu — vedomá medzera, nie prehliadnutie.
 // Čo funguje: keď akciu spustí klávesnica, `vratFocus` presunie focus na
 // krížik okna (kap. 48.6e). Čo NEfunguje:
@@ -22452,7 +22474,8 @@ let modalSave=null, modalDelete=null;
 // `okText` — tlačidlo, ktoré neukladá, nesmie sa volať „Uložiť" (Meranie jazdy
 // ním spúšťa GPS). Nastavuje sa pri KAŽDOM otvorení, inak by text ostal viseť.
 function openModal(title, bodyHTML, onSave, onDelete, trieda, okText){
-  modalSave=onSave; modalDelete=onDelete||null;
+  modalSave=onSave; modalDelete=onDelete||null; modalModul=null;
+  if(_oknoZamknute) zamkniTlacidlaOkna(false);
   const karta=document.querySelector("#modal .modalcard");
   if(karta){ karta.classList.remove("siroky"); if(trieda) karta.classList.add(trieda); }
   document.getElementById("modalTitle").textContent=title;
@@ -22463,8 +22486,31 @@ function openModal(title, bodyHTML, onSave, onDelete, trieda, okText){
   if(ok){ ok.style.display=onSave?"":"none"; ok.textContent=okText||"Uložiť"; }
   document.getElementById("modal").classList.add("on");
 }
+// FORMULÁR, KTORÝ ZAPISUJE DO MODULU. Okno samo nevie, komu patrí — Uložiť
+// a Zmazať sú jedno tlačidlo pre všetky formuláre —, preto mu modul povie ten,
+// kto ho otvára: hneď za openModal(...) volá zamOkno(modul). Pod rolou, ktorá v module nepíše, sa formulár otvorí ako detail:
+// pás hovorí prečo, Uložiť a Zmazať sú stlmené a modalConfirm ho odmietne aj
+// pri priamom volaní (stráž ako poistka). Modul je modul ZÁZNAMU, nie obrazovky:
+// faktúra otvorená z DPH je faktúra, vlastník s účtovníkom ju upraviť smie.
+let _oknoZamknute=false;
+function zamkniTlacidlaOkna(zamknut){
+  ["modalOk","modalDelete"].forEach(id=>{
+    const b=document.getElementById(id); if(!b) return;
+    if(zamknut){ b.setAttribute("data-w","1"); b.title=titulokIbaCitanie(); }
+    else { b.removeAttribute("data-w"); b.title=""; }
+  });
+  _oknoZamknute=zamknut;
+}
+function zamOkno(modul){
+  modalModul=modul;
+  if(mozemPisat(modul)) return;
+  zamkniTlacidlaOkna(true);
+  // insertAdjacentHTML, nie innerHTML: formulár si hodnoty polí môže doplniť
+  // hneď po otvorení a prepísanie tela by ich zahodilo.
+  document.getElementById("modalBody").insertAdjacentHTML("afterbegin", pasIbaCitanie(modul));
+}
 function closeModal(){
-  document.getElementById("modal").classList.remove("on"); modalSave=null; modalDelete=null;
+  document.getElementById("modal").classList.remove("on"); modalSave=null; modalDelete=null; modalModul=null;
   // Príznak karty pohybu musí padnúť tu, inak by `parPrekresli` po zavretí
   // kreslil do neviditeľného tela namiesto obrazovky, z ktorej sa akcia spustila.
   _kartaPohybuId=null;
@@ -22496,6 +22542,8 @@ function prekresliSoScrollom(fn){
 const prekresliModal = prekresliSoScrollom;
 async function modalConfirm(){
   if(modalSave){
+    // Stlmené Uložiť sa kliknúť nedá; toto je poistka pre každú inú cestu.
+    if(modalModul && !strazZapis(modalModul)) return;
     let r;
     try{ r=await modalSave(); }
     catch(e){
@@ -22508,7 +22556,10 @@ async function modalConfirm(){
   }
   closeModal();
 }
-function modalDeleteConfirm(){ if(modalDelete && confirm("Naozaj zmazať tento záznam?")){ modalDelete(); closeModal(); } }
+function modalDeleteConfirm(){
+  if(!modalDelete || (modalModul && !strazZapis(modalModul))) return;
+  if(confirm("Naozaj zmazať tento záznam?")){ modalDelete(); closeModal(); }
+}
 function val(id){ const e=document.getElementById(id); return e?e.value:""; }
 // bezpečné čítanie zaškrtávatka — chýbajúci prvok nesmie zhodiť ukladanie
 function chk(id){ const e=document.getElementById(id); return e?!!e.checked:false; }
@@ -24846,9 +24897,9 @@ function appEfaktury(){
   const nove=pri.filter(x=>x.stav!=="zaevidovana").length;
   const zapnuty=postarDostupny();
   const akcia = zapnuty
-    ? `<button class="aabtn pri" onclick="efaktSkontrolujSchranku(this)">Skontrolovať schránku</button>`
+    ? `<button class="aabtn pri" onclick="efaktSkontrolujSchranku(this)"${zam("efaktury")}>Skontrolovať schránku</button>`
     : `<button class="aabtn" onclick="otvorApp('data')">Nastaviť</button>`;
-  document.getElementById("appScreen").innerHTML=appHlavicka("efaktury", akcia)+`
+  document.getElementById("appScreen").innerHTML=appHlavicka("efaktury", akcia)+pasIbaCitanie("efaktury")+`
     ${zapnuty ? "" : `<div class="card" style="margin-bottom:14px;border-left:3px solid var(--warn)">
       <b>Odosielanie a príjem sieťou nie sú zapnuté.</b>
       <div class="csub" style="margin-top:5px">Zapnete ich v Nastaveniach. Od 1. 1. 2027 musí e-faktúry <b>prijímať každý</b> podnikateľ; vystavovať ich musia platitelia DPH. Do vtedy je to dobrovoľné a dá sa to skúšať.</div>
@@ -24870,7 +24921,7 @@ function appEfaktury(){
           <div class="ef-sum">${eur(+z.spolu||0)}</div>
           <div class="ef-akcie">${z.stav==="zaevidovana"
             ? `<span style="color:var(--pos);font-size:11.5px;font-weight:600">zaevidovaná</span>`
-            : `<button class="aabtn pri" style="padding:5px 9px;font-size:11px" onclick="efakturaZaevidujte('${esc(z.id)}')">Zaevidovať</button>`}
+            : `<button class="aabtn pri" style="padding:5px 9px;font-size:11px" onclick="efakturaZaevidujte('${esc(z.id)}')"${zam("efaktury")}>Zaevidovať</button>`}
             <button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="otvorDokladSubor('${esc(z.cesta)}')" title="Otvoriť originál XML">XML</button></div>
         </div>`).join("") : `<div class="aempty">Zo siete zatiaľ neprišlo nič.</div>`}</div>
     </div>
@@ -35064,7 +35115,7 @@ function appDokumenty(){
   // dokumenty expirujúce do 60 dní
   const expirujuce=zoznam.map(d=>({d,dni:dokExpiracia(d)})).filter(x=>x.dni!=null && x.dni>=0 && x.dni<=60).sort((a,b)=>a.dni-b.dni);
   const _dIdx=new Map(zoznam.map((x,i)=>[x,i]));   // index riadku bez O(n²) indexOf (45.8)
-  document.getElementById("appScreen").innerHTML=appHlavicka("dokumenty",`<button class="aabtn pri" onclick="dokPridaj()">＋ Dokument</button>`)+`
+  document.getElementById("appScreen").innerHTML=appHlavicka("dokumenty",`<button class="aabtn pri" onclick="dokPridaj()"${zam("dokumenty")}>＋ Dokument</button>`)+pasIbaCitanie("dokumenty")+`
     <div class="csub" style="margin:0 2px 14px">Evidencia zmlúv a dôležitých firemných dokumentov — zmluvy, poistky, certifikáty, GDPR. Súbory sa bezpečne uložia do cloudu.${localMode?' <b>(V lokálnom režime sa súbory neukladajú — prihláste sa pre cloud.)</b>':''}</div>
     ${expirujuce.length?`<div style="background:var(--sfc-warn);border-left:3px solid var(--warn);border-radius:8px;padding:10px 13px;margin:0 2px 14px;font-size:12.5px">
       <b>⏰ Blížiaca sa expirácia:</b><br>${expirujuce.map(x=>`${esc(x.d.nazov)} — ${x.dni===0?'expiruje dnes':'o '+x.dni+' dní'} (${fmtDatum(x.d.platnostDo)})`).join("<br>")}
@@ -35130,6 +35181,7 @@ function dokPridaj(idx){
     if(idx==null) zoznam.push(zaznam);
     poZmene(); appDokumenty();
   });
+  zamOkno("dokumenty");
 }
 function dokDetail(idx){
   const d=dokEnsure()[idx]; if(!d) return;
@@ -35148,9 +35200,9 @@ function dokDetail(idx){
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       ${d.subor?`<button class="aabtn pri" onclick="dokOtvor(${idx})">👁 Otvoriť súbor</button>`:'<span style="font-size:12px;color:var(--ink-soft);align-self:center">Bez priloženého súboru</span>'}
-      <button class="aabtn" onclick="closeModal();dokPridaj(${idx})">✎ Upraviť</button>
+      <button class="aabtn" onclick="closeModal();dokPridaj(${idx})"${zam("dokumenty")}>✎ Upraviť</button>
       <div style="flex:1"></div>
-      <button class="aabtn neg" onclick="dokZmaz(${idx})">🗑 Zmazať</button>
+      <button class="aabtn neg" onclick="dokZmaz(${idx})"${zam("dokumenty")}>🗑 Zmazať</button>
     </div>
   `, null);
 }
@@ -35177,13 +35229,13 @@ function appKalendar(){
   const vsetky=[...auto, ...vlastne, ...fsTerminy].map(t=>({...t, dni:Math.round((t.d-dnes)/86400000)})).filter(t=>t.dni>=-7).sort((a,b)=>a.d-b.d);
   // nadchádzajúce (od dnes)
   const nadchadzajuce=vsetky.filter(t=>t.dni>=0);
-  document.getElementById("appScreen").innerHTML=appHlavicka("kalendar",`<button class="aabtn pri" onclick="kalPridajUdalost()">＋ Udalosť</button>`)+`
+  document.getElementById("appScreen").innerHTML=appHlavicka("kalendar",`<button class="aabtn pri" onclick="kalPridajUdalost()"${zam("kalendar")}>＋ Udalosť</button>`)+pasIbaCitanie("kalendar")+`
     <div class="csub" style="margin:0 2px 14px">Daňové a odvodové termíny sa dopočítavajú z vášho profilu. Pridajte si vlastné udalosti a pripomienky.</div>
     <div style="background:var(--sfc-info);border-left:3px solid var(--brand);border-radius:8px;padding:10px 13px;margin:0 2px 14px;font-size:12px">
       <b>Oficiálny daňový kalendár FS.</b> Načítajte si aktuálne termíny priamo z Finančnej správy.
-      <div style="margin-top:8px"><button class="aabtn" style="padding:5px 10px;font-size:12px" onclick="kalNacitajFS()">↧ Načítať termíny FS</button> <span id="kalFSStav" style="font-size:11px;margin-left:6px"></span></div>
+      <div style="margin-top:8px"><button class="aabtn" style="padding:5px 10px;font-size:12px" onclick="kalNacitajFS()"${zam("kalendar")}>↧ Načítať termíny FS</button> <span id="kalFSStav" style="font-size:11px;margin-left:6px"></span></div>
     </div>
-    ${(firmaData.udalostiFS&&firmaData.udalostiFS.length)?`<div class="csub" style="margin:0 2px 10px;color:var(--pos)">✓ ${firmaData.udalostiFS.length} oficiálnych termínov FS načítaných. <span onclick="firmaData.udalostiFS=[];poZmene();appKalendar()" style="cursor:pointer;text-decoration:underline;color:var(--ink-soft)">Vymazať</span></div>`:''}
+    ${(firmaData.udalostiFS&&firmaData.udalostiFS.length)?`<div class="csub" style="margin:0 2px 10px;color:var(--pos)">✓ ${firmaData.udalostiFS.length} oficiálnych termínov FS načítaných. <span onclick="firmaData.udalostiFS=[];poZmene();appKalendar()"${zam("kalendar")} style="cursor:pointer;text-decoration:underline;color:var(--ink-soft)">Vymazať</span></div>`:''}
     ${nadchadzajuce.length?`
     <div class="chead" style="margin-bottom:8px">Nadchádzajúce</div>
     <div class="alist" style="margin-bottom:18px">
@@ -35273,7 +35325,7 @@ function kalRiadok(t, c){
   const naliehave=t.dni<=7;
   const poTermine=t.dni<0;
   const farbaDni=poTermine?'var(--neg)':naliehave?'var(--warn)':'var(--ink-soft)';
-  const zmazBtn=t.vlastne?`<span onclick="event.stopPropagation();kalZmazUdalost('${t.id}')" style="cursor:pointer;color:var(--neg);margin-left:auto;padding:0 4px">✕</span>`:'';
+  const zmazBtn=t.vlastne?`<span onclick="event.stopPropagation();kalZmazUdalost('${t.id}')"${zam("kalendar")} style="cursor:pointer;color:var(--neg);margin-left:auto;padding:0 4px">✕</span>`:'';
   return `<div class="arow" style="grid-template-columns:auto 1fr auto;gap:12px;align-items:center;cursor:default">
     <div style="text-align:center;min-width:44px">
       <div style="font-size:18px;font-weight:700;color:${c}">${t.d.getDate()}.</div>
@@ -35307,6 +35359,7 @@ function kalPridajUdalost(){
     firmaData.udalosti.push({ id:"u"+Date.now(), nazov, datum, detail:(document.getElementById("kal_detail").value||"").trim(), pripomienka:+document.getElementById("kal_pripomienka").value||0 });
     poZmene(); appKalendar();
   });
+  zamOkno("kalendar");
 }
 function kalZmazUdalost(id){
   if(!confirm("Zmazať túto udalosť?")) return;
