@@ -2,6 +2,342 @@
 // Pre každú snímku varianta m (mobil) a d (desktop): súbor, rozmery výrezu
 // v CSS px a obdĺžnik prvku, na ktorý sa ťuká (vo výreze).
 window.NAVODY_SNIMKY = {
+ "banka-automat-1": {
+  "m": {
+   "subor": "navody/banka-automat-1.m.08f95434.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 246,
+    "y": 11,
+    "w": 40,
+    "h": 40
+   }
+  },
+  "d": {
+   "subor": "navody/banka-automat-1.d.0075ea60.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 654,
+    "y": 10,
+    "w": 40,
+    "h": 40
+   }
+  }
+ },
+ "banka-automat-2": {
+  "m": {
+   "subor": "navody/banka-automat-2.m.65f936eb.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 43,
+    "y": 230,
+    "w": 304,
+    "h": 139
+   }
+  },
+  "d": {
+   "subor": "navody/banka-automat-2.d.bb50607e.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 295,
+    "y": 255,
+    "w": 434,
+    "h": 89
+   }
+  }
+ },
+ "banka-automat-3": {
+  "m": {
+   "subor": "navody/banka-automat-3.m.ffc4df3f.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 29,
+    "y": 281,
+    "w": 147,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/banka-automat-3.d.ce45eb63.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 848,
+    "y": 281,
+    "w": 147,
+    "h": 37
+   }
+  }
+ },
+ "banka-automat-4": {
+  "m": {
+   "subor": "navody/banka-automat-4.m.0c3faad7.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 277,
+    "y": 281,
+    "w": 60,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/banka-automat-4.d.d0738e92.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 849,
+    "y": 281,
+    "w": 60,
+    "h": 37
+   }
+  }
+ },
+ "banka-bez-dokladu-1": {
+  "m": {
+   "subor": "navody/banka-bez-dokladu-1.m.2726349b.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 42,
+    "y": 281,
+    "w": 184,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/banka-bez-dokladu-1.d.0685cd32.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 104,
+    "y": 281,
+    "w": 184,
+    "h": 37
+   }
+  }
+ },
+ "banka-bez-dokladu-2": {
+  "m": {
+   "subor": "navody/banka-bez-dokladu-2.m.632c84fb.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 42,
+    "y": 281,
+    "w": 109,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/banka-bez-dokladu-2.d.0685cd32.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 664,
+    "y": 281,
+    "w": 109,
+    "h": 37
+   }
+  }
+ },
+ "banka-bez-dokladu-3": {
+  "m": {
+   "subor": "navody/banka-bez-dokladu-3.m.41e4399c.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 42,
+    "y": 281,
+    "w": 215,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/banka-bez-dokladu-3.d.0685cd32.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 442,
+    "y": 281,
+    "w": 215,
+    "h": 37
+   }
+  }
+ },
+ "banka-prehlad-1": {
+  "m": {
+   "subor": "navody/banka-prehlad-1.m.6c88f8cc.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 16,
+    "y": 227,
+    "w": 358,
+    "h": 145
+   }
+  },
+  "d": {
+   "subor": "navody/banka-prehlad-1.d.0ff56b59.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 252,
+    "y": 201,
+    "w": 756,
+    "h": 67
+   }
+  }
+ },
+ "banka-prehlad-2": {
+  "m": {
+   "subor": "navody/banka-prehlad-2.m.4ad50d75.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 258,
+    "y": 281,
+    "w": 104,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/banka-prehlad-2.d.c041d156.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 892,
+    "y": 281,
+    "w": 104,
+    "h": 37
+   }
+  }
+ },
+ "banka-prehlad-3": {
+  "m": {
+   "subor": "navody/banka-prehlad-3.m.de1b5b9f.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 16,
+    "y": 237,
+    "w": 358,
+    "h": 125
+   }
+  },
+  "d": {
+   "subor": "navody/banka-prehlad-3.d.42891448.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 252,
+    "y": 245,
+    "w": 756,
+    "h": 109
+   }
+  }
+ },
+ "banka-rucne-1": {
+  "m": {
+   "subor": "navody/banka-rucne-1.m.824565b1.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 220,
+    "y": 281,
+    "w": 103,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/banka-rucne-1.d.1d8b8a6f.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 456,
+    "y": 281,
+    "w": 103,
+    "h": 37
+   }
+  }
+ },
+ "banka-rucne-2": {
+  "m": {
+   "subor": "navody/banka-rucne-2.m.f47905a7.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 17,
+    "y": 268,
+    "w": 356,
+    "h": 64
+   }
+  },
+  "d": {
+   "subor": "navody/banka-rucne-2.d.5c11a651.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 253,
+    "y": 272,
+    "w": 754,
+    "h": 55
+   }
+  }
+ },
+ "banka-rucne-3": {
+  "m": {
+   "subor": "navody/banka-rucne-3.m.200ac9d8.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 42,
+    "y": 260,
+    "w": 306,
+    "h": 85
+   }
+  },
+  "d": {
+   "subor": "navody/banka-rucne-3.d.d5606f39.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 104,
+    "y": 263,
+    "w": 816,
+    "h": 73
+   }
+  }
+ },
+ "banka-vypis-1": {
+  "m": {
+   "subor": "navody/banka-vypis-1.m.3d22d033.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 16,
+    "y": 266,
+    "w": 358,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/banka-vypis-1.d.0ff56b59.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 872,
+    "y": 101,
+    "w": 136,
+    "h": 37
+   }
+  }
+ },
  "efaktury-odoslat-1": {
   "m": {
    "subor": "navody/efaktury-odoslat-1.m.04375234.webp",
