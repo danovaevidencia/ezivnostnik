@@ -358,7 +358,128 @@ vydavky: {
 // ───────────────────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────────────────── BANKA
-// (miesto pre návody skupiny Banka: banka)
+banka: {
+  vJednejVete: "Nahrať výpis z účtu a priradiť platby k dokladom",
+  uvod: "Sem nahrávate výpisy z podnikateľského účtu. Appka z nich vezme pohyby a priradí platby k [[app:faktury|faktúram]] a [[app:vydavky|výdavkom]] tam, kde je zhoda jasná. Zvyšok nechá na vás — v zozname je podfarbený ako <b>nespárované</b>.",
+  ulohy: [
+    {
+      id: "vypis",
+      nazov: "Nahrať výpis z banky",
+      kedy: "Keď banka vystaví mesačný výpis, alebo keď chcete mať platby v appke aktuálne.",
+      kroky: [
+        { text: "V internet bankingu si stiahnite výpis vo formáte <b>XML</b> (SEPA, camt.053). Býva vedľa PDF, niekedy zabalený v ZIP." },
+        { text: "Ťuknite na <b>📥 Import výpisu</b> a vyberte stiahnutý súbor.", tlacidlo: "Import výpisu", snimka: "banka-vypis-1" },
+        { text: "Appka povie, koľko pohybov pridala a koľko platieb rovno priradila k dokladom." },
+        { text: "Čo sa nepriradilo, [[navod:banka/rucne|priradíte ručne]] alebo [[navod:banka/bez-dokladu|vybavíte bez dokladu]]." },
+      ],
+      tip: "Ten istý výpis nahratý druhýkrát nič nezdvojí — appka pozná pohyby, ktoré už má, a pridá len nové.",
+      podrobnosti: [
+        { nadpis: "Banka dáva len PDF",
+          html: "<p>Výber súboru ponúka XML a ZIP. V internet bankingu hľadajte export označený „XML“, „SEPA“ alebo „camt.053“ — býva pri výpise hneď vedľa PDF.</p>" },
+        { nadpis: "Výpis v zaheslovanom ZIP",
+          html: "<p>Appka sa na heslo opýta. Heslo posiela banka, zvyčajne v sprievodnom e-maile. Keď sedí, ponúkne, že si ho zapamätá — len na tomto zariadení, do cloudu sa neposiela.</p>" },
+        { nadpis: "Plán Free",
+          html: "<p>Vo Free sú tri importy výpisu. Počíta sa len import, ktorý niečo pridal — omylom znova nahratý výpis limit neminie.</p>" },
+      ],
+    },
+    {
+      id: "email",
+      nazov: "Posielať výpisy e-mailom",
+      kedy: "Banka vám výpis posiela e-mailom a nechcete ho sťahovať a nahrávať ručne.",
+      kroky: [
+        { text: "V [[app:data#dmKarta|nastaveniach — Doklady e-mailom]] skopírujte svoju prijímaciu adresu." },
+        { text: "Prepošlite na ňu e-mail s výpisom v prílohe (XML alebo ZIP)." },
+        { text: "Ťuknite na <b>📨 Schránka dokladov</b> a pri výpise s ikonou 🏦 na <b>Importovať →</b>.", tlacidlo: "Importovať →" },
+      ],
+      tip: "ZIP appka spozná ako výpis vždy, XML len keď má v názve dlhé číslo, aké dáva banka — súbor preto nepremenúvajte.",
+      podrobnosti: [
+        { nadpis: "Nič sa nezapíše samo",
+          html: "<p>Výpis čaká v schránke, kým ho neimportujete. Import ide tou istou cestou ako zo súboru — rovnaká kontrola, či pohyby už nemáte, aj rovnaký limit plánu.</p>" },
+        { nadpis: "Potvrdenia o platbách z internet bankingu",
+          html: "<p>Prepošlite aj e-maily, ktorými banka hlási jednotlivé platby. V schránke sú v časti <b>Pohyby na účte</b> a do Banky ich dostanete tlačidlom <b>Pridať</b>. V zozname pohybov majú značku ✉ — mesačný výpis ich neskôr nahradí.</p>" },
+        { nadpis: "V ukážkovej firme to nejde",
+          html: "<p>Schránka dokladov funguje len s vlastným účtom, nie v ukážke.</p>" },
+      ],
+    },
+    {
+      id: "automat",
+      nazov: "Skontrolovať, čo appka priradila sama",
+      kedy: "Zvonček hlási, že appka priradila platby k dokladom.",
+      kroky: [
+        { text: "Ťuknite na <b>🔔</b>.", snimka: "banka-automat-1" },
+        { text: "Ťuknite na upozornenie <b>Priradených … platieb</b>.", tlacidlo: "Priradených", snimka: "banka-automat-2" },
+        { text: "Banka ukáže presne tieto platby. Celý zoznam vrátite tlačidlom <b>Zobraziť celý zoznam</b>.", tlacidlo: "Zobraziť celý zoznam", snimka: "banka-automat-3" },
+        { text: "Ak priradenie nesedí, ťuknite na platbu a pri doklade na <b>odobrať</b>.", tlacidlo: "odobrať", snimka: "banka-automat-4",
+          tip: "Priradenie, ktoré odoberiete, už appka tej platbe sama nevráti." },
+      ],
+      tip: "Appka priradí platbu sama, len keď jeden doklad vychádza jasne najlepšie. Keď sedia dva podobne, nechá výber na vás.",
+      podrobnosti: [
+        { nadpis: "Podľa čoho appka páruje",
+          html: "<p>Prijatú platbu s variabilným symbolom priradí rovno k faktúre s tým číslom.</p><p>Inak porovná doklady podľa <b>sumy</b>, <b>variabilného symbolu</b>, <b>čísla účtu</b>, <b>partnera</b> a <b>vzdialenosti dátumov</b>. Sama priradí len vtedy, keď sedí suma a k nej ešte niečo silné, dátumy nie sú ďaleko od seba a žiadny iný doklad nevychádza podobne. Napríklad dve rovnaké mesačné faktúry od toho istého dodávateľa nechá na vás.</p>" },
+        { nadpis: "Kedy appka páruje",
+          html: "<p>Pri importe výpisu, pri otvorení appky a pri uložení nového dokladu — ten si nájde svoju platbu, ak už je vo výpise.</p>" },
+      ],
+    },
+    {
+      id: "rucne",
+      nazov: "Priradiť platbu k dokladu ručne",
+      kedy: "Platba ostala nespárovaná, hoci doklad k nej máte.",
+      kroky: [
+        { text: "Ťuknite na <b>Nespárované</b>.", tlacidlo: "Nespárované", snimka: "banka-rucne-1" },
+        { text: "Ťuknite na platbu v zozname.", snimka: "banka-rucne-2" },
+        { text: "Ťuknite na doklad, ktorý bol touto platbou zaplatený. Ten, ktorý appka odporúča, má ⭐.", tlacidlo: "Ťuknite na doklad", snimka: "banka-rucne-3",
+          tip: "Pri každom doklade appka píše, čo sedí — suma, VS, partner, dátum —, takže vidíte, prečo ho ponúka." },
+      ],
+      tip: "Na počítači je pohodlnejšia záložka <b>Párovanie</b>: platby a doklady v dvoch stĺpcoch. <b>⇄ Otočiť</b> prehodí smer — vyberiete doklad a hľadáte platbu.",
+      podrobnosti: [
+        { nadpis: "Jedna platba za viac dokladov",
+          html: "<p>Po priradení prvého dokladu appka povie, koľko z platby ešte ostáva. Ťuknite na ďalší doklad.</p>" },
+        { nadpis: "Doklad v ponuke nie je",
+          html: "<p>Appka ponúka doklady, pri ktorých sedí suma alebo variabilný symbol, prípadne partner s dátumom do 30 dní. Zaplatené doklady vynecháva.</p><p>Ak doklad chýba, skontrolujte jeho sumu a dátum. Alebo ho nájdite vo [[app:faktury|faktúrach]] či [[app:vydavky|výdavkoch]] a ťuknite na jeho stav úhrady — appka ukáže platby, ktoré k nemu sedia.</p>" },
+        { nadpis: "Priradil som omylom",
+          html: "<p>V okne platby je pod <b>Touto platbou máte zaplatené</b> pri každom doklade <b>odobrať</b>. Platba sa vráti medzi nespárované.</p>" },
+      ],
+    },
+    {
+      id: "bez-dokladu",
+      nazov: "Vybaviť platbu, ku ktorej doklad nie je",
+      kedy: "Bankový poplatok, odvody, daň alebo súkromná platba — nič, k čomu máte faktúru.",
+      kroky: [
+        { text: "Ťuknite na platbu v zozname." },
+        { text: "Výdavok podnikania bez faktúry? Ťuknite na <b>+ Vytvoriť výdavok z platby</b> — appka založí interný doklad a rovno ho priradí.", tlacidlo: "Vytvoriť výdavok z platby", snimka: "banka-bez-dokladu-1",
+          tip: "Interný doklad je bez DPH. Keď k platbe máte faktúru s DPH, zvoľte radšej <b>✎ Výdavok s DPH…</b>." },
+        { text: "Súkromná platba? Ťuknite na <b>🗄 Skryť pohyb</b> — zmizne z nespárovaných aj zo súčtov.", tlacidlo: "Skryť pohyb", snimka: "banka-bez-dokladu-2" },
+        { text: "Opakuje sa to s tou istou protistranou? Ťuknite na <b>⊘ Vždy ignorovať takéto pohyby</b>.", tlacidlo: "Vždy ignorovať takéto pohyby", snimka: "banka-bez-dokladu-3" },
+      ],
+      tip: "Vklady a prevody zo súkromného účtu vybavíte naraz: dole v časti <b>Pravidlá ignorovania</b> pridajte jeho číslo cez <b>+ IBAN</b>.",
+      podrobnosti: [
+        { nadpis: "Kde nájdem skryté a ignorované",
+          html: "<p>Nad zoznamom pribudnú filtre <b>⊘ ignorované</b> a <b>🗄 skryté</b>. Skrytú platbu vrátite v jej okne tlačidlom <b>↺ Obnoviť pohyb</b>. Pravidlo zmažete v časti <b>Pravidlá ignorovania</b> krížikom pri ňom.</p>" },
+        { nadpis: "Skrytie zruší priradenie",
+          html: "<p>Ak mala platba priradený doklad, skrytím sa priradenie zruší. Appka sa predtým opýta.</p>" },
+        { nadpis: "Ako funguje „Vždy ignorovať“",
+          html: "<p>Pridá pravidlo s názvom protistrany. Ignorovať sa budú všetky platby, v ktorých názve alebo popise sa ten text objaví — aj budúce.</p>" },
+      ],
+    },
+    {
+      id: "prehlad",
+      nazov: "Pozrieť, koľko prišlo a odišlo a či nechýba výpis",
+      kedy: "Pred daňovým priznaním, alebo keď chcete vedieť, ako na tom účet je.",
+      kroky: [
+        { text: "Hore vidíte príjmy, výdaje, saldo a koľko platieb je spárovaných. Pod tým je súhrn po mesiacoch.", snimka: "banka-prehlad-1" },
+        { text: "Príjmy a výdaje v dvoch stĺpcoch ukáže <b>⇄ vedľa seba</b>.", tlacidlo: "vedľa seba", snimka: "banka-prehlad-2" },
+        { text: "Dole v časti <b>Pokrytie výpismi</b> appka upozorní, ak medzi nahratými výpismi chýba mesiac.", tlacidlo: "Pokrytie výpismi", snimka: "banka-prehlad-3" },
+      ],
+      tip: "V platenom pláne overí, či nechýba jediná platba, [[app:knihy#dennikBox|peňažný denník]] — porovná zostatky, ktoré hlási banka, so súčtom pohybov.",
+      podrobnosti: [
+        { nadpis: "Prečo niektoré platby v súčtoch nie sú",
+          html: "<p>Súčty sú bez skrytých a ignorovaných platieb. Appka to pod nimi napíše a odkazom <b>zobraziť</b> ich ukáže.</p>" },
+        { nadpis: "Zoznam nahratých výpisov",
+          html: "<p>Je v časti <b>Pokrytie výpismi</b> pod <b>Nahraté výpisy</b>. Pôvodný súbor stiahnete tlačidlom <b>⬇</b>, ak sa uchoval.</p>" },
+      ],
+    },
+  ],
+},
 // ───────────────────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────────────────── PODANIA
