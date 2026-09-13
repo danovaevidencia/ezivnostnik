@@ -2,6 +2,246 @@
 // Pre každú snímku varianta m (mobil) a d (desktop): súbor, rozmery výrezu
 // v CSS px a obdĺžnik prvku, na ktorý sa ťuká (vo výreze).
 window.NAVODY_SNIMKY = {
+ "dph-odlozit-1": {
+  "m": {
+   "subor": "navody/dph-odlozit-1.m.52696737.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 174,
+    "y": 283,
+    "w": 135,
+    "h": 34
+   }
+  },
+  "d": {
+   "subor": "navody/dph-odlozit-1.d.3c5de4cd.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 624,
+    "y": 283,
+    "w": 135,
+    "h": 34
+   }
+  }
+ },
+ "dph-odlozit-2": {
+  "m": {
+   "subor": "navody/dph-odlozit-2.m.e517b945.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 41,
+    "y": 290,
+    "w": 308,
+    "h": 20
+   }
+  },
+  "d": {
+   "subor": "navody/dph-odlozit-2.d.9eb6ac67.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 277,
+    "y": 290,
+    "w": 706,
+    "h": 20
+   }
+  }
+ },
+ "dph-oprava-1": {
+  "m": {
+   "subor": "navody/dph-oprava-1.m.3960c7ba.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 217,
+    "y": 336,
+    "w": 75,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/dph-oprava-1.d.acd1245c.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 453,
+    "y": 479,
+    "w": 75,
+    "h": 37
+   }
+  }
+ },
+ "dph-podat-1": {
+  "m": {
+   "subor": "navody/dph-podat-1.m.b500f36d.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 53,
+    "y": 281,
+    "w": 82,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/dph-podat-1.d.047956f2.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 289,
+    "y": 281,
+    "w": 82,
+    "h": 37
+   }
+  }
+ },
+ "dph-podat-2": {
+  "m": {
+   "subor": "navody/dph-podat-2.m.4bd749b2.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 55,
+    "y": 291,
+    "w": 280,
+    "h": 17
+   }
+  },
+  "d": {
+   "subor": "navody/dph-podat-2.d.91deea31.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 291,
+    "y": 291,
+    "w": 678,
+    "h": 17
+   }
+  }
+ },
+ "dph-podat-3": {
+  "m": {
+   "subor": "navody/dph-podat-3.m.cb9f717a.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 53,
+    "y": 281,
+    "w": 183,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/dph-podat-3.d.acd1245c.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 289,
+    "y": 426,
+    "w": 183,
+    "h": 37
+   }
+  }
+ },
+ "dph-podat-4": {
+  "m": {
+   "subor": "navody/dph-podat-4.m.74934c27.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 20,
+    "y": 39,
+    "w": 350,
+    "h": 522
+   }
+  },
+  "d": {
+   "subor": "navody/dph-podat-4.d.316bc797.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 272,
+    "y": 78,
+    "w": 480,
+    "h": 443
+   }
+  }
+ },
+ "dph-podat-5": {
+  "m": {
+   "subor": "navody/dph-podat-5.m.baf02ed7.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 53,
+    "y": 281,
+    "w": 171,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/dph-podat-5.d.acd1245c.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 480,
+    "y": 426,
+    "w": 171,
+    "h": 37
+   }
+  }
+ },
+ "dph-udaje-1": {
+  "m": {
+   "subor": "navody/dph-udaje-1.m.9474e3b0.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 41,
+    "y": 280,
+    "w": 308,
+    "h": 39
+   }
+  },
+  "d": {
+   "subor": "navody/dph-udaje-1.d.67ad19d7.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 277,
+    "y": 280,
+    "w": 706,
+    "h": 39
+   }
+  }
+ },
+ "dph-udaje-2": {
+  "m": {
+   "subor": "navody/dph-udaje-2.m.6607dea3.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 41,
+    "y": 280,
+    "w": 308,
+    "h": 39
+   }
+  },
+  "d": {
+   "subor": "navody/dph-udaje-2.d.8ab94fc7.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 277,
+    "y": 280,
+    "w": 706,
+    "h": 39
+   }
+  }
+ },
  "efaktury-odoslat-1": {
   "m": {
    "subor": "navody/efaktury-odoslat-1.m.04375234.webp",
@@ -469,6 +709,294 @@ window.NAVODY_SNIMKY = {
     "y": 281,
     "w": 98,
     "h": 37
+   }
+  }
+ },
+ "priznania-nacitat-1": {
+  "m": {
+   "subor": "navody/priznania-nacitat-1.m.b4d196df.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 16,
+    "y": 249,
+    "w": 358,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/priznania-nacitat-1.d.713c0918.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 819,
+    "y": 101,
+    "w": 189,
+    "h": 37
+   }
+  }
+ },
+ "priznania-porovnat-1": {
+  "m": {
+   "subor": "navody/priznania-porovnat-1.m.a941b606.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 41,
+    "y": 290,
+    "w": 308,
+    "h": 20
+   }
+  },
+  "d": {
+   "subor": "navody/priznania-porovnat-1.d.1a420814.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 277,
+    "y": 290,
+    "w": 706,
+    "h": 20
+   }
+  }
+ },
+ "priznanieB-podiel-1": {
+  "d": {
+   "subor": "navody/priznanieB-podiel-1.d.b18e0988.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 277,
+    "y": 370,
+    "w": 706,
+    "h": 15
+   }
+  },
+  "m": {
+   "subor": "navody/priznanieB-podiel-1.m.4a464fd7.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 41,
+    "y": 292,
+    "w": 308,
+    "h": 15
+   }
+  }
+ },
+ "priznanieB-vyplnit-1": {
+  "m": {
+   "subor": "navody/priznanieB-vyplnit-1.m.bd292296.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 18,
+    "y": 283,
+    "w": 142,
+    "h": 33
+   }
+  },
+  "d": {
+   "subor": "navody/priznanieB-vyplnit-1.d.7f4af640.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 254,
+    "y": 283,
+    "w": 142,
+    "h": 33
+   }
+  }
+ },
+ "priznanieB-vyplnit-2": {
+  "m": {
+   "subor": "navody/priznanieB-vyplnit-2.m.6471d6a3.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 41,
+    "y": 279,
+    "w": 308,
+    "h": 41
+   }
+  },
+  "d": {
+   "subor": "navody/priznanieB-vyplnit-2.d.d3acd836.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 277,
+    "y": 279,
+    "w": 706,
+    "h": 41
+   }
+  }
+ },
+ "priznanieB-vyplnit-3": {
+  "m": {
+   "subor": "navody/priznanieB-vyplnit-3.m.d18529fa.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 259,
+    "y": 485,
+    "w": 115,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/priznanieB-vyplnit-3.d.7b81d8d8.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 893,
+    "y": 538,
+    "w": 115,
+    "h": 37
+   }
+  }
+ },
+ "priznanieB-vyplnit-4": {
+  "m": {
+   "subor": "navody/priznanieB-vyplnit-4.m.cd358b87.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 54,
+    "y": 292,
+    "w": 282,
+    "h": 16
+   }
+  },
+  "d": {
+   "subor": "navody/priznanieB-vyplnit-4.d.79fdb513.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 290,
+    "y": 292,
+    "w": 680,
+    "h": 16
+   }
+  }
+ },
+ "priznanieB-vyplnit-5": {
+  "m": {
+   "subor": "navody/priznanieB-vyplnit-5.m.cf5a3455.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 237,
+    "y": 485,
+    "w": 140,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/priznanieB-vyplnit-5.d.b18e0988.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 868,
+    "y": 538,
+    "w": 140,
+    "h": 37
+   }
+  }
+ },
+ "uzavierka-mesiac-1": {
+  "m": {
+   "subor": "navody/uzavierka-mesiac-1.m.abb968de.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 16,
+    "y": 164,
+    "w": 358,
+    "h": 272
+   }
+  },
+  "d": {
+   "subor": "navody/uzavierka-mesiac-1.d.7a46d8e9.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 252,
+    "y": 181,
+    "w": 756,
+    "h": 238
+   }
+  }
+ },
+ "uzavierka-mesiac-2": {
+  "m": {
+   "subor": "navody/uzavierka-mesiac-2.m.849e05ec.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 285,
+    "y": 281,
+    "w": 73,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/uzavierka-mesiac-2.d.986e98fa.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 919,
+    "y": 281,
+    "w": 73,
+    "h": 37
+   }
+  }
+ },
+ "uzavierka-odomknut-1": {
+  "m": {
+   "subor": "navody/uzavierka-odomknut-1.m.af961cb8.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 111,
+    "y": 281,
+    "w": 85,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/uzavierka-odomknut-1.d.33b549c5.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 907,
+    "y": 281,
+    "w": 85,
+    "h": 37
+   }
+  }
+ },
+ "uzavierka-rocna-1": {
+  "m": {
+   "subor": "navody/uzavierka-rocna-1.m.7b72ba99.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 41,
+    "y": 153,
+    "w": 308,
+    "h": 293
+   }
+  },
+  "d": {
+   "subor": "navody/uzavierka-rocna-1.d.c42dee1d.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 277,
+    "y": 153,
+    "w": 706,
+    "h": 293
    }
   }
  },

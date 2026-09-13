@@ -254,7 +254,235 @@ efaktury: {
 // ───────────────────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────────────────── PODANIA
-// (miesto pre návody skupiny Podania: dph, priznania, priznanieB, uzavierka)
+dph: {
+  vJednejVete: "Pripraviť kontrolný výkaz a priznanie k DPH na nahratie na portál",
+  uvod: "Appka z vašich faktúr a výdavkov zostaví kontrolný výkaz a priznanie k DPH ako súbory XML. <b>Podávate ich sami</b> — nahráte ich na portál Finančnej správy. Za správnosť zodpovedá platiteľ.",
+  ulohy: [
+    {
+      id: "podat",
+      nazov: "Pripraviť kontrolný výkaz a priznanie k DPH",
+      kedy: "Po skončení mesiaca alebo štvrťroka, keď máte zapísané faktúry aj výdavky.",
+      kroky: [
+        { text: "Na záložke <b>🧾 Kontrolný výkaz a priznanie</b> vyberte obdobie.", tlacidlo: "Kontrolný výkaz a priznanie", snimka: "dph-podat-1",
+          tip: "Ak podávate štvrťročne, vo výbere pri obdobiach prepnite na <b>štvrťročný platiteľ</b>." },
+        { text: "Prejdite rámček <b>Skontrolujte pred podaním</b> a opravte, čo appka našla.", tlacidlo: "Skontrolujte pred podaním", snimka: "dph-podat-2",
+          tip: "Chýbajúce IČ DPH dodávateľov doplníte naraz tlačidlom <b>✨ Doplniť chýbajúce IČ DPH</b> — z uložených partnerov alebo z registra." },
+        { text: "Ťuknite na <b>↧ Kontrolný výkaz (XML)</b>.", tlacidlo: "Kontrolný výkaz (XML)", snimka: "dph-podat-3" },
+        { text: "Appka podanie ešte raz skontroluje. Keď niečo nájde, ukáže to v okne — súbor stiahnete potvrdením, alebo okno zatvoríte a doklad opravíte.", tlacidlo: "Kontrola pred podaním", snimka: "dph-podat-4" },
+        { text: "Rovnako stiahnite <b>↧ Priznanie DPH (XML)</b> a oba súbory nahrajte na portál Finančnej správy.", tlacidlo: "Priznanie DPH (XML)", snimka: "dph-podat-5" },
+      ],
+      tip: "Vedľa voľby <b>Druh podania</b> appka ukazuje, koľko dní ostáva do 25. dňa po skončení obdobia.",
+      podrobnosti: [
+        { nadpis: "Appka za vás nepodáva",
+          html: "<p>Stiahnutie súboru nie je podanie. Súbory nahráte na portáli Finančnej správy a potvrdenie o podaní nájdete v schránke na portáli.</p><p>Kópiu každého stiahnutého súboru si appka odloží na záložku <b>📁 Odoslané podania</b>.</p>" },
+        { nadpis: "Kedy súbor nevznikne",
+          html: "<p>Keď doklad nemá číslo, dátum alebo číslo opravovanej faktúry, ktoré tlačivo vyžaduje, okno napíše <b>Podanie sa nedá vygenerovať</b> — portál by taký súbor odmietol. Údaj doplňte cez <b>Opraviť doklad</b> a skúste znova.</p><p>Súbor nevznikne ani vtedy, keď firme chýba IČ DPH, názov alebo adresa — [[navod:dph/udaje|ako ich doplniť]].</p>" },
+        { nadpis: "Náhľad pred podaním",
+          html: "<p><b>▦ Náhľad pred podaním</b> ukáže výkaz aj priznanie v podobe tlačiva. Je to náhľad na kontrolu, nie oficiálne tlačivo.</p>" },
+      ],
+    },
+    {
+      id: "udaje",
+      nazov: "Doplniť údaje firmy, bez ktorých súbor nevznikne",
+      kedy: "Raz, pred prvým podaním — alebo keď appka napíše, že vo výkaze by chýbala identifikácia daňovníka.",
+      kroky: [
+        { text: "V [[app:data#set_adresa|nastaveniach firmy]] vyplňte adresu v tvare <b>Ulica číslo, PSČ Obec</b>.", snimka: "dph-udaje-1",
+          tip: "Z tohto jedného riadku appka berie do XML ulicu (pred prvou čiarkou) a PSČ s obcou (za poslednou čiarkou)." },
+        { text: "Vyplňte [[app:data#set_danovyUrad|daňový úrad]].", tlacidlo: "Daňový úrad", snimka: "dph-udaje-2",
+          tip: "Kontrolný výkaz sa stiahne aj bez neho, priznanie k DPH a súhrnný výkaz nie." },
+        { text: "Ťuknite na <b>Uložiť všetky nastavenia</b>.", tlacidlo: "Uložiť všetky nastavenia" },
+      ],
+      tip: "IČ DPH, názov firmy, ulicu, obec a PSČ appka overí pred každým stiahnutím — keď niečo chýba, povie čo.",
+      podrobnosti: [
+        { nadpis: "DIČ",
+          html: "<p>Do priznania k DPH appka zapisuje aj [[app:data#set_dic|DIČ]], pred stiahnutím ho však nekontroluje. Skontrolujte, či ho máte vyplnené.</p>" },
+        { nadpis: "Prečo si appka nič nedomýšľa",
+          html: "<p>Údaje idú do dokumentu pre štát. Prázdne pole portál odmietne nahlas, cudzí údaj by prešiel ticho — preto appka chýbajúci údaj nedopĺňa.</p>" },
+      ],
+    },
+    {
+      id: "oprava",
+      nazov: "Opraviť výkaz, ktorý ste už podali",
+      kedy: "Po podaní ste v tom istom období zmenili alebo pridali doklad.",
+      kroky: [
+        { text: "Vyberte to isté obdobie — appka napíše, že sa doklady od posledného exportu zmenili.", tlacidlo: "Doklady sa od posledného exportu" },
+        { text: "Pri <b>Druh podania</b> vyberte <b>Opravný</b> alebo <b>Dodatočný</b>.", tlacidlo: "Opravný", snimka: "dph-oprava-1",
+          tip: "Keď termín (25.) uplynul, appka to pri druhu podania napíše." },
+        { text: "Stiahnite výkaz aj priznanie znova a nahrajte ich na portál Finančnej správy." },
+      ],
+      tip: "Podaný mesiac si [[navod:uzavierka/mesiac|uzavrite]] — doklad sa doňho potom omylom neuloží.",
+      podrobnosti: [
+        { nadpis: "Ako voľby opisuje appka",
+          html: "<p><b>Riadny</b> — podávate prvýkrát za toto obdobie. <b>Opravný</b> — už ste podali, ale ešte je pred 25.; nahradí pôvodné podanie celé. <b>Dodatočný</b> — lehota už uplynula; pošle sa len to, čo sa zmenilo.</p>" },
+      ],
+    },
+    {
+      id: "suhrnny",
+      nazov: "Podať súhrnný výkaz za dodania do EÚ",
+      kedy: "Fakturovali ste tovar alebo službu firme s IČ DPH v inej krajine EÚ.",
+      kroky: [
+        { text: "Vo [[app:faktury|faktúre]] vyberte <b>Druh plnenia</b> „Dodanie tovaru do EÚ“ alebo „Služba pre firmu v EÚ“.", tlacidlo: "Druh plnenia" },
+        { text: "Tu sa potom objaví záložka <b>⇄ Súhrnný výkaz</b> — vyberte obdobie a skontrolujte IČ DPH odberateľov.", tlacidlo: "Súhrnný výkaz" },
+        { text: "Ťuknite na <b>↧ Súhrnný výkaz (XML)</b> a súbor nahrajte na portál Finančnej správy.", tlacidlo: "Súhrnný výkaz (XML)" },
+      ],
+      tip: "Kým nemáte faktúru s dodaním do EÚ, záložka sa neukazuje — za obdobie bez takého dodania sa súhrnný výkaz nepodáva.",
+      podrobnosti: [
+        { nadpis: "Vlastné obdobie",
+          html: "<p>Súhrnný výkaz má vlastný výber <b>štvrťročne</b> / <b>mesačne</b>, nezávislý od obdobia DPH. Keď hodnota tovaru dodaného do EÚ prekročí limit, appka upozorní, že štvrťročné podávanie už použiť nemôžete.</p>" },
+      ],
+    },
+    {
+      id: "odlozit",
+      nazov: "Zistiť, koľko si odložiť na dane a odvody",
+      kedy: "Priebežne počas roka, aby vás priznanie neprekvapilo.",
+      kroky: [
+        { text: "Otvorte záložku <b>💶 Dane a odvody</b>.", tlacidlo: "Dane a odvody", snimka: "dph-odlozit-1" },
+        { text: "Riadok <b>Odložiť na dane a odvody</b> je odhad z doterajších príjmov, výdavkov a zaplatených preddavkov.", tlacidlo: "Odložiť na dane a odvody", snimka: "dph-odlozit-2" },
+      ],
+      tip: "Daň sa tu počíta bez nezdaniteľnej časti — tá sa uplatní až v priznaní, takže skutočná daň býva nižšia.",
+      podrobnosti: [
+        { nadpis: "Daň z motorových vozidiel",
+          html: "<p>Na tej istej záložke ju appka vypočíta — tlačidlo <b>＋ Pridať vozidlo a vypočítať daň</b>.</p>" },
+      ],
+    },
+  ],
+},
+
+priznania: {
+  vJednejVete: "Načítať podané priznania a porovnať roky vedľa seba",
+  uvod: "Sem nahráte daňové priznania, ktoré ste už podali, a appka ich postaví vedľa seba spolu s odhadom tohto roka. Nič tu nepočíta do priznania ani nepodáva — je to prehľad.",
+  ulohy: [
+    {
+      id: "nacitat",
+      nazov: "Načítať podané priznanie",
+      kedy: "Máte z portálu Finančnej správy XML súbor priznania typu B za niektorý rok.",
+      kroky: [
+        { text: "Ťuknite na <b>↥ Načítať priznanie (XML)</b>.", tlacidlo: "Načítať priznanie (XML)", snimka: "priznania-nacitat-1" },
+        { text: "Vyberte súbor — appka napíše, za ktorý rok priznanie načítala a s akými príjmami." },
+      ],
+      tip: "Appka berie len XML priznania fyzickej osoby typu B, nie PDF.",
+      podrobnosti: [
+        { nadpis: "Ten istý rok druhýkrát",
+          html: "<p>Priznanie za rok, ktorý už je načítaný, sa novým súborom prepíše — appka sa nepýta. Načítané priznanie odstránite tlačidlom <b>✕</b> v zozname načítaných priznaní.</p>" },
+      ],
+    },
+    {
+      id: "porovnat",
+      nazov: "Porovnať roky",
+      kedy: "Chcete vidieť, ako sa menili príjmy, výdavky, daň a odvody.",
+      kroky: [
+        { text: "V tabuľke <b>Porovnanie rokov</b> sú načítané roky vedľa seba.", tlacidlo: "Porovnanie rokov", snimka: "priznania-porovnat-1" },
+        { text: "Stĺpec tohto roka je označený <b>(odhad)</b> — appka ho dopočíta z doterajších mesiacov na celý rok." },
+      ],
+      tip: "Pri načítanom roku otvorí <b>▦ formulár</b> priznanie v podobe tlačiva.",
+      podrobnosti: [
+        { nadpis: "Odhad nie je priznanie",
+          html: "<p>Stĺpec s odhadom slúži na orientáciu. Appka pri ňom píše, že nenahrádza priznanie ani daňového poradcu.</p>" },
+        { nadpis: "Archív vygenerovaných podaní",
+          html: "<p>Návrhy stiahnuté zo [[navod:priznanieB/vyplnit|sprievodcu priznaním B]] sú tu tiež a znova ich stiahnete cez <b>↧ XML</b>. Nie sú potvrdením o podaní.</p>" },
+      ],
+    },
+  ],
+},
+
+priznanieB: {
+  vJednejVete: "Pripraviť návrh priznania typu B a stiahnuť ho ako XML",
+  uvod: "Sprievodca v štyroch krokoch zostaví z vašej evidencie návrh daňového priznania fyzickej osoby typu B. Na konci stiahnete XML, ktoré <b>skontrolujete a podáte sami</b> cez portál Finančnej správy.",
+  ulohy: [
+    {
+      id: "vyplnit",
+      nazov: "Pripraviť priznanie typu B",
+      kedy: "Po skončení roka, keď máte zapísané faktúry, výdavky a platby.",
+      kroky: [
+        { text: "Vyberte rok a začnite krokom <b>1. Príjmy a výdavky</b>.", tlacidlo: "Príjmy a výdavky", snimka: "priznanieB-vyplnit-1" },
+        { text: "Vyberte <b>Spôsob výdavkov</b> — skutočné alebo paušálne.", tlacidlo: "Spôsob výdavkov", snimka: "priznanieB-vyplnit-2",
+          tip: "Príjmy, výdavky aj zaplatené odvody appka doplní z evidencie. Ručne sa píšu len príjmy mimo živnosti — zo zamestnania, z prenájmu a podobne." },
+        { text: "Prejdite kroky tlačidlom <b>Pokračovať →</b> a doplňte, čo sa vás týka, napríklad deti.", tlacidlo: "Pokračovať", snimka: "priznanieB-vyplnit-3" },
+        { text: "V kroku <b>4. Zhrnutie</b> prejdite <b>Kontroly priznania</b>.", tlacidlo: "Kontroly priznania", snimka: "priznanieB-vyplnit-4" },
+        { text: "Ťuknite na <b>↧ Exportovať XML</b> a súbor po kontrole podajte cez portál Finančnej správy.", tlacidlo: "Exportovať XML", snimka: "priznanieB-vyplnit-5" },
+      ],
+      tip: "Nad krokmi je <b>Ročná kontrola</b> — nálezy naprieč celou evidenciou. Pozrite si ju skôr, než priznanie stiahnete.",
+      podrobnosti: [
+        { nadpis: "Appka za vás nepodáva",
+          html: "<p>Stiahnutý súbor je návrh. Appka pri stiahnutí píše, že ho treba skontrolovať, podať cez portál Finančnej správy a že nenahrádza daňového poradcu.</p><p>Stiahnuté návrhy nájdete aj v [[navod:priznania/porovnat|archíve priznaní]].</p>" },
+        { nadpis: "Osobné údaje v súbore",
+          html: "<p>Meno, priezvisko ani dátum narodenia appka v nastaveniach nepýta, takže ich súbor nemusí obsahovať. Pred podaním ich skontrolujte.</p>" },
+        { nadpis: "Blokujúce kontroly",
+          html: "<p>Keď kontroly našli niečo označené ⛔, appka sa pred stiahnutím spýta, či exportovať aj tak. Nie je to zámok.</p>" },
+        { nadpis: "Opravné a dodatočné priznanie",
+          html: "<p>Sprievodca vyrába riadne priznanie. Opravné ani dodatočné nevyrobí.</p>" },
+        { nadpis: "Ako formulár",
+          html: "<p><b>▦ Ako formulár</b> v poslednom kroku ukáže priznanie v podobe tlačiva. Je to náhľad na kontrolu, nie oficiálne tlačivo.</p>" },
+        { nadpis: "Zamknutý rok",
+          html: "<p>Sprievodca je v plánoch Neplatiteľ DPH a Platiteľ DPH, alebo sa dá odomknúť jednorazovo pre jeden rok. Zamknutý rok má pred sebou 🔒 a tlačidlo <b>Pozrieť plány a ceny</b>.</p>" },
+      ],
+    },
+    {
+      id: "podiel",
+      nazov: "Poukázať podiel dane neziskovke alebo rodičom",
+      kedy: "Chcete časť zaplatenej dane poslať organizácii alebo rodičom na dôchodku.",
+      kroky: [
+        { text: "V kroku <b>4. Zhrnutie</b> nájdite <b>Poukázanie podielu zaplatenej dane</b>.", tlacidlo: "Poukázanie podielu zaplatenej dane" },
+        { text: "Zaškrtnite <b>Neziskovej organizácii (§ 50)</b>, napíšte jej IČO a ťuknite na <b>Dotiahnuť z RPO</b>.", tlacidlo: "Neziskovej organizácii (§ 50)", snimka: "priznanieB-podiel-1",
+          tip: "Názov organizácie appka doplní z registra právnických osôb; keď ju nenájde, napíšete ho ručne." },
+        { text: "Rodičom poukážete cez <b>Rodičovi/rodičom</b> — vyplňte meno, priezvisko a rodné číslo.", tlacidlo: "Rodičovi/rodičom" },
+      ],
+      tip: "Suma na poukázanie sa ukáže hneď pod organizáciou — keď je nulová, appka povie prečo.",
+    },
+  ],
+},
+
+uzavierka: {
+  vJednejVete: "Označiť mesiac za hotový, aby sa doň doklad neuložil omylom",
+  uvod: "Uzavretý mesiac znamená „toto je hotové“: doklady s dátumom v ňom sa nedajú pridať, upraviť ani zmazať, kým ho neodomknete. Pred uzavretím appka mesiac skontroluje.",
+  ulohy: [
+    {
+      id: "mesiac",
+      nazov: "Uzavrieť mesiac",
+      kedy: "Máte za mesiac všetko zapísané — napríklad po stiahnutí výkazu DPH.",
+      kroky: [
+        { text: "Pri mesiaci si pozrite nálezy: ⛔ treba opraviť, ⚠ stačí pozrieť.", snimka: "uzavierka-mesiac-1" },
+        { text: "Ťuknite na <b>Uzavrieť</b>.", tlacidlo: "Uzavrieť", snimka: "uzavierka-mesiac-2" },
+        { text: "Ak má mesiac upozornenia, appka ich vypíše a spýta sa, či uzavrieť aj tak." },
+      ],
+      tip: "Upozornenie, ktoré je v poriadku, schováte zo zoznamu tlačidlom <b>🔕 Skryť nález</b>.",
+      podrobnosti: [
+        { nadpis: "Čo appka kontroluje",
+          html: "<p>Doklady bez dátumu a pri platiteľovi DPH doklady zmenené po vygenerovaní výkazu — tieto dve veci uzavretie zastavia. Na pozretie ukáže výdavky s nulovou sumou, faktúry bez adresy odberateľa, nespárované pohyby na účte, chýbajúci výkaz DPH za mesiac a pri aute v majetku tankovanie bez jázd.</p>" },
+        { nadpis: "Nie je to zámok proti vám",
+          html: "<p>Uzávierka je poistka proti dokladu, ktorý sa omylom uloží spätne do obdobia, za ktoré ste už podali. Keď sa to stane, appka zápis zastaví a povie, ktorý mesiac je uzavretý.</p>" },
+        { nadpis: "Ročná kontrola",
+          html: "<p>Karta nad mesiacmi hľadá veci naprieč celým rokom. Uzavretie mesiaca ani podanie neblokuje.</p>" },
+      ],
+    },
+    {
+      id: "odomknut",
+      nazov: "Opraviť doklad v uzavretom mesiaci",
+      kedy: "Treba zmeniť doklad v mesiaci, ktorý ste už uzavreli.",
+      kroky: [
+        { text: "Pri uzavretom mesiaci ťuknite na <b>Odomknúť</b>.", tlacidlo: "Odomknúť", snimka: "uzavierka-odomknut-1" },
+        { text: "Napíšte krátko dôvod — uloží sa do histórie mesiaca." },
+        { text: "Doklad opravte a mesiac uzavrite znova.", tlacidlo: "Uzavrieť" },
+      ],
+      tip: "Ak ste za mesiac už podali výkaz DPH, po oprave ho treba podať znova — [[navod:dph/oprava|ako na opravný alebo dodatočný výkaz]].",
+      podrobnosti: [
+        { nadpis: "Doklady sa zmenili po uzavretí",
+          html: "<p>Keď sa doklady v uzavretom mesiaci zmenia inak, napríklad importom na inom zariadení, karta mesiaca napíše <b>Doklady sa po uzavretí zmenili</b>. Obdobie skontrolujte a mesiac uzavrite znova.</p>" },
+      ],
+    },
+    {
+      id: "rocna",
+      nazov: "Stiahnuť ročnú uzávierku pre účtovníka",
+      kedy: "Po skončení roka chcete súhrn na vytlačenie alebo pre účtovníka.",
+      kroky: [
+        { text: "Dole v module nájdite <b>📋 Ročná uzávierka ako dokument</b>.", tlacidlo: "Ročná uzávierka ako dokument", snimka: "uzavierka-rocna-1" },
+        { text: "Prejdite kroky <b>Rok</b>, <b>Ročná kontrola</b> a <b>Náhľad</b>." },
+        { text: "V kroku <b>Generovať</b> ťuknite na <b>📄 Stiahnuť ročnú uzávierku</b>.", tlacidlo: "Stiahnuť ročnú uzávierku" },
+      ],
+      tip: "Je to súhrn na čítanie, nie podanie — priznanie pripravíte v [[navod:priznanieB/vyplnit|sprievodcovi priznaním B]].",
+    },
+  ],
+},
 // ───────────────────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────────── FIREMNÁ AGENDA
