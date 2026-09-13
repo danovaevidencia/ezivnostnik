@@ -504,7 +504,7 @@ dph: {
         { text: "Appka podanie ešte raz skontroluje. Keď niečo nájde, ukáže to v okne — súbor stiahnete potvrdením, alebo okno zatvoríte a doklad opravíte.", tlacidlo: "Kontrola pred podaním", snimka: "dph-podat-4" },
         { text: "Rovnako stiahnite <b>↧ Priznanie DPH (XML)</b> a oba súbory nahrajte na portál Finančnej správy.", tlacidlo: "Priznanie DPH (XML)", snimka: "dph-podat-5" },
       ],
-      tip: "Vedľa voľby <b>Druh podania</b> appka ukazuje, koľko dní ostáva do 25. dňa po skončení obdobia.",
+      tip: "Vedľa voľby <b>Druh podania</b> appka ukazuje, koľko dní ostáva do termínu — 25. dňa po skončení obdobia, pri víkende alebo sviatku najbližšieho pracovného dňa.",
       podrobnosti: [
         { nadpis: "Appka za vás nepodáva",
           html: "<p>Stiahnutie súboru nie je podanie. Súbory nahráte na portáli Finančnej správy a potvrdenie o podaní nájdete v schránke na portáli.</p><p>Kópiu každého stiahnutého súboru si appka odloží na záložku <b>📁 Odoslané podania</b>.</p>" },
@@ -530,7 +530,7 @@ dph: {
         { nadpis: "Ostatné údaje firmy",
           html: "<p>Tu sú len údaje, ktoré potrebujú podania k DPH. Doplnenie z registra, IBAN a ostatné opisuje [[navod:data/firma|návod k údajom firmy]].</p>" },
         { nadpis: "DIČ",
-          html: "<p>Do priznania k DPH appka zapisuje aj [[app:data#set_dic|DIČ]], pred stiahnutím ho však nekontroluje. Skontrolujte, či ho máte vyplnené.</p>" },
+          html: "<p>Do priznania k DPH appka zapisuje aj [[app:data#set_dic|DIČ]]. Bez neho priznanie nestiahne a napíše, že chýba. Kontrolný a súhrnný výkaz ho nepotrebujú.</p>" },
         { nadpis: "Prečo si appka nič nedomýšľa",
           html: "<p>Údaje idú do dokumentu pre štát. Prázdne pole portál odmietne nahlas, cudzí údaj by prešiel ticho — preto appka chýbajúci údaj nedopĺňa.</p>" },
       ],
@@ -542,7 +542,7 @@ dph: {
       kroky: [
         { text: "Vyberte to isté obdobie — appka napíše, že sa doklady od posledného exportu zmenili.", tlacidlo: "Doklady sa od posledného exportu" },
         { text: "Pri <b>Druh podania</b> vyberte <b>Opravný</b> alebo <b>Dodatočný</b>.", tlacidlo: "Opravný", snimka: "dph-oprava-1",
-          tip: "Keď termín (25.) uplynul, appka to pri druhu podania napíše." },
+          tip: "Keď termín uplynul, appka to aj s dátumom napíše pri druhu podania." },
         { text: "Stiahnite výkaz aj priznanie znova a nahrajte ich na portál Finančnej správy." },
       ],
       tip: "Podaný mesiac si [[navod:uzavierka/mesiac|uzavrite]] — doklad sa doňho potom omylom neuloží.",
@@ -595,10 +595,10 @@ priznania: {
         { text: "Ťuknite na <b>↥ Načítať priznanie (XML)</b>.", tlacidlo: "Načítať priznanie (XML)", snimka: "priznania-nacitat-1" },
         { text: "Vyberte súbor — appka napíše, za ktorý rok priznanie načítala a s akými príjmami." },
       ],
-      tip: "Appka berie len XML priznania fyzickej osoby typu B, nie PDF.",
+      tip: "Appka berie len XML priznania fyzickej osoby typu B, nie PDF. Iné XML, napríklad priznanie k DPH, odmietne.",
       podrobnosti: [
         { nadpis: "Ten istý rok druhýkrát",
-          html: "<p>Priznanie za rok, ktorý už je načítaný, sa novým súborom prepíše — appka sa nepýta. Načítané priznanie odstránite tlačidlom <b>✕</b> v zozname načítaných priznaní.</p>" },
+          html: "<p>Keď je priznanie za ten rok už načítané, appka sa spýta, či ho má novým súborom nahradiť. Načítané priznanie odstránite tlačidlom <b>✕</b> v zozname načítaných priznaní.</p>" },
       ],
     },
     {
@@ -1104,7 +1104,7 @@ kalendar: {
         { nadpis: "Prečo mi nejaký termín chýba",
           html: "<p>Termín sa ukáže, len keď k nemu appka má údaj: sociálne odvody pri vyplnených [[app:data#set_socOdvodyMes|mesačných sociálnych odvodoch]], preddavok na daň pri vyplnenom [[app:data#set_preddavokDanQ|štvrťročnom preddavku]] a DPH, keď má firma vyplnené [[app:data#set_icdph|IČ DPH]].</p>" },
         { nadpis: "Termín cez víkend a ako ďaleko dopredu",
-          html: "<p>Keď lehota pripadne na sobotu alebo nedeľu, appka ju posunie na pondelok. Štátne sviatky nepozná. Kalendár ukazuje termíny na pol roka dopredu.</p>" },
+          html: "<p>Keď lehota pripadne na sobotu alebo nedeľu, appka ju posunie na pondelok. Termín DPH posunie aj cez sviatok, napríklad cez Vianoce; pri ostatných termínoch sviatky zatiaľ nepozná. Kalendár ukazuje termíny na pol roka dopredu.</p>" },
       ],
     },
     {
