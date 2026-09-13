@@ -400,6 +400,438 @@ window.NAVODY_SNIMKY = {
    "ciel": null
   }
  },
+ "jazdy-import-1": {
+  "m": {
+   "subor": "navody/jazdy-import-1.m.b631f5c9.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 16,
+    "y": 139,
+    "w": 114,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/jazdy-import-1.d.c60a6fee.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 252,
+    "y": 76,
+    "w": 106,
+    "h": 37
+   }
+  }
+ },
+ "jazdy-merat-1": {
+  "m": {
+   "subor": "navody/jazdy-merat-1.m.b631f5c9.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 16,
+    "y": 184,
+    "w": 175,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/jazdy-merat-1.d.c60a6fee.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 566,
+    "y": 76,
+    "w": 125,
+    "h": 37
+   }
+  }
+ },
+ "jazdy-merat-2": {
+  "m": {
+   "subor": "navody/jazdy-merat-2.m.57e9e28d.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 200,
+    "y": 374,
+    "w": 148,
+    "h": 40
+   }
+  },
+  "d": {
+   "subor": "navody/jazdy-merat-2.d.e8ef61b3.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 517,
+    "y": 367,
+    "w": 213,
+    "h": 40
+   }
+  }
+ },
+ "jazdy-miesto-1": {
+  "m": {
+   "subor": "navody/jazdy-miesto-1.m.243a53ef.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 42,
+    "y": 265,
+    "w": 306,
+    "h": 70
+   }
+  },
+  "d": {
+   "subor": "navody/jazdy-miesto-1.d.38045545.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 278,
+    "y": 277,
+    "w": 704,
+    "h": 45
+   }
+  }
+ },
+ "jazdy-miesto-2": {
+  "m": {
+   "subor": "navody/jazdy-miesto-2.m.c8c332eb.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 42,
+    "y": 280,
+    "w": 306,
+    "h": 39
+   }
+  },
+  "d": {
+   "subor": "navody/jazdy-miesto-2.d.dd97a389.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 294,
+    "y": 280,
+    "w": 436,
+    "h": 39
+   }
+  }
+ },
+ "jazdy-miesto-3": {
+  "m": {
+   "subor": "navody/jazdy-miesto-3.m.e3d08b6a.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 48,
+    "y": 281,
+    "w": 93,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/jazdy-miesto-3.d.940626ec.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 520,
+    "y": 281,
+    "w": 93,
+    "h": 37
+   }
+  }
+ },
+ "jazdy-nabijanie-1": {
+  "m": {
+   "subor": "navody/jazdy-nabijanie-1.m.b631f5c9.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 138,
+    "y": 139,
+    "w": 114,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/jazdy-nabijanie-1.d.c60a6fee.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 366,
+    "y": 76,
+    "w": 74,
+    "h": 37
+   }
+  }
+ },
+ "jazdy-nabijanie-2": {
+  "m": {
+   "subor": "navody/jazdy-nabijanie-2.m.60375039.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 41,
+    "y": 280,
+    "w": 308,
+    "h": 39
+   }
+  },
+  "d": {
+   "subor": "navody/jazdy-nabijanie-2.d.dffe3c8c.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 277,
+    "y": 290,
+    "w": 706,
+    "h": 20
+   }
+  }
+ },
+ "jazdy-sprievodca-1": {
+  "m": {
+   "subor": "navody/jazdy-sprievodca-1.m.1968c7f7.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 28,
+    "y": 281,
+    "w": 121,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/jazdy-sprievodca-1.d.cec488a5.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 264,
+    "y": 281,
+    "w": 121,
+    "h": 37
+   }
+  }
+ },
+ "jazdy-sprievodca-2": {
+  "m": {
+   "subor": "navody/jazdy-sprievodca-2.m.e320b69e.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 42,
+    "y": 281,
+    "w": 144,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/jazdy-sprievodca-2.d.7013ce05.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 294,
+    "y": 281,
+    "w": 144,
+    "h": 37
+   }
+  }
+ },
+ "jazdy-sprievodca-3": {
+  "m": {
+   "subor": "navody/jazdy-sprievodca-3.m.a8db3d62.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 42,
+    "y": 281,
+    "w": 306,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/jazdy-sprievodca-3.d.6a808e5b.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 294,
+    "y": 281,
+    "w": 436,
+    "h": 37
+   }
+  }
+ },
+ "jazdy-sprievodca-4": {
+  "m": {
+   "subor": "navody/jazdy-sprievodca-4.m.5afc6a39.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 42,
+    "y": 281,
+    "w": 184,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/jazdy-sprievodca-4.d.5b1719a6.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 294,
+    "y": 281,
+    "w": 184,
+    "h": 37
+   }
+  }
+ },
+ "jazdy-sprievodca-5": {
+  "m": {
+   "subor": "navody/jazdy-sprievodca-5.m.6c845b1a.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 42,
+    "y": 281,
+    "w": 306,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/jazdy-sprievodca-5.d.782bd22d.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 294,
+    "y": 281,
+    "w": 436,
+    "h": 37
+   }
+  }
+ },
+ "jazdy-zapisat-1": {
+  "m": {
+   "subor": "navody/jazdy-zapisat-1.m.1ccdc671.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 199,
+    "y": 184,
+    "w": 175,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/jazdy-zapisat-1.d.c60a6fee.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 698,
+    "y": 76,
+    "w": 77,
+    "h": 37
+   }
+  }
+ },
+ "jazdy-zapisat-2": {
+  "m": {
+   "subor": "navody/jazdy-zapisat-2.m.6e88ce18.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 42,
+    "y": 156,
+    "w": 306,
+    "h": 39
+   }
+  },
+  "d": {
+   "subor": "navody/jazdy-zapisat-2.d.4d65d9b0.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 294,
+    "y": 152,
+    "w": 436,
+    "h": 39
+   }
+  }
+ },
+ "jazdy-zapisat-3": {
+  "m": {
+   "subor": "navody/jazdy-zapisat-3.m.8139e422.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 42,
+    "y": 280,
+    "w": 306,
+    "h": 39
+   }
+  },
+  "d": {
+   "subor": "navody/jazdy-zapisat-3.d.71adfc53.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 294,
+    "y": 280,
+    "w": 436,
+    "h": 39
+   }
+  }
+ },
+ "jazdy-zapisat-4": {
+  "m": {
+   "subor": "navody/jazdy-zapisat-4.m.1ad37d49.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 42,
+    "y": 316,
+    "w": 306,
+    "h": 56
+   }
+  },
+  "d": {
+   "subor": "navody/jazdy-zapisat-4.d.c1de6ae4.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 294,
+    "y": 339,
+    "w": 436,
+    "h": 56
+   }
+  }
+ },
+ "jazdy-zapisat-5": {
+  "m": {
+   "subor": "navody/jazdy-zapisat-5.m.1ad37d49.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 200,
+    "y": 502,
+    "w": 148,
+    "h": 40
+   }
+  },
+  "d": {
+   "subor": "navody/jazdy-zapisat-5.d.c1de6ae4.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 517,
+    "y": 506,
+    "w": 213,
+    "h": 40
+   }
+  }
+ },
  "pohladavky-prehlad-1": {
   "m": {
    "subor": "navody/pohladavky-prehlad-1.m.60989966.webp",
