@@ -28,7 +28,7 @@ window.NAVODY_SNIMKY = {
  },
  "banka-automat-2": {
   "m": {
-   "subor": "navody/banka-automat-2.m.65f936eb.webp",
+   "subor": "navody/banka-automat-2.m.b3fc79af.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -39,7 +39,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/banka-automat-2.d.bb50607e.webp",
+   "subor": "navody/banka-automat-2.d.52704f51.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -268,7 +268,7 @@ window.NAVODY_SNIMKY = {
  },
  "banka-rucne-2": {
   "m": {
-   "subor": "navody/banka-rucne-2.m.f47905a7.webp",
+   "subor": "navody/banka-rucne-2.m.84a59615.webp",
    "w": 390,
    "h": 600,
    "ciel": {
