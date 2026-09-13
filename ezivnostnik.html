@@ -2081,7 +2081,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.13-OB";  // E-faktúry: odosielanie len v pláne Platiteľ DPH a Účtovník, príjem v každom
+const APP_VERZIA = "2026.09.13-OC";  // Tretie kolo opráv + zámok e-faktúry pri hromadnom mazaní, sandbox nezamyká
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -10401,8 +10401,18 @@ function fakZrusVyber(){ fakVybrane.clear(); appFaktury(); }
 function fakHromadneZmazat(){
   if(!strazZapis("faktury")) return;
   if(!fakVybrane.size) return;
-  if(!confirm("Naozaj zmazať "+fakVybrane.size+" vybraných faktúr?\n\nZmažú sa aj ich priradenia k bankovým pohybom. Akcia sa nedá vrátiť.")) return;
-  const kluce=new Set([...fakVybrane].map(String));
+  // 🔴 13. 9. 2026: hromadné mazanie sa na zámok odoslaného dokladu nepýtalo —
+  // zaškrtnutie a „Zmazať“ zmazalo aj faktúru, ktorú odberateľ už má, hoci
+  // detail to zastaví. Zámok je ten istý `faktOdoslana` ako v detaile.
+  const vybrane=(firmaData.faktury||[]).filter(f=>fakVybrane.has(String(dokladKluc(f))));
+  const zamknute=vybrane.filter(f=>faktOdoslana(f));
+  const zamVeta=zamknute.length
+    ? "\n\n"+zamknute.length+" z vybraných už odišli sieťou e-faktúr ("+zamknute.map(f=>f.cislo||"bez čísla").join(", ")+") — tie sa nezmažú, opravujú sa novým dokladom."
+    : "";
+  if(zamknute.length && zamknute.length===vybrane.length){ alert("Vybrané faktúry sa zmazať nedajú."+zamVeta); return; }
+  if(!confirm("Naozaj zmazať "+(vybrane.length-zamknute.length)+" vybraných faktúr?"+zamVeta+"\n\nZmažú sa aj ich priradenia k bankovým pohybom. Akcia sa nedá vrátiť.")) return;
+  const kluce=new Set(vybrane.filter(f=>!faktOdoslana(f)).map(f=>String(dokladKluc(f))));
+
   firmaData.faktury=(firmaData.faktury||[]).filter(f=>!kluce.has(dokladKluc(f)));
   // Úhrady na pohyboch, ktoré ukazovali na zmazané doklady, by ostali visieť ako
   // duchovia. Cez odoberUhradu, nie priamym filtrom: ten čistil `uhrady`, ale
@@ -10506,7 +10516,8 @@ function appFaktury(){
     </div>`:''}
     <div class="alist">
       <div class="arow head rdok rf"><div class="c-cb"><input type="checkbox" ${vsetkyVybrane?'checked':''} onclick="fakVyberVsetky(this.checked)" title="Vybrať všetky" style="cursor:pointer"></div><div class="c-sub">Číslo</div><div class="c-main">Odberateľ</div><div class="c-date">Dátum</div><div class="c-sum" style="text-align:right">Suma</div><div class="c-stav">Stav</div><div class="c-act"></div></div>
-      ${list.length?list.map(f=>{const idx=_fIdx.get(f);const fk=dokladKluc(f);const st=uhradaStav("faktura", fk);const fb=UHRADA_FARBY[st.stav]||UHRADA_FARBY.neznamy;const uhradena=faktJeUhradena(f);const RZ=rozporRiadok(st);return `<div class="arow rdok rf${RZ.trieda}"><div class="c-cb"><input type="checkbox" ${fakVybrane.has(fk)?'checked':''} onclick="event.stopPropagation();fakToggleVyber('${esc(fk)}',this.checked)" style="cursor:pointer"></div><div class="acol-strong c-sub" style="color:${c}" onclick="otvorDoklad(${idx})">${esc(f.cislo||"—")}</div><div class="c-main" onclick="otvorDoklad(${idx})">${esc(f.odberatel||"—")}</div><div class="acol-muted c-date" onclick="otvorDoklad(${idx})">${fmtDatum(f.datum||f.vystavenie)}</div><div class="acol-sum c-sum" onclick="otvorDoklad(${idx})">${eur(+f.spolu||0)}</div><div class="c-stav" ${st.stav!=="overene"?`onclick="event.stopPropagation();otvorVyberPlatby('faktura','${esc(fk)}')"${zam("faktury")}`:`onclick="otvorDoklad(${idx})"`} style="${st.stav!=="overene"?"cursor:pointer":""}" title="${esc((st.text||'')+(st.stav!=="overene"?" · ťuknutím priradíte platbu z banky":""))}"><span style="display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:600;color:${fb.f}">${fb.ic}${fb.tichy?'':' '+fb.n}</span></div><div class="c-act" style="display:flex;gap:5px;align-items:center">${!uhradena?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vyberSposobUhrady(null,_s=>{oznacDokladUhradeny('faktura','${esc(fk)}',_s);appFaktury();})"${zam("faktury")} title="Označiť ako uhradené">✓</button>`:((st.zdroj==='rucne'||st.zdroj==='legacy')?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();zrusDokladUhradu('faktura','${esc(fk)}');appFaktury()"${zam("faktury")} title="Zrušiť potvrdenie úhrady">✕</button>`:'')}<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();exportFakturaPDF(${idx})" title="${f.originalSubor?'Stiahnuť pôvodný PDF':'Vygenerovať PDF faktúry'}">${f.originalSubor?'📎':'PDF'}</button><button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();exportEFakturaUBL(${idx})" title="E-faktúra UBL 2.1 / Peppol (povinné od 2027)">e-fa</button>${(!faktOdoslana(f) && postarMozeOdosielat())?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();faktOdosliSietou(${idx})"${zam("faktury")} title="Odoslať sieťou Peppol — najprv sa ukáže, čo presne odíde">📮</button>`:(faktOdoslana(f)?`<span title="Odoslaná sieťou Peppol" style="font-size:12px;padding:0 3px">📮✓</span>`:'')}<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();faktMenu(${idx},this)"${zam("faktury")} title="Dobropis, ťarchopis, storno alebo kópia">⋯</button></div>${RZ.nota}</div>`;}).join(''):prazdnyAleboFilter(!(d.faktury||[]).length,
+      ${list.length?list.map(f=>{const idx=_fIdx.get(f);const fk=dokladKluc(f);const st=uhradaStav("faktura", fk);const fb=UHRADA_FARBY[st.stav]||UHRADA_FARBY.neznamy;const uhradena=faktJeUhradena(f);const RZ=rozporRiadok(st);return `<div class="arow rdok rf${RZ.trieda}"><div class="c-cb"><input type="checkbox" ${fakVybrane.has(fk)?'checked':''} onclick="event.stopPropagation();fakToggleVyber('${esc(fk)}',this.checked)" style="cursor:pointer"></div><div class="acol-strong c-sub" style="color:${c}" onclick="otvorDoklad(${idx})">${esc(f.cislo||"—")}</div><div class="c-main" onclick="otvorDoklad(${idx})">${esc(f.odberatel||"—")}</div><div class="acol-muted c-date" onclick="otvorDoklad(${idx})">${fmtDatum(f.datum||f.vystavenie)}</div><div class="acol-sum c-sum" onclick="otvorDoklad(${idx})">${eur(+f.spolu||0)}</div><div class="c-stav" ${st.stav!=="overene"?`onclick="event.stopPropagation();otvorVyberPlatby('faktura','${esc(fk)}')"${zam("faktury")}`:`onclick="otvorDoklad(${idx})"`} style="${st.stav!=="overene"?"cursor:pointer":""}" title="${esc((st.text||'')+(st.stav!=="overene"?" · ťuknutím priradíte platbu z banky":""))}"><span style="display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:600;color:${fb.f}">${fb.ic}${fb.tichy?'':' '+fb.n}</span></div><div class="c-act" style="display:flex;gap:5px;align-items:center">${!uhradena?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();vyberSposobUhrady(null,_s=>{oznacDokladUhradeny('faktura','${esc(fk)}',_s);appFaktury();})"${zam("faktury")} title="Označiť ako uhradené">✓</button>`:((st.zdroj==='rucne'||st.zdroj==='legacy')?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();zrusDokladUhradu('faktura','${esc(fk)}');appFaktury()"${zam("faktury")} title="Zrušiť potvrdenie úhrady">✕</button>`:'')}<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();exportFakturaPDF(${idx})" title="${f.originalSubor?'Stiahnuť pôvodný PDF':'Vygenerovať PDF faktúry'}">${f.originalSubor?'📎':'PDF'}</button><button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();exportEFakturaUBL(${idx})" title="E-faktúra UBL 2.1 / Peppol (povinné od 2027)">e-fa</button>${(!faktOdoslana(f) && postarMozeOdosielat())?`<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();faktOdosliSietou(${idx})"${zam("faktury")} title="Odoslať sieťou Peppol — najprv sa ukáže, čo presne odíde">📮</button>`:(faktOdoslana(f)?`<span title="Odoslaná sieťou Peppol" style="font-size:12px;padding:0 3px">📮✓</span>`:(faktOdoslanaTest(f)?`<span title="Odoslaná len do testovacej siete — odberateľ ju nedostal" style="font-size:11px;padding:0 3px;color:var(--ink-soft)">📮 test</span>`:''))
+}<button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();faktMenu(${idx},this)"${zam("faktury")} title="Dobropis, ťarchopis, storno alebo kópia">⋯</button></div>${RZ.nota}</div>`;}).join(''):prazdnyAleboFilter(!(d.faktury||[]).length,
         "Zatiaľ nemáte žiadnu faktúru. Vystavte prvú — číslo, dátumy aj DPH doplní appka podľa nastavení.",
         {popis:"＋ Nová faktúra", kod:"editFaktura()", modul:"faktury"},
         "fFilter='vsetky';fRok='';fMesiac='';_hladaj.faktury='';appFaktury()")}
@@ -11351,8 +11362,19 @@ const FAKT_ODOSLANE_STAVY = ["odoslana","dorucena"];
 function faktOdoslana(f){
   const e=(f||{}).efaktura;
   if(!e || FAKT_ODOSLANE_STAVY.indexOf(String(e.stav||""))<0) return null;
+  // Doklad odoslaný do TESTOVACEJ siete nie je doručený daňový doklad: sandbox
+  // doručenie nesimuluje a odberateľ ho nikdy nedostal. Keby zamkol, testovacia
+  // faktúra by sa nedala opraviť ani zmazať (13. 9. 2026, faktúra 20260010).
+  // Záznam bez príznaku (odoslaný pred OC) sa berie ako ostrý — bezpečnejšie.
+  if(e.sandbox) return null;
   return e;
 }
+// Faktúra odoslaná len do testovacej siete — na označenie v zozname.
+function faktOdoslanaTest(f){
+  const e=(f||{}).efaktura;
+  return (e && e.sandbox && FAKT_ODOSLANE_STAVY.indexOf(String(e.stav||""))>=0) ? e : null;
+}
+
 function faktZamokVeta(e){
   const kedy=(e&&e.kedy) ? " "+fmtDatum(String(e.kedy).slice(0,10)) : "";
   return "Táto faktúra už odišla odberateľovi cez sieť e-faktúr"+kedy
@@ -25240,7 +25262,9 @@ function efaktStavHtml(e){
   if(e && e.nedorucitelne)
     return `<span style="color:var(--warn);font-weight:600" title="Poštár doklad prevzal a nahlásil Finančnej správe, ale odberateľ v sieti Peppol nie je">nedoručiteľná</span>`;
   const S=EFAKT_STAVY[String((e||{}).stav||"")]||{n:String((e||{}).stav||"—"), f:"var(--ink-soft)"};
-  return `<span style="color:${S.f};font-weight:600">${esc(S.n)}</span>`;
+  return `<span style="color:${S.f};font-weight:600">${esc(S.n)}</span>`
+    +((e&&e.sandbox)?` <span class="apill" style="font-size:9px" title="Odoslaná len do testovacej siete — odberateľ ju nedostal">test</span>`:"");
+
 }
 async function efaktSkontrolujSchranku(btn){
   if(!strazZapis("efaktury")) return;
@@ -25520,10 +25544,15 @@ function peppolOknoHtml(){
       : E.nedorucitelne
       ? `<div style="font-size:30px">⚠</div><b>Poštár doklad prevzal, ale odberateľovi sa nedoručil</b>
          <div class="csub" style="margin-top:8px">Odberateľ v sieti Peppol nie je. Poštár doklad nahlási Finančnej správe.</div>`
+      : E.sandbox
+      ? `<div style="font-size:30px">🧪</div><b>Faktúra odoslaná do testovacej siete</b>
+         <div class="csub" style="margin-top:8px">Testovacia sieť doručenie nesimuluje — odberateľ faktúru nedostal. Faktúra ostáva otvorená: dá sa upraviť aj zmazať.</div>`
       : `<div style="font-size:30px;color:var(--pos)">✓</div><b>Faktúra odoslaná sieťou Peppol</b>
+
          <div class="csub" style="margin-top:8px">Identifikátor dokladu: ${esc(E.id||"—")}${E.sietStav?" · stav "+esc(E.sietStav):""}</div>`;
     return `<div style="text-align:center;padding:14px 6px">${telo}
-      ${O.chyba?"":`<div class="csub" style="margin-top:10px">Faktúra je odteraz zamknutá. Opraviť sa dá dobropisom, ťarchopisom alebo stornom.</div>`}
+      ${(O.chyba||E.sandbox)?"":`<div class="csub" style="margin-top:10px">Faktúra je odteraz zamknutá.
+ Opraviť sa dá dobropisom, ťarchopisom alebo stornom.</div>`}
       <div style="margin-top:16px"><button class="aabtn pri" onclick="closeModal()">Zavrieť</button></div></div>`;
   }
 
@@ -25593,8 +25622,12 @@ async function faktPeppolOdosli(){
       id:String((r&&(r.providerDocumentId||r.id))||""),
       prijemca:O.v.prijemca,
       sietStav:String((r&&r.status)||""),
-      nedorucitelne:!!(r&&r.undeliverable)
+      nedorucitelne:!!(r&&r.undeliverable),
+      // Sieť, do ktorej doklad odišiel. Sandbox nezamyká (`faktOdoslana`).
+      siet:String((r&&r.siet)||""),
+      sandbox:!!(r&&r.sandbox)
     };
+
     poZmene();
     obnovPoEditacii("faktury");
   }catch(e){
