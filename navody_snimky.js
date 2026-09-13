@@ -472,6 +472,366 @@ window.NAVODY_SNIMKY = {
    }
   }
  },
+ "vydavky-email-1": {
+  "m": {
+   "subor": "navody/vydavky-email-1.m.c01057e2.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 17,
+    "y": 277,
+    "w": 246,
+    "h": 45
+   }
+  },
+  "d": {
+   "subor": "navody/vydavky-email-1.d.accb959e.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 253,
+    "y": 212,
+    "w": 246,
+    "h": 45
+   }
+  }
+ },
+ "vydavky-email-4": {
+  "m": {
+   "subor": "navody/vydavky-email-4.m.b659fa90.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 42,
+    "y": 136,
+    "w": 306,
+    "h": 148
+   }
+  },
+  "d": {
+   "subor": "navody/vydavky-email-4.d.1296fb7c.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 294,
+    "y": 132,
+    "w": 436,
+    "h": 130
+   }
+  }
+ },
+ "vydavky-fotka-1": {
+  "d": {
+   "subor": "navody/vydavky-fotka-1.d.9282ae6d.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 252,
+    "y": 76,
+    "w": 195,
+    "h": 37
+   }
+  },
+  "m": {
+   "subor": "navody/vydavky-fotka-1.m.577ddbf6.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 16,
+    "y": 185,
+    "w": 358,
+    "h": 37
+   }
+  }
+ },
+ "vydavky-fotka-2": {
+  "m": {
+   "subor": "navody/vydavky-fotka-2.m.d0f65e04.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 17,
+    "y": 229,
+    "w": 246,
+    "h": 45
+   }
+  },
+  "d": {
+   "subor": "navody/vydavky-fotka-2.d.accb959e.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 253,
+    "y": 120,
+    "w": 246,
+    "h": 45
+   }
+  }
+ },
+ "vydavky-fotka-3": {
+  "m": {
+   "subor": "navody/vydavky-fotka-3.m.cda2d11c.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 42,
+    "y": 136,
+    "w": 306,
+    "h": 64
+   }
+  },
+  "d": {
+   "subor": "navody/vydavky-fotka-3.d.3249d951.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 294,
+    "y": 132,
+    "w": 436,
+    "h": 49
+   }
+  }
+ },
+ "vydavky-fotka-4": {
+  "m": {
+   "subor": "navody/vydavky-fotka-4.m.7889bc23.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 200,
+    "y": 502,
+    "w": 148,
+    "h": 40
+   }
+  },
+  "d": {
+   "subor": "navody/vydavky-fotka-4.d.dd5c8986.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 517,
+    "y": 506,
+    "w": 213,
+    "h": 40
+   }
+  }
+ },
+ "vydavky-prehlad-1": {
+  "m": {
+   "subor": "navody/vydavky-prehlad-1.m.512ff671.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 16,
+    "y": 212,
+    "w": 358,
+    "h": 175
+   }
+  },
+  "d": {
+   "subor": "navody/vydavky-prehlad-1.d.9282ae6d.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 252,
+    "y": 176,
+    "w": 756,
+    "h": 82
+   }
+  }
+ },
+ "vydavky-prehlad-2": {
+  "m": {
+   "subor": "navody/vydavky-prehlad-2.m.4336178b.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 112,
+    "y": 281,
+    "w": 103,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/vydavky-prehlad-2.d.b7a7eed5.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 348,
+    "y": 281,
+    "w": 103,
+    "h": 37
+   }
+  }
+ },
+ "vydavky-prehlad-3": {
+  "m": {
+   "subor": "navody/vydavky-prehlad-3.m.06f67096.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 28,
+    "y": 281,
+    "w": 180,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/vydavky-prehlad-3.d.b7a7eed5.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 459,
+    "y": 281,
+    "w": 180,
+    "h": 37
+   }
+  }
+ },
+ "vydavky-rucne-1": {
+  "m": {
+   "subor": "navody/vydavky-rucne-1.m.577ddbf6.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 16,
+    "y": 275,
+    "w": 358,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/vydavky-rucne-1.d.9282ae6d.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 796,
+    "y": 76,
+    "w": 134,
+    "h": 37
+   }
+  }
+ },
+ "vydavky-rucne-2": {
+  "m": {
+   "subor": "navody/vydavky-rucne-2.m.44347b2a.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 42,
+    "y": 156,
+    "w": 306,
+    "h": 174
+   }
+  },
+  "d": {
+   "subor": "navody/vydavky-rucne-2.d.3508a8e5.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 294,
+    "y": 152,
+    "w": 436,
+    "h": 138
+   }
+  }
+ },
+ "vydavky-rucne-3": {
+  "m": {
+   "subor": "navody/vydavky-rucne-3.m.b26494d2.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 42,
+    "y": 279,
+    "w": 306,
+    "h": 41
+   }
+  },
+  "d": {
+   "subor": "navody/vydavky-rucne-3.d.29944555.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 294,
+    "y": 279,
+    "w": 436,
+    "h": 41
+   }
+  }
+ },
+ "vydavky-rucne-4": {
+  "m": {
+   "subor": "navody/vydavky-rucne-4.m.c8d4b438.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 55,
+    "y": 280,
+    "w": 280,
+    "h": 39
+   }
+  },
+  "d": {
+   "subor": "navody/vydavky-rucne-4.d.7b679e13.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 307,
+    "y": 280,
+    "w": 410,
+    "h": 39
+   }
+  }
+ },
+ "vydavky-uhrada-1": {
+  "m": {
+   "subor": "navody/vydavky-uhrada-1.m.9ce045bf.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 333,
+    "y": 281,
+    "w": 28,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/vydavky-uhrada-1.d.34faaf15.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 964,
+    "y": 281,
+    "w": 28,
+    "h": 37
+   }
+  }
+ },
+ "vydavky-uhrada-2": {
+  "m": {
+   "subor": "navody/vydavky-uhrada-2.m.c148fd82.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 200,
+    "y": 277,
+    "w": 149,
+    "h": 46
+   }
+  },
+  "d": {
+   "subor": "navody/vydavky-uhrada-2.d.e3365ab7.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 517,
+    "y": 277,
+    "w": 214,
+    "h": 46
+   }
+  }
+ },
  "vykazy-export-1": {
   "m": {
    "subor": "navody/vykazy-export-1.m.d2e56ddb.webp",
