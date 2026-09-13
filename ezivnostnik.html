@@ -2805,6 +2805,7 @@ function resetStavuModulov(){
   fFilter="vsetky"; fRok=""; fMesiac=""; fakVybrane=new Set(); fakPoslednyList=[];
   vFilter="vsetky"; vRok=""; vMesiac=""; vydVybrane=new Set(); vydPoslednyList=[];
   bFilter="vsetky"; bMesiac=""; vypisRozbaleny=null;
+  vyber=null;   // výber zo zvončeka nesie kľúče predošlej firmy
   kjMesiac=""; kjZlucit=false; kjTriedenie="datum"; kjHladaj="";
   Object.keys(_hladaj).forEach(k=>delete _hladaj[k]);         // hľadanie je per firma
   Object.keys(_zobrazLimit).forEach(k=>delete _zobrazLimit[k]);
@@ -5886,6 +5887,17 @@ function otvorSVyberom(modul, kluce, popis, celkom){
   otvorApp(modul);
 }
 function vyberAktivny(modul){ return (vyber && vyber.modul===modul) ? vyber : null; }
+// KEDY VÝBER ZANIKNE — jedno pravidlo: výber žije, kým je na obrazovke modul,
+// pre ktorý vznikol. Prekreslenie toho istého modulu (uloženie, synchronizácia,
+// klik na skupinu, ktorá ukazuje tú istú záložku) ho nechá. Zruší ho každá iná
+// obrazovka — iný modul, iná záložka skupiny, Domov, Párovanie, iná firma —
+// a v module ktorýkoľvek filter alebo „Zobraziť celý zoznam".
+// Volá sa zo vchodov navigácie (`otvorApp`, `renderSuperApka`, `domov`,
+// `otvorSplit`), nie z modulov: modul nevie, kam sa odchádza.
+// Do 13. 9. 2026 výber rušil len `otvorApp`. Po otvorení v rámci skupiny by
+// prežil prepnutie záložky aj návrat na Domov a človek by sa neskôr vrátil
+// do filtrovaného zoznamu bez toho, aby vedel prečo.
+function vyberPlatiPre(id){ if(vyber && vyber.modul!==id) vyber=null; }
 function vyberZrus(){
   const m=vyber && vyber.modul; vyber=null;
   if(m) otvorApp(m);
@@ -8232,7 +8244,13 @@ function otvorApp(id){
   // Výber zo zvončeka platí pre JEDEN modul. Odchodom inam stráca zmysel a
   // nechať ho žiť by znamenalo, že sa človek o týždeň vráti do Banky a nájde
   // tam filtrovaný zoznam bez toho, aby vedel prečo.
-  if(vyber && vyber.modul!==id) vyber=null;
+  vyberPlatiPre(id);
+  // Modul zo skupiny sa otvára v jej rámci — tak ho človek pozná z plochy
+  // a len tam má na mobile záložky. Je to JEDNA cesta pre dlaždice, zvonček,
+  // odkazy aj návody: do 13. 9. 2026 rámec vedel otvoriť len `nvOtvorModul`
+  // a zvonček otváral Banku bez hlavičky skupiny a bez záložiek.
+  const sk=skupinaSRamcom(id);
+  if(sk){ otvorSuperApku(sk, id); return; }
   aktualnaApp=id;
   aktualnaSuperApka=null;
   zobrazObrazovku("app");
@@ -8474,6 +8492,7 @@ function domov(){
   // `prepniZalozku` a ODNAVIGOVAL by človeka do super apky, ktorú zavrel.
   aktualnaSuperApka=null;
   aktualnaZalozka=null;
+  vyberPlatiPre(null);   // plocha nie je modul
   nastavSirku(null);
   zobrazObrazovku("domov");
   zobrazFirmu();
@@ -8615,8 +8634,7 @@ function nvPlanPoznamkaHtml(id){
 function nvOtvorModul(modul, prvok){
   nvZastav();
   if(!nvDostupny(modul)){ zobrazCennik(); return; }
-  const g=SKUPINY.find(x=>x.moduly.includes(modul));
-  if(g && typeof otvorSuperApku==="function") otvorSuperApku(g.id, modul); else otvorApp(modul);
+  otvorApp(modul);   // modul zo skupiny otvorí v jej rámci
   if(!prvok) return;
   let pokus=0;
   const ukaz=()=>{
@@ -9042,6 +9060,8 @@ function skupinaPocetTabov(skupinaId, moduly){
 function renderSuperApka(skupinaId, moduly){
   const g=SKUPINY.find(s=>s.id===skupinaId); if(!g) return;
   const akt=aktualnaZalozka;
+  // Cez rámec prejde otvorenie skupiny, prepnutie záložky aj bočná lista.
+  vyberPlatiPre(akt);
   // 1) nechaj modul vykresliť svoj obsah do #appScreen
   _vRamci=true;
   try{ renderApp(akt); } finally { _vRamci=false; }
@@ -9078,6 +9098,15 @@ function modulySkupiny(skupinaId){
   let m=g.moduly.filter(x=>APPS[x]&&modulPovolenyPreModul(x));
   if(!jePlatcaDPH()) m=m.filter(x=>x!=="dph");
   return m;
+}
+// Skupina, v ktorej rámci sa modul otvára. Len keď skupina ukazuje záložky —
+// pri jedinej (Výdavky) sa modul otvára priamo, rovnako ako z dlaždice.
+// Modul, ktorý skupina tejto firme neukazuje (plán, DPH neplatiteľa), rámec
+// nedostane: `otvorSuperApku` by namiesto neho ticho otvoril prvú záložku.
+function skupinaSRamcom(id){
+  const g=SKUPINY.find(s=>s.moduly.includes(id)); if(!g) return null;
+  const moduly=modulySkupiny(g.id);
+  return (moduly.includes(id) && skupinaPocetTabov(g.id, moduly)>1) ? g.id : null;
 }
 function prekresliRamec(){
   if(!aktualnaSuperApka) return false;
@@ -32023,6 +32052,7 @@ let _splitNavrat=null;   // odkiaľ sa split otvoril — ‹ sa vracia tam, nie 
 function otvorSplit(lavy, pravy){
   _splitNavrat=(typeof aktualnaSuperApka!=="undefined" && aktualnaSuperApka) ? aktualnaSuperApka : null;
   aktualnaApp="split";
+  vyberPlatiPre("split");
   splitVybranyPohyb=null;
   if(lavy) splitLavy=lavy;
   if(pravy) splitPravy=pravy;
