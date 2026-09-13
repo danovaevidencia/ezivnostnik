@@ -15559,9 +15559,8 @@ function appJazdy(){
   const tachStav=(d.settings&&d.settings.tachometer)?(+d.settings.tachometer):null;
   // Pole je POČIATOČNÝ stav knihy (kotva `prepocitajTachometer`). Karta písala
   // „Aktuálny stav + najazdené za rok = odhad ku koncu roka" — zvádzalo to
-  // zadať dnešný stav a pri medzere v reťazi súčet nesedel. Stav po poslednej
-  // jazde berie reťaz, kde je; kotva + km len keď jazdy stav nemajú.
-  const tachKon=vsetky.some(j=>+j.kon>0) ? jazdaPoslednyStav() : (tachStav ? tachoCele(tachStav+kmAll) : 0);
+  // zadať dnešný stav a pri medzere v reťazi súčet nesedel.
+  const tachKon=jazdaPoslednyStav();
   const kontroly=jazdyKontrola();
 
   document.getElementById("appScreen").innerHTML=appHlavicka("jazdy",
@@ -15903,10 +15902,8 @@ function editTankovanie(idx){
     t.litre=parseFloat(val("t_litre"))||0;
     t.suma=parseFloat(val("t_suma"))||0;
     poZmene(); prekresliSoScrollom(appJazdy);
-  }, ()=>{ // zmazať
-    if(confirm("Zmazať toto tankovanie z prehľadu?")){
-      firmaData.tankovania.splice(idx,1); poZmene(); prekresliSoScrollom(appJazdy);
-    }
+  }, ()=>{ // zmazať — potvrdenie sa pýta `modalDeleteConfirm`, druhá otázka by bola navyše
+    firmaData.tankovania.splice(idx,1); poZmene(); prekresliSoScrollom(appJazdy);
   });
 }
 
@@ -15997,9 +15994,11 @@ function kjwVytvorVydavokNabijanie(){
     id:"dn"+Date.now()+Math.random().toString(36).slice(2,7),
     cislo, datum:_kjW.doD, partner:"Domáca elektrina (vlastný výpočet)",
     druh:"Interný doklad", popis, kategoria:"prevadzka",
-    bez:D.suma, dph:0, spolu:D.suma,
-    uhradaRucne:{datum:_kjW.doD, sposob:"ine"}
+    bez:D.suma, dph:0, spolu:D.suma
   });
+  // Úhrada tou istou cestou ako ručné označenie v zozname. Priamy zápis
+  // `uhradaRucne` nemal sumu ani `zaplatena`, takže doklad nebol celý uhradený.
+  oznacDokladUhradeny("vydavok", cislo, "ine", _kjW.doD, "interný doklad — domáce nabíjanie");
   poZmene();
   _kjW.hotovo.nabijanie=D.suma;
   kjwRender();
@@ -16810,14 +16809,6 @@ function spracujZse(e){
   }).catch(err=>{ console.error(err); alert("Súbor sa nepodarilo prečítať. Skúste PDF výpis zo ZSE Drive."); });
 }
 
-// export knihy jázd (CSV)
-function kjExport(){
-  const jazdy=(firmaData.jazdy||[]).slice().sort((a,b)=>{const da=jazdaDatum(a),db=jazdaDatum(b);return (da&&db)?(da-db):0;});
-  let csv="Dátum;Trasa;Účel;km\r\n";
-  jazdy.forEach(j=>{ csv+=`${j.datum||''};${(j.cesta||j.trasa||'').replace(/;/g,',')};${(j.ucel||'').replace(/;/g,',')};${+j.km||0}\r\n`; });
-  downloadBlob(new Blob(["\ufeff"+csv],{type:"text/csv"}),"kniha_jazd.csv");
-}
-
 // XLS export knihy jázd — mesačný alebo celá kniha (SheetJS)
 function kjExportXLS(iba){ // iba = mesiac (napr "2026-04") alebo null pre celú knihu
   ensureXlsxStyle().then(X=>{
@@ -17301,9 +17292,18 @@ function jazdaTrasaAktualizuj(){
 // Počiatočný stav tachometra: koniec poslednej jazdy, ktorá ho má. Reťaz
 // `kon` → `poc` je pri kontrole prvá vec, ktorá sa overuje, a doteraz ju
 // nová jazda vždy pretrhla — dopĺňala sa až ručným prepočtom.
+//
+// Ručný stav z nastavení je stav PRED prvou jazdou — tak ho berie aj
+// `prepocitajTachometer`. Bez reťaze sa preto pripočítajú kilometre jázd, ktoré
+// kniha už má; predtým nová jazda začínala na počiatočnom stave, akoby knihy
+// nebolo, a prepočet by jej stav vzápätí posunul.
 function jazdaPoslednyStav(){
-  const zoz=(firmaData.jazdy||[]).filter(j=>+j.kon>0);
-  if(!zoz.length) return +((firmaData.settings||{}).tachometer)||0;
+  const vsetky=firmaData.jazdy||[];
+  const zoz=vsetky.filter(j=>+j.kon>0);
+  if(!zoz.length){
+    const t=+((firmaData.settings||{}).tachometer)||0;
+    return t>0 ? tachoCele(t+vsetky.reduce((a,j)=>a+(+j.km||0),0)) : 0;
+  }
   zoz.sort((a,b)=>{
     const da=jazdaDatum(a), db=jazdaDatum(b);
     if(da&&db&&da-db) return da-db;
@@ -18228,6 +18228,14 @@ function appData(){
         <div class="mfield"><label>Meno vodiča</label><input id="set_kjVodic" value="${esc((d.settings||{}).kjVodic||'')}"></div>
         <div class="mfield"><label>Limit auto-doplnenia (km)</label><input type="number" id="set_kjAutoLimit" value="${esc((d.settings||{}).kjAutoLimit||50)}"></div>
       </div>
+      <div class="mrow2">
+        <div class="mfield"><label>Vozidlo</label><input id="set_kjVozidlo" value="${esc((d.meta||{}).vozidlo||'')}" placeholder="napr. Škoda Octavia BA-123AB"></div>
+        <div class="mfield"><label>Pohon</label><select id="set_kjTypVozidla">
+          ${[["","Podľa údajov z auta"],["spalovacie","Spaľovací motor"],["phev","Plug-in hybrid"],["elektro","Elektromobil"]]
+            .map(([v,n])=>`<option value="${v}"${((d.settings||{}).kjTypVozidla||"")===v?" selected":""}>${n}</option>`).join("")}
+        </select></div>
+      </div>
+      <div style="font-size:11.5px;color:var(--ink-soft);line-height:1.5;margin:-4px 0 12px">Vozidlo sa ukáže v Knihe jázd a v hlavičke exportu. Pohon určuje, či sprievodca ponúkne krok Domáce nabíjanie — bez voľby sa odvodí z jázd.</div>
       <div class="mfield"><label>Predvolená trasa</label><input id="set_kjTrasa" value="${esc((d.settings||{}).kjTrasaDefault||(d.settings||{}).kjTrasa||'')}"></div>
       <div class="mfield"><label>Predvolený účel</label><input id="set_kjUcel" value="${esc((d.settings||{}).kjUcel||'')}"></div>
       <div class="mrow2">
@@ -18393,6 +18401,8 @@ async function ulozNastavenia(){
   s.kjAutoLimit=num("set_kjAutoLimit",50);
   s.kjTrasaDefault=val("set_kjTrasa")||"";
   s.kjUcel=val("set_kjUcel")||"";
+  if(document.getElementById("set_kjTypVozidla")) s.kjTypVozidla=val("set_kjTypVozidla")||"";
+  if(document.getElementById("set_kjVozidlo")){ if(!firmaData.meta) firmaData.meta={}; firmaData.meta.vozidlo=val("set_kjVozidlo").trim(); }
   s.kjNormaElektro=num("set_kjNormaElektro",18.1);
   s.kjNormaElektrina=s.kjNormaElektro;   // alias — export knihy jázd číta tento kľúč
   s.kjCenaElektro=num("set_kjCenaElektro",0.15);
@@ -20441,7 +20451,7 @@ function xkKnihaJazdSheet(X, S, D, m, vlastnyZoznam){
   if(!list.length) return null;
   const cfg=D.settings||{};
   const VOZIDLO=(D.meta&&D.meta.vozidlo)||"";
-  const NAZOV_VOZ=cfg.kjNazovVozidla||(firmaData.meta&&firmaData.meta.vozidlo)||"Služobné vozidlo";
+  const NAZOV_VOZ=VOZIDLO||"Služobné vozidlo";   // `kjNazovVozidla` nikto nenastavoval — vozidlo je jedno pole v nastaveniach
   const NORMA_BENZIN=normaPHM();
   const NORMA_EL=normaElektro();
   const CENA_EL=+cfg.kjCenaElektro||0.15;
@@ -32919,10 +32929,12 @@ function _uhradaSposobVyber(k){
   const ok=document.getElementById("modalOk"); if(ok) ok.style.display="";
   if(cb) cb(k);
 }
-function oznacDokladUhradeny(typ, cislo, sposob){
-  const dnes=new Date().toISOString().slice(0,10);
+// `datum`, `poznamka` — doklad, ktorý vystaví appka sama (domáce nabíjanie),
+// je uhradený ku dňu dokladu, nie ku dňu kliknutia.
+function oznacDokladUhradeny(typ, cislo, sposob, datum, poznamka){
+  const dnes=datum||new Date().toISOString().slice(0,10);
   const s=r2(dokladSuma(typ, cislo));
-  const R_=oznacUhradeneRucne(typ, cislo, dnes, s, "označené v zozname");
+  const R_=oznacUhradeneRucne(typ, cislo, dnes, s, poznamka||"označené v zozname");
   if(R_ && sposob) R_.sposob=sposob;
   const d=najdiDoklad(typ, cislo); if(d){ d.zaplatena=true; if(sposob) d.uhrada=UHRADA_SPOSOBY[sposob]||d.uhrada; }
   if(typeof ulozFirmu==="function") ulozFirmu();

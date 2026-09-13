@@ -1023,7 +1023,7 @@ jazdy: {
       tip: "Bez sprievodcu knihu stiahnete hneď tlačidlom <b>↧ XLS mesiac</b> alebo <b>↧ XLS celá</b>.",
       podrobnosti: [
         { nadpis: "Domáce nabíjanie (elektromobil a plug-in hybrid)",
-          html: "<p>Pri aute s elektrinou má sprievodca krok navyše. Porovná spotrebu podľa vozidla s tým, čo ste nabili verejne na staniciach ZSE — rozdiel ste nabili doma. Tlačidlom <b>+ Vytvoriť výdavok</b> z neho vznikne interný doklad s celým výpočtom v popise. Cenu za kWh zmeníte v [[app:data#set_kjCenaElektro|nastaveniach knihy jázd]].</p>" },
+          html: "<p>Pri aute s elektrinou má sprievodca krok navyše. Či auto elektrinu má, appka odvodí z jázd — alebo to nastavíte v [[app:data#set_kjTypVozidla|nastaveniach knihy jázd]] v poli <b>Pohon</b>. Porovná spotrebu podľa vozidla s tým, čo ste nabili verejne na staniciach ZSE — rozdiel ste nabili doma. Tlačidlom <b>+ Vytvoriť výdavok</b> z neho vznikne interný doklad s celým výpočtom v popise. Cenu za kWh zmeníte v [[app:data#set_kjCenaElektro|nastaveniach knihy jázd]].</p>" },
         { nadpis: "Krok Rozloženie a export",
           html: "<p>Appka ho sama označuje <b>Iba ukážka — na daňové účely sa nepoužíva</b>: prepisuje dátumy jázd a výsledok už nezodpovedá tomu, čo hlási vozidlo. Do knihy sa nič neuloží, kým návrh výslovne nepoužijete — vtedy sa najprv stiahne záloha a treba potvrdiť napísaním slova.</p>" },
         { nadpis: "Čo je v exporte",
