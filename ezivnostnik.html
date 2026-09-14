@@ -2480,6 +2480,9 @@ function enterApp(user){
   else { chip.textContent="✓ prihlásený"; chip.className="syncchip"; } }
   // načítaj firmu z cloudu
   nacitajFirmu();
+  // Prijatie podmienok (č. 68) sa overuje popri tom — nečaká sa naň, k dátam
+  // sa používateľ dostane aj bez neho.
+  suhlasSkontroluj(user);
 }
 
 // ═══ PRÁCA S FIRMOU ═══
@@ -18828,9 +18831,93 @@ const DOKUMENTY={
 };
 // Záznam súhlasu k účtu (ROZHODNUTIA č. 52). Zmluva vzniká vytvorením účtu
 // (podmienky čl. 4) — bez záznamu sa nedá preukázať, ktorú verziu kto prijal.
-// Čas je z prehliadača; dôveryhodný čas vzniku účtu drží Supabase (`created_at`).
+// Ide do `user_metadata.suhlas` pri `signUp`. Čas z prehliadača a metadáta, ktoré
+// si používateľ vie sám prepísať, sú len doplnok: platný záznam z nich robí
+// server — trigger v admin_39 zapíše verzie do tabuľky `suhlasy` s časom vzniku
+// účtu (č. 67). Metadáta ostávajú, lebo pri potvrdzovaní e-mailu `signUp`
+// reláciu nevracia a iný kanál na server v tej chvíli nie je.
 function suhlasZaznam(){
   return {podmienky:DOKUMENTY.podmienky.verzia, zasady:DOKUMENTY.sukromie.verzia, kedy:new Date().toISOString()};
+}
+
+// ── PRIJATIE PODMIENOK PRE ÚČTY BEZ ZÁZNAMU (ROZHODNUTIA č. 68) ──
+// Pri vstupe do appky sa prijaté verzie (`suhlasy`, RLS vráti len vlastné
+// riadky) porovnajú s `DOKUMENTY`. Chýba záznam alebo je starší → okno
+// s odkazmi a „Prijímam“, ktoré zapíše cez RPC `suhlas_prijmi` (používateľa
+// a čas dopĺňa server). Pri zmene podmienok (čl. 13) poslúži to isté okno —
+// stačí nová verzia v `DOKUMENTY`.
+//
+// Okno NEBLOKUJE prístup k dátam: podmienky čl. 13 berú pokračovanie
+// v používaní za prijatie zmeny, okno ho len zaznamenáva. Zavreté sa ponúkne
+// znova pri ďalšom prihlásení (spustení appky). Vlastný prvok, nie spoločné
+// #modal — to by prepísalo formulár, ktorý môže byť práve otvorený.
+//
+// Kým admin_39 nebeží, tabuľka neexistuje a okno sa NEUKÁŽE: prijatie by nebolo
+// kam zapísať a ponúkalo by sa pri každom spustení aj po kliknutí.
+const SUHLAS_DOKUMENT={podmienky:"podmienky", zasady:"sukromie"};   // kľúč v `suhlasy` → DOKUMENTY
+let _suhlasUklada=false;
+// Objekt v databáze chýba (migrácia ešte nebeží): PostgREST hlási chýbajúcu
+// funkciu (PGRST202) či tabuľku (PGRST205), Postgres 42883 / 42P01.
+function chybaChybajuciObjektDb(error){
+  return !!error && (/^(PGRST202|PGRST205|42883|42P01)$/.test(String(error.code||""))
+    || /schema cache|does not exist|Could not find the (function|table)/i.test(String(error.message||"")));
+}
+function suhlasChybajuce(zaznamy){
+  return Object.keys(SUHLAS_DOKUMENT).filter(k=>
+    !(zaznamy||[]).some(z=>z.dokument===k && z.verzia===DOKUMENTY[SUHLAS_DOKUMENT[k]].verzia));
+}
+async function suhlasSkontroluj(user){
+  if(localMode || demoMode || !sb || !user) return;
+  try{
+    const { data, error } = await sb.from("suhlasy").select("dokument,verzia").eq("user_id", user.id);
+    if(error){
+      if(chybaChybajuciObjektDb(error)){
+        console.info("Prijatie podmienok: tabuľka suhlasy ešte nie je (migrácia admin_39) — okno sa neponúka.");
+        return;
+      }
+      throw error;
+    }
+    if(suhlasChybajuce(data).length) suhlasOknoUkaz("");
+  }catch(e){
+    // Hláška by rušila pri práci, ktorá s ňou nesúvisí — stačí konzola.
+    console.error("Prijatie podmienok sa nepodarilo overiť:", e);
+  }
+}
+function suhlasOknoUkaz(chyba){
+  let o=document.getElementById("suhlasOkno");
+  if(!o){ o=document.createElement("div"); o.id="suhlasOkno"; o.className="modal on"; document.body.appendChild(o); }
+  const d=DOKUMENTY;
+  o.innerHTML=`<div class="modalcard" role="dialog" aria-labelledby="suhlasOknoNadpis">
+    <div class="modalhd"><h3 id="suhlasOknoNadpis">Dokumenty služby</h3>
+      <button class="modalx" onclick="suhlasZavri()" title="Zavrieť">✕</button></div>
+    <div class="modalbd" style="font-size:13.5px;line-height:1.55">
+      <p style="margin-bottom:10px">Prosíme o potvrdenie aktuálnych dokumentov: ${dokumentOdkaz("podmienky", d.podmienky.n+" (verzia "+d.podmienky.verzia+")")} a ${dokumentOdkaz("sukromie", d.sukromie.n+" (verzia "+d.sukromie.verzia+")")}.</p>
+      <p style="margin-bottom:10px">Stlačením „Prijímam“ prijímate obchodné podmienky a potvrdzujete, že ste sa oboznámili so zásadami ochrany osobných údajov. K účtu sa uloží verzia a čas prijatia.</p>
+      <p style="color:var(--ink-soft);font-size:12.5px">Okno môžete zavrieť a pracovať ďalej — k dátam máte prístup aj tak. Ponúkneme ho znova pri ďalšom prihlásení.</p>
+      ${chyba?`<div class="cloudmsg err">${esc(chyba)}</div>`:""}
+    </div>
+    <div class="modalft"><button class="abtn" onclick="suhlasZavri()">Neskôr</button>
+      <button class="abtn pri" onclick="suhlasPrijmi()"${_suhlasUklada?" disabled":""}>Prijímam</button></div>
+  </div>`;
+}
+function suhlasZavri(){
+  const o=document.getElementById("suhlasOkno");
+  if(o) o.remove();
+}
+// Poistka proti dvojitému ťuknutiu: druhé „Prijímam“ počas zápisu nič neurobí.
+async function suhlasPrijmi(){
+  if(_suhlasUklada || !sb) return;
+  _suhlasUklada=true; suhlasOknoUkaz("");
+  try{
+    const { error } = await sb.rpc("suhlas_prijmi", { p_podmienky:DOKUMENTY.podmienky.verzia, p_zasady:DOKUMENTY.sukromie.verzia });
+    if(error) throw error;
+    _suhlasUklada=false;
+    suhlasZavri();
+  }catch(e){
+    _suhlasUklada=false;
+    console.error("Prijatie podmienok sa nezapísalo:", e);
+    suhlasOknoUkaz("Prijatie sa nepodarilo uložiť: "+((e && e.message) || e)+". Skúste to znova, alebo okno zavrite — ponúkneme ho pri ďalšom prihlásení.");
+  }
 }
 function dokumentOdkaz(kod, text){
   const d=DOKUMENTY[kod];
@@ -30441,7 +30528,7 @@ async function dokladyAdresa(prerazit){
     // obal, aby staršia appka bežala ďalej — opačný smer treba ošetriť tu:
     // novšia appka nad databázou bez `admin_24` by inak spadla na
     // „Could not find the function ... in the schema cache".
-    if(error && /schema cache|does not exist|Could not find the function/i.test(error.message||"")){
+    if(chybaChybajuciObjektDb(error)){
       console.warn("ASCII funkcia chýba, skúšam pôvodný názov — spusti admin_24.");
       ({ data, error } = await sb.rpc("prideľ_doklady_token",
         { p_firma_id: firmaId, p_prerazit: !!prerazit }));
