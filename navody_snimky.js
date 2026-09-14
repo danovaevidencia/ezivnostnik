@@ -279,7 +279,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/banka-rucne-2.d.a003c795.webp",
+   "subor": "navody/banka-rucne-2.d.5e7b40ca.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -580,7 +580,7 @@ window.NAVODY_SNIMKY = {
  },
  "data-predplatne-1": {
   "m": {
-   "subor": "navody/data-predplatne-1.m.765ddd21.webp",
+   "subor": "navody/data-predplatne-1.m.5b693d5e.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -591,7 +591,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/data-predplatne-1.d.d648ce84.webp",
+   "subor": "navody/data-predplatne-1.d.757eb092.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -652,7 +652,7 @@ window.NAVODY_SNIMKY = {
  },
  "dokumenty-platnost-1": {
   "m": {
-   "subor": "navody/dokumenty-platnost-1.m.d10d66a7.webp",
+   "subor": "navody/dokumenty-platnost-1.m.be7bd90f.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -663,7 +663,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/dokumenty-platnost-1.d.d576aaf6.webp",
+   "subor": "navody/dokumenty-platnost-1.d.c2721beb.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -820,7 +820,7 @@ window.NAVODY_SNIMKY = {
  },
  "dph-oprava-1": {
   "m": {
-   "subor": "navody/dph-oprava-1.m.c1b1d030.webp",
+   "subor": "navody/dph-oprava-1.m.b31c3019.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -831,7 +831,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/dph-oprava-1.d.f0447ee0.webp",
+   "subor": "navody/dph-oprava-1.d.26ebb022.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -892,7 +892,7 @@ window.NAVODY_SNIMKY = {
  },
  "dph-podat-3": {
   "m": {
-   "subor": "navody/dph-podat-3.m.94d8d175.webp",
+   "subor": "navody/dph-podat-3.m.0048e6b9.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -903,7 +903,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/dph-podat-3.d.f0447ee0.webp",
+   "subor": "navody/dph-podat-3.d.26ebb022.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -940,7 +940,7 @@ window.NAVODY_SNIMKY = {
  },
  "dph-podat-5": {
   "m": {
-   "subor": "navody/dph-podat-5.m.8e9dd225.webp",
+   "subor": "navody/dph-podat-5.m.3ce4fa70.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -951,7 +951,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/dph-podat-5.d.f0447ee0.webp",
+   "subor": "navody/dph-podat-5.d.26ebb022.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1180,7 +1180,7 @@ window.NAVODY_SNIMKY = {
  },
  "faktury-oprava-3": {
   "m": {
-   "subor": "navody/faktury-oprava-3.m.62fb9892.webp",
+   "subor": "navody/faktury-oprava-3.m.1897beec.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -1191,7 +1191,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/faktury-oprava-3.d.9df6ad67.webp",
+   "subor": "navody/faktury-oprava-3.d.f3f2a085.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1311,7 +1311,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/faktury-vystavit-2.d.6aa71c0e.webp",
+   "subor": "navody/faktury-vystavit-2.d.7ef16149.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1335,7 +1335,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/faktury-vystavit-3.d.42508d76.webp",
+   "subor": "navody/faktury-vystavit-3.d.d6b60306.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1359,7 +1359,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/faktury-vystavit-4.d.5ba9c63f.webp",
+   "subor": "navody/faktury-vystavit-4.d.3a9bce1b.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1402,7 +1402,7 @@ window.NAVODY_SNIMKY = {
    "ciel": null
   },
   "d": {
-   "subor": "navody/faktury-zaloha-2.d.73cc3ead.webp",
+   "subor": "navody/faktury-zaloha-2.d.86d0f1be.webp",
    "w": 1024,
    "h": 600,
    "ciel": null
@@ -1626,7 +1626,7 @@ window.NAVODY_SNIMKY = {
  },
  "jazdy-sprievodca-2": {
   "m": {
-   "subor": "navody/jazdy-sprievodca-2.m.e320b69e.webp",
+   "subor": "navody/jazdy-sprievodca-2.m.46a0d3cc.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -1637,7 +1637,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/jazdy-sprievodca-2.d.e4791cf0.webp",
+   "subor": "navody/jazdy-sprievodca-2.d.5c4bcc4d.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1698,7 +1698,7 @@ window.NAVODY_SNIMKY = {
  },
  "jazdy-sprievodca-5": {
   "m": {
-   "subor": "navody/jazdy-sprievodca-5.m.6c845b1a.webp",
+   "subor": "navody/jazdy-sprievodca-5.m.9beae258.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -1709,7 +1709,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/jazdy-sprievodca-5.d.0b7c1672.webp",
+   "subor": "navody/jazdy-sprievodca-5.d.d33c3f4c.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1746,7 +1746,7 @@ window.NAVODY_SNIMKY = {
  },
  "jazdy-zapisat-2": {
   "m": {
-   "subor": "navody/jazdy-zapisat-2.m.450373db.webp",
+   "subor": "navody/jazdy-zapisat-2.m.342f121a.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -1757,7 +1757,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/jazdy-zapisat-2.d.aa498f91.webp",
+   "subor": "navody/jazdy-zapisat-2.d.a7733496.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1770,7 +1770,7 @@ window.NAVODY_SNIMKY = {
  },
  "jazdy-zapisat-3": {
   "m": {
-   "subor": "navody/jazdy-zapisat-3.m.8139e422.webp",
+   "subor": "navody/jazdy-zapisat-3.m.377ba563.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -1781,7 +1781,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/jazdy-zapisat-3.d.c48b1b2d.webp",
+   "subor": "navody/jazdy-zapisat-3.d.997ac826.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1794,7 +1794,7 @@ window.NAVODY_SNIMKY = {
  },
  "jazdy-zapisat-4": {
   "m": {
-   "subor": "navody/jazdy-zapisat-4.m.1ad37d49.webp",
+   "subor": "navody/jazdy-zapisat-4.m.b1b66ec7.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -1805,7 +1805,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/jazdy-zapisat-4.d.14f02d9c.webp",
+   "subor": "navody/jazdy-zapisat-4.d.1d4d478c.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1818,7 +1818,7 @@ window.NAVODY_SNIMKY = {
  },
  "jazdy-zapisat-5": {
   "m": {
-   "subor": "navody/jazdy-zapisat-5.m.1ad37d49.webp",
+   "subor": "navody/jazdy-zapisat-5.m.b1b66ec7.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -1829,7 +1829,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/jazdy-zapisat-5.d.14f02d9c.webp",
+   "subor": "navody/jazdy-zapisat-5.d.1d4d478c.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1938,7 +1938,7 @@ window.NAVODY_SNIMKY = {
  },
  "kalendar-udalost-2": {
   "m": {
-   "subor": "navody/kalendar-udalost-2.m.dedcfe4c.webp",
+   "subor": "navody/kalendar-udalost-2.m.ad929dfd.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -1949,7 +1949,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/kalendar-udalost-2.d.0a6c93b3.webp",
+   "subor": "navody/kalendar-udalost-2.d.f49744b2.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1962,7 +1962,7 @@ window.NAVODY_SNIMKY = {
  },
  "kalendar-udalost-3": {
   "m": {
-   "subor": "navody/kalendar-udalost-3.m.6d6601b9.webp",
+   "subor": "navody/kalendar-udalost-3.m.90d715df.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -1973,7 +1973,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/kalendar-udalost-3.d.1a82b849.webp",
+   "subor": "navody/kalendar-udalost-3.d.98d2e021.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1986,7 +1986,7 @@ window.NAVODY_SNIMKY = {
  },
  "kalendar-udalost-4": {
   "m": {
-   "subor": "navody/kalendar-udalost-4.m.db7b91a4.webp",
+   "subor": "navody/kalendar-udalost-4.m.0b83bf23.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -1997,7 +1997,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/kalendar-udalost-4.d.1a82b849.webp",
+   "subor": "navody/kalendar-udalost-4.d.98d2e021.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -2058,7 +2058,7 @@ window.NAVODY_SNIMKY = {
  },
  "knihy-kniha-1": {
   "m": {
-   "subor": "navody/knihy-kniha-1.m.568fc959.webp",
+   "subor": "navody/knihy-kniha-1.m.730b79d2.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -2069,7 +2069,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/knihy-kniha-1.d.9a944d45.webp",
+   "subor": "navody/knihy-kniha-1.d.2c2dc620.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -2093,7 +2093,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/knihy-kniha-2.d.8508bbb2.webp",
+   "subor": "navody/knihy-kniha-2.d.a567ba19.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -2202,7 +2202,7 @@ window.NAVODY_SNIMKY = {
  },
  "majetok-vyradit-2": {
   "m": {
-   "subor": "navody/majetok-vyradit-2.m.984574e3.webp",
+   "subor": "navody/majetok-vyradit-2.m.1edc3aa7.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -2213,7 +2213,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/majetok-vyradit-2.d.20cad71d.webp",
+   "subor": "navody/majetok-vyradit-2.d.55632ebe.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -2285,7 +2285,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/pohladavky-prehlad-1.d.28c9c15a.webp",
+   "subor": "navody/pohladavky-prehlad-1.d.d59ecff6.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -2298,7 +2298,7 @@ window.NAVODY_SNIMKY = {
  },
  "pohladavky-prehlad-2": {
   "m": {
-   "subor": "navody/pohladavky-prehlad-2.m.a7a55ce0.webp",
+   "subor": "navody/pohladavky-prehlad-2.m.22210f49.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -2309,7 +2309,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/pohladavky-prehlad-2.d.a8ae3c2c.webp",
+   "subor": "navody/pohladavky-prehlad-2.d.e94c4e89.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -2322,7 +2322,7 @@ window.NAVODY_SNIMKY = {
  },
  "pohladavky-upomienka-1": {
   "m": {
-   "subor": "navody/pohladavky-upomienka-1.m.a7a55ce0.webp",
+   "subor": "navody/pohladavky-upomienka-1.m.22210f49.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -2333,7 +2333,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/pohladavky-upomienka-1.d.9901ac84.webp",
+   "subor": "navody/pohladavky-upomienka-1.d.db98c933.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -2586,7 +2586,7 @@ window.NAVODY_SNIMKY = {
  },
  "superdash-rok-1": {
   "m": {
-   "subor": "navody/superdash-rok-1.m.3e9cd664.webp",
+   "subor": "navody/superdash-rok-1.m.bbf939a4.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -2778,7 +2778,7 @@ window.NAVODY_SNIMKY = {
  },
  "uzavierka-odomknut-1": {
   "m": {
-   "subor": "navody/uzavierka-odomknut-1.m.7c385ac1.webp",
+   "subor": "navody/uzavierka-odomknut-1.m.798f1a52.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -2789,7 +2789,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/uzavierka-odomknut-1.d.f22c3dd1.webp",
+   "subor": "navody/uzavierka-odomknut-1.d.20c75f86.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -3090,7 +3090,7 @@ window.NAVODY_SNIMKY = {
  },
  "vydavky-rucne-3": {
   "m": {
-   "subor": "navody/vydavky-rucne-3.m.b26494d2.webp",
+   "subor": "navody/vydavky-rucne-3.m.ac7eccd6.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -3101,7 +3101,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/vydavky-rucne-3.d.38e6c737.webp",
+   "subor": "navody/vydavky-rucne-3.d.80d4cd01.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -3138,7 +3138,7 @@ window.NAVODY_SNIMKY = {
  },
  "vydavky-uhrada-1": {
   "m": {
-   "subor": "navody/vydavky-uhrada-1.m.903d4370.webp",
+   "subor": "navody/vydavky-uhrada-1.m.4259c043.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -3149,7 +3149,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/vydavky-uhrada-1.d.0196c2bc.webp",
+   "subor": "navody/vydavky-uhrada-1.d.ea35de34.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
