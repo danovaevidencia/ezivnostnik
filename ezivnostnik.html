@@ -25522,8 +25522,248 @@ async function efaktSkontrolujSchranku(btn){
   }catch(e){ alert("Schránku sa nepodarilo skontrolovať: "+e.message); }
   finally{ if(btn){ btn.disabled=false; btn.textContent="Skontrolovať schránku"; } }
 }
+// ═══════════════════════════════════════════════════════════════
+//  FIRMA V SIETI PEPPOL — výber poskytovateľa na portáli FS (onboarding)
+//
+//  eživnostník je SPROSTREDKOVATEĽ doručovacej služby certifikovaného
+//  poskytovateľa Verteco (PLAN_EFAKTURA §19–21). Firmu do siete nezakladá
+//  appka: podnikateľ si nás vyberie na portáli Finančnej správy, FS pošle
+//  webhook (edge funkcia peppol-fs-webhook), Verteco firmu založí a oznámi to
+//  udalosťou (peppol-udalosti). Appka stav len ČÍTA cez peppol-portal.
+//
+//  🔴 Appka firmu v sieti NEPÁRUJE. DIČ si do firmy napíše ktokoľvek; párovanie
+//  robí server podľa e-mailu z výberu na FS (dev/opravy/onboarding.md).
+//
+//  Stav v sieti odosielanie NEBLOKUJE — ani pri „elsewhere“ (docs/resellers:
+//  firma odosielať smie, sieť len doručuje prijaté faktúry inam).
+// ═══════════════════════════════════════════════════════════════
+// Kým nie je zápis eživnostníka v zozname sprostredkovateľov zverejnený,
+// riadok „eživnostník“ vo výbere na portáli NEEXISTUJE a návod by posielal
+// hľadať voľbu, ktorá tam nie je. Prepína Roman po zverejnení zápisu.
+function peppolZapisZverejneny(){ return false; }
+const PEPPOL_VPDS="https://vpds.financnasprava.sk";
+let _peppolSiet={firma:null, nacitane:false, bezi:false, odpoved:null, chyba:""};
+
+// Stav firmy v sieti z odpovede peppol-portal/stav. Kódy: bez_dic, konflikt,
+// caka_na_priradenie, nevybrany, caka_na_vyber, caka, aktivna, elsewhere,
+// rejected, external, deaktivovana, pozastavena.
+function peppolStavFirmy(odpoved, settings, teraz){
+  const o=odpoved||{}, s=o.stav;
+  if(o.konflikt) return "konflikt";
+  if(o.caka_na_priradenie) return "caka_na_priradenie";
+  if(!s){
+    if(o.bez_dic) return "bez_dic";
+    // „Výber som urobil“ platí dva týždne; potom je to zabudnutý klik, nie čakanie.
+    const kedy=Date.parse((settings||{}).peppolVyberKedy||"");
+    return (!isNaN(kedy) && (teraz||Date.now())-kedy < 14*86400000) ? "caka_na_vyber" : "nevybrany";
+  }
+  if(s.status==="deactivated") return "deaktivovana";
+  if(s.status==="suspended" || s.status==="archived") return "pozastavena";
+  if(s.smp_state==="elsewhere") return "elsewhere";
+  if(s.smp_state==="rejected") return "rejected";
+  if(s.smp_state==="external") return "external";
+  if(s.status==="active" && s.smp_state==="registered") return "aktivna";
+  return "caka";
+}
+// Háčik prekreslenia sa pýta jednej funkcie (ROZHODNUTIA.md 35, test_oprava_prekreslenie).
+function peppolEfakturyOtvorene(){ return modulNaObrazovke()==="efaktury"; }
+// Volanie našej edge funkcie používateľovým tokenom — o firme rozhoduje RLS.
+async function edgeFunkciaVolaj(funkcia, akcia, telo){
+  if(localMode || !sb || !firmaId) throw new Error("Funguje len v cloudovom režime.");
+  const tok=await ziskajToken();
+  if(!tok) throw new Error(CHYBA_SESSION);
+  const res=await fetch(SUPABASE_URL+"/functions/v1/"+funkcia,{
+    method:"POST",
+    headers:{"Content-Type":"application/json","Authorization":"Bearer "+tok},
+    body:JSON.stringify(Object.assign({akcia:akcia, firma_id:firmaId}, telo||{}))
+  });
+  const d=await res.json().catch(()=>({}));
+  if(!res.ok){ const e=new Error(d.error || (funkcia+" odpovedal "+res.status)); e.stav=res.status; throw e; }
+  return d;
+}
+async function peppolNacitajSiet(){
+  const S=_peppolSiet;
+  if(localMode || !sb || !firmaId || S.bezi) return;
+  const firma=firmaId;
+  S.bezi=true;
+  try{
+    const o=await edgeFunkciaVolaj("peppol-portal","stav");
+    if(firmaId!==firma) return;
+    Object.assign(S,{firma, nacitane:true, odpoved:o, chyba:""});
+    if(mozemPisat("efaktury")) await peppolPrevezmiZoServera(firma);
+  }catch(e){
+    console.error("stav firmy v sieti Peppol:", e);
+    if(firmaId===firma) Object.assign(S,{firma, nacitane:!!S.odpoved && S.firma===firma, chyba:e.message||String(e)});
+  }finally{
+    S.bezi=false;
+    if(firmaId===firma && peppolEfakturyOtvorene()) appEfaktury();
+  }
+}
+// Prijaté e-faktúry, ktorých originál stiahol SERVER hneď po doručení (poštár
+// obsah maže po 14 dňoch). Záznam má ten istý tvar ako `postarPrevezmi`.
+//
+// Server sa dozvie „prevzaté“ až pri ĎALŠOM načítaní, keď je doklad už
+// v uložených dátach firmy — `poZmene` ukladá neskôr a označiť skôr by pri
+// zlyhanom uložení doklad z appky stratilo (originál by ostal len v úložisku).
+async function peppolPrevezmiZoServera(firma){
+  const odp=await edgeFunkciaVolaj("peppol-portal","prijate");
+  const nove=[], ulozene=[];
+  for(const d of ((odp&&odp.doklady)||[])){
+    const id=String(d.document_id||"");
+    if(!id || !d.cesta) continue;
+    if(efakturaMam(id)){ ulozene.push(id); continue; }
+    let cislo=d.cislo||"", dodavatel=d.dodavatel||"", datum=d.datum||"", mena=d.mena||"EUR";
+    let spolu=parseFloat(d.spolu);
+    if(!cislo || !dodavatel || !isFinite(spolu)){
+      // Zo záložného zberu prichádza doklad bez súhrnu — doplní sa z originálu.
+      try{
+        const r=await fetch(await dokladUrl(d.cesta));
+        const U=parseUBLFaktura(await r.text());
+        if(U){ cislo=cislo||U.cislo||""; dodavatel=dodavatel||U.partner||""; datum=datum||U.datum||"";
+               if(!isFinite(spolu)) spolu=+U.spolu||0; mena=U.mena||mena; }
+      }catch(e){ console.error("prijatá e-faktúra "+id+": súhrn z originálu sa nenačítal", e); }
+    }
+    nove.push({ id, cesta:d.cesta, prijate:d.prijate_siet||d.vytvorene||new Date().toISOString(), stav:"nove",
+      cislo, dodavatel, datum, spolu:isFinite(spolu)?spolu:0, mena, zdroj:"server" });
+  }
+  if(firmaId!==firma) return 0;
+  if(nove.length){
+    if(!firmaData.efaktury) firmaData.efaktury=[];
+    firmaData.efaktury.unshift(...nove);
+    poZmene();
+  }
+  if(ulozene.length){
+    try{ await edgeFunkciaVolaj("peppol-portal","prevzate",{document_ids:ulozene}); }
+    catch(e){ console.error("označenie prevzatých e-faktúr:", e); }
+  }
+  return nove.length;
+}
+function peppolVyberUrobeny(){
+  if(!strazZapis("efaktury")) return;
+  if(!firmaData.settings) firmaData.settings={};
+  firmaData.settings.peppolVyberKedy=new Date().toISOString();
+  poZmene();
+  _peppolSiet.nacitane=false;
+  peppolNacitajSiet();
+}
+async function peppolMigruj(btn){
+  if(!strazZapis("efaktury")) return;
+  const pole=document.getElementById("peppol_kod");
+  const kod=String((pole&&pole.value)||"").trim();
+  if(!kod){ alert("Vložte migračný kód, ktorý vám vydal doterajší poskytovateľ."); return; }
+  if(btn){ btn.disabled=true; btn.textContent="Preberám…"; }
+  try{
+    const o=await edgeFunkciaVolaj("peppol-portal","migruj",{kod});
+    _peppolSiet.odpoved={stav:o.stav};
+    alert("Hotovo. Záznam v národnom registri Peppol je prevzatý — e-faktúry vám odteraz chodia sem.");
+  }catch(e){
+    console.error("migračný kód:", e);
+    alert(e.message||String(e));
+  }finally{
+    if(btn){ btn.disabled=false; btn.textContent="Prevziať"; }
+    if(peppolEfakturyOtvorene()) appEfaktury();
+  }
+}
+async function peppolPrijimamInde(ano){
+  if(!strazZapis("efaktury")) return;
+  if(ano && !confirm("E-faktúry budete ďalej prijímať u doterajšieho poskytovateľa a pripomienka migračného kódu zmizne.\n\nOdosielať cez eživnostník môžete naďalej. Pokračovať?")) return;
+  try{
+    const o=await edgeFunkciaVolaj("peppol-portal","prijimam_inde",{ano:!!ano});
+    _peppolSiet.odpoved={stav:o.stav};
+  }catch(e){
+    console.error("prijímanie u iného poskytovateľa:", e);
+    alert("Nepodarilo sa to nastaviť: "+(e.message||e));
+  }
+  if(peppolEfakturyOtvorene()) appEfaktury();
+}
+function peppolNavodHtml(dic, otvorene){
+  return `<details${otvorene?" open":""} style="margin-top:10px">
+      <summary style="cursor:pointer;font-weight:600">Ako vybrať eživnostník na portáli Finančnej správy</summary>
+      <ol style="margin:8px 0 0 18px;padding:0;font-size:13px;line-height:1.55">
+        <li>Otvorte <b>vpds.financnasprava.sk</b> a prihláste sa <b>eID</b> (občiansky preukaz s čipom) alebo prihlasovacími údajmi do portálu Finančnej správy.</li>
+        <li>Ak konáte za viac subjektov, zvoľte subjekt s <b>DIČ ${esc(dic||"vašej firmy")}</b>.</li>
+        <li>V zozname poskytovateľov vyberte sprostredkovateľa <b>eživnostník</b> — poskytovateľ <b>Verteco</b>.</li>
+        <li>Zadajte kontaktný e-mail a telefón. <b>Použite e-mail, ktorým sa prihlasujete do eživnostníka</b> — podľa neho vašu firmu bezpečne priradíme.</li>
+        <li>Povoľte poskytnutie údajov a výber potvrďte.</li>
+      </ol>
+      <div class="csub" style="margin-top:6px">Ak už e-faktúry prijímate u iného poskytovateľa, po výbere vám tu ukážeme, ako záznam prevziať migračným kódom.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+        <a class="aabtn pri" href="${PEPPOL_VPDS}" target="_blank" rel="noopener">Otvoriť portál FS</a>
+        <button class="aabtn" onclick="peppolVyberUrobeny()"${zam("efaktury")}>Výber som urobil(a)</button>
+      </div>
+    </details>`;
+}
+function peppolKartaHtml(){
+  if(localMode || !sb || !firmaId) return "";
+  const S=_peppolSiet, m=firmaData.meta||{};
+  const dic=String(m.dic||m.icdph||"").replace(/[^0-9]/g,"");
+  const karta=(obsah, farba)=>`<div class="card" style="margin-bottom:14px${farba?";border-left:3px solid "+farba:""}">${obsah}</div>`;
+  if(S.firma!==firmaId || (!S.nacitane && !S.chyba)) return "";
+  if(!S.nacitane) return karta(`<b>Firma v sieti Peppol</b>
+      <div class="csub" style="margin-top:5px">Stav sa nepodarilo zistiť: ${esc(S.chyba)}</div>
+      <button class="aabtn" style="margin-top:8px" onclick="_peppolSiet.chyba='';peppolNacitajSiet()">Skúsiť znova</button>`);
+  const kod=peppolStavFirmy(S.odpoved, firmaData.settings, Date.now());
+  const st=(S.odpoved&&S.odpoved.stav)||{};
+  const zverejneny=peppolZapisZverejneny();
+  const pozastavene=st.odosielanie_pozastavene
+    ? `<div class="csub" style="margin-top:6px;color:var(--warn)">Odosielanie e-faktúr je pozastavené — príjem beží ďalej.</div>` : "";
+  const poskytovatel=`<div class="csub" style="margin-top:5px">Doklady doručuje certifikovaný poskytovateľ <b>Verteco</b>; eživnostník je jeho sprostredkovateľ.</div>`;
+  switch(kod){
+    case "aktivna":
+      return `<div class="csub" style="margin:0 0 12px"><span style="color:var(--pos);font-weight:600">✓ Firma prijíma e-faktúry sieťou Peppol</span> — poskytovateľ Verteco, sprostredkovateľ eživnostník.${pozastavene}</div>`;
+    case "caka":
+      return karta(`<b>Firma sa zapisuje do siete Peppol</b>
+        <div class="csub" style="margin-top:5px">Výber na portáli Finančnej správy je potvrdený. Zápis do národného registra (SMP) zvyčajne trvá pár minút.</div>${poskytovatel}${pozastavene}`);
+    case "elsewhere":
+      return karta(`<b>E-faktúry vám zatiaľ chodia k predchádzajúcemu poskytovateľovi</b>
+        <div class="csub" style="margin-top:5px">Firma je v eživnostníku aktivovaná, ale záznam v národnom registri Peppol (SMP) drží váš doterajší poskytovateľ. Vyžiadajte si u neho <b>migračný kód</b> pre DIČ ${esc(dic)} a vložte ho sem — prepnutie je okamžité a bez výpadku. <b>Odosielať faktúry môžete aj teraz.</b></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+          <input id="peppol_kod" placeholder="migračný kód" autocomplete="off" style="flex:1;min-width:160px">
+          <button class="aabtn pri" onclick="peppolMigruj(this)"${zam("efaktury")}>Prevziať</button>
+        </div>
+        <button class="aabtn" style="margin-top:8px;font-size:11.5px" onclick="peppolPrijimamInde(true)"${zam("efaktury")}>Prijímam zámerne u iného poskytovateľa</button>${pozastavene}`, "var(--warn)");
+    case "rejected":
+      return karta(`<b>Výber poskytovateľa sa nepodaril — zopakujte ho</b>
+        <div class="csub" style="margin-top:5px">Poskytovateľ neprijal overenie z portálu Finančnej správy, preto firmu do siete nezapísal. Urobte výber znova.</div>
+        ${peppolNavodHtml(dic, true)}`, "var(--warn)");
+    case "external":
+      return karta(`<b>E-faktúry prijímate u iného poskytovateľa</b>
+        <div class="csub" style="margin-top:5px">Tak je to nastavené. Odosielanie cez eživnostník funguje; prijaté faktúry vám doručuje doterajší poskytovateľ.</div>
+        <button class="aabtn" style="margin-top:8px" onclick="peppolPrijimamInde(false)"${zam("efaktury")}>Chcem prijímať v eživnostníku</button>${pozastavene}`);
+    case "deaktivovana":
+      return karta(`<b>Firma bola zo siete Peppol odhlásená</b>
+        <div class="csub" style="margin-top:5px">Prijímať začne znova po novom výbere na portáli Finančnej správy.</div>
+        ${zverejneny?peppolNavodHtml(dic, false):""}`, "var(--warn)");
+    case "pozastavena":
+      return karta(`<b>Firma je v sieti Peppol pozastavená</b>
+        <div class="csub" style="margin-top:5px">Napíšte nám na <b>podpora@ezivnostnik.eu</b>, preveríme to s poskytovateľom.</div>`, "var(--warn)");
+    case "caka_na_priradenie":
+      return karta(`<b>Výber prišiel, firmu sme ešte nepriradili</b>
+        <div class="csub" style="margin-top:5px">E-mail zadaný pri výbere na portáli Finančnej správy sa nezhoduje s e-mailom vášho účtu ani firmy, takže ju nevieme priradiť automaticky. Napíšte nám na <b>podpora@ezivnostnik.eu</b> z e-mailu, ktorý ste pri výbere zadali. Faktúry, ktoré medzitým prídu, bezpečne uchováme.</div>`);
+    case "konflikt":
+      return karta(`<b>Toto DIČ je v sieti priradené inej firme</b>
+        <div class="csub" style="margin-top:5px">Ak ide o omyl, napíšte nám na <b>podpora@ezivnostnik.eu</b>.</div>`, "var(--warn)");
+    case "caka_na_vyber":
+      return karta(`<b>Čakáme na potvrdenie výberu od Finančnej správy</b>
+        <div class="csub" style="margin-top:5px">Zvyčajne to trvá pár minút. Ak sa do dňa nič nezmení, skontrolujte, či ste vybrali subjekt s DIČ ${esc(dic)} a zadali e-mail, ktorým sa prihlasujete sem.</div>
+        ${zverejneny?peppolNavodHtml(dic, false):""}`);
+    case "bez_dic":
+      return zverejneny ? karta(`<b>Doplňte DIČ firmy</b>
+        <div class="csub" style="margin-top:5px">Bez DIČ firma v sieti Peppol neexistuje. Doplníte ho v Nastaveniach.</div>`) : "";
+    default: // nevybrany
+      return zverejneny ? karta(`<b>Prijímajte e-faktúry priamo v eživnostníku</b>
+        <div class="csub" style="margin-top:5px">Od 1. 1. 2027 musí e-faktúry prijímať každý podnikateľ. Stačí raz vybrať eživnostník na portáli Finančnej správy — prijaté faktúry sa potom ukladajú do archívu samé.</div>
+        ${poskytovatel}${peppolNavodHtml(dic, false)}`) : "";
+  }
+}
 function appEfaktury(){
   if(prekresliVRamci("efaktury")) return;
+  // Raz na firmu: prekreslenie modulu (aj dvakrát za sebou) nesmie pýtať stav znova.
+  // Opakovanie po chybe je vedomé tlačidlo v karte.
+  if(!localMode && sb && firmaId && !_peppolSiet.bezi && _peppolSiet.firma!==firmaId){
+    _peppolSiet={firma:firmaId, nacitane:false, bezi:false, odpoved:null, chyba:""};
+    setTimeout(peppolNacitajSiet, 0);
+  }
   const c=APPS.efaktury.c;
   const odo=efaktOdoslane();
   const pri=efakturyPrijate();
@@ -25532,7 +25772,7 @@ function appEfaktury(){
   const akcia = zapnuty
     ? `<button class="aabtn pri" onclick="efaktSkontrolujSchranku(this)"${zam("efaktury")}>Skontrolovať schránku</button>`
     : `<button class="aabtn" onclick="otvorApp('data')">Nastaviť</button>`;
-  document.getElementById("appScreen").innerHTML=appHlavicka("efaktury", akcia)+pasIbaCitanie("efaktury")+`
+  document.getElementById("appScreen").innerHTML=appHlavicka("efaktury", akcia)+pasIbaCitanie("efaktury")+peppolKartaHtml()+`
     ${zapnuty ? "" : `<div class="card" style="margin-bottom:14px;border-left:3px solid var(--warn)">
       <b>Odosielanie a príjem sieťou nie sú zapnuté.</b>
       <div class="csub" style="margin-top:5px">Zapnete ich v Nastaveniach. Od 1. 1. 2027 musí e-faktúry <b>prijímať každý</b> podnikateľ; vystavovať ich musia platitelia DPH. Do vtedy je to dobrovoľné a dá sa to skúšať.</div>
