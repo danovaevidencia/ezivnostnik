@@ -8141,7 +8141,7 @@ const VYD_IKONA_KAT={
   odvody:["odvody","poist"],       preddavokSP:["odvody","poist"],
   preddavokZP:["zdravotne","poist"], zuctovanieZP:["zdravotne","poist"],
   odpisy:["odpisy","majetok"],
-  neovplyv:["neovplyv","sedy"]
+  neovplyv:["neovplyv","sedy"],    sukromnaSpotreba:["neovplyv","sedy"]
 };
 // Staršie doklady nesú v `kategoria` ZOBRAZENÝ NÁZOV namiesto kľúča
 // („Softvér a služby" namiesto `sluzby`) — tá istá trieda, akú rieši
@@ -12810,10 +12810,21 @@ const VYDAVOK_POLIA_BEZ_PRAZDNEJ=["rozpis","viacSadzieb","litre","podnikPct","za
 // ktoré prišli s dokladom (služba zo zahraničia z e-faktúry). Pri zahraničnom
 // doklade voľba neplatí — § 69 ods. 12 je prenos od slovenského dodávateľa.
 // Ten istý čitateľ počíta aj náhľad oddielu (`mAktualizujOddiel`).
+//
+// Pri zahraničnom doklade číta aj voľbu „Čo ste kúpili" (`m_zahrDruh`, č. 56).
+// Voľba prebije druh z faktúry, keď s ním nesedí: služba spotrebovaná
+// v zahraničí sa nesamozdaňuje, tovar a služba idú do iných riadkov priznania.
+// Skryté pole bez príznaku (ručne zadaný doklad) ostáva bez `samozdanenieTyp` —
+// ten príznak pri súkromnej spotrebe znamená „na faktúre je IČ DPH" (č. 51).
 function citajSamozdanenie(obj){
   let t=String(val("m_samozdanenieTyp")||"").trim();
   if(t==="tuzemsky") t="";
-  if(chk("m_tuzemskyPrenos") && !chk("m_zahranicny")) t="tuzemsky";
+  const zahr=chk("m_zahranicny");
+  if(chk("m_tuzemskyPrenos") && !zahr) t="tuzemsky";
+  const z=zahr ? String(val("m_zahrDruh")||"").trim() : "";
+  if(ZAHR_DRUHY[z]) obj.zahrDruh=z; else delete obj.zahrDruh;
+  if(z==="spotreba") t="";
+  else if(t && SAMOZD_DRUHY[z]) t=z;
   if(SAMOZD_DRUHY[t]) obj.samozdanenieTyp=t; else delete obj.samozdanenieTyp;
   return obj;
 }
@@ -12990,9 +13001,15 @@ function vydavokFormHtml(x, nova, idx){
       <label style="display:flex;align-items:center;gap:9px;cursor:pointer;font-size:13.5px">
         <input type="checkbox" id="m_zahranicny" ${x.zahranicny?"checked":""}
           onchange="const p=document.getElementById('m_prenosBox'); if(p) p.style.display=this.checked?'none':'block'; const b=document.getElementById('m_zahrBox'); if(b) b.style.display=this.checked?'block':'none'; mAktualizujOddiel()">
-        <b>Zahraničný doklad</b> (samozdanenie / reverse charge)</label>
+        <b>Zahraničný doklad</b> (dodávateľ mimo Slovenska)</label>
       <div id="m_zahrBox" style="display:${x.zahranicny?'block':'none'};margin-top:10px">
-        <div class="csub" style="margin-bottom:8px">Pri službe zo zahraničia bez slovenskej DPH sa uplatní <b>samozdanenie (reverse charge)</b> — appka dopočíta 23% DPH do výstupu aj odpočtu.</div>
+        <div class="csub" style="margin-bottom:8px">Čo ste kúpili, rozhoduje, či vznikne slovenská DPH. Zahraničnú DPH, ak je na doklade, si na Slovensku neodpočítate.</div>
+        <div class="mfield"><label>Čo ste kúpili</label>
+          <select id="m_zahrDruh" onchange="const p=document.getElementById('m_zahrDruhPozn'); if(p) p.textContent=(ZAHR_DRUHY[this.value]||{}).p||''; mAktualizujOddiel()">
+            ${Object.keys(ZAHR_DRUHY).map(k=>`<option value="${k}" ${zahrDruhDokladu(x)===k?"selected":""}>${esc(ZAHR_DRUHY[k].n)}</option>`).join("")}
+          </select>
+          <div class="ocr-hint" id="m_zahrDruhPozn">${esc(ZAHR_DRUHY[zahrDruhDokladu(x)].p)}</div>
+        </div>
         <div class="mfield" style="margin-bottom:0"><label>Kód krajiny</label><input id="m_kodKrajiny" value="${esc(x.kodKrajiny||'')}" placeholder="US, DE, IE…"></div>
       </div>
     </div>
@@ -13069,8 +13086,9 @@ function vydavokJeBlocek(x){
 //
 // Roman 13. 9. 2026 (ROZHODNUTIA č. 16): „vždy, keď doklad obsahuje DPH a nie
 // je to bloček". Platiteľ/neplatiteľ o tom nerozhoduje a to isté pravidlo používa
-// mäkká kontrola `dphBezIc` aj ročná kontrola — dovtedy sa rozchádzali práve
-// v bločkoch a v neplatiteľovi.
+// ročná kontrola (`vydavokChybaIcDph`) — dovtedy sa rozchádzali práve v bločkoch
+// a v neplatiteľovi. Mäkká hláška `dphBezIc` pri zápise s tou istou podmienkou
+// za tvrdou kontrolou sa nemohla ukázať nikdy; zmazaná 14. 9. 2026 (č. 59).
 function vydavokPotrebujeIcDph(x){
   if(!x || x.zahranicny) return null;
   if((+x.dph||0)>0) return vydavokJeBlocek(x) ? null : {odpocet:true};
@@ -13086,21 +13104,37 @@ function vydavokPotrebujeIcDph(x){
 // sa neodpočítava a do výkazu nejde. Obom ostáva, že faktúra uvádza IČ DPH
 // dodávateľa (§ 74 ods. 1 písm. b) zákona o DPH). Do 13. 9. 2026 im hláška
 // tvrdila „Doklad si odpočítava DPH" — Roman, ROZHODNUTIA č. 44.
+//
+// Doklad BEZ DPH, ktorý appka vedie v oddiele výkazu (tuzemský prenos, dobropis),
+// potrebuje IČ DPH tiež (č. 26). Neplatiteľovi sa však nesmie tvrdiť, že „ide do
+// kontrolného výkazu" — výkaz nepodáva (§ 78a). Pri platiteľovi bez nároku do
+// výkazu naozaj ide (B.1 s odpočtom 0), preto "" (č. 60).
 function vydavokIcDphBezOdpoctu(x){
-  if(!jePlatcaDPH()) return "Nie ste platiteľ DPH, takže si ju neodpočítavate — IČ DPH dodávateľa však na faktúre s DPH byť má.";
-  if(vydavokUplatnujeOdpocet(x)) return "";
+  const sDph=(+((x||{}).dph)||0)>0;
+  if(!jePlatcaDPH()) return sDph
+    ? "Nie ste platiteľ DPH, takže si ju neodpočítavate — IČ DPH dodávateľa však na faktúre s DPH byť má."
+    : "Nie ste platiteľ DPH, takže kontrolný výkaz nepodávate — IČ DPH dodávateľa však na takom doklade byť má.";
+  if(!sDph || vydavokUplatnujeOdpocet(x)) return "";
   return "DPH z tohto dokladu si neodpočítavate (kategória „"+((KATEGORIE_VYDAVKOV[x.kategoria]||{}).n||x.kategoria)
     +"“) — IČ DPH dodávateľa však na faktúre s DPH byť má.";
+}
+// Chýba dokladu IČ DPH dodávateľa, ktoré podľa č. 16 potrebuje? Jedna podmienka
+// pre tvrdú kontrolu pri zápise (`vydavokOverIcDph`) aj ročnú kontrolu.
+function vydavokChybaIcDph(x){
+  return !!vydavokPotrebujeIcDph(x) && !String((x||{}).dodavatelIcDph||"").trim();
 }
 function vydavokOverIcDph(x, kdeHladat){
   const dovod=vydavokPotrebujeIcDph(x);
   if(!dovod) return true;
   const ic=String(x.dodavatelIcDph||"").trim();
-  if(!ic){
-    const bezOdpoctu=dovod.odpocet ? vydavokIcDphBezOdpoctu(x) : "";
+  if(vydavokChybaIcDph(x)){
+    const bezOdpoctu=vydavokIcDphBezOdpoctu(x);
     alert((dovod.odpocet
         ? "Tento doklad obsahuje DPH ("+eur(+x.dph)+"), takže potrebuje IČ DPH dodávateľa.\n\n"
           +(bezOdpoctu || "Je povinné pre odpočet DPH a kontrolný výkaz.")
+        : bezOdpoctu
+        ? "Tento doklad appka vedie ako „"+(DPH_ODDIELY[dovod.oddiel]||dovod.oddiel)+"“, "
+          +"takže potrebuje IČ DPH dodávateľa, hoci DPH na ňom nie je.\n\n"+bezOdpoctu
         : "Tento doklad ide do kontrolného výkazu DPH ("+(DPH_ODDIELY[dovod.oddiel]||dovod.oddiel)+"), "
           +"takže potrebuje IČ DPH dodávateľa, hoci DPH na ňom nie je.")
       +(kdeHladat ? "\n\n"+kdeHladat : "")
@@ -14594,7 +14628,15 @@ const KATEGORIE_VYDAVKOV = {
   ostatne:  {n:"Ostatné výdavky ovplyvňujúce základ dane",
              p:"Všetko ostatné, čo súvisí s podnikaním a znižuje daň — a nepatrí do kategórií vyššie.",               zaklad:true},
   neovplyv: {n:"Neovplyvňuje základ dane",
-             p:"Súkromné nákupy, pohostenie klienta (reprezentácia), splátky istiny úveru, prevody medzi vlastnými účtami. Do daní nevstupuje, DPH sa neodpočíta.", zaklad:false, ucinok:"ziadny"},
+             p:"Pohostenie klienta (reprezentácia), splátky istiny úveru, prevody medzi vlastnými účtami. Do daní nevstupuje, DPH sa neodpočíta.", zaklad:false, ucinok:"ziadny"},
+  // Súkromná spotreba (ROZHODNUTIA č. 51, 14. 9. 2026). Do dane z príjmov
+  // nevstupuje rovnako ako „neovplyv" — daňový výdavok je len výdavok na
+  // dosiahnutie, zabezpečenie a udržanie príjmov (§ 2 písm. i) zákona 595/2003
+  // o dani z príjmov). V DPH sa od reprezentácie líši: služba zo zahraničia
+  // kúpená výlučne na súkromnú spotrebu slovenskú daň nezakladá, reprezentácia
+  // áno (`dphOddielVydavok`).
+  sukromnaSpotreba: {n:"Súkromná spotreba",
+             p:"Nákup pre seba alebo rodinu, nie na podnikanie. Do daní nevstupuje, DPH sa neodpočíta a služba zo zahraničia sa nesamozdaňuje.", zaklad:false, ucinok:"ziadny"},
 
   // ── platby proti povinnostiam ──
   preddavokZP:  {n:"Preddavok na zdravotné poistenie", odvod:"zp", ucinok:"zaklad", zaklad:true,
@@ -14990,9 +15032,30 @@ const SAMOZD_DRUHY = {
     vKV:true,
   },
 };
+// Zahraničný doklad: čo ste kúpili (ROZHODNUTIA č. 56, 14. 9. 2026). Rozhoduje,
+// či slovenská daň vôbec vznikne — služba na diaľku a tovar z EÚ sa samozdaňujú,
+// služba spotrebovaná v zahraničí (§ 16) nie (`vydavokSpotrebaVZahranici`).
+// Kľúče `sluzba` a `euTovar` sú zároveň druhy samozdanenia (riadky priznania).
+const ZAHR_DRUHY = {
+  sluzba:   {n:"Služba na diaľku — softvér, reklama, predplatné, konzultácia",
+             p:"Dodávateľ fakturuje bez DPH a daň platíte na Slovensku vy (samozdanenie, § 69 ods. 3)."},
+  spotreba: {n:"Ubytovanie, reštaurácia, vstupné, doprava či požičanie auta v zahraničí",
+             p:"Služba sa poskytla v zahraničí (§ 16) — slovenská DPH nevzniká a doklad do výkazu ani priznania DPH nejde. Zahraničná DPH je súčasť ceny. Pozor: na podujatí sa to týka len vstupného."},
+  euTovar:  {n:"Tovar kúpený v EÚ",
+             p:"Fyzický tovar od dodávateľa z inej krajiny EÚ bez DPH — nadobudnutie tovaru (§ 11), daň platíte vy."},
+};
+// Druh zahraničného dokladu pre formulár: uložená voľba, inak druh samozdanenia
+// z faktúry, inak služba (ako doteraz).
+function zahrDruhDokladu(x){
+  if(x && ZAHR_DRUHY[x.zahrDruh]) return x.zahrDruh;
+  return (x && x.samozdanenieTyp==="euTovar") ? "euTovar" : "sluzba";
+}
 function samozdDruh(x){
   const t=String(x&&x.samozdanenieTyp||"").trim();
-  return SAMOZD_DRUHY[t] ? t : "sluzba";     // najčastejší prípad u živnostníka
+  if(SAMOZD_DRUHY[t]) return t;
+  // voľba „Čo ste kúpili" pri zahraničnom doklade bez príznaku z faktúry
+  const z=(x && x.zahranicny===true) ? String(x.zahrDruh||"") : "";
+  return SAMOZD_DRUHY[z] ? z : "sluzba";     // najčastejší prípad u živnostníka
 }
 
 // ══ DRUH PLNENIA NA VYSTAVENEJ FAKTÚRE (F3) ══
@@ -26072,7 +26135,12 @@ function mAktualizujOddiel(){
   }
   const pozn = od==="B31" ? "Vykáže sa súhrnne s ostatnými bločkami, IČ DPH sa neuvádza."
              : od==="B2"  ? "Vykáže sa jednotlivo — IČ DPH dodávateľa je povinné."
-             : od==="B1"  ? "Samozdanenie — daň sa dopočíta do výstupu aj odpočtu."
+             : od==="B1"  ? (vydavokUplatnujeOdpocet(x) ? "Samozdanenie — daň sa dopočíta do výstupu aj odpočtu."
+                                                         : "Samozdanenie — daň sa dopočíta do výstupu, odpočet k nej nie je (doklad bez nároku).")
+             // dôvod, prečo doklad do výkazu nejde, podľa `dphOddielVydavok`
+             : mimo && vydavokSpotrebaVZahranici(x) ? ZAHR_DRUHY.spotreba.p
+             : mimo && x.zahranicny && x.dph>0      ? "Zahraničná DPH je súčasť ceny — na Slovensku sa neodpočíta a do výkazu nejde."
+             : mimo && vydavokSukromnaSpotreba(x)   ? "Súkromná spotreba — do kontrolného výkazu ani priznania DPH nejde."
              : mimo       ? "Doklad nevstúpi do kontrolného výkazu (bez DPH alebo bez nároku)."
              : "";
   // Ručné prepísanie je TICHÉ — panel ukáže zvolený oddiel a nič neprezradí
@@ -26123,15 +26191,21 @@ const DRUHY_DOKLADU = {
 // posudzuje ako celok — to je pôvodné správanie a platí pre drvivú väčšinu dokladov.
 // S ním sa posudzuje jednotlivá sadzba: doklad môže mať časť s prenosom daňovej
 // povinnosti (0 %) a časť bežne zdanenú, a tie patria do rôznych oddielov.
-// Doklad bez nároku na odpočet DPH. Kategória „Neovplyvňuje základ dane" sú
-// súkromné nákupy — odpočet je len pri tovare a službe použitej na zdaniteľné
-// plnenia (§ 49 ods. 2 zákona 222/2004 o DPH) — a reprezentácia, pri ktorej
-// je odpočet vylúčený výslovne (§ 49 ods. 7). Do 13. 9. 2026 išla DPH z takého
+// Doklad bez nároku na odpočet DPH. Kategória „Súkromná spotreba" — odpočet je
+// len pri tovare a službe použitej na zdaniteľné plnenia (§ 49 ods. 2 zákona
+// 222/2004 o DPH) — a „Neovplyvňuje základ dane" (reprezentácia, pri ktorej je
+// odpočet vylúčený výslovne, § 49 ods. 7). Do 13. 9. 2026 išla DPH z takého
 // dokladu do odpočtu a appka k tomu dala len upozornenie (demo: občerstvenie
 // pre klienta, 3,28 €). Jedno pravidlo podľa kategórie, bez osobitného
 // príznaku — Roman, 13. 9. 2026 (dev/opravy/ROZHODNUTIA.md, bod 15). Výnimku
 // rieši ručné „Zaradenie do výkazu", ktoré má v `dphOddielVydavok` prednosť.
-function vydavokBezNarokuNaOdpocet(x){ return !!x && x.kategoria==="neovplyv"; }
+function vydavokBezNarokuNaOdpocet(x){ return !!x && (x.kategoria==="neovplyv" || vydavokSukromnaSpotreba(x)); }
+function vydavokSukromnaSpotreba(x){ return !!x && x.kategoria==="sukromnaSpotreba"; }
+// Služba spotrebovaná v zahraničí — ubytovanie (§ 16 ods. 1 zákona o DPH),
+// krátkodobý nájom dopravného prostriedku (ods. 2), vstupné na podujatie
+// (ods. 3 druhá veta), doprava osôb (ods. 4), reštaurácia (ods. 10). Voľba
+// „Čo ste kúpili" pri zahraničnom doklade (`ZAHR_DRUHY`, ROZHODNUTIA č. 56).
+function vydavokSpotrebaVZahranici(x){ return !!x && x.zahranicny===true && x.zahrDruh==="spotreba"; }
 // Uplatňuje si doklad odpočet? Kategóriu (vyššie) prebije ručné „Zaradenie do
 // výkazu" — rovnaká poistka pre výnimku ako v `dphOddielVydavok`.
 function vydavokUplatnujeOdpocet(x){
@@ -26167,24 +26241,53 @@ function dphOddielVydavok(x, riadok){
   const icdph=(x.dodavatelIcDph||x.icdph||x.icDph||"").trim();
   const bezNaroku=vydavokBezNarokuNaOdpocet(x);
 
-  // 2) dobropis — záporná suma je oprava už uplatneného odpočtu; pri doklade
+  // 2) služba spotrebovaná v zahraničí (§ 16) má miesto dodania v štáte, kde sa
+  //    poskytla, aj pri zdaniteľnej osobe. Samozdanenie viaže § 69 ods. 3 len na
+  //    miesto dodania podľa § 15 ods. 1, do B.1 kontrolného výkazu idú len faktúry
+  //    podľa § 69 ods. 2, 3, 6, 7, 9 až 12 (poučenie FS ku KV, B.1). Slovenská daň
+  //    teda nevzniká; zahraničná je súčasť ceny a vrátiť ju môže len štát dodania
+  //    (FS: služby k nehnuteľnosti — miesto dodania, príklad s českou DPH). Pozor:
+  //    § 16 ods. 3 platí len na VSTUPNÉ — iné služby k podujatiu sú podľa MP FS
+  //    7/DPH/2023/MP (určenie miesta dodania služieb) § 15 ods. 1 a samozdaňujú sa.
+  //    Do 14. 9. 2026 sa hotel či reštaurácia v zahraničí samozdanili ako služba
+  //    na diaľku (ROZHODNUTIA č. 56). Dobropis k takej službe nemá čo opravovať.
+  if(vydavokSpotrebaVZahranici(x)) return "X";
+
+  // 3) dobropis — záporná suma je oprava už uplatneného odpočtu; pri doklade
   //    bez nároku odpočet uplatnený nebol, takže nie je čo opravovať
   if(zaklad<0 || dan<0) return bezNaroku ? "X" : "C2";
 
-  // 3) samozdanenie
+  // 4) samozdanenie
   // Prednosť má príznak na doklade. Heuristika podľa krajiny dodávateľa ho nezachytí,
   // keď daň prenesie SLOVENSKÝ dodávateľ (§ 69 ods. 12 — stavebné práce, kovový odpad).
   // Taký doklad predtým skončil ako „X" a z výkazu aj z priznania ticho vypadol.
+  // Príznak zo zahraničnej e-faktúry (kategória AE) zároveň znamená, že odberateľ
+  // dodávateľovi oznámil IČ DPH — preto platí aj pri súkromnej spotrebe (nižšie).
   if(String(x.samozdanenieTyp||"").trim() && dan<=0) return "B1";
   // zahraničný doklad bez dane, alebo dodávateľ mimo SK
-  if(x.zahranicny===true && dan<=0) return "B1";
-  if(icdph && !/^SK/i.test(icdph) && dan<=0) return "B1";
+  const zahrBezDane = (x.zahranicny===true || (icdph && !/^SK/i.test(icdph))) && dan<=0;
+  // Služba zo zahraničia kúpená VÝLUČNE na súkromnú spotrebu slovenskú daň
+  // nezakladá: príjemca sa považuje za nezdaniteľnú osobu (čl. 19 ods. 1
+  // vykonávacieho nariadenia Rady (EÚ) 282/2011), miesto dodania je u dodávateľa
+  // (§ 15 ods. 2) a § 69 ods. 3 sa neuplatní (dev/opravy/dph4.md, ROZHODNUTIA
+  // č. 51). Keď odberateľ pri nákupe uviedol IČ DPH, dodávateľ smie považovať
+  // službu za podnikateľskú (čl. 19 ods. 2, čl. 18 ods. 1 písm. a)) a faktúra
+  // príde bez DPH s príznakom samozdanenia — ten sa podľa rozhodnutia č. 51
+  // samozdaňuje ďalej (riadok vyššie). Zo zákona to nevyplýva výslovne, je to
+  // opatrná voľba: bez nej by daň nezaplatil nikto (dev/opravy/dph5.md).
+  // Tovar z EÚ (§ 11) sa tu nerieši — ostáva v B.1 ako doteraz.
+  if(zahrBezDane && vydavokSukromnaSpotreba(x) && samozdDruh(x)!=="euTovar") return "X";
+  if(zahrBezDane) return "B1";
   // doklad bez nároku na odpočet (súkromný nákup, reprezentácia) do výkazu
   // ani do odpočtu nejde — DPH na ňom je len súčasť ceny
   if(bezNaroku) return "X";
-  // zahraničný doklad S daňou = cudzia DPH, tú si neodpočítame (rieši sa
-  // upozornením pri načítaní) — do výkazu ide ako bežné prijaté plnenie
-  if(x.zahranicny===true) return "B2";
+  // Zahraničný doklad S daňou = cudzia DPH. Odpočítať sa dá daň z faktúry, ktorú
+  // vystavil iný platiteľ (§ 49 ods. 2 písm. a) zákona o DPH), teda slovenská; cudziu DPH
+  // vracia štát dodania na žiadosť o vrátenie dane z iného členského štátu.
+  // Do 14. 9. 2026 išiel taký doklad do B.2 a jeho DPH do odpočtu (sonda: hotel
+  // v Rakúsku s DPH 10 € → odpočet +10) — Roman, 14. 9. 2026 (dev/opravy/dph5.md).
+  // Doklad s cudzím IČ DPH bez zaškrtnutého „Zahraničný doklad" rovnako.
+  if(x.zahranicny===true || (icdph && !/^SK/i.test(icdph))) return "X";
 
   // 4) druh dokladu určuje oddiel
   const t=DRUHY_DOKLADU[String(x.druh||"").trim()];
@@ -26330,8 +26433,9 @@ function dphSumare(doklady){
       // do odpočtu len oddiely s nárokom (B2/B31), nie opravy C2
       if(["B2","B31","B32"].includes(d.oddiel)){
         // pri aute s obmedzeným odpočtom sa uplatní len časť dane
+        // (súčet neodpočítanej časti `S.neodpocitatelna` sa tu počítal do
+        // 14. 9. 2026, nikto ho nečítal a pri B.1 bol neúplný — zrušený)
         const odp=(d.danOdpocet!=null)?d.danOdpocet:d.dan;
-        S.neodpocitatelna=r2((S.neodpocitatelna||0)+((+d.dan||0)-(+odp||0)));
         S.vstupZaklad=r2(S.vstupZaklad+d.zaklad); S.vstupDan=r2(S.vstupDan+odp);
         const s=+d.sadzba||23;
         if(s===23)S.vstup23=r2(S.vstup23+odp); else if(s===19)S.vstup19=r2(S.vstup19+odp); else if(s===10)S.vstup10=r2(S.vstup10+odp); else if(s===5)S.vstup5=r2(S.vstup5+odp);
@@ -26963,26 +27067,11 @@ function dokladKontext(){
   const dni=new Set((firmaData.jazdy||[]).map(j=>jazdaDayKey(j)).filter(Boolean));
   return {maAuto, dniSJazdou:dni, poslednaJazda:[...dni].sort().pop()||""};
 }
+// Chýbajúce IČ DPH dodávateľa tu nie je: pri zápise ho zastaví tvrdá kontrola
+// `vydavokOverIcDph` skôr, než sa pravidlá vyhodnotia, a ročná kontrola číta tú
+// istú podmienku `vydavokChybaIcDph`. Mäkká hláška `dphBezIc` sa preto nemohla
+// ukázať nikdy — zmazaná 14. 9. 2026 (ROZHODNUTIA č. 59, pravidlo č. 16 platí).
 const PRAVIDLA_DOKLADU=[
-  {
-    k:"dphBezIc", typ:"vydavok",
-    // To isté pravidlo ako tvrdá kontrola pri zápise (`vydavokPotrebujeIcDph`).
-    // Do 13. 9. 2026 malo vlastné: neplatiteľa vynechávalo a pri tankovaní či
-    // prenose sa s tvrdou kontrolou rozchádzalo (ROZHODNUTIA č. 16).
-    plati:(x)=>!!vydavokPotrebujeIcDph(x) && !String(x.dodavatelIcDph||"").trim(),
-    // Text podľa situácie — neplatiteľ a doklad bez nároku si DPH neodpočítavajú
-    // (`vydavokIcDphBezOdpoctu`, ROZHODNUTIA č. 44); pravidlo `plati` je spoločné.
-    hlaska:(x)=>((+x.dph||0)>0
-        ? (vydavokIcDphBezOdpoctu(x)
-          ? "⚠ Doklad obsahuje DPH "+eur(x.dph)+", ale dodávateľ nemá IČ DPH.\n\n"+vydavokIcDphBezOdpoctu(x)+"\n\n"
-          : "⚠ Doklad si odpočítava DPH "+eur(x.dph)+", ale dodávateľ nemá IČ DPH.\n\n"
-            +"Bez neho nárok na odpočet nevzniká a kontrolný výkaz taký doklad odmietne.\n\n")
-        : "⚠ Doklad ide do kontrolného výkazu DPH, ale dodávateľ nemá IČ DPH.\n\n"
-          +"Kontrolný výkaz taký doklad odmietne.\n\n")
-      +"Doplňte IČ DPH podľa dokladu (pomôže tlačidlo „Skontrolovať / doplniť z registra“). "
-      +"Ak dodávateľ platiteľom DPH nie je, dajte DPH na 0 a celú sumu do základu.\n\n"
-      +"Uložiť doklad aj tak?"
-  },
   {
     // Tankovanie deň pred cestou je bežné, preto ±1 deň. Doklad novší než celá
     // kniha sa tu zámerne NEHLÁSI — to nie je chýbajúca jazda, ale nedotiahnuté
@@ -27418,20 +27507,31 @@ function rocnaKontrola(rok){
 
   // ── 7. Odpočet DPH z dokladu bez IČ DPH — cez celý rok ──
   {
-    // Tá istá podmienka, akú používa kontrola pri zápise — z jednej tabuľky.
-    const P=PRAVIDLA_DOKLADU.find(p=>p.k==="dphBezIc");
-    const bezIc=P ? vydavky.filter(x=>{ try{ return P.plati(x); }catch(_){ return false; } }) : [];
+    // Tá istá podmienka, akú používa tvrdá kontrola pri zápise.
+    const bezIc=vydavky.filter(x=>{ try{ return vydavokChybaIcDph(x); }catch(_){ return false; } });
     // Neplatiteľ odpočet nemá a kontrolný výkaz nepodáva — nález by mu tvrdil
     // niečo, čo neplatí (Roman, ROZHODNUTIA č. 31). Pravidlo pri zápise dokladu
     // (`vydavokPotrebujeIcDph`, č. 16) sa tým nemení.
     if(bezIc.length && jePlatcaDPH()){
-      const dan=r2(bezIc.reduce((a,x)=>a+(+x.dph||0),0));
+      // Doklad bez nároku (reprezentácia, súkromná spotreba) si DPH neodpočítava —
+      // do 14. 9. 2026 ho nález počítal medzi „si odpočítava DPH" (č. 60). Veta
+      // o ňom je tá istá ako pri zápise (`vydavokIcDphBezOdpoctu`).
+      const bezNaroku=bezIc.filter(x=>vydavokIcDphBezOdpoctu(x));
+      const sOdpoctom=bezIc.filter(x=>!vydavokIcDphBezOdpoctu(x) && (+x.dph||0)>0);
+      const doKV=bezIc.length-bezNaroku.length-sOdpoctom.length;
+      const dan=r2(sOdpoctom.reduce((a,x)=>a+(+x.dph||0),0));
+      const casti=[sOdpoctom.length && sOdpoctom.length+" si odpočítava DPH ("+eur(dan)+")",
+        bezNaroku.length && bezNaroku.length+" má DPH bez nároku na odpočet",
+        doKV && doKV+" ide do kontrolného výkazu"].filter(Boolean);
       // Tlačidlo len vtedy, keď má čo robiť. Ponuka „opraviť", ktorá po kliknutí
       // nič neurobí, je horšia než žiadna — nabudúce ju človek preskočí.
       let daSa=0;
       try{ daSa=bezIc.filter(x=>{ const p=najdiPartnera(x); return p && p.icdph; }).length; }catch(_){}
-      pridaj("chyba","dphBezIc", bezIc.length+(dan>0 ? " dokladov si odpočítava DPH ("+eur(dan)+")" : " dokladov ide do kontrolného výkazu")+" bez IČ DPH dodávateľa",
-        "Bez IČ DPH nárok na odpočet nevzniká a kontrolný výkaz taký doklad odmietne."
+      pridaj("chyba","dphBezIc", casti.length===1
+          ? bezIc.length+" dokladov"+casti[0].replace(/^\d+/,"")+" bez IČ DPH dodávateľa"
+          : bezIc.length+" dokladov bez IČ DPH dodávateľa: "+casti.join(", "),
+        [(sOdpoctom.length||doKV) ? "Bez IČ DPH nárok na odpočet nevzniká a kontrolný výkaz taký doklad odmietne." : "",
+          ...new Set(bezNaroku.map(vydavokIcDphBezOdpoctu))].filter(Boolean).join(" ")
         + (daSa ? " Pri "+daSa+" z nich appka IČ DPH pozná z iných dokladov toho istého dodávateľa." : ""),
         bezIc.slice(0,8).map(x=>(x.cislo||"—")+" · "+(x.partner||"—")+" · DPH "+eur(x.dph)),
         daSa ? {l:"Doplniť IČ DPH do "+daSa+" dokladov", fn:"doplnPartnerovDoVydavkov()"} : null);
