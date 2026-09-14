@@ -3616,7 +3616,7 @@ function deMesiacneData(rok){
     // dátach to nebolo vidieť (taký doklad nemá ani jeden), ale smer bol
     // nepríjemný: evidencia hlásila vyšší základ než daňový prehľad.
     const vyd=(d.vydavky||[]).filter(x=>vydavokObdobieDane(x)===mk && !x.zaradenyOdpisovany);
-    let vydavky=r2(vyd.reduce((a,x)=>a+vydavokDoZakladu(x),0));   // PHL podľa zvoleného režimu
+    let vydavky=r2(vyd.reduce((a,x)=>a+vydavokDoZakladu(x),0)+vydavkyDphVratenieObdobia(mk));   // PHL podľa zvoleného režimu
     // pri vlastnom aute nejdú do výdavkov bločky, ale náhrady prepočítané z knihy jázd
     const NAH=nahradyObdobie(rok, mk);
     if(NAH.aktivne && NAH.spolu) vydavky=r2(vydavky+NAH.spolu);
@@ -4326,7 +4326,7 @@ function calcDanRow(mesiacIdx, rok, S){
   const jeAktivny=faktB>0 || vyradenie>0 || nahrady>0 || (firmaData.vydavky||[]).some(x=>vydavokObdobieDane(x)===mk);
   const odpis=jeAktivny?odpisMes:0;
   // ostatné náklady = výdavky mesiaca bez DPH (okrem odpisovaného majetku)
-  const ostatne=r2((firmaData.vydavky||[]).filter(x=>vydavokObdobieDane(x)===mk && !x.zaradenyOdpisovany).reduce((a,x)=>a+vydavokDoZakladu(x),0)+nahrady);
+  const ostatne=r2((firmaData.vydavky||[]).filter(x=>vydavokObdobieDane(x)===mk && !x.zaradenyOdpisovany).reduce((a,x)=>a+vydavokDoZakladu(x),0)+vydavkyDphVratenieObdobia(mk)+nahrady);
   const nakladySpolu=r2(odpis+ostatne+vyradenie);
   const ciastkZaklad=r2(faktB-nakladySpolu);              // čiastkový základ dane
   // SKUTOČNÉ zdravotné poistné z vymeriavacieho základu (nie preddavok!)
@@ -5501,7 +5501,7 @@ function _dashWidgetKatalogVypocet(){
           const v=vsetky.filter(x=>!jePlatbaStatu(x));
           const statu=vsetky.length-v.length;
           const fa=v.filter(x=>x.druh==="Došlá faktúra").length,bl=v.filter(x=>x.druh==="Bloček").length;
-          return {v:eur0(v.reduce((a,x)=>a+(+x.bez||0),0)),
+          return {v:eur0(v.reduce((a,x)=>a+vydavokSumaVydavku(x),0)),
             m:v.length+" dokladov"+(statu?" · "+statu+" platieb štátu mimo":""), cls:"",
             vedlajsie:[{l:"DPH na odpočet",v:eur(dphSaldoRok(rok).inp),cls:"pos"},
                        {l:"faktúry / bločky",v:fa+" / "+bl}]};}},
@@ -5589,7 +5589,7 @@ function dashMesacne(rok, typ){
     const mk=rok+"-"+String(mi+1).padStart(2,"0");
     let v=0;
     if(typ==="prijmy") v=faktSucet("uhrada", mk).bez;
-    else if(typ==="vydavky") v=(d.vydavky||[]).filter(x=>vydavokObdobieDane(x)===mk).reduce((a,x)=>a+(+x.bez||0),0);
+    else if(typ==="vydavky") v=(d.vydavky||[]).filter(x=>vydavokObdobieDane(x)===mk).reduce((a,x)=>a+vydavokSumaVydavku(x),0);
     else if(typ==="dph") v=faktSucet("dodanie", mk).dph;
     else if(typ==="km") v=(d.jazdy||[]).filter(j=>jazdaMonthKey(j)===mk).reduce((a,j)=>a+(+j.km||0),0);
     out.push(v);
@@ -7770,6 +7770,8 @@ function osobitnaKDatumu(icdph, datum){
 function citajOsobitnu(obj){
   const v=osobitnaKDatumu(val("m_dodIcDph"), obj.datum||val("m_datum"));
   if(v===true) obj.osobitna68d=true; else delete obj.osobitna68d;
+  // odpoveď registra z poľa IČ DPH je tiež overenie (`osobitnaOverena`)
+  if(v!==null) obj.osobitna68dOverene=normalizujICDPH(val("m_dodIcDph"));
   return obj;
 }
 // Dátum, kedy bol doklad ÚPLNE zaplatený. Čiastočná úhrada nárok na odpočet
@@ -7869,6 +7871,13 @@ function osobitnaKandidati(rok){
     && (+x.dph||0)>0
     && /^SK\d{10}$/.test(normalizujICDPH(x.dodavatelIcDph)));
 }
+// Bol dodávateľ dokladu overený v registri? Overenie sa pamätá s IČ DPH, ku
+// ktorému prebehlo — po prepísaní dodávateľa už neplatí. Samotný príznak
+// `osobitna68d` to povedať nevie: pri „neuplatňuje" sa maže (test_osobitna_uprava),
+// takže nález `osobitnaNeoverena` po overení ostával (ROZHODNUTIA č. 81).
+function osobitnaOverena(x){
+  return !!x && !!x.osobitna68dOverene && x.osobitna68dOverene===normalizujICDPH(x.dodavatelIcDph);
+}
 async function overOsobitnuUpravu(rok){
   if(!strazZapis("vydavky")) return;
   const zoz=osobitnaKandidati(rok);
@@ -7887,6 +7896,7 @@ async function overOsobitnuUpravu(rok){
     // `null` je „register nevedel" — vtedy sa nemení nič, ani sa nemaže.
     if(v===true){ x.osobitna68d=true; najdenych++; }
     else if(v===false) delete x.osobitna68d;
+    if(v!==null) x.osobitna68dOverene=normalizujICDPH(x.dodavatelIcDph);
   });
   poZmene();
   alert(najdenych
@@ -12654,7 +12664,9 @@ function appVydavky(){
   // (kap. 84). Majú preto vlastnú dlaždicu aj vlastný filter.
   const vydBezne=vyd.filter(x=>!jePlatbaStatu(x));
   const vydStatu=vyd.filter(jePlatbaStatu);
-  const bezSpolu=vydBezne.reduce((a,x)=>a+(+x.bez||0),0);
+  // Bez DPH, ktorú si platiteľ odpočíta; neplatiteľovi s DPH (`vydavokSumaVydavku`,
+  // to isté číslo ako dlaždica a graf na ploche — ROZHODNUTIA č. 81).
+  const bezSpolu=vydBezne.reduce((a,x)=>a+vydavokSumaVydavku(x),0);
   // Suma S DPH je to, čo naozaj odišlo z účtu. NIE je to „bez DPH + odpočet":
   // odpočet je daňový nárok a počíta ho `dphSaldoRok` cez samozdanenie
   // a oddiely, takže tie dve čísla sa nemusia sčítať. Berie sa preto `spolu`
@@ -12709,7 +12721,7 @@ function appVydavky(){
   const _tank=vydavkySTankovanim();   // raz na vykreslenie, nie raz na riadok
   document.getElementById("appScreen").innerHTML=appHlavicka("vydavky",`<button class="aabtn" onclick="rychlyDoklad(this)"${zam("vydavky")}>🧾 Odfotiť / načítať doklad</button><button class="aabtn" onclick="faktPdfImport()"${zam("vydavky")}>📥 Import faktúr (XML/PDF)</button><button class="aabtn" onclick="otvorOpakovane()"${zam("vydavky")}>🔁 Opakované${(()=>{const n=opakovaneCakajuce().length;return n?" ("+n+")":"";})()}</button><button class="aabtn pri" onclick="editVydavok()"${zam("vydavky")}>＋ Nový výdavok</button>`)+pasIbaCitanie("vydavky")+`
     <div class="amini">
-      <div class="aminbox"><div class="al">Výdavky bez DPH</div><div class="av">${eur(bezSpolu)}</div>${
+      <div class="aminbox"><div class="al">${jePlatcaDPH()?"Výdavky bez DPH":"Výdavky"}</div><div class="av">${eur(bezSpolu)}</div>${
         Math.abs(sDphSpolu-bezSpolu)>=0.01?`<div class="as">${eur(sDphSpolu)} s DPH</div>`:''}</div>
       <div class="aminbox"><div class="al">DPH na odpočet</div><div class="av pos">${eur(dphSpolu)}</div></div>
       <div class="aminbox"><div class="al">Odvody a dane</div><div class="av">${eur(statuSpolu)}</div><div class="as">${vydStatu.length} platieb · mimo výdavkov</div></div>
@@ -12845,6 +12857,9 @@ function vydavokZFormulara(datum){
   citajPodnikPct(obj);
   citajUcetFS(obj);
   citajOsobitnu(obj);
+  citajVratenieDph(obj);
+  if(obj.vratenieDph && !obj.vratenieDphRok){ alert("Zadajte rok, v ktorom podáte žiadosť o vrátenie zahraničnej DPH."); return null; }
+  if(obj.vratenieDph && obj.vratenieDphRok < (+String(obj.datum||"").slice(0,4)||0)){ alert("Žiadosť o vrátenie DPH nemôže byť skôr ako rok dokladu."); return null; }
   return obj;
 }
 // Polia formulára, ktoré sa pri prázdnej hodnote do dokladu NEZAPISUJÚ. Pri
@@ -12853,7 +12868,7 @@ function vydavokZFormulara(datum){
 // litre aj tuzemský prenos. `ucetFS` a `osobitna68d` tu zámerne nie sú: ich
 // čitateľ pri nenačítanom registri nevie, a „neviem" nesmie zmazať, čo sa
 // zistilo skôr.
-const VYDAVOK_POLIA_BEZ_PRAZDNEJ=["rozpis","viacSadzieb","litre","podnikPct","zaRok","samozdanenieTyp"];
+const VYDAVOK_POLIA_BEZ_PRAZDNEJ=["rozpis","viacSadzieb","litre","podnikPct","zaRok","samozdanenieTyp","vratenieDph","vratenieDphRok"];
 
 // ── PERCENTO OSOBNÉHO POUŽITIA — JEDEN ČITATEĽ ─────────────────────────────
 // Formulár výdavku je síce jeden, ale ČÍTAJÚ ho dve rôzne cesty: editor si
@@ -12910,6 +12925,31 @@ function citajSamozdanenie(obj){
   else if(t && SAMOZD_DRUHY[z]) t=z;
   if(SAMOZD_DRUHY[t]) obj.samozdanenieTyp=t; else delete obj.samozdanenieTyp;
   return obj;
+}
+// ── ŽIADOSŤ O VRÁTENIE ZAHRANIČNEJ DPH — JEDEN ČITATEĽ (č. 77) ──
+// Voľba je v bloku zahraničného dokladu a len pre platiteľa (žiadosť podáva
+// platiteľ, § 55f zákona o DPH). Bez zaškrtnutia sa oba kľúče mažú
+// (`VYDAVOK_POLIA_BEZ_PRAZDNEJ`). Ten istý čitateľ počíta náhľad oddielu.
+function citajVratenieDph(obj){
+  const rok=parseInt(val("m_vratenieDphRok"),10);
+  if(chk("m_zahranicny") && chk("m_vratenieDph")){
+    obj.vratenieDph=true;
+    if(rok>2000) obj.vratenieDphRok=rok; else delete obj.vratenieDphRok;
+  } else { delete obj.vratenieDph; delete obj.vratenieDphRok; }
+  return obj;
+}
+function vydavokVratenieDphHtml(x){
+  const zap=x.vratenieDph===true;
+  const rokNavrh=(+String(x.datum||"").slice(0,4)||new Date().getFullYear())+1;
+  return `<div style="margin-top:10px">
+          <label style="display:flex;align-items:center;gap:9px;cursor:pointer;font-size:13.5px">
+            <input type="checkbox" id="m_vratenieDph" ${zap?"checked":""} onchange="const b=document.getElementById('m_vratenieDphBox'); if(b) b.style.display=this.checked?'block':'none'; mAktualizujOddiel()">
+            <b>Žiadam o vrátenie zahraničnej DPH</b></label>
+          <div id="m_vratenieDphBox" style="display:${zap?'block':'none'};margin-top:8px">
+            <div class="mfield" style="margin-bottom:0"><label>Rok, v ktorom žiadosť podáte</label><input id="m_vratenieDphRok" type="number" step="1" min="2000" value="${esc(x.vratenieDphRok||'')}" placeholder="${rokNavrh}" oninput="mAktualizujOddiel()"></div>
+            <div class="ocr-hint" style="margin-top:5px">DPH, o ktorej vrátenie žiadate, je daňovým výdavkom až v roku podania žiadosti, nie v roku úhrady (§ 19 ods. 3 písm. k) bod 3 zákona o dani z príjmov). Žiadosť sa podáva cez portál finančnej správy najneskôr do 30. 9. nasledujúceho roka (§ 55f zákona o DPH).</div>
+          </div>
+        </div>`;
 }
 function citajZaRok(obj){
   const K=KATEGORIE_VYDAVKOV[val("m_kategoria")||((obj||{}).kategoria)];
@@ -13097,6 +13137,7 @@ function vydavokFormHtml(x, nova, idx){
           <div class="ocr-hint" id="m_zahrDruhPozn">${esc(ZAHR_DRUHY[zahrDruhDokladu(x)].p)}</div>
         </div>
         <div class="mfield" style="margin-bottom:0"><label>Kód krajiny</label><input id="m_kodKrajiny" value="${esc(x.kodKrajiny||'')}" placeholder="US, DE, IE…"></div>
+        ${jePlatcaDPH()?vydavokVratenieDphHtml(x):""}
       </div>
     </div>
     <div id="m_prenosBox" style="display:${x.zahranicny?'none':'block'};background:var(--bg);border-radius:9px;padding:11px 13px;margin-bottom:4px">
@@ -14306,13 +14347,14 @@ function vydavokDoZakladu(x){
   return suma;
 }
 // DPH, ktorá je súčasťou daňového výdavku (ROZHODNUTIA č. 64). U platiteľa DPH
-// daňovým výdavkom nie je (§ 21 ods. 1 písm. i) zákona 595/2003 o dani z príjmov)
+// daňovým výdavkom nie je (§ 21 ods. 2 písm. i) zákona 595/2003 o dani z príjmov)
 // okrem DPH, na ktorej odpočítanie nemá nárok (§ 19 ods. 3 písm. k) bod 2) — tu
 // zahraničná DPH, ktorú appka vedie mimo výkazu (`dphOddielVydavok`). Pri sume pod
 // limitom na vrátenie v štáte dodania je výdavkom v období úhrady (bod 4). Keď
 // platiteľ o vrátenie cudzej DPH žiada, je výdavkom až v období žiadosti (bod 3)
-// a bez žiadosti vôbec (FS, podpora „DPH ako daňový výdavok", otázka 4) — appka
-// žiadosť nepozná; Roman 14. 9. 2026: výdavok v roku úhrady (dev/opravy/dph6.md).
+// a bez žiadosti vôbec (FS, podpora „DPH ako daňový výdavok", otázka 4). Bez voľby
+// „žiadam o vrátenie" appka dáva výdavok v roku úhrady (Roman 14. 9. 2026,
+// dev/opravy/dph6.md); s voľbou až v roku žiadosti (`vydavokDphVratenieRok`, č. 77).
 // Neplatiteľa vylúčenie netýka, výdavkom je suma s DPH (pri majetku výslovne
 // § 25 ods. 5 písm. a)). Krátená DPH (podiel na podnikaní, auto, pohonné látky)
 // do výdavku NEJDE: viaže sa k časti, ktorá daňovým výdavkom nie je (FS, otázky
@@ -14320,11 +14362,69 @@ function vydavokDoZakladu(x){
 // spotreba sem nedôjdu, do základu nejdú vôbec (`kategoriaOvplyvnujeZaklad`).
 // Do 14. 9. 2026 bral výdavok len sumu bez DPH: hotel v Rakúsku 100 + 10 € DPH
 // uplatnil 100 a neplatiteľ z faktúry 100 + 23 € tiež 100.
+// Ručné zaradenie do X je vyhlásenie „na odpočet nemám nárok" (popis oddielu X),
+// takže DPH aj zo slovenského dokladu je výdavkom podľa bodu 2 — ROZHODNUTIA
+// č. 81, dev/opravy/dph7.md. Do 14. 9. 2026 (dph6) platiteľ takú DPH nemal ani
+// v odpočte, ani vo výdavku. Automatické X slovenského dokladu (interný doklad)
+// nárok nevyhlasuje, ostáva bez DPH.
 function vydavokDphDoVydavku(x){
   const dph=+((x&&x.dph))||0;
   if(!dph) return 0;
   if(!vydavokPlatcaDPH(x)) return dph;
-  return (vydavokZahranicnyDodavatel(x) && dphOddielVydavok(x)==="X") ? dph : 0;
+  if(vydavokDphVratenieRok(x)) return 0;      // výdavkom až v roku žiadosti o vrátenie
+  const rucneX = x.oddielRucne==="X";
+  return ((vydavokZahranicnyDodavatel(x) || rucneX) && dphOddielVydavok(x)==="X") ? dph : 0;
+}
+// Koľko z dokladu je výdavok pred daňovými kráteniami: suma bez DPH a DPH, ktorá
+// je súčasťou výdavku (`vydavokDphDoVydavku`). Jedno číslo pre dlaždicu „Výdavky
+// (rok)", graf po mesiacoch a súčet v module Výdavky — po č. 64 ukazovali
+// neplatiteľovi sumu bez DPH, hoci do základu mu išla s DPH (ROZHODNUTIA č. 81).
+// Kategóriu ani krátenie (podiel, auto) neuplatňuje: to je `vydavokDoZakladu`.
+function vydavokSumaVydavku(x){
+  return r2((+((x&&x.bez))||0)+vydavokDphDoVydavku(x));
+}
+// ── CUDZIA DPH SO ŽIADOSŤOU O VRÁTENIE (ROZHODNUTIA č. 77) ──
+// Pri daňovej evidencii (§ 6 ods. 11) je DPH, ktorú platiteľovi vráti iný členský
+// štát, daňovým výdavkom „v tom zdaňovacom období, v ktorom uplatní nárok na jej
+// vrátenie" (§ 19 ods. 3 písm. k) bod 3 zákona 595/2003, znenie 2026) a nárok sa
+// uplatňuje „podaním žiadosti o vrátenie dane" (§ 55f ods. 1 zákona 222/2004) —
+// teda v roku žiadosti, nie v roku úhrady. Žiadosť podáva len „Platiteľ
+// registrovaný podľa § 4 alebo 4b" (§ 55f ods. 1), preto voľba platí len pre
+// platiteľa a cudziu DPH v oddiele X. Bez voľby ostáva výdavok v roku úhrady (dph6).
+// Obdobie dane je rok; pre mesačné prehľady ide DPH do mesiaca úhrady, keď je
+// žiadosť v tom istom roku, inak do decembra roka žiadosti (technická voľba,
+// dev/opravy/dph7.md). Zamietnutú či čiastočne vrátenú žiadosť appka nerieši.
+function vydavokDphVratenieRok(x){
+  if(!x || x.vratenieDph!==true || !((+x.dph||0)>0)) return 0;
+  const rok=parseInt(x.vratenieDphRok,10);
+  if(!(rok>2000)) return 0;
+  if(!vydavokPlatcaDPH(x) || !vydavokZahranicnyDodavatel(x) || dphOddielVydavok(x)!=="X") return 0;
+  return rok;
+}
+// Časť výdavku, ktorá sa presúva do roku žiadosti: rozdiel výdavku bez voľby
+// a s ňou — kategória, podiel na podnikaní aj auto sa uplatnia tak isto.
+function vydavokDphVratenieDoZakladu(x){
+  if(!vydavokDphVratenieRok(x) || x.zaradenyOdpisovany) return 0;
+  return r2(vydavokDoZakladu(Object.assign({}, x, {vratenieDph:false})) - vydavokDoZakladu(x));
+}
+function vydavokDphVratenieObdobie(x){
+  const rok=vydavokDphVratenieRok(x);
+  if(!rok) return "";
+  const u=vydavokObdobieDane(x);
+  return u.slice(0,4)===String(rok) ? u : rok+"-12";
+}
+// Súčet presunutej DPH za obdobie „RRRR-MM" alebo „RRRR" — pripočíta sa tam,
+// kde sa sčítava `vydavokDoZakladu` podľa obdobia dane.
+function vydavkyDphVratenieObdobia(obd){
+  const o=String(obd||"");
+  return r2((firmaData.vydavky||[]).reduce((a,x)=>{
+    const v=vydavokDphVratenieObdobie(x);
+    return (v && v.slice(0,o.length)===o) ? a+vydavokDphVratenieDoZakladu(x) : a;
+  },0));
+}
+function dphVratenieVeta(x){
+  const rok=vydavokDphVratenieRok(x);
+  return (rok && kategoriaOvplyvnujeZaklad(x)) ? " Do daňového výdavku pôjde DPH až v roku žiadosti o vrátenie ("+rok+")." : "";
 }
 // Bol platiteľom DPH v deň dokladu? Právo odpočítať daň vzniká platiteľovi
 // (§ 49 ods. 1 zákona 222/2004 o DPH), takže doklad spred registrácie alebo po
@@ -15272,7 +15372,7 @@ const DPH_ODDIELY_POPIS = {
   C2:"Dobropisy, ktoré ste dostali od dodávateľa — vracia vám peniaze, takže si odpočítate menej dane.",
   D1:"Tržby zaevidované pokladnicou eKasa — uvádzajú sa jedným súhrnným riadkom.",
   D2:"Tržby pre nepodnikateľov (faktúra súkromnej osobe) — súhrnne, bez uvedenia odberateľa.",
-  X:"Doklad do výkazu nejde: bez DPH, bez nároku na odpočet, so zahraničnou DPH, služba spotrebovaná v zahraničí (§16), súkromná spotreba zo zahraničia alebo vyňatý ručne."
+  X:"Doklad do výkazu nejde: bez DPH, bez nároku na odpočet, so zahraničnou DPH, služba spotrebovaná v zahraničí (§16), súkromná spotreba zo zahraničia alebo vyňatý ručne. Ručne ho sem dajte, keď na odpočet nemáte nárok — DPH potom ide do daňového výdavku."
 };
 let dphVybranyMesiac = null;
 let dphLegendaOtvorena = false;
@@ -16015,6 +16115,13 @@ function kategorieRoka(rok){
     r.pocet++;
     r.zDokladov=r2(r.zDokladov+(+x.bez||0));
     r.doZakladu=r2(r.doZakladu+vydavokDoZakladu(x));
+  });
+  // cudzia DPH so žiadosťou o vrátenie v tomto roku (č. 77), aj z dokladu iného roka
+  (firmaData.vydavky||[]).forEach(x=>{
+    if(vydavokDphVratenieObdobie(x).slice(0,4)!==String(rok)) return;
+    const k=odhadniKategoriu(x);
+    const r=mapa[k]||(mapa[k]={kluc:k, pocet:0, zDokladov:0, doZakladu:0});
+    r.doZakladu=r2(r.doZakladu+vydavokDphVratenieDoZakladu(x));
   });
   const NAH=nahradyObdobie(rok);
   const zoznam=Object.keys(mapa)
@@ -19728,7 +19835,7 @@ function prognozaRok(rok){
   for(let mi=0;mi<12;mi++){ const c=calcDanRow(mi,+rok,S); zdravSkut+=c.zdrav; socSkut+=c.soc; preddavkyDanSkut+=c.danPreddavok; }
   const prijmyRok=r2(prijmySkut*faktor);
   const odpisRok=odpisDaneRok(rok, S).rok;
-  const vydavkyRealRok=r2((firmaData.vydavky||[]).filter(x=>vydavokVRoku(x, rok)).reduce((a,x)=>a+vydavokDoZakladu(x),0));
+  const vydavkyRealRok=r2((firmaData.vydavky||[]).filter(x=>vydavokVRoku(x, rok)).reduce((a,x)=>a+vydavokDoZakladu(x),0)+vydavkyDphVratenieObdobia(String(rok)));
   const vydavkyRok=r2(vydavkyRealRok+odpisRok);
   const zdravRok=r2(zdravSkut*faktor);
   let socMesiacov=0;
@@ -21894,7 +22001,7 @@ function xkBuild(X, volby){
   // sa tie dve čísla líšia (súkromný výdavok, krátené auto a PHL) a bez tohto
   // stĺpca by sa súčet výdavkov a daňový hárok nedali zosúladiť.
   xkRokyVydavkov(D).filter(chceRok).forEach(rk=>{
-    const zoz=(D.vydavky||[]).filter(x=>vydavokVRoku(x, rk))
+    const zoz=(D.vydavky||[]).filter(x=>vydavokVRoku(x, rk) || vydavokDphVratenieObdobie(x).slice(0,4)===String(rk))
       .sort((a,b)=>String(a.datum||"").localeCompare(String(b.datum||"")));
     if(!zoz.length) return;
     const aoa=[[xkCell("Výdavky "+rk,S.title)],[],
@@ -21905,12 +22012,15 @@ function xkBuild(X, volby){
     zoz.forEach((x,i)=>{ const z=i%2===1, sc=z?S.cellZ:S.cell, se=z?S.eurZ:S.eur;
       const kat=(typeof odhadniKategoriu==="function")?odhadniKategoriu(x):"";
       const katN=(KATEGORIE_VYDAVKOV[kat]||{}).n||"";
-      const doZ=x.zaradenyOdpisovany ? 0 : vydavokDoZakladu(x);
-      const pozn=x.zaradenyOdpisovany ? "zaradený do majetku" : katN;
+      // doklad iného roka je tu len pre DPH so žiadosťou o vrátenie v tomto roku (č. 77)
+      const inyRok=!vydavokVRoku(x, rk);
+      const vrat=vydavokDphVratenieObdobie(x).slice(0,4)===String(rk) ? vydavokDphVratenieDoZakladu(x) : 0;
+      const doZ=x.zaradenyOdpisovany ? 0 : r2((inyRok ? 0 : vydavokDoZakladu(x))+vrat);
+      const pozn=x.zaradenyOdpisovany ? "zaradený do majetku" : inyRok ? "DPH — žiadosť o vrátenie "+rk : katN;
       aoa.push([xkCell(x.cislo||"",sc),xkCell(fmtSk(x.datum),sc),xkCell(x.partner||"",sc),xkCell(x.popis||"",sc),
-                xkCell(x.druh||"",sc),xkCell(pozn,sc),xkCell(r2(x.bez),se),xkCell(r2(x.dph),se),
-                xkCell(r2(x.spolu),se),xkCell(r2(doZ),se)]);
-      tb+=+x.bez||0; td+=+x.dph||0; ts+=+x.spolu||0; tz+=doZ; });
+                xkCell(x.druh||"",sc),xkCell(pozn,sc),xkCell(inyRok?0:r2(x.bez),se),xkCell(inyRok?0:r2(x.dph),se),
+                xkCell(inyRok?0:r2(x.spolu),se),xkCell(r2(doZ),se)]);
+      if(!inyRok){ tb+=+x.bez||0; td+=+x.dph||0; ts+=+x.spolu||0; } tz+=doZ; });
     aoa.push([xkCell("Spolu "+rk,S.foot),xkCell("",S.foot),xkCell("",S.foot),xkCell("",S.foot),xkCell("",S.foot),
               xkCell("",S.foot),xkCell(r2(tb),S.footE),xkCell(r2(td),S.footE),xkCell(r2(ts),S.footE),xkCell(r2(tz),S.footE)]);
     if(Math.abs(r2(tb)-r2(tz))>0.005) aoa.push([],[xkCell("Rozdiel medzi dokladmi a základom dane je krátenie (auto, pohonné hmoty) alebo výdavok, ktorý základ dane neovplyvňuje.",S.sub)]);
@@ -26537,6 +26647,7 @@ function mAktualizujOddiel(){
   // prenos daňovej povinnosti tým istým čitateľom ako uloženie — voľba
   // `m_tuzemskyPrenos` aj druh, ktorý prišiel s dokladom
   citajSamozdanenie(x);
+  citajVratenieDph(x);
   if(viac && typeof mZbierRozpis==="function"){
     const rz=mZbierRozpis();
     if(rz.length){ x.rozpis=rz; x.bez=rz.reduce((a,r)=>a+(+r.bez||0),0); x.dph=rz.reduce((a,r)=>a+(+r.dph||0),0); }
@@ -26603,13 +26714,16 @@ function dphOddielPoznamka(x, od){
     return naIcDph ? veta+" Tovar z EÚ prišiel na vaše IČ DPH, preto sa zdaňuje — pri súkromnom nákupe IČ DPH neuvádzajte." : veta;
   }
   if(!mimo) return "";
-  if(vydavokSpotrebaVZahranici(x)) return ZAHR_DRUHY.spotreba.p;
+  if(vydavokSpotrebaVZahranici(x)) return ZAHR_DRUHY.spotreba.p + dphVratenieVeta(x);
   if(vydavokSukromnaSpotreba(x)) return naIcDph
     ? "Súkromná spotreba — slovenská daň nevzniká a do kontrolného výkazu ani priznania DPH nejde. Faktúra je však na vaše IČ DPH: pri súkromnom nákupe ho neuvádzajte a dodávateľa požiadajte o opravu faktúry."
     : "Súkromná spotreba — do kontrolného výkazu ani priznania DPH nejde.";
   if(vydavokZahranicnyDodavatel(x) && (+x.dph||0)>0)
     return "Zahraničná DPH je súčasť ceny — na Slovensku sa neodpočíta a do výkazu nejde."
-      + (kategoriaOvplyvnujeZaklad(x) ? " Do daňového výdavku ide suma s DPH." : "");
+      + (vydavokDphVratenieRok(x) ? dphVratenieVeta(x) : kategoriaOvplyvnujeZaklad(x) ? " Do daňového výdavku ide suma s DPH." : "");
+  // ručné X je vyhlásenie, že na odpočet nárok nie je — DPH ide do výdavku (č. 81)
+  if(x.oddielRucne==="X" && kategoriaOvplyvnujeZaklad(x) && vydavokDphDoVydavku(x)>0)
+    return "Nastavené ako doklad bez nároku na odpočet — DPH sa neodpočíta a do daňového výdavku ide suma s DPH.";
   return "Doklad nevstúpi do kontrolného výkazu (bez DPH alebo bez nároku).";
 }
 // Uvoľnenie ručného zaradenia. Vlastná funkcia preto, že sa musí prekresliť aj
@@ -28100,7 +28214,7 @@ function rocnaKontrola(rok){
           "takže vy si ju smiete odpočítať tiež až po úhrade. Appka ich do priznania zaradí sama podľa dátumu úhrady. "+
           "Pri čiastočnej úhrade zákon dovoľuje pomerný odpočet; appka ho nerozdeľuje a čaká na úplné zaplatenie.",
           caka.slice(0,8).map(x=>(x.cislo||x.partner||"—")+" · DPH "+eur(+x.dph||0)));
-    } else if(kand.length && !kand.some(x=>x.osobitna68d!==undefined))
+    } else if(kand.some(x=>!osobitnaOverena(x)))
       pridaj("pozor","osobitnaNeoverena", "Dodávatelia nie sú overení v registri osobitnej úpravy",
         "Kto uplatňuje osobitnú úpravu podľa § 68d, odvádza daň až pri prijatí platby — a vy si ju smiete "+
         "odpočítať tiež až po zaplatení, nie dňom dodania. Faktúra to má uvedené slovami „daň sa uplatňuje "+
