@@ -13652,6 +13652,9 @@ async function ulozVydavokZFormularaRaz(idx, R){
   if(R){
     // Prijatá e-faktúra je zaevidovaná AŽ TERAZ — výdavok naozaj existuje.
     // Pred `poZmene()`, aby stav odišiel do cloudu v tom istom uložení.
+    // Doklad zo Schránky: bez vlastnej kópie ukáže na originál z e-mailu (č. 104).
+    // Nad e-faktúrou — test_postar_appka drží jej volanie tesne pred poZmene.
+    if(typeof cakajuciOriginalPoUlozeni==="function") cakajuciOriginalPoUlozeni(ulozeny);
     if(typeof oznacEfakturuZaevidovanu==="function") oznacEfakturuZaevidovanu();
   }
   poZmene();
@@ -32136,12 +32139,42 @@ async function odmietniCakajuci(id){
 // Volá sa po úspešnom uložení výdavku z OCR cesty.
 async function oznacCakajuciSpracovany(){
   const id=_cakajuciSpracovavany; _cakajuciSpracovavany=null;
+  const nahradeny=_cakajuciNahradeny; _cakajuciNahradeny=null;
   if(!id || localMode || !sb) return;
+  const koren=firmaId;
   try{
-    await sb.from("cakajuce_doklady")
+    const { error }=await sb.from("cakajuce_doklady")
       .update({ stav:"spracovane", spracovane:new Date().toISOString() }).eq("id", id);
+    if(error) throw error;
     await nacitajCakajuce(true);
-  }catch(_){}
+  }catch(e){ console.error("doklad zo Schránky sa neodbavil — originál z e-mailu ostáva:", e); return; }
+  if(!nahradeny) return;
+  if(firmaId!==koren){ console.error("medzitým sa otvorila iná firma — originál z e-mailu ostáva v úložisku:", nahradeny.cesta); return; }
+  dokladZmazOriginaly([nahradeny.cesta]);
+}
+// ORIGINÁL Z E-MAILU PO PREVZATÍ (ROZHODNUTIA č. 104). Príloha leží v úložisku
+// ako `email_…` v plnej veľkosti (uložila ju edge funkcia `doklady-mailom`).
+// Prevzatie ide tou istou cestou ako fotka z telefónu: `spracujCakajuci` →
+// okno dokladu → `dokladUpload`, takže výdavok dostane vlastnú kópiu — fotku
+// zmenšenú (č. 92), PDF a XML bajt po bajte rovnaké. Originál `email_…` do
+// 14. 9. 2026 ostával v úložisku navždy vedľa nej.
+//
+// Volá sa pri uložení výdavku zo Schránky PRED `poZmene`:
+//   - výdavok bez vlastnej kópie (úložisko ju neprijalo, e-faktúra uložená „aj
+//     tak“) ukáže na originál z e-mailu — ten sa potom nemaže;
+//   - s vlastnou kópiou sa originál poznačí a zmaže ho `oznacCakajuciSpracovany`
+//     až po odbavení mailu, cez `dokladZmazOriginaly` (po uložení do cloudu a len
+//     keď naň nič v dátach neukazuje).
+// Zmenšovať v edge funkcii netreba: server nemá plátno a o tom, či je príloha
+// doklad, rozhodne až človek v appke.
+let _cakajuciNahradeny=null;
+function cakajuciOriginalPoUlozeni(v){
+  _cakajuciNahradeny=null;
+  const id=_cakajuciSpracovavany;
+  const z=id!=null && (cakajuceDoklady||[]).find(x=>x.id===id);
+  if(!z || !z.subor_cesta || !v) return;
+  if(!v.doklad){ v.doklad=z.subor_cesta; return; }
+  _cakajuciNahradeny={ id, cesta:z.subor_cesta };
 }
 
 // ── Rozbaľovacie menu pri tlačidle ────────────────────────────────────────
@@ -37081,7 +37114,7 @@ async function dokUloz(idx, f){
     else {
       if(stav){ stav.textContent="Nahrávam súbor…"; stav.style.color="var(--ink-soft)"; }
       const cesta=await dokladUpload(f, "zmluva");
-      if(cesta){ zaznam.subor=cesta; zaznam.suborNazov=f.name; }
+      if(cesta){ zaznam.subor=cesta; zaznam.suborNazov=nazovUlozenehoSuboru(f.name, cesta); }
       else { if(stav){stav.textContent="Súbor sa nepodarilo nahrať."; stav.style.color="var(--neg)";} return false; }
     }
   }
@@ -37644,6 +37677,16 @@ async function uloziskoMaSubor(priecinok, nazov){
     return (data||[]).some(o=>o && o.name===nazov);
   }catch(e){ console.error("zoznam úložiska:", e); return false; }
 }
+// Meno súboru pre človeka podľa toho, čo je naozaj v úložisku (ROZHODNUTIA č. 104).
+// Fotka ide do úložiska ako zmenšená kópia .jpg (č. 92) — zmluva odfotená ako
+// `zmluva.png` si do 14. 9. 2026 pamätala .png, hoci v úložisku ležal JPEG.
+function nazovUlozenehoSuboru(meno, cesta){
+  const m=String(meno||""), zaklad=String(cesta||"").split("/").pop(), bod=zaklad.lastIndexOf(".");
+  if(bod<0) return m;
+  const ext=zaklad.slice(bod+1).toLowerCase();
+  if(m.toLowerCase().endsWith("."+ext)) return m;
+  return (m.replace(/\.[^./]*$/, "")||"subor")+"."+ext;
+}
 // ── FOTKA DO ÚLOŽISKA ZMENŠENÁ (ROZHODNUTIA č. 92) ──
 // Fotka 4000×3000 z telefónu má 4–4,5 MB a pri pomalom 4G (750 kbit/s) sa
 // nahrávala 43–48 s (dev/opravy/ukladanie8.md). Do úložiska ide kópia s dlhšou
@@ -37706,6 +37749,25 @@ function jpegHlavicka(b){
   }
   return R;
 }
+// KÓDOVANIE JE SYNCHRÓNNE (ROZHODNUTIA č. 106, dev/opravy/fotky10.md). Na telefóne
+// (Galaxy S25 Ultra, WebView 151) trvalo zmenšenie 4,3 s a 4,1 s z toho čakalo
+// ASYNCHRÓNNE kódovanie — `toBlob` aj `OffscreenCanvas.convertToBlob` na hlavnom
+// vlákne, bez ohľadu na obsah a rozmer (biele plátno 600×450 rovnako). Synchrónne
+// `toDataURL` ten istý JPEG zakóduje za 0,1–0,16 s a na ten čas zablokuje stránku;
+// počas „Ukladám…“ to neprekáža. Dekódovanie rovno do menšieho rozmeru
+// (`createImageBitmap` s `resizeWidth`) nepomohlo: plné dekódovanie trvá ~0,1 s,
+// zmenšené ~0,2 s. Worker s OffscreenCanvas je rovnako rýchly, ale Safari ho
+// nemá všade a pridal by druhú cestu.
+function fotkaJpegZPlatna(c){
+  const url=c.toDataURL("image/jpeg", FOTKA_KVALITA);
+  const ciarka=url.indexOf(",");
+  if(ciarka<0 || ciarka===url.length-1) throw new Error("prehliadač fotku nezakódoval");
+  const typ=url.slice(5, ciarka).split(";")[0];
+  if(typ!=="image/jpeg") throw new Error("prehliadač vrátil "+(typ||"neznámy formát")+" namiesto JPEG");
+  const bin=atob(url.slice(ciarka+1)), u=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) u[i]=bin.charCodeAt(i);
+  return new Blob([u], {type:"image/jpeg"});
+}
 // → {subor, chyba}. `subor` je kópia alebo pôvodný súbor, `chyba` len pri poruche.
 async function fotkaPreUlozisko(file){
   if(!jeFotkaNaZmensenie(file) || file.size<=FOTKA_PRAH_B) return {subor:file};
@@ -37725,9 +37787,7 @@ async function fotkaPreUlozisko(file){
     x.fillStyle="#fff"; x.fillRect(0, 0, w, h);   // priehľadné PNG by v JPEG sčernelo
     x.imageSmoothingEnabled=true; x.imageSmoothingQuality="high";
     x.drawImage(bmp, 0, 0, w, h);
-    const blob=await new Promise(r=>c.toBlob(r, "image/jpeg", FOTKA_KVALITA));
-    if(!blob) throw new Error("prehliadač fotku nezakódoval");
-    if(blob.type!=="image/jpeg") throw new Error("prehliadač vrátil "+(blob.type||"neznámy formát")+" namiesto JPEG");
+    const blob=fotkaJpegZPlatna(c);
     if(blob.size>=file.size) return {subor:file};
     const meno=String(file.name||"fotka").replace(/\.[^./]*$/, "")+".jpg";
     return {subor:new File([blob], meno, {type:"image/jpeg", lastModified:file.lastModified||Date.now()})};
