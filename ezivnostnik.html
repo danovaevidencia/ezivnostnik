@@ -2944,6 +2944,7 @@ function resetStavuModulov(){
   vyber=null;   // výber zo zvončeka nesie kľúče predošlej firmy
   _cakajuciSpracovavany=null;   // rozpracovaný doklad zo Schránky patrí predošlej firme (č. 70)
   _efakturaSpracovavana=null;   // rozpracovaná prijatá e-faktúra tiež (č. 81)
+  saasRelaciaVyprazdni();       // faktúry za predplatné a ich automatika patria firme (č. 104)
   Object.keys(STAV_CITANIA_RELACIA).forEach(k=>delete STAV_CITANIA_RELACIA[k]);   // stav čítania pod Náhľadom patrí firme (č. 58)
   // Otvorená skupina a modul. Obrazovka modulu sa nižšie skrýva, ale bočná
   // lišta kreslí rozbalenú skupinu podľa týchto premenných — po odchode z dema
@@ -22442,7 +22443,7 @@ function spracujNavratZPlatby(){
         else if(aktualnyPlan()!=="free") hotovo=true;
       }
       if(hotovo){
-        _saasFaktury=null; _saasAutoDone=false;
+        saasRelaciaVyprazdni();
         try{ await autoZaevidujSaasFaktury(); }catch(_){}
         if(jeDoplnok){
           alert("✓ Ďakujeme za platbu!\n\nDaňové priznanie typ B za rok "+(rokDoplnku||"")+" máte odomknuté natrvalo.\n"+
@@ -22710,6 +22711,12 @@ let _saasChyba=null;
 // Automatické (tiché) zaevidovanie faktúr za predplatné do výdavkov — bez tlačidla.
 // Zákazník ich má rovno vo Výdavkoch (aj s PDF prílohou), dozvie sa o tom cez zvonček.
 let _saasAutoDone=false;
+// Zoznam faktúr, chyba ich načítania aj „automatika už bežala“ patria firme,
+// pri ktorej vznikli (ROZHODNUTIA č. 104). Vyprázdňuje ich prepnutie firmy
+// (`resetStavuModulov`) aj návrat z platby — jedno miesto. Do 14. 9. 2026 ich
+// prepnutie nechalo: druhá firma v tej istej relácii automatické zaevidovanie
+// nedostala a zvonček jej ponúkal faktúry a chybu predošlej firmy.
+function saasRelaciaVyprazdni(){ _saasFaktury=null; _saasChyba=null; _saasAutoDone=false; }
 async function autoZaevidujSaasFaktury(){
   if(localMode || !sb || !firmaId || !firmaData) return 0;
   if(!mozemPisat("vydavky")) return 0;
@@ -23146,6 +23153,12 @@ async function spustiPredplatne(plan, obdobie, rok, tier){
       try{ sessionStorage.setItem("ez_platba", JSON.stringify({ plan, rok: rok?String(rok):null })); }catch(_){}
       location.href=r.url;              // nové predplatné → Stripe checkout
     }
+    // Server odmietol nevlastníka (ROZHODNUTIA č. 103): rola sa medzitým zmenila
+    // alebo appka stojí na starých údajoch, takže stráž vyššie to nevedela. Tá
+    // istá veta ako v cenníku, z jedného miesta — podľa KÓDU, text servera sa
+    // neukazuje. 403 bez kódu vracia `stripe-checkout` pred nasadením desiateho
+    // kola (je v nej jediný 403), takže na poradí nasadenia nezáleží.
+    else if(r.kod==="len_vlastnik" || (res.status===403 && !r.kod)) alert(PREDPLATNE_LEN_VLASTNIK);
     else alert("Platbu sa nepodarilo spustiť: "+(r.error||res.status));
   }catch(e){ alert("Chyba: "+e.message); }
 }
@@ -23499,7 +23512,8 @@ function zmenitNaFree(){
 const ZMENA_PLANU_LEN_VLASTNIK = "Naplánovanú zmenu plánu môže zrušiť len vlastník firmy.";
 // Kto smie meniť predplatné — JEDINÉ miesto pravidla pre cenník (ROZHODNUTIA č. 95).
 // Predplatiť, Prejsť na, Zrušiť predplatné aj doplnok volajú `stripe-checkout`,
-// ktorý overí `firma.user_id` a iného odmietne 403; zrušenie naplánovanej zmeny
+// ktorý overí `firma.user_id` a iného odmietne 403 s kódom `len_vlastnik` a touto
+// vetou (č. 103, zhodu drží test_oprava_male10); zrušenie naplánovanej zmeny
 // odmietne `zrus_zmenu_planu` (admin_41). Účtovník ani Náhľad akciu nedostanú,
 // len stlmené tlačidlo a vetu. Lokálny režim = vlastník (`mojaRolaVFirme`).
 function smiemMenitPredplatne(){ return mojaRolaVFirme()==="vlastnik"; }
@@ -26493,12 +26507,18 @@ async function postarPrevezmiRaz(dokladId){
 // schránku" a `postarNaPozadi` (pri spustení appky a otvorení E-faktúr).
 // Bez otvorenej appky dnes nekontroluje nič — príjem na serveri do 14 dní,
 // kým poštár obsah zmaže, je samostatná práca (PLAN §21.4).
-let _postarBezi=false;
+// Príznak behu drží DÁTA FIRMY, pri ktorých beh začal — nie true (ROZHODNUTIA
+// č. 104). Po prepnutí firmy beh predošlej novú nedrží: schránka aj stav
+// odoslaných prídu hneď, nie až pri ďalšom podnete o 5 minút. A finally uvoľní
+// len vlastný beh, nie ten, ktorý medzitým začala nová firma (aj tá istá firma
+// otvorená znova má nové dáta). Rovnako `_postarStavBezi`.
+let _postarBezi=null;
 async function postarSynchronizuj(tiche){
   // Rola, ktorá do E-faktúr písať nesmie, schránku nepreberá (č. 88). Stráž je
   // tu, kde sa zapisuje, nie len u volajúcich (`postarNaPozadi`, tlačidlo).
-  if(_postarBezi || !postarDostupny() || !mozemPisat("efaktury")) return 0;
-  _postarBezi=true;
+  if(_postarBezi===firmaData || !postarDostupny() || !mozemPisat("efaktury")) return 0;
+  const beh=firmaData;
+  _postarBezi=beh;
   const firma=firmaId;
   let vzatych=0;
   try{
@@ -26545,7 +26565,7 @@ async function postarSynchronizuj(tiche){
   }catch(e){
     console.error("schránka poštára:", e);
     if(!tiche && typeof cloudMsg==="function") cloudMsg("Schránku sa nepodarilo načítať: "+e.message,"warn");
-  }finally{ _postarBezi=false; }
+  }finally{ if(_postarBezi===beh) _postarBezi=null; }
   return vzatych;
 }
 
@@ -26602,14 +26622,15 @@ function efaktRiadokOdoslanej(f, riadky, faktury){
   return (riadky||[]).filter(x=>String(x.invoiceNumber||"")===cislo)
     .sort((a,b)=>String(b.creationDateTime||"").localeCompare(String(a.creationDateTime||"")))[0] || null;
 }
-let _postarStavBezi=false;
+// Príznak drží dáta firmy, pri ktorých beh začal (č. 104) — viď `_postarBezi`.
+let _postarStavBezi=null;
 async function postarObnovStavOdoslanych(tiche){
   // Stav sa zapisuje do faktúr — rola bez zápisu do Faktúr ho neobnovuje (č. 88).
-  if(_postarStavBezi || !postarMaIdentitu() || !mozemPisat("faktury")) return 0;
+  if(_postarStavBezi===firmaData || !postarMaIdentitu() || !mozemPisat("faktury")) return 0;
   const cakaju=(firmaData.faktury||[]).filter(f=>f && efaktCakaNaStav(f.efaktura));
   if(!cakaju.length) return 0;
-  const firma=firmaId;
-  _postarStavBezi=true;
+  const firma=firmaId, beh=firmaData;
+  _postarStavBezi=beh;
   let zmien=0;
   try{
     // Jedna faktúra = jedno volanie cez jej číslo. Viac = od najstaršieho
@@ -26636,7 +26657,7 @@ async function postarObnovStavOdoslanych(tiche){
   }catch(e){
     console.error("stav odoslaných e-faktúr:", e);
     if(!tiche && typeof cloudMsg==="function") cloudMsg("Stav odoslaných e-faktúr sa nepodarilo obnoviť: "+e.message,"warn");
-  }finally{ _postarStavBezi=false; }
+  }finally{ if(_postarStavBezi===beh) _postarStavBezi=null; }
   return zmien;
 }
 
