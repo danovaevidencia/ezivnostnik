@@ -4,7 +4,7 @@
 window.NAVODY_SNIMKY = {
  "banka-automat-1": {
   "m": {
-   "subor": "navody/banka-automat-1.m.a3bdfaec.webp",
+   "subor": "navody/banka-automat-1.m.fe3dbc5e.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -460,7 +460,7 @@ window.NAVODY_SNIMKY = {
  },
  "data-firma-3": {
   "m": {
-   "subor": "navody/data-firma-3.m.1751368d.webp",
+   "subor": "navody/data-firma-3.m.9c414b07.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -471,7 +471,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/data-firma-3.d.2d238c5c.webp",
+   "subor": "navody/data-firma-3.d.e105794a.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -604,7 +604,7 @@ window.NAVODY_SNIMKY = {
  },
  "data-predplatne-2": {
   "m": {
-   "subor": "navody/data-predplatne-2.m.316c5435.webp",
+   "subor": "navody/data-predplatne-2.m.9bb57098.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -615,7 +615,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/data-predplatne-2.d.af65cc42.webp",
+   "subor": "navody/data-predplatne-2.d.2443c104.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -772,7 +772,7 @@ window.NAVODY_SNIMKY = {
  },
  "dph-odlozit-1": {
   "m": {
-   "subor": "navody/dph-odlozit-1.m.c24ddada.webp",
+   "subor": "navody/dph-odlozit-1.m.0548255f.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -988,7 +988,7 @@ window.NAVODY_SNIMKY = {
  },
  "dph-udaje-2": {
   "m": {
-   "subor": "navody/dph-udaje-2.m.b640ba46.webp",
+   "subor": "navody/dph-udaje-2.m.b85538b6.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -999,7 +999,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/dph-udaje-2.d.56017c6e.webp",
+   "subor": "navody/dph-udaje-2.d.cb424d1d.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1626,7 +1626,7 @@ window.NAVODY_SNIMKY = {
  },
  "jazdy-sprievodca-2": {
   "m": {
-   "subor": "navody/jazdy-sprievodca-2.m.46a0d3cc.webp",
+   "subor": "navody/jazdy-sprievodca-2.m.4d5d356e.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -2058,7 +2058,7 @@ window.NAVODY_SNIMKY = {
  },
  "knihy-kniha-1": {
   "m": {
-   "subor": "navody/knihy-kniha-1.m.730b79d2.webp",
+   "subor": "navody/knihy-kniha-1.m.13251147.webp",
    "w": 390,
    "h": 600,
    "ciel": {
