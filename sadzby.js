@@ -12,8 +12,8 @@
 //  pravidlo zapísané na dvoch miestach sa skôr či neskôr rozíde.
 //
 //  Čo do appky patrí a sem NIE: sadzbaFirmy() (prepísanie v nastaveniach
-//  zákazníka), migrácia starých nastavení a náhľad dopadu na skutočné dáta.
-//  Všetko tri potrebujú firmaData, ktoré admin nemá.
+//  zákazníka) a migrácia starých nastavení. Obe potrebujú firmaData, ktoré
+//  admin nemá.
 // ═══════════════════════════════════════════════════════════════
 
 // Vlastný formát čísel. Appka aj admin majú svoje eur(), ale s inou presnosťou —
@@ -515,7 +515,7 @@ async function sadzbyNacitaj(){
 
 
 // ═══════════════════════════════════════════════════════════════
-//  EDITOR SADZIEB (3c) — koncept, náhľad dopadu, export
+//  EDITOR SADZIEB (3c) — koncept a export
 //  Editor NEZAPISUJE do bežiacej tabuľky. Zmeny sa hromadia v koncepte a von
 //  idú ako súbor sadzby.json, ktorý sa commitne. Znie to okľukou, ale má to
 //  dôvod: git je audit, ktorý by som inak musel postaviť — kto, kedy, z čoho
