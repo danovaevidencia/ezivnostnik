@@ -1350,6 +1350,7 @@ h1,h2,h3,h4,.chead,.wbig,.sbox .sn,.sp-title b,.splittitle{text-wrap:balance}
 /* 37 px ako všetko ostatné (kap. 90.14). Zatvorenie modálu je terč, ktorý sa
    trafí naslepo — človek mieri palcom do rohu, nie na ikonu. */
 .modalx{width:37px;height:37px;border-radius:9px;border:1px solid var(--line);background:var(--bg);cursor:pointer;font-size:15px;color:var(--ink-soft)}
+.modalx:disabled,#modalZrusit:disabled{opacity:.45;cursor:default}
 .modalbd{padding:20px 22px}
 .mfield{margin-bottom:13px}
 .mfield label{display:block;font-size:12px;font-weight:600;color:var(--ink-soft);margin-bottom:5px}
@@ -2056,12 +2057,12 @@ html[data-jazda] .jazdapruh{display:flex}
   <div class="modalcard">
     <div class="modalhd">
       <h3 id="modalTitle">Upraviť</h3>
-      <button class="modalx" onclick="closeModal()">✕</button>
+      <button class="modalx" id="modalX" onclick="closeModal()">✕</button>
     </div>
     <div class="modalbd" id="modalBody"></div>
     <div class="modalft">
       <button class="abtn danger hidden" id="modalDelete" onclick="modalDeleteConfirm()">Zmazať</button>
-      <button class="abtn" onclick="closeModal()">Zrušiť</button>
+      <button class="abtn" id="modalZrusit" onclick="closeModal()">Zrušiť</button>
       <button class="abtn pri" id="modalOk" onclick="modalConfirm()">Uložiť</button>
     </div>
   </div>
@@ -7666,6 +7667,17 @@ function ucetFSdokladu(x){
   if(!ibanPlatny(ib)) return "preklep";
   return (x&&x.ucetFS)||"";
 }
+// Doklad s preklepom v IBAN nemá mať stav z registra — ani ten, ktorý dostal
+// pred opravou č. 45. Stav je odvodený z registra, nie zadaný človekom, preto ho
+// ďalšie overenie (uloženie dokladu aj hromadné) zmaže a ročná kontrola ukáže
+// preklep, nie ručenie (ROZHODNUTIA č. 61). Preklep nie je „neviem" — nevypýtaný
+// register výsledok nemaže (`VYDAVOK_POLIA_BEZ_PRAZDNEJ`). Vráti, či zmazal.
+function ucetFSzmazPreklep(x){
+  const ib=String((x&&x.iban)||"").replace(/[^A-Za-z0-9]/g,"");
+  if(!ib || ibanPlatny(ib) || !("ucetFS" in x || "ucetFSdatum" in x)) return false;
+  delete x.ucetFS; delete x.ucetFSdatum;
+  return true;
+}
 // Jeden čitateľ pre OBE ukladacie cesty formulára výdavku. Keby si každá
 // čítala po svojom, jedna by sa raz zabudla — presne to sa stalo pri
 // percente osobného použitia (kap. 53.3).
@@ -7851,10 +7863,17 @@ async function overUctyDodavatelov(rok){
   if(!zoz.length){ alert("Niet čo overovať — žiadny doklad tohto roka nemá naraz IČ DPH dodávateľa, číslo účtu aj odpočítanú DPH."); return; }
   // IBAN s preklepom do registra nejde (č. 45) — výsledok by bol vždy
   // „neoznámený" a z prepisu by bolo ručenie. Povie sa, ale neoveruje.
-  const preklepy=zoz.filter(x=>ucetFSdokladu(x)==="preklep").length;
-  const preklepVeta=preklepy?"⚠ "+preklepy+" dokladov má IBAN dodávateľa s preklepom — v registri sa neoverujú. Opravte IBAN podľa dokladu.":"";
+  const preklepy=zoz.filter(x=>ucetFSdokladu(x)==="preklep");
+  const preklepVeta=preklepy.length?"⚠ "+preklepy.length+" dokladov má IBAN dodávateľa s preklepom — v registri sa neoverujú. Opravte IBAN podľa dokladu.":"";
   zoz=zoz.filter(x=>ucetFSdokladu(x)!=="preklep");
-  if(!zoz.length){ alert("Niet čo overovať v registri.\n\n"+preklepVeta); return; }
+  // Stav z registra, ktorý doklad s preklepom dostal pred opravou č. 45, overenie
+  // zmaže (`ucetFSzmazPreklep`, ROZHODNUTIA č. 61) — až keď naozaj prebehne,
+  // nie pri zrušenej otázke. Bez dotazu do registra sa neukladá nič iné.
+  if(!zoz.length){
+    let zmazanych=0; preklepy.forEach(x=>{ if(ucetFSzmazPreklep(x)) zmazanych++; });
+    if(zmazanych) poZmene();
+    alert("Niet čo overovať v registri.\n\n"+preklepVeta); return;
+  }
   const dodavatelia=[...new Set(zoz.map(x=>normalizujICDPH(x.dodavatelIcDph)))];
   if(!confirm("Overiť účty "+dodavatelia.length+" dodávateľov v registri Finančnej správy?\n\n"
     +zoz.length+" dokladov za rok "+rok+". Nič sa nemení v účtovníctve — len sa k dokladom doplní, či bol účet oznámený."
@@ -7867,6 +7886,7 @@ async function overUctyDodavatelov(rok){
   // Zápis až po dotazoch: čo sa nepodarilo overiť, ostane nedotknuté —
   // „neviem" sa nesmie zapísať ako výsledok.
   let zapisanych=0;
+  preklepy.forEach(x=>ucetFSzmazPreklep(x));
   zoz.forEach(x=>{
     const stav=ucetFSstav(x.dodavatelIcDph, x.iban);
     if(stav){ x.ucetFS=stav; x.ucetFSdatum=new Date().toISOString().slice(0,10); zapisanych++; }
@@ -13325,6 +13345,7 @@ async function ulozVydavokZFormulara(idx, R){
     obj.id=x.id;
     VYDAVOK_POLIA_BEZ_PRAZDNEJ.forEach(k=>{ if(!(k in obj)) delete x[k]; });
     ulozeny=Object.assign(x, obj);
+    ucetFSzmazPreklep(ulozeny);   // preklep nie je „neviem": starý stav z registra preč (č. 61)
   }
   zapamatajPartnera(ulozeny);
   if(doplnene) zapisAutomat("icdph", [dokladKluc(ulozeny)]);
@@ -23021,6 +23042,19 @@ function zamOkno(modul){
   // hneď po otvorení a prepísanie tela by ich zahodilo.
   document.getElementById("modalBody").insertAdjacentHTML("afterbegin", pasIbaCitanie(modul));
 }
+// OKNO, KTORÉ NAHRÁVA ORIGINÁLY DOKLADOV, SA NEDÁ ZAVRIEŤ (✕, Zrušiť).
+// Zavretie uloženie nezastaví — `modalSave` už beží —, len ho skryje: doklady
+// sa zapíšu až po nahratí, počítadlo „⏳ 3 z 20" písalo do tlačidla ďalšieho
+// okna a dávka načítala výpis ZSE z nového okna importu (overené behom
+// 14. 9. 2026, ROZHODNUTIA č. 62, technické). Zamyká `dokladOriginalyUloz` —
+// jediná cesta nahratia originálu pre okno dokladu aj import. Zamknuté sú len
+// tlačidlá, ktorými okno zatvára človek; `closeModal` z kódu ostáva voľné.
+function oknoNahrava(zamknut){
+  ["modalX","modalZrusit"].forEach(id=>{
+    const b=document.getElementById(id); if(!b) return;
+    b.disabled=!!zamknut; b.title=zamknut?"Počkajte, kým sa originály dokladov nahrajú":"";
+  });
+}
 function closeModal(){
   document.getElementById("modal").classList.remove("on"); modalSave=null; modalDelete=null; modalModul=null;
   // Príznak karty pohybu musí padnúť tu, inak by `parPrekresli` po zavretí
@@ -31563,8 +31597,26 @@ async function spracujDokladSubor(file, setStav, qrVopred, ignorujZse){
   }catch(_){}
   return R;
 }
+// ── STRÁŽ IMPORTU PODĽA MODULU, DO KTORÉHO SÚBOR ZAPISUJE ──
+// Import dokladov zapisuje podľa toho, čo súbor je: doklad do výdavkov, podrobný
+// výpis nabíjaní ZSE Drive medzi nabíjania v knihe jázd. Stráži sa modul zápisu,
+// nie tlačidlo, z ktorého import začal (kap. 113.3), a skôr, než sa nahrá
+// originál. Do 14. 9. 2026 strážil jeden súbor výpisu modul výdavkov, výpis zo
+// schránky či zo zdieľania nestrážil nič a dávka nahrala originály a zapísala
+// doklady skôr, než výpis odmietla (ROZHODNUTIA č. 62, technické).
+//
+// `polozky` = rozpoznané súbory (výsledok `spracujDokladSubor`), ktoré sa naozaj
+// zapíšu. Bez položiek sa stráži modul dokladov.
+const MODUL_DOKLADU="vydavky", MODUL_VYPISU_ZSE="jazdy";
+function modulImportu(R){ return Array.isArray(R && R._zseTxns) ? MODUL_VYPISU_ZSE : MODUL_DOKLADU; }
+function strazImportu(polozky){
+  const moduly=[...new Set((polozky||[]).map(modulImportu))];
+  return (moduly.length ? moduly : [MODUL_DOKLADU]).every(m=>strazZapis(m));
+}
 async function faktPdfSpracuj(e){
-  if(!strazZapis("vydavky")) return;   // import došlých faktúr zapisuje do výdavkov
+  // Pred čítaním sa nevie, čo súbory sú: stačí právo do jedného z modulov, do
+  // ktorých import zapisuje. Každý súbor sa stráži pri uložení (`strazImportu`).
+  if(!mozemPisat(MODUL_VYPISU_ZSE) && !strazZapis(MODUL_DOKLADU)) return;
   let files=[...e.target.files]; e.target.value="";
   if(!files.length) return;
   // Archív sa rozbalí ešte pred otvorením okna, aby počet v hlavičke sedel
@@ -31730,10 +31782,16 @@ async function faktPdfUlozImport(){
   finally{ _faktPdfUklada=false; if(tlacidlo) tlacidlo.textContent=text; }
 }
 async function faktPdfUlozImportRaz(){
+    // Stav okna sa berie TERAZ, pred nahrávaním: `_faktPdfZse` môže medzitým
+    // prepísať nové okno importu a uloženie by načítalo výpis, ktorý v tomto
+    // okne nebol (overené behom 14. 9. 2026).
+    const zse=_faktPdfZse.filter(Z=>Z._import);
+    const opravenych=_faktPdfData.filter(R=>R._import&&R._opravene).length;
     // Vlastná stráž zápisovej cesty: okno importu nemá zamOkno, takže ho
     // modalConfirm nestráži, a stráž vo faktPdfSpracuj kryje len otvorenie.
-    // Modul je ten, DO KTORÉHO sa zapisuje (výdavky), ako tlačidlo importu.
-    if(!strazZapis("vydavky")) return false;
+    // Každý vybraný súbor podľa modulu, DO KTORÉHO zapisuje, a pred nahratím
+    // originálov — odmietnutý výpis nesmie nechať za sebou uložené doklady.
+    if(!strazImportu([..._faktPdfData.filter(R=>R._import && !R._chyba), ...zse.map(Z=>({_zseTxns:Z.txns}))])) return false;
     let preskocene=0;
     const prijate=[];   // {R, obj} — doklady, ktoré sa naozaj uložia
     _faktPdfData.forEach(R=>{
@@ -31780,9 +31838,7 @@ async function faktPdfUlozImportRaz(){
     // Výpisy nabíjaní cestou tlačidla ⚡ ZSE v knihe jázd (stráž modulu,
     // čítanie, uloženie aj hláška) — až po zápise dokladov, aby ich Zrušiť
     // v otázke o origináli nenačítalo bez importu.
-    const zse=_faktPdfZse.filter(Z=>Z._import);
     for(const Z of zse) await spracujZse({target:{files:[Z.subor], value:""}});
-    const opravenych=_faktPdfData.filter(R=>R._import&&R._opravene).length;
     if(pridane || preskocene || !zse.length) setTimeout(()=>alert("Importovaných "+pridane+" faktúr."
       +(preskocene?"\nPreskočených "+preskocene+" duplicít (už evidované).":"")
       +(lokalnaVeta?"\n\n"+lokalnaVeta:"")
@@ -32408,6 +32464,10 @@ async function spracujDokladZoSuboru(file, qrVopred, archivCesta){
         // Výdavok sa nezakladá, takže originál nemá čo nahrávať do cloudu —
         // inak by tam ostal viseť pre nasledujúci doklad.
         _ocrFile=null; _ocrArchiv=null;
+        // Výpis zapisuje do knihy jázd: stráži sa ten modul, nie výdavky, kam
+        // mieril doklad zo schránky, zo zdieľania či z importu (`strazImportu`).
+        // Odmietnutý výpis ostáva v schránke.
+        if(!strazImportu([R])) return;
         const pridanych=zseUlozNabijania(R._zseTxns);
         // Až TERAZ, keď sú nabíjania uložené: zrušená otázka musí výpis
         // nechať v schránke.
@@ -36399,14 +36459,19 @@ async function dokladOriginalyUloz(polozky, pokracovanie, priebeh){
   const zoz=(polozky||[]).filter(P=>P && P.subor);
   if(localMode && zoz.some(P=>P.jeEf) && typeof cloudMsg==="function") cloudMsg(ORIGINAL_LOKALNY,"warn");
   const neulozene=[];
-  for(let i=0;i<zoz.length;i++){
-    const P=zoz[i];
-    if(P.cesta) continue;
-    if(priebeh) priebeh(i+1, zoz.length);
-    const v=await dokladOriginalNahraj(P.subor, P.jeEf);
-    P.cesta=v.cesta||null;
-    if(!P.cesta && P.jeEf && !localMode) neulozene.push(v.chyba ? Object.assign({}, P, {chyba:v.chyba}) : P);
-  }
+  // Počas nahrávania sa okno nedá zavrieť (`oknoNahrava`). Otázka nižšie už
+  // beží s odomknutým oknom — po Zrušiť v nej okno ostáva otvorené a dá sa zavrieť.
+  oknoNahrava(true);
+  try{
+    for(let i=0;i<zoz.length;i++){
+      const P=zoz[i];
+      if(P.cesta) continue;
+      if(priebeh) priebeh(i+1, zoz.length);
+      const v=await dokladOriginalNahraj(P.subor, P.jeEf);
+      P.cesta=v.cesta||null;
+      if(!P.cesta && P.jeEf && !localMode) neulozene.push(v.chyba ? Object.assign({}, P, {chyba:v.chyba}) : P);
+    }
+  }finally{ oknoNahrava(false); }
   if(!neulozene.length) return true;
   const dovody=[...new Set(neulozene.map(n=>n.chyba).filter(Boolean))];
   return confirm("⚠ Originál "+(neulozene.length===1?"e-faktúry":neulozene.length+" e-faktúr")+" sa NEULOŽIL do archívu:\n\n"
