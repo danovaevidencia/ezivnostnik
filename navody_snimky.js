@@ -4,7 +4,7 @@
 window.NAVODY_SNIMKY = {
  "banka-automat-1": {
   "m": {
-   "subor": "navody/banka-automat-1.m.313dfe18.webp",
+   "subor": "navody/banka-automat-1.m.eea8fe85.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -15,7 +15,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/banka-automat-1.d.1fa0b105.webp",
+   "subor": "navody/banka-automat-1.d.40bbc712.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -28,7 +28,7 @@ window.NAVODY_SNIMKY = {
  },
  "banka-automat-2": {
   "m": {
-   "subor": "navody/banka-automat-2.m.4dd86dc2.webp",
+   "subor": "navody/banka-automat-2.m.6abe2567.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -39,7 +39,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/banka-automat-2.d.dea86dd5.webp",
+   "subor": "navody/banka-automat-2.d.eb26cb8c.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -279,7 +279,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/banka-rucne-2.d.5e7b40ca.webp",
+   "subor": "navody/banka-rucne-2.d.a003c795.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -772,7 +772,7 @@ window.NAVODY_SNIMKY = {
  },
  "dph-odlozit-1": {
   "m": {
-   "subor": "navody/dph-odlozit-1.m.19f0608b.webp",
+   "subor": "navody/dph-odlozit-1.m.cc7418fd.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -2237,7 +2237,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/majetok-zaradit-1.d.b0703525.webp",
+   "subor": "navody/majetok-zaradit-1.d.eba71f66.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -2586,7 +2586,7 @@ window.NAVODY_SNIMKY = {
  },
  "superdash-rok-1": {
   "m": {
-   "subor": "navody/superdash-rok-1.m.bbf939a4.webp",
+   "subor": "navody/superdash-rok-1.m.552a8b1c.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -2597,7 +2597,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/superdash-rok-1.d.28bce1e4.webp",
+   "subor": "navody/superdash-rok-1.d.6c70b221.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -3114,7 +3114,7 @@ window.NAVODY_SNIMKY = {
  },
  "vydavky-rucne-4": {
   "m": {
-   "subor": "navody/vydavky-rucne-4.m.586edd18.webp",
+   "subor": "navody/vydavky-rucne-4.m.426d5701.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -3125,7 +3125,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/vydavky-rucne-4.d.8c0844fb.webp",
+   "subor": "navody/vydavky-rucne-4.d.10a680d3.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
