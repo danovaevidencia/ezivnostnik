@@ -2440,6 +2440,28 @@ function nastavVyskuDemo(){
 window.addEventListener("resize", ()=>setTimeout(nastavVyskuDemo, 0));
 // Odchod z dema — jediné miesto, ktoré demo ruší. Volá ho „Vytvoriť vlastný
 // účet" aj „Ukončiť demo" (ROZHODNUTIA č. 50).
+// Téma, zakryté čísla a šírka lišty žijú v atribútoch `<html>`, ktoré `<head>`
+// nastaví zo zariadenia len pri štarte stránky. Keby sa pamäť dema len zabudla,
+// voľba z dema by ostala na obrazovke až do obnovenia — skutočná firma by po
+// prihlásení mala odkryté čísla, hoci ich zariadenie má zakryté. Beží ešte
+// v deme: téma a zakrytie idú cez tie isté funkcie ako voľba človeka
+// (prekreslenie, farba lišty, zakrytie súm) a zapíšu sa len do pamäti, ktorú
+// `demoNaRegistraciu` hneď potom zabudne. Téma, ktorú si na zariadení nikto
+// nevybral, sa riadi systémom rovnako ako v `<head>` (ROZHODNUTIA č. 80).
+// Vracia sa len voľba, ktorú demo zmenilo (jej kľúč je v pamäti): tieto atribúty
+// inak nastavuje len `<head>` zo zariadenia, takže ostatné sedia. Odchod preto
+// `<html>` nečíta a bez zmeny nič neprekresľuje.
+function demoVratVolbyZariadenia(){
+  const zmenilo=k=>_demoZariadenie.has(k);
+  const tema=zmenilo("eziv_tema"), zakryte=zmenilo("eziv_zakryte"), bocna=zmenilo("eziv_bocna");
+  _demoZariadenie.clear();                  // čítanie nižšie berie zariadenie
+  if(tema) nastavTemu((gpsCitaj("eziv_tema")
+    || (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "tmavy" : "svetly"))==="tmavy");
+  if(zakryte) nastavZakrytie(gpsCitaj("eziv_zakryte")==="1");
+  // `prepniBocnu` len prepína podľa úložiska — atribút sa nastaví priamo,
+  // lišta sa prekreslí pri ďalšom vstupe do appky.
+  if(bocna) document.documentElement.setAttribute("data-bocna", bocnaZbalena()?"uzka":"siroka");
+}
 function demoNaRegistraciu(){
   // Ukážková jazda by merala ďalej aj po odchode z dema a pás by ju ponúkal
   // zapísať do skutočnej firmy. Ruší sa ešte v deme: `jazdaZmazStav` v ňom na
@@ -2447,6 +2469,8 @@ function demoNaRegistraciu(){
   if(_jazda){ jazdaZastavMeranie(); jazdaZmazStav(); }
   // Voľby zariadenia zmenené v deme sú len v pamäti karty (`gpsUloz`) a s demom
   // sa zabudnú — aj súhlas s mapou, ktorý si karta drží bokom v premennej.
+  // Tie, ktoré drží `<html>`, sa pred tým vrátia na hodnotu zariadenia.
+  demoVratVolbyZariadenia();
   _demoZariadenie.clear(); _mapaVysvetlena=null;
   demoMode=false; localMode=false; firmaData=null; firmaConfig=null;   // plán dema sa nededí
   // Demo stojí na tých istých premenných ako skutočná firma — filtre, výbery,
@@ -8533,12 +8557,13 @@ function listaVyber(){
 //  a jedno zariadenie by prepisovalo druhé).
 //  Atribút drží `<html>`, aby sa šírka dala nastaviť ešte pred spustením
 //  skriptu appky — inak lišta pri každom štarte blikne širokou.
+//  Úložisko cez `gpsCitaj`/`gpsUloz`: v deme len pamäť karty (ROZHODNUTIA č. 80).
 function bocnaZbalena(){
-  try{ return localStorage.getItem("eziv_bocna")==="uzka"; }catch(_){ return false; }
+  return gpsCitaj("eziv_bocna")==="uzka";
 }
 function prepniBocnu(){
   const uzka=!bocnaZbalena();
-  try{ localStorage.setItem("eziv_bocna", uzka?"uzka":"siroka"); }catch(_){}
+  gpsUloz("eziv_bocna", uzka?"uzka":"siroka");
   document.documentElement.setAttribute("data-bocna", uzka?"uzka":"siroka");
   renderLista();
   // Horná lišta sa pri zmene šírky môže inak zalomiť a jej výška je
@@ -17758,6 +17783,9 @@ const gpsZdroj={
 // v deme berie najprv to, čo zmenilo demo, potom zariadenie. Rovnaké pravidlo ako
 // `eziv_firma` a `ez_jazda_beh`, tu na jednom mieste pre všetky kľúče, ktoré idú
 // cez tieto dve funkcie (ROZHODNUTIA č. 73, technické; dev/opravy/okno.md).
+// Od siedmeho kola sem idú aj téma, zakryté čísla, šírka lišty a heslo k ZIP
+// výpisom (č. 80); tie, ktoré drží `<html>`, vracia `demoVratVolbyZariadenia`.
+// Zápis do `localStorage` mimo týchto funkcií stráži `test_oprava_demo7`.
 const _demoZariadenie=new Map();
 function gpsCitaj(kluc){
   if(demoMode && _demoZariadenie.has(kluc)) return _demoZariadenie.get(kluc);
@@ -24428,14 +24456,13 @@ async function rozbalArchivy(files){
 }
 
 // Heslo k výpisom. Zámerne `localStorage`, nie `firmaData`: to sa synchronizuje
-// do cloudu a heslo by skončilo vedľa archívu, ktorý odomyká.
-const zipHesloKluc = () => "eziv_vypis_heslo_"+(firmaId||"local");
-const zipHesloUlozene = () => { try{ return localStorage.getItem(zipHesloKluc())||""; }catch(_){ return ""; } };
+// do cloudu a heslo by skončilo vedľa archívu, ktorý odomyká. Cez `gpsUloz`:
+// v deme len do pamäti karty. Demo má vlastný kľúč — `firmaId` je v ňom null
+// a kľúč lokálnej firmy by ukážke ponúkol jej skutočné heslo (ROZHODNUTIA č. 80).
+const zipHesloKluc = () => "eziv_vypis_heslo_"+(firmaId||(demoMode?"demo":"local"));
+const zipHesloUlozene = () => gpsCitaj(zipHesloKluc())||"";
 function zipHesloUloz(heslo, pamataj){
-  try{
-    if(pamataj && heslo) localStorage.setItem(zipHesloKluc(), heslo);
-    else localStorage.removeItem(zipHesloKluc());
-  }catch(_){}
+  gpsUloz(zipHesloKluc(), pamataj && heslo ? heslo : null);
 }
 
 // Vráti text XML výpisu zo súboru, ktorý môže byť XML aj (zaheslovaný) ZIP.
@@ -30619,6 +30646,17 @@ let _cakajuceChyba = null;
 const PRICINA_ZNACKA = "Prílohu sme neuložili:";
 const cakajuceNeprijate = () => (cakajuceDoklady||[])
   .filter(x=>x.stav==="bez_prilohy" && String(x.telo||"").startsWith(PRICINA_ZNACKA));
+// Maily bez prílohy, ktoré nie sú ničím iným: bez notifikácií banky (nepridaný
+// pohyb aj mail od banky, ktorý sa nedal prečítať — majú vlastný riadok a ✕)
+// a bez mailov s odmietnutou prílohou (vlastné varovanie). Z tejto funkcie
+// Schránka počíta riadok „N mailov prišlo bez prílohy“ aj vyberá, čo jeho
+// „Zahodiť“ zahodí. Dve kópie sa rozišli: riadok notifikácie vynechával,
+// tlačidlo ich zmietlo a nepridaný pohyb zmizol bez upozornenia (ROZHODNUTIA č. 79).
+function cakajuceBezPrilohy(notifik=cakajuceNotifikacie()){
+  const neprijate=cakajuceNeprijate();
+  return (cakajuceDoklady||[]).filter(x=>x.stav==="bez_prilohy"
+    && !notifik.some(p=>String(p.z.id)===String(x.id)) && !neprijate.includes(x));
+}
 
 async function nacitajCakajuce(tiche){
   if(localMode || !sb || !firmaId) { cakajuceDoklady=[]; return; }
@@ -31046,8 +31084,7 @@ async function otvorCakajuce(){
   // človek s tým vie niečo urobiť, keď sa mu povie čo. Delí ich `cakajuceNeprijate`,
   // teda tá istá funkcia, ktorá dvíha odznak.
   const zahodena= cakajuceNeprijate().filter(x=>!notifik.some(p=>p.z.id===x.id));
-  const bezPril = cakajuceDoklady.filter(x=>x.stav==="bez_prilohy"
-    && !notifik.some(p=>p.z.id===x.id) && !zahodena.includes(x));
+  const bezPril = cakajuceBezPrilohy(notifik);
   const opakuje= cakajuceOpakovane();
   const posledny= await poslednyMailHtml();
 
@@ -31373,13 +31410,13 @@ let _cakajuciSpracovavany = null;
 // appka prílohu odmietla. V databáze majú `bez_prilohy` ako ostatné, líšia sa
 // obsahom `telo` — a zahodiť sa musia zvlášť, inak by ich tlačidlo pri
 // „mailoch bez prílohy" zmietlo spolu s nimi a varovanie by zmizlo bez toho,
-// aby ho niekto čítal.
+// aby ho niekto čítal. To isté platí pre notifikácie banky: „bez_prilohy“
+// vyberá `cakajuceBezPrilohy`, tá istá funkcia, z ktorej Schránka počíta riadok.
 async function odbavCakajuce(stav, odKoho){
   if(!strazZapis(MODUL_DOKLADU)) return;
-  const zoznam = stav==="neprijate"
-    ? cakajuceNeprijate()
-    : cakajuceDoklady.filter(x=>x.stav===stav && (!odKoho || x.od_koho===odKoho)
-        && !(stav==="bez_prilohy" && cakajuceNeprijate().includes(x)));
+  const zoznam = stav==="neprijate" ? cakajuceNeprijate()
+    : stav==="bez_prilohy" ? cakajuceBezPrilohy()
+    : cakajuceDoklady.filter(x=>x.stav===stav && (!odKoho || x.od_koho===odKoho));
   if(!zoznam.length) return;
   const co = stav==="neznamy_odosielatel"
     ? "Zahodiť "+zoznam.length+" mailov z adresy "+odKoho+"?"
@@ -31496,7 +31533,7 @@ function nastavTemu(tmavy){
   const k = document.documentElement;
   if(tmavy) k.setAttribute("data-tema", "tmavy");
   else k.removeAttribute("data-tema");
-  try{ localStorage.setItem("eziv_tema", tmavy ? "tmavy" : "svetly"); }catch(_){}
+  gpsUloz("eziv_tema", tmavy ? "tmavy" : "svetly");   // v deme len do pamäti karty (č. 80)
   // Farba systémovej lišty na mobile. Bez toho ostane modrý pruh nad tmavou
   // appkou a vyzerá to ako nedokončená vec.
   const m = document.getElementById("metaTema");
@@ -31625,7 +31662,7 @@ function nastavZakrytie(zap){
   if(!zakrDomVie()) return;
   const k = document.documentElement;
   if(zap) k.setAttribute("data-zakryte", "1"); else k.removeAttribute("data-zakryte");
-  try{ localStorage.setItem("eziv_zakryte", zap ? "1" : "0"); }catch(_){}
+  gpsUloz("eziv_zakryte", zap ? "1" : "0");   // v deme len do pamäti karty (č. 80)
   const b = document.getElementById("zakrBtn");
   if(b){
     const t = zap ? "Odkryť čísla na obrazovke" : "Zakryť čísla na obrazovke";
