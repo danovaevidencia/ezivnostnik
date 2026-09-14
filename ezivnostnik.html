@@ -2857,6 +2857,7 @@ function resetStavuModulov(){
   vFilter="vsetky"; vRok=""; vMesiac=""; vydVybrane=new Set(); vydPoslednyList=[];
   bFilter="vsetky"; bMesiac=""; vypisRozbaleny=null;
   vyber=null;   // výber zo zvončeka nesie kľúče predošlej firmy
+  _cakajuciSpracovavany=null;   // rozpracovaný doklad zo Schránky patrí predošlej firme (č. 70)
   Object.keys(STAV_CITANIA_RELACIA).forEach(k=>delete STAV_CITANIA_RELACIA[k]);   // stav čítania pod Náhľadom patrí firme (č. 58)
   // Otvorená skupina a modul. Obrazovka modulu sa nižšie skrýva, ale bočná
   // lišta kreslí rozbalenú skupinu podľa týchto premenných — po odchode z dema
@@ -2939,7 +2940,9 @@ function strazPole(modul, prekresli){
 // po prepnutí firmy sa obrazovka aj tak prekresľuje celá. Stlmenie robí CSS,
 // takže sa nedá zabudnúť na prechod DOM po prekreslení.
 function zam(modul){
-  if(mozemPisat(modul)) return "";
+  // Akcia, ktorá zapisuje do viacerých modulov, dá pole — stlmí ju ktorýkoľvek
+  // zakázaný (rozlíšenie kolíznych dokladov v ročnej kontrole).
+  if([].concat(modul).every(m=>mozemPisat(m))) return "";
   return ' data-w="1" title="'+titulokIbaCitanie()+'"';
 }
 function titulokIbaCitanie(){
@@ -5642,7 +5645,8 @@ function dashKonfig(){
       if(!cfg.widgety.includes("nesparovane")) cfg.widgety.push("nesparovane");
     }
   }
-  return cfg;
+  // Rola bez zápisu vidí plochu tak, ako si ju upravila v relácii (dashZmen).
+  return stavCitania("dashboard");
 }
 function dashMetrikaKey(wkey){
   const cfg=dashKonfig();
@@ -5651,15 +5655,11 @@ function dashMetrikaKey(wkey){
   return cfg.metriky[wkey] || kat.metriky[0].k;
 }
 function dashPrepniMetriku(wkey){
-  const cfg=dashKonfig();
   const kat=dashWidgetKatalog()[wkey];
   const cur=dashMetrikaKey(wkey);
   const idx=kat.metriky.findIndex(m=>m.k===cur);
   const next=kat.metriky[(idx+1)%kat.metriky.length];
-  cfg.metriky[wkey]=next.k;
-  firmaDirty=true;
-  ulozNastavenieDebounced();  // ukladaj do cloudu až po pauze, nie pri každom kliku
-  vykresliDashboard();
+  dashZmen(cfg=>{ cfg.metriky[wkey]=next.k; }, true);  // ukladaj do cloudu až po pauze, nie pri každom kliku
 }
 // debounced ukladanie — zabráni zbytočným cloud zápisom pri rýchlom prepínaní
 let _ulozTimer=null;
@@ -5741,8 +5741,7 @@ function dashTileMenu(wkey, ev){
 }
 // nastav konkrétnu metriku (nie cyklické prepínanie)
 function dashNastavMetriku(wkey, mkey){
-  const cfg=dashKonfig(); cfg.metriky[wkey]=mkey;
-  firmaDirty=true; ulozNastavenieDebounced(); vykresliDashboard();
+  dashZmen(cfg=>{ cfg.metriky[wkey]=mkey; }, true);
 }
 // jednoduché kontextové mini-menu
 function zobrazMiniMenu(ev, polozky){
@@ -5809,14 +5808,16 @@ function notifJePrecitana(kluc){ return !!notifPrecitaneMapa()[kluc]; }
 // „Zatiaľ nie“ vyzerali, že nerobia nič. Jedno miesto tej otázky pre všetky
 // príznaky; číta sa cez stavCitania. Relácia patrí firme, pri ktorej vznikla —
 // prepnutie firmy ju vyprázdni (resetStavuModulov).
+// Tou istou cestou ide úprava plochy (dashZmen) — `uloz` je jej spôsob uloženia
+// (hneď alebo po pauze); bez neho sa ukladá cez poZmene.
 // Vracia, či sa stav zmenil (bez firmy nie) — volajúci podľa toho prekreslí.
 const STAV_CITANIA_RELACIA={};
-function zapisStavCitania(zmen){
+function zapisStavCitania(zmen, uloz){
   if(!firmaData) return false;
   if(!mozemPisat("data")){ zmen(STAV_CITANIA_RELACIA); return true; }
   if(!firmaData.settings) firmaData.settings={};
   zmen(firmaData.settings);
-  poZmene();
+  if(uloz){ firmaDirty=true; uloz(); } else poZmene();
   return true;
 }
 // Stav čítania tak, ako ho používateľ vidí: uložený v dátach firmy, prekrytý
@@ -7314,13 +7315,11 @@ function nastavDragDrop(dash){
 // dĺžku vstupu nikdy nepresiahne) — a mŕtva poistka je horšia než žiadna,
 // lebo vyzerá ako ochrana. Stráži to test, nie `if`.
 function dashUlozPoradie(viditelneVPoradi){
-  const cfg=dashKonfig();
   const jeViditelna=new Set(viditelneVPoradi);
-  let k=0;
-  const arr=cfg.widgety.map(w=>jeViditelna.has(w) ? viditelneVPoradi[k++] : w);
-  cfg.widgety=arr;
-  firmaDirty=true; ulozNastavenieDebounced();
-  vykresliDashboard();
+  dashZmen(cfg=>{
+    let k=0;
+    cfg.widgety=cfg.widgety.map(w=>jeViditelna.has(w) ? viditelneVPoradi[k++] : w);
+  }, true);
 }
 
 // Presun jednej dlaždice na miesto druhej (desktop drop aj klávesnica).
@@ -7387,12 +7386,27 @@ function dashKonfigDialog(){
     </div>
   `, null);
 }
-function dashToggleWidget(wkey){
+// ÚPRAVA PLOCHY — skryté a pridané dlaždice, poradie, zvolená metrika. Je to
+// preferencia k firme ako stav čítania, nie agenda: rola bez zápisu (Náhľad) ju
+// do dát firmy nezapíše, zmena jej však platí do zatvorenia appky (ROZHODNUTIA
+// č. 58, technické pod č. 73). Tou istou cestou — zapisStavCitania do
+// STAV_CITANIA_RELACIA, prepnutie firmy ju zabudne. Relácia drží CELÚ
+// konfiguráciu (poradie a skrytie sa s uloženým zoznamom zlúčiť nedajú), preto
+// sa pri prvej zmene skopíruje uložená. `poPauze`: metrika a poradie idú do
+// cloudu až po pauze, pridanie či skrytie dlaždice hneď.
+function dashZmen(zmen, poPauze){
   const cfg=dashKonfig();
-  const i=cfg.widgety.indexOf(wkey);
-  if(i>=0) cfg.widgety.splice(i,1); else cfg.widgety.push(wkey);
-  firmaDirty=true; ulozFirmu();
+  if(!zapisStavCitania(S=>{
+    if(!S.dashboard) S.dashboard=JSON.parse(JSON.stringify(cfg));
+    zmen(S.dashboard);
+  }, poPauze ? ulozNastavenieDebounced : ulozFirmu)) return;
   vykresliDashboard();
+}
+function dashToggleWidget(wkey){
+  dashZmen(cfg=>{
+    const i=cfg.widgety.indexOf(wkey);
+    if(i>=0) cfg.widgety.splice(i,1); else cfg.widgety.push(wkey);
+  });
 }
 
 // kontroly (prenesené z dashChecks starej appky)
@@ -15762,7 +15776,7 @@ function rocnaKontrolaHtml(rok){
           ${x.priklady.length>=8?"<br>· …":""}
         </div>`:""}
         ${(x.akcia&&x.akcia.length)||nalezMozeSkryt(x.zavaznost,x.k)?`<div style="margin-top:9px;display:flex;gap:7px;flex-wrap:wrap">${
-          (x.akcia||[]).map(a=>`<button class="aabtn" style="padding:6px 12px;font-size:12px" onclick="${esc(a.fn)}"${/^otvorApp\(/.test(a.fn)?"":zam("uzavierka")}>${esc(a.l)}</button>`).join("")
+          (x.akcia||[]).map(a=>`<button class="aabtn" style="padding:6px 12px;font-size:12px" onclick="${esc(a.fn)}"${a.modul?zam(a.modul):""}>${esc(a.l)}</button>`).join("")
         }${skryTlacidloHtml("rocna", x.zavaznost, x.k, x.t)}</div>`:""}
       </div>`).join("")}
       <div class="ob-hint">
@@ -23146,6 +23160,10 @@ function oknoNahrava(zamknut){
 }
 function closeModal(){
   document.getElementById("modal").classList.remove("on"); modalSave=null; modalDelete=null; modalModul=null;
+  // Zavreté okno = rozpracovaný doklad zo Schránky sa zrušil (ROZHODNUTIA č. 70).
+  // Uloženie ho spotrebuje skôr, než okno zavrie (oznacCakajuciSpracovany); bez
+  // tohto by ďalší doklad z iného zdroja odbavil v schránke cudzí mail.
+  _cakajuciSpracovavany=null;
   // Príznak karty pohybu musí padnúť tu, inak by `parPrekresli` po zavretí
   // kreslil do neviditeľného tela namiesto obrazovky, z ktorej sa akcia spustila.
   _kartaPohybuId=null;
@@ -24066,26 +24084,6 @@ function zrusVratenie(txIdVal){
   delete a.vratenie; if(b) delete b.vratenie;
   firmaDirty=true; ulozFirmu();
 }
-// Prejde výpis a spáruje, čo je isté. Vracia prehľad, nie len počet —
-// používateľ má vidieť, čo sa stalo, nie len že sa niečo stalo.
-function sparujIste(){
-  const out={sparovane:[], vratenia:[], preskocene:0};
-  const vrat=najdiVratenia();
-  const vId={}; vrat.forEach(v=>{ vId[txId(v.vratenie)]=1; vId[txId(v.platba)]=1; });
-  out.vratenia=vrat;
-  (firmaData.vypis||[]).forEach(tx=>{
-    if(tx.skryty || tx.vratenie) return;          // skryté a vrátenia sa nepárujú
-    if(txZostava(tx)<=0.005) return;             // už rozdelený
-    if(vId[txId(tx)]){ out.preskocene++; return; }   // časť dvojice vrátenia
-    const z=istaZhoda(tx);
-    if(!z) return;
-    const pridane=pridajUhradu(tx, z.typ, z.cislo, null);
-    if(pridane>0) out.sparovane.push({datum:tx.datum, suma:pridane, typ:z.typ, cislo:z.cislo, preco:z.preco});
-  });
-  if(out.sparovane.length){ firmaDirty=true; if(typeof ulozFirmu==="function") ulozFirmu(); }
-  return out;
-}
-
 function vypisSparuj(tx){
   const d=firmaData;
   // používateľské pravidlá ignorovania (IBAN / kľúčové slovo)
@@ -24160,24 +24158,6 @@ function vypisZoradKandidatov(kand, tx, typ){
   });
   scored.sort((a,b)=>(b._skore.num)-(a._skore.num));
   return scored;
-}
-// ručné potvrdenie / odmietnutie zhody
-function vypisPotvrdZhodu(txId, typ, cislo){
-  if(!strazZapis("banka")) return;
-  const tx=(firmaData.vypis||[]).find(t=>(t.id||t.datum+t.suma)===txId); if(!tx) return;
-  // Cez pridajUhradu, nie priamym zápisom `potvrdenaZhoda`. Priamy zápis nechal
-  // `uhrady` prázdne, takže pohyb sa v Banke tváril spárovaný, ale doklad o ňom
-  // nevedel: `dokladUhradene` vrátilo 0, faktúra ostala v pohľadávkach a editor
-  // nezobrazil „Zaplatené z účtu". V ostrých dátach tak skončilo 14 pohybov.
-  pridajUhradu(tx, typ, cislo);
-  vypisRozbaleny=null;
-  poZmene(); appBanka();
-}
-function vypisOdmietniZhodu(txId){
-  if(!strazZapis("banka")) return;
-  const tx=(firmaData.vypis||[]).find(t=>(t.id||t.datum+t.suma)===txId); if(!tx) return;
-  tx.odmietnutaZhoda=true; delete tx.potvrdenaZhoda; vypisRozbaleny=null;
-  poZmene(); appBanka();
 }
 function vypisZrusZhodu(txId){
   if(!strazZapis("banka")) return;
@@ -27265,6 +27245,9 @@ function rocnaKontrola(rok){
   // takých objektov. Nález, ktorý appka vie odstrániť sama, nemá posielať
   // človeka hľadať, kde sa to robí — a otázka, na ktorú sú dve odpovede,
   // má ponúknuť obe, nie jednu a „Zrušiť".
+  // `modul` je modul, DO KTORÉHO akcia zapisuje (ROZHODNUTIA č. 43, 57) — podľa
+  // neho sa tlačidlo stlmí, nie podľa Uzávierky, v ktorej karta stojí. Rovnaký
+  // modul stráži funkcia na prvom riadku. Akcia, ktorá len otvára modul, ho nemá.
   const pridaj=(zavaznost,k,t,detail,priklady,akcia)=>out.push({zavaznost,k,t,d:detail,
     priklady:priklady||[], akcia: akcia ? (Array.isArray(akcia)?akcia:[akcia]) : null});
   // Kontrola, ktorá spadne, nesmie vyzerať ako kontrola, ktorá nič nenašla —
@@ -27320,7 +27303,7 @@ function rocnaKontrola(rok){
       +"Kým je pri nich rok povinnosti "+R+", appka ich ráta ako zaplatenú povinnosť za "+R+" "
       +"a v dlaždici „Odlož si na dane“ tvrdí vyššiu zaplatenosť, než je skutočná.",
       zlyRok.map(x=>((KATEGORIE_VYDAVKOV[x.kategoria]||{}).n||x.kategoria)+" · "+fmtDatum(x.datum)+" · "+eur(+x.spolu||0)),
-      {l:"Opraviť rok povinnosti", fn:"opravZaRokVysporiadania("+rok+")"});
+      {l:"Opraviť rok povinnosti", fn:"opravZaRokVysporiadania("+rok+")", modul:"vydavky"});
   }catch(e){ zlyhalo("rok povinnosti", e); }
 
   // ── 1d. Zaplatená záloha, ku ktorej nikto nevystavil doklad ──
@@ -27472,7 +27455,7 @@ function rocnaKontrola(rok){
     "Ak má doklad na papieri iné číslo, opravte ho; ak dodávateľ naozaj posiela rovnaké "+
     "(zákaznícke ID), nechajte ich odlíšiť — číslo pre výkaz ostane zachované.", kolizie,
     {l:"Odlíšiť "+kolSkupiny.reduce((a,s)=>a+s.doklady.length,0)+" dokladov",
-     fn:"rozlisKolizneDoklady()"});
+     fn:"rozlisKolizneDoklady()", modul:MODULY_ROZLISENIA});
 
   // ── 3c. Úhrada priradená k dokladu, ktorý neexistuje ──
   //
@@ -27492,7 +27475,7 @@ function rocnaKontrola(rok){
     "Pohyb sa tvári spárovaný, ale doklad k nemu nie je — v banke vyzerá vybavený, "+
     "v evidencii chýba. Odobratím sa pohyb vráti medzi nespárované a priradíte ho nanovo.",
     sirotyU.slice(0,8),
-    {l:"Odobrať "+sirotyU.length+" neplatných priradení", fn:"odoberSiroteUhrady()"});
+    {l:"Odobrať "+sirotyU.length+" neplatných priradení", fn:"odoberSiroteUhrady()", modul:"banka"});
 
   // ── 4. Príjem na účte bez faktúry ──
   //
@@ -27519,7 +27502,7 @@ function rocnaKontrola(rok){
         "Môže ísť o vrátku, vklad či presun medzi vlastnými účtami — alebo o tržbu, ktorá nie je vyfakturovaná.",
         nespar.slice(0,8).map(t=>fmtDatum(t.datum)+" · "+eur(Math.abs(+t.suma||0))+" · "+(t.proti||t.popis||"—")),
         kand ? {l:"Neúčtovať príjmy z účtu …"+kand[0].slice(-4)+" ("+kand[1].length+"×)",
-                fn:"ignorujProtiucet('"+kand[0]+"')"} : null);
+                fn:"ignorujProtiucet('"+kand[0]+"')", modul:"banka"} : null);
     }
   }
 
@@ -27586,8 +27569,8 @@ function rocnaKontrola(rok){
               "a daňová kontrola sa naň pýta. Odpovedzte raz a appka sa pýtať prestane.",
           [],
           priznane ? {l:"Otvoriť knihu jázd", fn:"otvorApp('jazdy')"}
-                   : [{l:"Áno, jazdím ním aj súkromne", fn:"nastavAutoSukromne('ano')"},
-                      {l:"Nie, len na podnikanie", fn:"nastavAutoSukromne('nie')"}]);
+                   : [{l:"Áno, jazdím ním aj súkromne", fn:"nastavAutoSukromne('ano')", modul:"jazdy"},
+                      {l:"Nie, len na podnikanie", fn:"nastavAutoSukromne('nie')", modul:"jazdy"}]);
       }
     }
   }catch(e){ zlyhalo("súkromné jazdy", e); }
@@ -27610,7 +27593,7 @@ function rocnaKontrola(rok){
         +"Zosúladenie nemení žiadnu sumu, DPH ani odtlačok uzávierky.",
         rozchod.slice(0,8).map(x=>(x.cislo||"—")+" · "+(x.partner||"—")+" · "+fmtDatum(x.datum)
           +" · "+((KATEGORIE_VYDAVKOV[x.kategoria]||{}).n||x.kategoria)),
-        {l:"Zosúladiť "+rozchod.length+(rozchod.length===1?" doklad":rozchod.length<5?" doklady":" dokladov"), fn:"zosuladPhmKategorie("+R+")"});
+        {l:"Zosúladiť "+rozchod.length+(rozchod.length===1?" doklad":rozchod.length<5?" doklady":" dokladov"), fn:"zosuladPhmKategorie("+R+")", modul:"vydavky"});
     }
     // Tankovanie bez väzby na auto si odpočítava DPH v plnej výške, hoci pri
     // osobnom aute patrí polovica. Auto sa TU NEDOPĹŇA hromadne: zmena by
@@ -27657,7 +27640,7 @@ function rocnaKontrola(rok){
           ...new Set(bezNaroku.map(vydavokIcDphBezOdpoctu))].filter(Boolean).join(" ")
         + (daSa ? " Pri "+daSa+" z nich appka IČ DPH pozná z iných dokladov toho istého dodávateľa." : ""),
         bezIc.slice(0,8).map(x=>(x.cislo||"—")+" · "+(x.partner||"—")+" · DPH "+eur(x.dph)),
-        daSa ? {l:"Doplniť IČ DPH do "+daSa+" dokladov", fn:"doplnPartnerovDoVydavkov()"} : null);
+        daSa ? {l:"Doplniť IČ DPH do "+daSa+" dokladov", fn:"doplnPartnerovDoVydavkov()", modul:"vydavky"} : null);
     }
   }
 
@@ -27737,12 +27720,12 @@ function rocnaKontrola(rok){
           "Overte doklad — ak vám dodávateľ dal iné číslo účtu, než má zverejnené, pýtajte si opravu. "+
           "Ak účet medzitým oznámil, overte znova.",
           zle.slice(0,8).map(x=>(x.cislo||x.partner||"—")+" · "+eur(+x.spolu||0)+" · "+String(x.iban||"")),
-          {l:"Overiť znova", fn:"overUctyDodavatelov("+R+")"});
+          {l:"Overiť znova", fn:"overUctyDodavatelov("+R+")", modul:"vydavky"});
       else if(neoverene.length)
         pridaj("pozor","ucetNeovereny", neoverene.length+" dokladov má účet dodávateľa neoverený",
           "Zaplatiť na účet, ktorý dodávateľ neoznámil Finančnej správe, znamená ručiť za jeho DPH (§ 69 ods. 14). "+
           "Appka vie účty porovnať s verejným registrom — číslo účtu aj IČ DPH už na dokladoch má.",
-          [], {l:"Overiť účty dodávateľov", fn:"overUctyDodavatelov("+R+")"});
+          [], {l:"Overiť účty dodávateľov", fn:"overUctyDodavatelov("+R+")", modul:"vydavky"});
     }
   }catch(e){ zlyhalo("účty dodávateľov", e); }
 
@@ -27766,7 +27749,7 @@ function rocnaKontrola(rok){
         "odpočítať tiež až po zaplatení, nie dňom dodania. Faktúra to má uvedené slovami „daň sa uplatňuje "+
         "na základe prijatia platby“, ale prehliadnuť sa to dá ľahko. Register má necelú tisícku subjektov, "+
         "takže väčšine ľudí kontrola nič nenájde — a to je dobrá správa, nie stratený čas.",
-        [], {l:"Overiť dodávateľov", fn:"overOsobitnuUpravu("+R+")"});
+        [], {l:"Overiť dodávateľov", fn:"overOsobitnuUpravu("+R+")", modul:"vydavky"});
   }catch(e){ zlyhalo("osobitná úprava", e); }
 
   // ── 8. Pohľadávky po splatnosti dlhšie ako rok ──
@@ -30582,6 +30565,7 @@ function cakajuceOpakovane(){
 // pravidlo, potom mazanie — keby to bolo opačne a zápis pravidla zlyhal,
 // doklady by zmizli a zajtra by prišiel ďalší.
 async function potlacOpakovane(index){
+  if(!strazZapis("data")) return;
   if(localMode || !sb || !firmaId){ alert("Funguje len s cloudovým účtom."); return; }
   const sk=cakajuceOpakovane()[+index];
   if(!sk){ alert("Skupina sa nenašla — schránka sa medzitým zmenila."); return; }
@@ -30640,7 +30624,7 @@ async function spravujPotlacene(){
           <div style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(x.predmet||"—")}</div>
           <div style="font-size:11px;color:var(--ink-soft);font-family:monospace;overflow:hidden;text-overflow:ellipsis">${esc(x.od_koho||"")}</div>
         </div>
-        <button class="aabtn" style="padding:3px 9px;font-size:11px" onclick="zrusPotlacenie('${esc(x.id)}')">Zrušiť</button>
+        <button class="aabtn" style="padding:3px 9px;font-size:11px" onclick="zrusPotlacenie('${esc(x.id)}')"${zam("data")}>Zrušiť</button>
       </div>
       <div style="font-size:11px;color:var(--ink-soft);margin-top:3px">
         ${x.pocet ? "zachytených "+x.pocet+(x.posledny?", naposledy "+fmtDatum(String(x.posledny).slice(0,10)):"")
@@ -30650,6 +30634,7 @@ async function spravujPotlacene(){
   `, null, null, "siroky");
 }
 async function zrusPotlacenie(id){
+  if(!strazZapis("data")) return;
   try{
     const { error } = await sb.from("doklady_potlacene").delete().eq("id", id);
     if(error) throw error;
@@ -30726,13 +30711,13 @@ async function otvorCakajuce(){
     ${nove.length ? `<div style="margin-top:14px">
       <div style="font-weight:700;font-size:13px;margin-bottom:8px">Čaká na spracovanie (${nove.length})</div>
       ${nove.map(x=>`<div class="arow" style="grid-template-columns:auto 1fr auto auto;gap:10px;align-items:center">
-        <div style="font-size:19px;cursor:pointer" onclick="spracujCakajuci('${esc(x.id)}')">${jeVypisSubor(x)?"🏦":(/pdf/.test(x.subor_typ||"")?"📄":"🖼")}</div>
-        <div style="min-width:0;cursor:pointer" onclick="spracujCakajuci('${esc(x.id)}')">
+        <div style="font-size:19px;cursor:pointer" onclick="spracujCakajuci('${esc(x.id)}')"${zam(modulCakajuceho(x.id))}>${jeVypisSubor(x)?"🏦":(/pdf/.test(x.subor_typ||"")?"📄":"🖼")}</div>
+        <div style="min-width:0;cursor:pointer" onclick="spracujCakajuci('${esc(x.id)}')"${zam(modulCakajuceho(x.id))}>
           <div style="font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(x.subor_nazov||"doklad")}</div>
           <div style="font-size:11px;color:var(--ink-soft)">${esc(x.od_koho||"")} · ${fmtDatum(String(x.prijate||"").slice(0,10))} · ${Math.round((x.subor_bajtov||0)/1024)} kB</div>
         </div>
-        <div style="font-size:11px;color:var(--brand);font-weight:600;cursor:pointer" onclick="spracujCakajuci('${esc(x.id)}')">${jeVypisSubor(x)?"Importovať →":"Spracovať →"}</div>
-        <span onclick="event.stopPropagation();odmietniCakajuci('${esc(x.id)}')"
+        <div style="font-size:11px;color:var(--brand);font-weight:600;cursor:pointer" onclick="spracujCakajuci('${esc(x.id)}')"${zam(modulCakajuceho(x.id))}>${jeVypisSubor(x)?"Importovať →":"Spracovať →"}</div>
+        <span onclick="event.stopPropagation();odmietniCakajuci('${esc(x.id)}')"${zam(modulCakajuceho(x.id, true))}
               title="Nepotrebujem — odstrániť zo schránky"
               style="cursor:pointer;color:var(--ink-soft);font-size:15px;padding:0 2px;line-height:1">✕</span>
       </div>`).join("")}
@@ -30746,8 +30731,8 @@ async function otvorCakajuce(){
       </div>
       ${[...new Set(cudzie.map(x=>x.od_koho))].map(e=>`<div style="display:flex;gap:8px;align-items:center;margin-top:6px">
         <div style="flex:1;font-size:12px;font-family:monospace;overflow:hidden;text-overflow:ellipsis">${esc(e||"—")}</div>
-        <button class="aabtn" style="padding:4px 9px;font-size:11px" onclick="odblokujPodlaEmailu('${esc(e)}')">Odblokovať</button>
-        <span onclick="odbavCakajuce('neznamy_odosielatel','${esc(e)}')" title="Zahodiť maily z tejto adresy"
+        <button class="aabtn" style="padding:4px 9px;font-size:11px" onclick="odblokujPodlaEmailu('${esc(e)}')"${zam("data")}>Odblokovať</button>
+        <span onclick="odbavCakajuce('neznamy_odosielatel','${esc(e)}')"${zam(MODUL_DOKLADU)} title="Zahodiť maily z tejto adresy"
               style="cursor:pointer;color:var(--ink-soft);font-size:15px;padding:0 2px">✕</span>
       </div>`).join("")}
     </div>` : ""}
@@ -30760,7 +30745,7 @@ async function otvorCakajuce(){
         Ak to nikdy nebude doklad, netreba to nechať chodiť.
       </div>
       <button class="aabtn" style="padding:3px 9px;font-size:11px"
-              onclick="potlacOpakovane(${i})">Prestať ukazovať</button>
+              onclick="potlacOpakovane(${i})"${zam("data")}>Prestať ukazovať</button>
     </div>`).join("") : ""}
 
     ${notifNove.length ? `<div style="margin-top:14px">
@@ -30783,7 +30768,7 @@ async function otvorCakajuce(){
         </div>
         <div style="display:flex;gap:8px;align-items:center">
           <button class="aabtn" style="padding:4px 10px;font-size:11.5px" onclick="prijmiNotifikaciu('${esc(p.z.id)}')"${zam("banka")}>Pridať</button>
-          <span onclick="event.stopPropagation();odmietniCakajuci('${esc(p.z.id)}')"
+          <span onclick="event.stopPropagation();odmietniCakajuci('${esc(p.z.id)}')"${zam(modulCakajuceho(p.z.id, true))}
                 title="Nepotrebujem — odstrániť zo schránky"
                 style="cursor:pointer;color:var(--ink-soft);font-size:15px;padding:0 2px;line-height:1">✕</span>
         </div>
@@ -30799,7 +30784,7 @@ async function otvorCakajuce(){
     ${zahodena.length ? `<div class="ocr-hint" style="margin-top:12px;border-left:3px solid var(--warn,#c98a00);padding-left:9px">
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:5px">
         <span style="flex:1;font-weight:600">⚠ ${zahodena.length===1?"Jeden mail priniesol prílohu, ktorú appka neprijala":zahodena.length+" mailov prinieslo prílohu, ktorú appka neprijala"}</span>
-        <button class="aabtn" style="padding:3px 9px;font-size:11px" onclick="odbavCakajuce('neprijate')">Zahodiť</button>
+        <button class="aabtn" style="padding:3px 9px;font-size:11px" onclick="odbavCakajuce('neprijate')"${zam(MODUL_DOKLADU)}>Zahodiť</button>
       </div>
       ${zahodena.map(x=>`<div style="margin-bottom:6px">
         <div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(x.predmet||"—")}</div>
@@ -30809,13 +30794,13 @@ async function otvorCakajuce(){
 
     ${bezPril.length ? `<div class="ocr-hint" style="margin-top:12px;display:flex;gap:8px;align-items:center">
       <span style="flex:1">${bezPril.length===1?"1 mail prišiel":bezPril.length+(bezPril.length<5?" maily prišli":" mailov prišlo")} bez prílohy — nič sa neuložilo.</span>
-      <button class="aabtn" style="padding:3px 9px;font-size:11px" onclick="odbavCakajuce('bez_prilohy')">Zahodiť</button>
+      <button class="aabtn" style="padding:3px 9px;font-size:11px" onclick="odbavCakajuce('bez_prilohy')"${zam(MODUL_DOKLADU)}>Zahodiť</button>
     </div>` : ""}
 
     <div style="margin-top:16px;border-top:1px solid var(--line);padding-top:12px">
       <button class="aabtn" onclick="spravujOdosielatelov()">🚫 Blokované adresy</button>
       <button class="aabtn" onclick="spravujPotlacene()">🔕 Umlčané maily</button>
-      <button class="aabtn" onclick="prerazDokladyToken()" title="Stará adresa okamžite prestane fungovať">↻ Nová adresa</button>
+      <button class="aabtn" onclick="prerazDokladyToken()"${zam("data")} title="Stará adresa okamžite prestane fungovať">↻ Nová adresa</button>
     </div>
   `, null, null, "siroky");
 }
@@ -30828,12 +30813,14 @@ function kopirujAdresu(){
 }
 
 async function prerazDokladyToken(){
+  if(!strazZapis("data")) return;
   if(!confirm("Vygenerovať novú prijímaciu adresu?\n\nStará okamžite prestane fungovať — kto ju má uloženú v kontaktoch, musí dostať novú.")) return;
   const a=await dokladyAdresa(true);
   if(a){ cloudMsg("Nová adresa: "+a,"ok"); otvorCakajuce(); }
 }
 
 async function blokujOdosielatela(email){
+  if(!strazZapis("data")) return;
   const e=String(email||"").toLowerCase().trim();
   if(!e) return;
   if(!confirm("Zablokovať "+e+"?\n\nPrílohy z tejto adresy sa už neuložia. Mail sa aj tak zaznamená, aby ste vedeli, že vám píše.")) return;
@@ -30848,6 +30835,7 @@ async function blokujOdosielatela(email){
 }
 // Odblokovanie priamo zo schránky — používateľ tam vidí adresu, nie jej id.
 async function odblokujPodlaEmailu(email){
+  if(!strazZapis("data")) return;
   const e=String(email||"").toLowerCase().trim();
   if(!e) return;
   try{
@@ -30859,6 +30847,7 @@ async function odblokujPodlaEmailu(email){
   }catch(err){ alert("Nepodarilo sa odblokovať: "+(err.message||err)); }
 }
 async function odblokujOdosielatela(id){
+  if(!strazZapis("data")) return;
   try{
     await sb.from("doklady_odosielatelia").update({ blokovany:false }).eq("id", id);
     spravujOdosielatelov();
@@ -30881,13 +30870,13 @@ async function spravujOdosielatelov(){
     <div class="mfield"><label>Zablokovať adresu</label>
       <div style="display:flex;gap:8px">
         <input id="doNovy" placeholder="reklama@spam.sk" style="flex:1">
-        <button class="aabtn neg" onclick="blokujOdosielatela(val('doNovy'))">Zablokovať</button>
+        <button class="aabtn neg" onclick="blokujOdosielatela(val('doNovy'))"${zam("data")}>Zablokovať</button>
       </div>
     </div>
     <div style="margin-top:12px">
       ${zoznam.length ? zoznam.map(x=>`<div style="display:flex;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line-soft)">
         <div style="flex:1;font-size:12.5px;font-family:monospace;overflow:hidden;text-overflow:ellipsis">${esc(x.email)}</div>
-        <button class="aabtn" style="padding:3px 9px;font-size:11px" onclick="odblokujOdosielatela('${esc(x.id)}')">Odblokovať</button>
+        <button class="aabtn" style="padding:3px 9px;font-size:11px" onclick="odblokujOdosielatela('${esc(x.id)}')"${zam("data")}>Odblokovať</button>
       </div>`).join("") : '<div class="ocr-hint">Nikto nie je blokovaný — doklady chodia od všetkých.</div>'}
     </div>
     <div class="ocr-hint" style="margin-top:12px">
@@ -30909,6 +30898,19 @@ function jeVypisSubor(z){
   // a dátum — dlhé číslo je teda rozumný tip.
   if(/\.xml$/.test(n) && /\d{6,}/.test(n)) return true;
   return false;
+}
+// Modul, DO KTORÉHO zapisuje akcia nad riadkom schránky (ROZHODNUTIA č. 70,
+// pravidlo č. 43 a 57) — pre stráž aj značku tlačidla. Výpis ide do Banky,
+// ostatné spracovanie je príjem dokladu do Výdavkov. Odmietnutie pohybu
+// z notifikácie banky rozhoduje o Banke: pohyb sa do nej už nedostane.
+// Nastavenia schránky (adresa, blokované adresy, umlčané maily) sú nastavenia
+// firmy — "data". Zapisuje sa do serverových tabuliek, kde rolu Náhľad odmietne
+// aj RLS; stráž to povie pred potvrdzovacím oknom, značka ešte pred klikom.
+function modulCakajuceho(id, odmietnutie){
+  const z=(cakajuceDoklady||[]).find(x=>String(x.id)===String(id));
+  if(z && jeVypisSubor(z)) return "banka";
+  if(odmietnutie && cakajuceNotifikacie().some(x=>String(x.z.id)===String(id) && x.pohyb)) return "banka";
+  return MODUL_DOKLADU;
 }
 
 // Výpis prijatý e-mailom. Ide TOU ISTOU cestou ako ručný import — vrátane
@@ -30940,6 +30942,7 @@ async function importujCakajuciVypis(id){
 }
 
 async function spracujCakajuci(id){
+  if(!strazZapis(modulCakajuceho(id))) return;
   const z=cakajuceDoklady.find(x=>x.id===id);
   if(!z || !z.subor_cesta){ alert("Súbor sa nenašiel."); return; }
   // Výpis ide inou cestou než doklad. Rozhodne obsah: keď `parseVypis` nájde
@@ -31017,6 +31020,7 @@ let _cakajuciSpracovavany = null;
 // „mailoch bez prílohy" zmietlo spolu s nimi a varovanie by zmizlo bez toho,
 // aby ho niekto čítal.
 async function odbavCakajuce(stav, odKoho){
+  if(!strazZapis(MODUL_DOKLADU)) return;
   const zoznam = stav==="neprijate"
     ? cakajuceNeprijate()
     : cakajuceDoklady.filter(x=>x.stav===stav && (!odKoho || x.od_koho===odKoho)
@@ -31039,6 +31043,7 @@ async function odbavCakajuce(stav, odKoho){
 }
 
 async function odmietniCakajuci(id){
+  if(!strazZapis(modulCakajuceho(id, true))) return;
   const z=cakajuceDoklady.find(x=>x.id===id);
   if(!z) return;
   // 🔴 5. 9. 2026: pohyby na účte mali v schránke len tlačidlo „Pridať" —
@@ -32545,6 +32550,10 @@ async function spracujDokladZoSuboru(file, qrVopred, archivCesta){
     // bežnou cestou; rozpoznanie mu teda nemôže nič zobrať.
     if(R._zseTxns){
       const kwh=r2(R._zseTxns.reduce((a,b)=>a+(+b.kwh||0),0));
+      // closeModal zruší rozpracovaný doklad zo Schránky — tu okno len uhne
+      // otázke a doklad sa spracúva ďalej. Vráti sa po uložení nabíjaní alebo
+      // pri „Nie“; odmietnutý výpis ho nechá zrušený (č. 70).
+      const cakajuci=_cakajuciSpracovavany;
       closeModal();
       if(confirm("Toto vyzerá na podrobný výpis nabíjaní zo ZSE Drive, nie na doklad do výdavkov.\n\n"
           +R._zseTxns.length+" záznamov · "+kwh.toFixed(2)+" kWh\n\n"
@@ -32558,12 +32567,14 @@ async function spracujDokladZoSuboru(file, qrVopred, archivCesta){
         // Odmietnutý výpis ostáva v schránke.
         if(!strazImportu([R])) return;
         const pridanych=zseUlozNabijania(R._zseTxns);
+        _cakajuciSpracovavany=cakajuci;
         // Až TERAZ, keď sú nabíjania uložené: zrušená otázka musí výpis
         // nechať v schránke.
         if(typeof oznacCakajuciSpracovany==="function") oznacCakajuciSpracovany();
         alert("ZSE výpis: pridaných "+pridanych+" nabíjaní, "+kwh.toFixed(2)+" kWh.");
         return;
       }
+      _cakajuciSpracovavany=cakajuci;
       openModal("Spracúvam doklad…", `<div style="text-align:center;padding:20px">
         <div class="spin" style="margin:0 auto 14px"></div>
         <div id="ocrStav">Načítavam...</div></div>`, null);
@@ -34575,8 +34586,12 @@ function siroteUhrady(){
 // povedať, ktorému platba patrí. Keď to jednoznačné nie je, úhrada sa NEHÁDŽE
 // naslepo — odoberie sa a pohyb sa vráti medzi nespárované, kde o ňom rozhodne
 // človek. Zlé priradenie sa hľadá horšie než chýbajúce.
+//
+// Zapisuje do troch modulov: kľúče výdavkov aj faktúr a väzby v Banke. Tlačidlo
+// v ročnej kontrole aj stráž berú ten istý zoznam (ROZHODNUTIA č. 57).
+const MODULY_ROZLISENIA=["vydavky","faktury","banka"];
 function rozlisKolizneDoklady(){
-  if(!strazZapis("vydavky")) return;
+  if(!MODULY_ROZLISENIA.every(m=>strazZapis(m))) return;
   const skupiny=[...kolizneCisla("vydavok").map(s=>({...s, typ:"vydavok"})),
                  ...kolizneCisla("faktura").map(s=>({...s, typ:"faktura"}))];
   if(!skupiny.length){ alert("Žiadne číslo dokladu nenesie viac dokladov s rôznou sumou."); return; }
