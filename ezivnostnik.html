@@ -13008,24 +13008,38 @@ function vydavokPotrebujeIcDph(x){
   const odd=dphOddielVydavok(x);
   return odd==="X" ? null : {oddiel:odd};
 }
-// Vráti false, keď doklad bez (platného) IČ DPH uložiť nejde. `kdeHladat` je
-// rada, ktorá patrí k oknu, z ktorého sa ukladá.
+// Prečo doklad s DPH potrebuje IČ DPH dodávateľa, keď si z neho DPH NEODPOČÍTAVATE
+// — veta pre hlášku; "" pri doklade s odpočtom (tam má každá cesta vlastnú vetu
+// o odpočte a kontrolnom výkaze). Pravidlo, KEDY sa pýta (`vydavokPotrebujeIcDph`,
+// č. 16), je pre všetkých rovnaké, dôvod nie: neplatiteľ odpočet nemá a kontrolný
+// výkaz nepodáva (§ 78a zákona o DPH), doklad bez nároku (`vydavokUplatnujeOdpocet`)
+// sa neodpočítava a do výkazu nejde. Obom ostáva, že faktúra uvádza IČ DPH
+// dodávateľa (§ 74 ods. 1 písm. b) zákona o DPH). Do 13. 9. 2026 im hláška
+// tvrdila „Doklad si odpočítava DPH" — Roman, ROZHODNUTIA č. 44.
+function vydavokIcDphBezOdpoctu(x){
+  if(!jePlatcaDPH()) return "Nie ste platiteľ DPH, takže si ju neodpočítavate — IČ DPH dodávateľa však na faktúre s DPH byť má.";
+  if(vydavokUplatnujeOdpocet(x)) return "";
+  return "DPH z tohto dokladu si neodpočítavate (kategória „"+((KATEGORIE_VYDAVKOV[x.kategoria]||{}).n||x.kategoria)
+    +"“) — IČ DPH dodávateľa však na faktúre s DPH byť má.";
+}
 function vydavokOverIcDph(x, kdeHladat){
   const dovod=vydavokPotrebujeIcDph(x);
   if(!dovod) return true;
   const ic=String(x.dodavatelIcDph||"").trim();
   if(!ic){
+    const bezOdpoctu=dovod.odpocet ? vydavokIcDphBezOdpoctu(x) : "";
     alert((dovod.odpocet
         ? "Tento doklad obsahuje DPH ("+eur(+x.dph)+"), takže potrebuje IČ DPH dodávateľa.\n\n"
-          +"Je povinné pre odpočet DPH a kontrolný výkaz."
+          +(bezOdpoctu || "Je povinné pre odpočet DPH a kontrolný výkaz.")
         : "Tento doklad ide do kontrolného výkazu DPH ("+(DPH_ODDIELY[dovod.oddiel]||dovod.oddiel)+"), "
           +"takže potrebuje IČ DPH dodávateľa, hoci DPH na ňom nie je.")
       +(kdeHladat ? "\n\n"+kdeHladat : "")
-      +(dovod.odpocet
-        ? "\n\nAk dodávateľ platiteľom DPH nie je, alebo ide o zahraničného predajcu, ktorý naúčtoval "
+      +(!dovod.odpocet ? ""
+        : bezOdpoctu
+        ? "\n\nAk dodávateľ platiteľom DPH nie je, nastavte DPH na 0 a do základu dajte celú sumu."
+        : "\n\nAk dodávateľ platiteľom DPH nie je, alebo ide o zahraničného predajcu, ktorý naúčtoval "
           +"cudziu DPH (Allegro, Temu, eBay…), odpočet spravidla nemáte nárok uplatniť — vtedy nastavte "
-          +"DPH na 0 a do základu dajte celú sumu."
-        : ""));
+          +"DPH na 0 a do základu dajte celú sumu."));
     return false;
   }
   if(!platneICDPH(ic)){
@@ -13856,9 +13870,13 @@ function autoEvidenciaRok(rok){
     s.pocet++;
     s.bez=r2(s.bez+(+x.bez||0));
     s.dph=r2(s.dph+(+x.dph||0));
-    s.odpocet=r2(s.odpocet+vydavokOdpocetDane(+x.dph||0, x));   // bez nároku 0, ako priznanie
     s.doVydavkov=r2(s.doVydavkov+vydavokDoZakladu(x));
+    (s.doklady||(s.doklady=[])).push(x);
   });
+  // Odpočet z tých istých riadkov ako priznanie (nárok, krátenie, samozdanenie
+  // B.1). Z `x.dph` sa samozdanenie nedalo vidieť — doklad zo zahraničia má DPH 0
+  // a prehľad ukazoval odpočet 0, kým priznanie ho uplatnilo (ROZHODNUTIA č. 38).
+  Object.values(skupiny).forEach(s=>{ s.odpocet=dphOdpocetDokladov(s.doklady); delete s.doklady; });
   const riadky=Object.values(skupiny).sort((a,b)=>b.bez-a.bez);
   const sum=(k)=>r2(riadky.reduce((a,r)=>a+r[k],0));
   return {riadky, pocet:v.length, bez:sum("bez"), dph:sum("dph"), odpocet:sum("odpocet"), doVydavkov:sum("doVydavkov")};
@@ -13904,8 +13922,11 @@ function odpocetPercent(x){
   return autoRezim()==="100" ? 100 : 50;
 }
 // suma dane, ktorú si naozaj možno odpočítať
-function danNaOdpocet(dan, x){
-  const p=odpocetPercent(x);
+function danNaOdpocet(dan, x){ return danKratenaNaOdpocet(dan, odpocetPercent(x)); }
+// Krátenie dane percentom z `odpocetPercent`. Jedno miesto pre bežný doklad
+// (`danNaOdpocet`) aj samozdanenie, ktoré percento nesie na riadku zberu
+// (`dphOdpocetSamozdanenia`) — ROZHODNUTIA č. 38.
+function danKratenaNaOdpocet(dan, p){
   return p===100 ? r2(dan) : r2((+dan||0)*p/100);
 }
 
@@ -26059,9 +26080,13 @@ function vydavokOdpocetDane(dan, x){ return vydavokUplatnujeOdpocet(x) ? danNaOd
 // v B.1 a nulový je len odpočet — Roman, ROZHODNUTIA č. 24. Jedno miesto pre
 // priznanie (`dphSumare` → r18/r19), kontrolný výkaz (B.1, atribút O) aj
 // dlaždicu „DPH na odpočet" (`dphOdpocetDokladov`).
+// Pri použití aj na iný účel než podnikanie sa odpočíta len pomerná časť dane
+// (§ 49 ods. 5 zákona o DPH) — auto 50 %, podiel na podnikaní. Do 13. 9. 2026
+// sa to pri samozdanení neuplatňovalo (odpočet 100 % alebo 0), hoci bežný
+// doklad sa krátil. Daň na výstupe ostáva celá — Roman, ROZHODNUTIA č. 38.
 function dphOdpocetSamozdanenia(dk){
   if(!dk || dk.oddiel!=="B1" || !dk.samozdanenie || dk.bezNaroku) return 0;
-  return r2(dk.danSamozdanenie||0);
+  return danKratenaNaOdpocet(dk.danSamozdanenie||0, dk.odpocetPct!=null ? +dk.odpocetPct : 100);
 }
 function dphOddielVydavok(x, riadok){
   // 1) ručné prepísanie má vždy prednosť
@@ -26875,9 +26900,13 @@ const PRAVIDLA_DOKLADU=[
     // Do 13. 9. 2026 malo vlastné: neplatiteľa vynechávalo a pri tankovaní či
     // prenose sa s tvrdou kontrolou rozchádzalo (ROZHODNUTIA č. 16).
     plati:(x)=>!!vydavokPotrebujeIcDph(x) && !String(x.dodavatelIcDph||"").trim(),
+    // Text podľa situácie — neplatiteľ a doklad bez nároku si DPH neodpočítavajú
+    // (`vydavokIcDphBezOdpoctu`, ROZHODNUTIA č. 44); pravidlo `plati` je spoločné.
     hlaska:(x)=>((+x.dph||0)>0
-        ? "⚠ Doklad si odpočítava DPH "+eur(x.dph)+", ale dodávateľ nemá IČ DPH.\n\n"
-          +"Bez neho nárok na odpočet nevzniká a kontrolný výkaz taký doklad odmietne.\n\n"
+        ? (vydavokIcDphBezOdpoctu(x)
+          ? "⚠ Doklad obsahuje DPH "+eur(x.dph)+", ale dodávateľ nemá IČ DPH.\n\n"+vydavokIcDphBezOdpoctu(x)+"\n\n"
+          : "⚠ Doklad si odpočítava DPH "+eur(x.dph)+", ale dodávateľ nemá IČ DPH.\n\n"
+            +"Bez neho nárok na odpočet nevzniká a kontrolný výkaz taký doklad odmietne.\n\n")
         : "⚠ Doklad ide do kontrolného výkazu DPH, ale dodávateľ nemá IČ DPH.\n\n"
           +"Kontrolný výkaz taký doklad odmietne.\n\n")
       +"Doplňte IČ DPH podľa dokladu (pomôže tlačidlo „Skontrolovať / doplniť z registra“). "
@@ -28591,7 +28620,11 @@ function dphGenerujKV(mk){
   // Samozdanenie zo zahraničia sem NEPATRÍ — to sa vykazuje len v priznaní.
   doklady.filter(d=>d.oddiel==="B1" && samozdDruh(d)==="tuzemsky").forEach(d=>{
     const dan=r2(d.danSamozdanenie||d.dan||0);
-    // O = odpočítaná daň; pri doklade bez nároku 0 (`dphOdpocetSamozdanenia`)
+    // O = odpočítaná daň; pri doklade bez nároku 0, pri krátení pomerná časť
+    // (`dphOdpocetSamozdanenia`). Atribút sa NEVYNECHÁVA: v kv_dph_2025.xsd je
+    // pri B1 use="required" a metodický pokyn FS ku KV (2021, príklady 12 a 20)
+    // pri neuplatnenom odpočte uvádza v stĺpci „Výška odpočítanej dane" údaj „0"
+    // — overené 13. 9. 2026 (ROZHODNUTIA č. 39).
     R.B1.push(`<B1 ${atr({Dod:d.icDph, F:d.cislo, Den:d.datum, Z:n(d.zaklad), D:n(dan), S:d.sadzba, O:n(dphOdpocetSamozdanenia(d))})}/>`);
   });
 
