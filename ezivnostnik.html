@@ -2879,6 +2879,9 @@ let firmyZoznam = [];
 // faktúry (kap. 10.4). Každá nová modulová premenná patrí SEM.
 function resetStavuModulov(){
   firmaData=null; firmaId=null; firmaVerzia=null; firmaConfig=null; firmaDirty=false;
+  // Neuložené odkazy na nahraté súbory predošlej firmy už nikto neuloží — otázka
+  // pri zatvorení záložky zhasne (č. 81). Bežiace nahrávania ju zhasnú samy.
+  _nahrateNeulozene=false; odchodStraz();
   pristupyFirmy=[];   // prístupy sú PER FIRMU — inak by platili oprávnenia predošlej
   fFilter="vsetky"; fRok=""; fMesiac=""; fakVybrane=new Set(); fakPoslednyList=[];
   vFilter="vsetky"; vRok=""; vMesiac=""; vydVybrane=new Set(); vydPoslednyList=[];
@@ -11476,6 +11479,12 @@ async function faktImportPotvrd(){
   if(!strazZapis("faktury")) return;
   const rows=(_faktImportData||[]).filter(r=>r._import);
   if(!rows.length){ alert("Nie je vybraná žiadna faktúra."); return false; }
+  // Originály PDF sa nahrávajú — druhé ťuknutie, zámok okna aj zatvorenie
+  // záložky rieši jedna cesta (`nahravajRaz`, ROZHODNUTIA č. 81). Druhé ťuknutie
+  // nahralo originál znova a faktúra ukázala len na druhý; prvý osirel.
+  return rows.some(r=>r._origFile) ? nahravajRaz(()=>faktImportZapis(rows)) : faktImportZapis(rows);
+}
+async function faktImportZapis(rows){
   if(!Array.isArray(firmaData.faktury)) firmaData.faktury=[];
   let added=0, updated=0, bezDatumu=0;
   for(const r of rows){
@@ -15180,7 +15189,7 @@ async function ulozOriginalVypisu(text, zaznam){
     if(!koren){ zaznam.bezOriginalu="nie je otvorená firma"; return; }
     const cesta=`${koren}/vypisy/vypis_${Date.now()}.xml`;
     const blob=new Blob([text],{type:"application/xml"});
-    const { error }=await sb.storage.from("dokumenty").upload(cesta, blob, {upsert:false, contentType:"application/xml"});
+    const { error }=await nahrajDoUloziska(cesta, blob, {upsert:false, contentType:"application/xml"});
     if(error){ console.error("uloženie výpisu do úložiska:", error); zaznam.bezOriginalu="úložisko odmietlo"; return; }
     zaznam.cesta=cesta;
   }catch(e){
@@ -22401,29 +22410,33 @@ async function autoZaevidujSaasFaktury(){
     // a zároveň tam ešte NIKDY nebola. Prvá sama by zmazanú faktúru vrátila.
     const nove = (zoz||[]).filter(f=>!saasFakturaZaevidovana(f.cislo) && !saasUzZaevidovana(f.cislo));
     if(!nove.length) return 0;
-    if(!firmaData.vydavky) firmaData.vydavky=[];
-    let n=0;
-    for(const f of nove){
-      const datum=String(f.vystavene||"").slice(0,10) || new Date().toISOString().slice(0,10);
-      const obj={ druh:"Došlá faktúra", partner:SAAS_DODAVATEL.nazov, cislo:f.cislo, vs:f.cislo,
-        popis:f.popis||"eživnostník — predplatné", datum, mesiac:datum.slice(0,7),
-        bez:+f.zaklad||0, dph:+f.dph||0, spolu:+f.spolu||0, zahranicny:false, kodKrajiny:"",
-        dodavatelIco:SAAS_DODAVATEL.ico, dodavatelDic:SAAS_DODAVATEL.dic,
-        dodavatelIcDph:SAAS_DODAVATEL.icdph, zdroj:"predplatne" };
-      if(najdiDuplicityVydavku(obj).length) continue;   // ticho preskoč duplicitu
-      obj.id="v"+Date.now()+Math.random().toString(36).slice(2,7);
-      try{
-        const blob=(await saasFakturaPDF(f)).output("blob");
-        const cesta=await dokladUpload(new File([blob],"faktura-"+f.cislo+".pdf",{type:"application/pdf"}),"predplatne");
-        if(cesta) obj.doklad=cesta;
-      }catch(e){ console.error("PDF príloha SaaS faktúry "+f.cislo+":", e); }  // výdavok vznikne aj bez prílohy
-      firmaData.vydavky.push(obj);
-      saasOznacZaevidovanu(f.cislo);
-      if(typeof zapamatajPartnera==="function") zapamatajPartnera(obj);
-      n++;
-    }
-    if(n){ poZmene(); try{ renderNotifBadge(); }catch(_){} }
-    return n;
+    // Nahráva PDF a až po celej dávke zapisuje — zatvorenie záložky sa pýta cez
+    // celú dávku (`nahravanie`, ROZHODNUTIA č. 81). Okno nezamyká: beží na pozadí.
+    return await nahravanie(async()=>{
+      if(!firmaData.vydavky) firmaData.vydavky=[];
+      let n=0;
+      for(const f of nove){
+        const datum=String(f.vystavene||"").slice(0,10) || new Date().toISOString().slice(0,10);
+        const obj={ druh:"Došlá faktúra", partner:SAAS_DODAVATEL.nazov, cislo:f.cislo, vs:f.cislo,
+          popis:f.popis||"eživnostník — predplatné", datum, mesiac:datum.slice(0,7),
+          bez:+f.zaklad||0, dph:+f.dph||0, spolu:+f.spolu||0, zahranicny:false, kodKrajiny:"",
+          dodavatelIco:SAAS_DODAVATEL.ico, dodavatelDic:SAAS_DODAVATEL.dic,
+          dodavatelIcDph:SAAS_DODAVATEL.icdph, zdroj:"predplatne" };
+        if(najdiDuplicityVydavku(obj).length) continue;   // ticho preskoč duplicitu
+        obj.id="v"+Date.now()+Math.random().toString(36).slice(2,7);
+        try{
+          const blob=(await saasFakturaPDF(f)).output("blob");
+          const cesta=await dokladUpload(new File([blob],"faktura-"+f.cislo+".pdf",{type:"application/pdf"}),"predplatne");
+          if(cesta) obj.doklad=cesta;
+        }catch(e){ console.error("PDF príloha SaaS faktúry "+f.cislo+":", e); }  // výdavok vznikne aj bez prílohy
+        firmaData.vydavky.push(obj);
+        saasOznacZaevidovanu(f.cislo);
+        if(typeof zapamatajPartnera==="function") zapamatajPartnera(obj);
+        n++;
+      }
+      if(n){ poZmene(); try{ renderNotifBadge(); }catch(_){} }
+      return n;
+    });
   }catch(e){ console.error("autoZaevidujSaasFaktury:", e); return 0; }
 }
 
@@ -22457,9 +22470,15 @@ function saasZabudniZaevidovanu(cislo){
   s.saasZaevidovane = s.saasZaevidovane.filter(x=>x!==String(cislo||"").trim());
 }
 
-// zaevidovanie do výdavkov — rovnaký tvar záznamu ako pri importe faktúr
+// zaevidovanie do výdavkov — rovnaký tvar záznamu ako pri importe faktúr.
+// Nahráva PDF: druhé ťuknutie, zámok okna aj zatvorenie záložky rieši jedna
+// cesta (`nahravajRaz`, ROZHODNUTIA č. 81). Kým sa nahrávalo, faktúra ešte nebola
+// vo výdavkoch, takže druhé ťuknutie prešlo kontrolou aj duplicitou a zapísalo ju znova.
 async function zaevidujSaasFakturu(cislo){
   if(!strazZapis("vydavky")) return;
+  return nahravajRaz(()=>zaevidujSaasFakturuRaz(cislo));
+}
+async function zaevidujSaasFakturuRaz(cislo){
   const f = (_saasFaktury||[]).find(x => x.cislo === cislo);
   if(!f){ alert("Faktúra sa nenašla."); return; }
   if(saasFakturaZaevidovana(cislo)){ alert("Táto faktúra už je vo výdavkoch."); return; }
@@ -22634,6 +22653,9 @@ async function otvorSaasFaktury(){
 
 async function zaevidujVsetkySaasFaktury(){
   if(!strazZapis("vydavky")) return;
+  return nahravajRaz(zaevidujVsetkySaasFakturyRaz);   // jedna cesta nahrávania, ako zaevidujSaasFakturu
+}
+async function zaevidujVsetkySaasFakturyRaz(){
   // Tu sa pamäť ignoruje ZÁMERNE: je to výslovný pokyn používateľa, nie
   // automatika na pozadí. Kto klikne „Zaevidovať všetky", chce ich všetky.
   const zoz = (_saasFaktury||[]).filter(f=>!saasFakturaZaevidovana(f.cislo));
@@ -23436,7 +23458,8 @@ function zamOkno(modul){
 // sa zapíšu až po nahratí, počítadlo „⏳ 3 z 20" písalo do tlačidla ďalšieho
 // okna a dávka načítala výpis ZSE z nového okna importu (overené behom
 // 14. 9. 2026, ROZHODNUTIA č. 62, technické). Zamyká `dokladOriginalyUloz` —
-// jediná cesta nahratia originálu pre okno dokladu aj import. Zamknuté sú len
+// jediná cesta nahratia originálu pre okno dokladu aj import — a `nahravajRaz`
+// pre ostatné nahrávania z okna (č. 81). Zamknuté sú len
 // tlačidlá, ktorými okno zatvára človek; `closeModal` z kódu ostáva voľné.
 //
 // Zatvorenie ZÁLOŽKY, Späť z appky či obnovenie stránky zastaviť nejde, dá sa
@@ -23452,7 +23475,9 @@ function oknoNahrava(zamknut){
     const b=document.getElementById(id); if(!b) return;
     b.disabled=!!zamknut; b.title=zamknut?"Počkajte, kým sa originály dokladov nahrajú":"";
   });
-  window.onbeforeunload=zamknut ? nahravanieNeodchadzaj : null;
+  // Otázku pri zatvorení záložky rozhoduje jedno miesto (`odchodStraz`, č. 81):
+  // po nahratí trvá, kým sa dáta s odkazom neuložia do cloudu.
+  nahravaSa(zamknut);
 }
 function closeModal(){
   document.getElementById("modal").classList.remove("on"); modalSave=null; modalDelete=null; modalModul=null;
@@ -25944,7 +25969,15 @@ function efakturaMam(id){ return efakturyPrijate().some(x=>String(x.id)===String
 
 // Prevzatie JEDNÉHO dokladu. Vracia zápis, alebo vyhodí chybu s dôvodom —
 // ticho zhltnutá chyba tu znamená stratený originál.
+//
+// Medzi nahratím originálu a zápisom je potvrdenie u poštára (sieť). Zatvorenie
+// záložky sa pýta cez celé prevzatie (`nahravanie`, ROZHODNUTIA č. 81): uloženie
+// inej zmeny, ktoré medzitým dobehne, tento záznam ešte neobsahuje. Potvrdený
+// a neuložený doklad ostane v úložisku bez záznamu a u poštára o 14 dní zmizne.
 async function postarPrevezmi(dokladId){
+  return nahravanie(()=>postarPrevezmiRaz(dokladId));
+}
+async function postarPrevezmiRaz(dokladId){
   // Archívny originál (`GET …/receive/{id}/xml`) po bajtoch, nie `payload`
   // z detailu — zdôvodnenie pri `archivXml` v edge funkcii (PLAN §21.3 bod 3).
   // Doklad sa číta z toho istého súboru, takže zápis a archív nemôžu byť dve verzie.
@@ -29134,7 +29167,7 @@ async function dphUlozSubor(mk, typ, xml){
       if(user && ulozKoren()){
         const cesta=`${ulozKoren()}/podania/${typ}_${mk}_${Date.now()}.xml`;
         const blob=new Blob([xml],{type:"application/xml"});
-        const { error }=await sb.storage.from("dokumenty").upload(cesta, blob, {upsert:false, contentType:"application/xml"});
+        const { error }=await nahrajDoUloziska(cesta, blob, {upsert:false, contentType:"application/xml"});
         if(!error){ zaznam.cesta=cesta; uloz(); return; }
         console.error("uloženie podania do úložiska:", error);
       }
@@ -36538,33 +36571,39 @@ function dokPridaj(idx){
     <div class="mfield"><label>Poznámka (nepovinné)</label><input id="dok_pozn" value="${esc(d.poznamka||'')}" placeholder="detail"></div>
     <div class="mfield"><label>Súbor ${d.subor?'(nahradí existujúci)':''}</label><input id="dok_subor" type="file" accept=".pdf,.png,.jpg,.jpeg,.docx,.doc,.xlsx"></div>
     <div id="dok_uploadStav" style="font-size:11.5px;margin-top:4px;min-height:14px"></div>
-  `, async ()=>{
-    const nazov=(document.getElementById("dok_nazov").value||"").trim();
-    if(!nazov){ alert("Zadajte názov dokumentu."); return false; }
-    const zoznam=dokEnsure();
-    const zaznam = idx!=null ? zoznam[idx] : { id:"d"+Date.now(), pridane:new Date().toISOString() };
-    zaznam.nazov=nazov;
-    zaznam.typ=document.getElementById("dok_typ").value;
-    zaznam.partner=(document.getElementById("dok_partner").value||"").trim();
-    zaznam.platnostOd=document.getElementById("dok_od").value||"";
-    zaznam.platnostDo=document.getElementById("dok_do").value||"";
-    zaznam.poznamka=(document.getElementById("dok_pozn").value||"").trim();
-    // nahraj súbor ak je vybraný
+  `, ()=>{
+    // Súbor sa nahráva — druhé ťuknutie, zámok okna aj zatvorenie záložky rieši
+    // jedna cesta (`nahravajRaz`, ROZHODNUTIA č. 81). Kým sa nahrával, nový
+    // dokument ešte nebol v zozname a druhé ťuknutie ho zapísalo druhý raz.
     const f=document.getElementById("dok_subor").files[0];
-    if(f){
-      const stav=document.getElementById("dok_uploadStav");
-      if(localMode||!sb){ if(stav){stav.textContent="V lokálnom režime sa súbor neuloží — prihláste sa pre cloud."; stav.style.color="var(--warn)";} }
-      else {
-        if(stav){ stav.textContent="Nahrávam súbor…"; stav.style.color="var(--ink-soft)"; }
-        const cesta=await dokladUpload(f, "zmluva");
-        if(cesta){ if(zaznam.subor) dokladZmaz(zaznam.subor); zaznam.subor=cesta; zaznam.suborNazov=f.name; }
-        else { if(stav){stav.textContent="Súbor sa nepodarilo nahrať."; stav.style.color="var(--neg)";} return false; }
-      }
-    }
-    if(idx==null) zoznam.push(zaznam);
-    poZmene(); appDokumenty();
+    return f ? nahravajRaz(()=>dokUloz(idx, f)) : dokUloz(idx, null);
   });
   zamOkno("dokumenty");
+}
+async function dokUloz(idx, f){
+  const nazov=(document.getElementById("dok_nazov").value||"").trim();
+  if(!nazov){ alert("Zadajte názov dokumentu."); return false; }
+  const zoznam=dokEnsure();
+  const zaznam = idx!=null ? zoznam[idx] : { id:"d"+Date.now(), pridane:new Date().toISOString() };
+  zaznam.nazov=nazov;
+  zaznam.typ=document.getElementById("dok_typ").value;
+  zaznam.partner=(document.getElementById("dok_partner").value||"").trim();
+  zaznam.platnostOd=document.getElementById("dok_od").value||"";
+  zaznam.platnostDo=document.getElementById("dok_do").value||"";
+  zaznam.poznamka=(document.getElementById("dok_pozn").value||"").trim();
+  // nahraj súbor ak je vybraný
+  if(f){
+    const stav=document.getElementById("dok_uploadStav");
+    if(localMode||!sb){ if(stav){stav.textContent="V lokálnom režime sa súbor neuloží — prihláste sa pre cloud."; stav.style.color="var(--warn)";} }
+    else {
+      if(stav){ stav.textContent="Nahrávam súbor…"; stav.style.color="var(--ink-soft)"; }
+      const cesta=await dokladUpload(f, "zmluva");
+      if(cesta){ if(zaznam.subor) dokladZmaz(zaznam.subor); zaznam.subor=cesta; zaznam.suborNazov=f.name; }
+      else { if(stav){stav.textContent="Súbor sa nepodarilo nahrať."; stav.style.color="var(--neg)";} return false; }
+    }
+  }
+  if(idx==null) zoznam.push(zaznam);
+  poZmene(); appDokumenty();
 }
 function dokDetail(idx){
   const d=dokEnsure()[idx]; if(!d) return;
@@ -36930,6 +36969,9 @@ async function ulozFirmu(){
     _ukladaSa = false;
     // Medzitým pribudla ďalšia zmena — uložíme ju hneď, s novou verziou.
     if(_ukladatZnova){ _ukladatZnova = false; ulozFirmu(); }
+    // Nahratý súbor, na ktorý už uložené dáta ukazujú — zatvorenie záložky sa
+    // nemusí pýtať (`nahrateUlozene`, ROZHODNUTIA č. 81).
+    nahrateUlozene();
   }
 }
 
@@ -37084,7 +37126,7 @@ async function dokladUpload(file, prefix){
   if(!koren){ console.error("upload dokladu: nie je otvorená firma"); return null; }
   const ext=(file.name.split(".").pop()||"bin").toLowerCase();
   const cesta=`${koren}/${prefix||"doklad"}_${Date.now()}.${ext}`;
-  const { error }=await sb.storage.from("dokumenty").upload(cesta, file, { upsert:false });
+  const { error }=await nahrajDoUloziska(cesta, file, { upsert:false });
   if(error){ console.error("upload dokladu:",error); return null; }
   return cesta; // uložíme do záznamu ako odkaz
 }
@@ -37121,6 +37163,68 @@ async function ulozDokladyRaz(uloz){
   _dokladyUkladaju=true;
   try{ return await uloz(); }
   finally{ _dokladyUkladaju=false; }
+}
+// ── NAHRÁVANIE DO ÚLOŽISKA — JEDNO PRAVIDLO PRE VŠETKY (ROZHODNUTIA č. 81) ──
+// Šieste kolo (č. 73) dalo poistku proti druhému ťuknutiu, zamknuté okno
+// a otázku pri zatvorení záložky len oknu dokladu a importu výdavkov. Druhé
+// ťuknutie pri origináli vystavenej faktúry, zmluve či faktúre za predplatné
+// nahralo súbor dvakrát a zmluva aj predplatné zapísali záznam dvakrát;
+// zatvorenie záložky sa inde nepýtalo vôbec (overené behom 14. 9. 2026,
+// test_oprava_nahravanie).
+//
+// Tri vrstvy, každá na jednom mieste:
+//   nahrajDoUloziska   — JEDINÝ zápis do úložiska (doklady, výpisy, podania):
+//                        počíta bežiace nahrávania a pamätá si, že v úložisku
+//                        leží súbor, na ktorý uložené dáta ešte neukazujú;
+//   nahravanie(akcia)  — akcia, ktorá po nahratí ešte na niečo čaká (potvrdenie
+//                        u poštára, ďalší súbor) a až potom zapisuje: otázka
+//                        trvá cez celú akciu, nielen cez samotné nahratie;
+//   nahravajRaz(akcia) — akcia človeka v okne: navyše `ulozDokladyRaz` (druhé
+//                        ťuknutie vráti false) a `oknoNahrava` (✕, Zrušiť).
+// Nahrávanie na pozadí okno nezamyká — otvorené okno patrí niečomu inému.
+//
+// KEDY SA ZATVORENIE ZÁLOŽKY PÝTA (`odchodStraz`): počas nahrávania A OD
+// NAHRATIA, KÝM SA DÁTA NEULOŽIA DO CLOUDU. Záznam s odkazom sa zapíše do
+// pamäti hneď a `poZmene` ho posiela bez odkladu (odklad má len
+// `ulozNastavenieDebounced`), no zápis celého `firmaData` ide sieťou — na mobile
+// sekundy, za bežiacim uložením v rade — a pri výpadku nedobehne vôbec
+// (`firmaDirty` ostane). Zavretá karta v tej chvíli záznam stratila a súbor
+// ostal v úložisku bez odkazu. Otázku zhasne až úspešné uloženie
+// (`nahrateUlozene` z `ulozFirmu`) alebo odchod z firmy. Bez nahratia sa
+// zatvorenie nepýta: otázka pri každej neuloženej zmene je širšia vec
+// (dev/opravy/nahravanie.md) a naučila by ľudí odklikávať.
+let _nahravania=0, _nahrateNeulozene=false;
+function odchodStraz(){
+  window.onbeforeunload=(_nahravania>0 || _nahrateNeulozene) ? nahravanieNeodchadzaj : null;
+}
+function nahravaSa(zacina){
+  _nahravania=Math.max(0, _nahravania+(zacina?1:-1));
+  odchodStraz();
+}
+async function nahravanie(akcia){
+  nahravaSa(true);
+  try{ return await akcia(); }
+  finally{ nahravaSa(false); }
+}
+function nahravajRaz(akcia){
+  return ulozDokladyRaz(async()=>{
+    oknoNahrava(true);
+    try{ return await akcia(); }
+    finally{ oknoNahrava(false); }
+  });
+}
+async function nahrajDoUloziska(cesta, telo, volby){
+  return nahravanie(async()=>{
+    const res=await sb.storage.from("dokumenty").upload(cesta, telo, volby);
+    if(res && !res.error) _nahrateNeulozene=true;
+    return res;
+  });
+}
+// Volá ju `ulozFirmu` po každom dobehnutom uložení. Zhasne, len keď nič nečaká:
+// bežiaca akcia s nahratím ešte zapíše a jej zápis v tomto uložení nebol.
+function nahrateUlozene(){
+  if(!_ukladaSa && !firmaDirty && !_nahravania) _nahrateNeulozene=false;
+  odchodStraz();
 }
 // Originály dokladov pred zápisom — AŽ PO všetkých otázkach nad dokladom
 // (ROZHODNUTIA č. 20). `polozky` = [{subor, jeEf, nazov, cesta}]; nahratý
