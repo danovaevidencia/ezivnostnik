@@ -2319,7 +2319,9 @@ async function doPrimary(){
     if(mode==="register"){
       const gdpr=document.getElementById("gdprSuhlas");
       if(gdpr && !gdpr.checked){ msg("Pre registráciu je potrebný súhlas s obchodnými podmienkami.","err"); btn.disabled=false; return; }
-      const { data, error } = await sb.auth.signUp({ email, password: heslo });
+      // Súhlas sa zapisuje k účtu (`user_metadata`), inak by zaškrtnutie nič
+      // nepreukazovalo (ROZHODNUTIA č. 52).
+      const { data, error } = await sb.auth.signUp({ email, password: heslo, options:{ data:{ suhlas: suhlasZaznam() } } });
       if(error) throw error;
       if(data.user && !data.session){
         msg("Účet vytvorený. Skontrolujte e-mail a potvrďte registráciu.","ok");
@@ -2438,6 +2440,10 @@ window.addEventListener("resize", ()=>setTimeout(nastavVyskuDemo, 0));
 // Odchod z dema — jediné miesto, ktoré demo ruší. Volá ho „Vytvoriť vlastný
 // účet" aj „Ukončiť demo" (ROZHODNUTIA č. 50).
 function demoNaRegistraciu(){
+  // Ukážková jazda by merala ďalej aj po odchode z dema a pás by ju ponúkal
+  // zapísať do skutočnej firmy. Ruší sa ešte v deme: `jazdaZmazStav` v ňom na
+  // úložisko nesiaha, takže skutočná jazda zariadenia ostane nedotknutá.
+  if(_jazda){ jazdaZastavMeranie(); jazdaZmazStav(); }
   demoMode=false; localMode=false; firmaData=null; firmaConfig=null;   // plán dema sa nededí
   // Demo stojí na tých istých premenných ako skutočná firma — filtre, výbery,
   // otvorené okno a obrazovka modulu by inak prežili do prihlásenia. Ruší sa
@@ -2847,6 +2853,10 @@ function resetStavuModulov(){
   vFilter="vsetky"; vRok=""; vMesiac=""; vydVybrane=new Set(); vydPoslednyList=[];
   bFilter="vsetky"; bMesiac=""; vypisRozbaleny=null;
   vyber=null;   // výber zo zvončeka nesie kľúče predošlej firmy
+  // Otvorená skupina a modul. Obrazovka modulu sa nižšie skrýva, ale bočná
+  // lišta kreslí rozbalenú skupinu podľa týchto premenných — po odchode z dema
+  // (aj po prepnutí firmy) by ostala otvorená skupina, v ktorej človek nie je.
+  aktualnaApp=null; aktualnaSuperApka=null; aktualnaZalozka=null;
   kjMesiac=""; kjZlucit=false; kjTriedenie="datum"; kjHladaj="";
   Object.keys(_hladaj).forEach(k=>delete _hladaj[k]);         // hľadanie je per firma
   Object.keys(_zobrazLimit).forEach(k=>delete _zobrazLimit[k]);
@@ -17560,8 +17570,16 @@ function jazdaPriznak(zapnut){
   const h=document.documentElement; if(!h || !h.setAttribute) return;
   if(zapnut) h.setAttribute("data-jazda","1"); else h.removeAttribute("data-jazda");
 }
-function jazdaZapis(){ gpsUloz(GPS_KLUC, JSON.stringify(_jazda)); }
-function jazdaZmazStav(){ _jazda=null; gpsUloz(GPS_KLUC, null); jazdaPriznak(false); }
+// Demo do zariadenia nezapisuje, rovnako ako `eziv_firma`. Ukážková jazda by po
+// odchode z dema čakala na zapísanie do skutočnej knihy jázd a prepísala by
+// skutočnú rozbehnutú jazdu, ktorá na zariadení už leží.
+function jazdaZapis(){ if(!demoMode) gpsUloz(GPS_KLUC, JSON.stringify(_jazda)); }
+function jazdaZmazStav(){ _jazda=null; if(!demoMode) gpsUloz(GPS_KLUC, null); jazdaPriznak(false); }
+// Zastaví meranie. Čo s jazdou (zapísať, zahodiť, zrušiť s demom), rozhodne volajúci.
+function jazdaZastavMeranie(){
+  gpsZdroj.stop(); jazdaUvolniLock();
+  if(_jazdaTik){ clearInterval(_jazdaTik); _jazdaTik=null; }
+}
 
 // ── Register miest ──────────────────────────────────────────────────────────
 // Je na ZARIADENÍ, nie vo `firmaData`: sú to súradnice. Cena je, že sa
@@ -17652,8 +17670,7 @@ function gpsChyba(e){
   // takže sa to povie hneď a jazda sa nepredstiera.
   if(e && e.code===1){
     _jazda.chyba="poloha je zakázaná";
-    gpsZdroj.stop(); jazdaUvolniLock();
-    if(_jazdaTik){ clearInterval(_jazdaTik); _jazdaTik=null; }
+    jazdaZastavMeranie();
     jazdaZmazStav(); closeModal();
     alert("Meranie sa nespustilo — prehliadač nemá povolenú polohu.\n\n"
       +"Povoľte ju pre túto stránku v nastaveniach prehliadača a skúste to znova.");
@@ -17784,7 +17801,9 @@ function jazdaPruhText(){
 // Po načítaní appky. Bez tohto by zavretie okna, pád prehliadača alebo
 // nasadenie novej verzie znamenali stratu jazdy — ticho, bez hlášky.
 function jazdaObnov(){
-  if(_jazda) return;
+  // Demo si skutočnú jazdu zariadenia nevezme — ukončila by sa do ukážkovej
+  // firmy, ktorá sa neukladá.
+  if(_jazda || demoMode) return;
   const s=gpsCitaj(GPS_KLUC);
   if(!s) return;
   try{ _jazda=JSON.parse(s); }catch(_){ jazdaZmazStav(); return; }
@@ -17826,8 +17845,7 @@ function jazdaZahod(){
   // čo sa stratí.
   const km=parseFloat(String(jazdaKm()).replace(",","."))||0;
   if(km>=0.1 && !confirm("Zahodiť jazdu?\n\nNameraných "+jazdaKm()+" km sa neuloží a nedá sa to vrátiť.")) return;
-  gpsZdroj.stop(); jazdaUvolniLock();
-  if(_jazdaTik){ clearInterval(_jazdaTik); _jazdaTik=null; }
+  jazdaZastavMeranie();
   jazdaZmazStav(); closeModal();
 }
 
@@ -17839,8 +17857,7 @@ function jazdaUkonci(){
   if(!_jazda) return;
   if(!_jazda.ukoncena){
     _jazda.ukoncena=Date.now();
-    gpsZdroj.stop(); jazdaUvolniLock();
-    if(_jazdaTik){ clearInterval(_jazdaTik); _jazdaTik=null; }
+    jazdaZastavMeranie();
     jazdaZapis(); jazdaPruhText();
   }
   jazdaZaver();
@@ -18612,11 +18629,22 @@ function dmKopiruj(){
 // nevidí. Appka na ne odkazuje odtiaľto, text nekopíruje: stránky sú tvrdenia
 // o kóde a stráži ich test_pravne (kap. 43.46). Otvárajú sa na novej karte —
 // v nainštalovanej appke by stránka v tom istom okne nemala cestu späť.
+//
+// `verzia` je číslo z hlavičky stránky (`<p class="meta">`) — registrácia ho
+// zapisuje k účtu ako prijatú verziu (č. 52). Je tu jediný raz; zhodu so
+// stránkou stráži test_pravne, takže nová verzia dokumentu bez úpravy tu
+// sadu zhodí.
 const DOKUMENTY={
-  podmienky:{url:"podmienky.html",     n:"Obchodné podmienky"},
-  sukromie: {url:"sukromie.html",      n:"Ochrana osobných údajov"},
+  podmienky:{url:"podmienky.html",     n:"Obchodné podmienky",      verzia:"1.0"},
+  sukromie: {url:"sukromie.html",      n:"Ochrana osobných údajov", verzia:"1.2"},
   zmazanie: {url:"zmazanie-uctu.html", n:"Zmazanie účtu a údajov"},
 };
+// Záznam súhlasu k účtu (ROZHODNUTIA č. 52). Zmluva vzniká vytvorením účtu
+// (podmienky čl. 4) — bez záznamu sa nedá preukázať, ktorú verziu kto prijal.
+// Čas je z prehliadača; dôveryhodný čas vzniku účtu drží Supabase (`created_at`).
+function suhlasZaznam(){
+  return {podmienky:DOKUMENTY.podmienky.verzia, zasady:DOKUMENTY.sukromie.verzia, kedy:new Date().toISOString()};
+}
 function dokumentOdkaz(kod, text){
   const d=DOKUMENTY[kod];
   return `<a href="${d.url}" target="_blank" rel="noopener" style="color:var(--brand)">${esc(text||d.n)}</a>`;
