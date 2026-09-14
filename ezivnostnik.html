@@ -37,7 +37,15 @@
   try{
     var t = localStorage.getItem("eziv_tema");
     if(!t) t = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "tmavy" : "svetly";
-    if(t === "tmavy") document.documentElement.setAttribute("data-tema", "tmavy");
+    if(t === "tmavy"){
+      document.documentElement.setAttribute("data-tema", "tmavy");
+      // Farba systémovej lišty z toho istého dôvodu: v HTML je svetlá a kým
+      // človek tému neprepne, nad tmavou appkou by ostal modrý pruh. Hodnota
+      // je tá istá ako v `nastavTemu` — skript appky tu ešte nebeží, zhodu
+      // stráži test_oprava_male8 (ROZHODNUTIA č. 88).
+      var m = document.getElementById("metaTema");
+      if(m) m.setAttribute("content", "#151a21");
+    }
   }catch(_){}
   // Zakryté čísla sa nastavujú TU z rovnakého dôvodu ako téma: keby sa atribút
   // doplnil až po štarte, sumy by na okamih blikli ostré. Režim, ktorý raz za
@@ -2390,6 +2398,7 @@ function useLocal(){
 let demoMode = false;
 async function spustiDemo(){
   localMode = true; demoMode = true;
+  demoPredvoleneVolby();
   hide("authView");
   document.getElementById("appView").classList.add("on");
   const chip=document.getElementById("syncChip");
@@ -2454,13 +2463,31 @@ window.addEventListener("resize", ()=>setTimeout(nastavVyskuDemo, 0));
 function demoVratVolbyZariadenia(){
   const zmenilo=k=>_demoZariadenie.has(k);
   const tema=zmenilo("eziv_tema"), zakryte=zmenilo("eziv_zakryte"), bocna=zmenilo("eziv_bocna");
-  _demoZariadenie.clear();                  // čítanie nižšie berie zariadenie
-  if(tema) nastavTemu((gpsCitaj("eziv_tema")
-    || (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "tmavy" : "svetly"))==="tmavy");
-  if(zakryte) nastavZakrytie(gpsCitaj("eziv_zakryte")==="1");
+  _demoZariadenie.clear();
+  if(tema) nastavTemu(temaZariadeniaTmava());
+  if(zakryte) nastavZakrytie(zariadenieCitaj("eziv_zakryte")==="1");
   // `prepniBocnu` len prepína podľa úložiska — atribút sa nastaví priamo,
   // lišta sa prekreslí pri ďalšom vstupe do appky.
-  if(bocna) document.documentElement.setAttribute("data-bocna", bocnaZbalena()?"uzka":"siroka");
+  if(bocna) document.documentElement.setAttribute("data-bocna", zariadenieCitaj("eziv_bocna")==="uzka"?"uzka":"siroka");
+}
+// Téma, akú `<head>` nastavil zo zariadenia: voľba človeka, inak systém.
+function systemTmavy(){ return !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches); }
+function temaZariadeniaTmava(){ return (zariadenieCitaj("eziv_tema") || (systemTmavy() ? "tmavy" : "svetly"))==="tmavy"; }
+// Demo začína s predvolenými voľbami, nie s voľbami zariadenia (ROZHODNUTIA č. 88):
+// ukážka má vyzerať tak, ako ju uvidí nový návštevník, a nemá ukazovať, čo si
+// skutočný používateľ zariadenia zvolil. Atribúty `<html>` nastavil `<head>` zo
+// zariadenia skôr, než sa vie, že pôjde o demo — tu sa vrátia na predvolené cez
+// tie isté funkcie ako voľba človeka. Zapíšu sa len do pamäti dema, takže ich
+// odchod (`demoVratVolbyZariadenia`) vráti na zariadenie. Mení sa len to, čo sa
+// od predvoleného líši; `<html>` sa nečíta (atrapy v cudzích testoch).
+// Predvolené: téma podľa systému, čísla odkryté, lišta široká.
+function demoPredvoleneVolby(){
+  if(temaZariadeniaTmava()!==systemTmavy()) nastavTemu(systemTmavy());
+  if(zariadenieCitaj("eziv_zakryte")==="1") nastavZakrytie(false);
+  if(zariadenieCitaj("eziv_bocna")==="uzka"){
+    gpsUloz("eziv_bocna", "siroka");
+    document.documentElement.setAttribute("data-bocna", "siroka");
+  }
 }
 function demoNaRegistraciu(){
   // Ukážková jazda by merala ďalej aj po odchode z dema a pás by ju ponúkal
@@ -17978,17 +18005,39 @@ const gpsZdroj={
 // používateľovi: pomenované miesta z dema by sa ponúkali skutočnej firme,
 // súhlas s mapou by platil bez otázky a čas zálohy stiahnutej v deme by
 // skutočnej firme tvrdil, že je zálohovaná. V deme idú zápisy do pamäti karty —
-// ukážka funguje ďalej, odchod z dema (`demoNaRegistraciu`) ich zabudne. Čítanie
-// v deme berie najprv to, čo zmenilo demo, potom zariadenie. Rovnaké pravidlo ako
-// `eziv_firma` a `ez_jazda_beh`, tu na jednom mieste pre všetky kľúče, ktoré idú
-// cez tieto dve funkcie (ROZHODNUTIA č. 73, technické; dev/opravy/okno.md).
-// Od siedmeho kola sem idú aj téma, zakryté čísla, šírka lišty a heslo k ZIP
-// výpisom (č. 80); tie, ktoré drží `<html>`, vracia `demoVratVolbyZariadenia`.
-// Zápis do `localStorage` mimo týchto funkcií stráži `test_oprava_demo7`.
+// ukážka funguje ďalej, odchod z dema (`demoNaRegistraciu`) ich zabudne. Rovnaké
+// pravidlo ako `eziv_firma` a `ez_jazda_beh`, tu na jednom mieste pre všetky
+// kľúče, ktoré idú cez tieto dve funkcie (ROZHODNUTIA č. 73, technické;
+// dev/opravy/okno.md). Od siedmeho kola sem idú aj téma, zakryté čísla, šírka
+// lišty a heslo k ZIP výpisom (č. 80); tie, ktoré drží `<html>`, vracia
+// `demoVratVolbyZariadenia`. Zápis do `localStorage` mimo týchto funkcií stráži
+// `test_oprava_demo7`.
+// DEMO ZO ZARIADENIA ANI NEČÍTA (č. 88): čítanie v deme berie len to, čo si
+// človek zvolil v deme, inak predvolené (null). Do siedmeho kola padalo na
+// zariadenie — demo ukazovalo skutočné pomenované miesta, súhlas s mapou a rok
+// Štatistík. Kto potrebuje zariadenie aj v deme (návrat pri odchode), volá
+// `zariadenieCitaj`.
+// Výnimky čítajú zariadenie aj v deme:
+//  · voľby, ktoré drží `<html>` — čítanie musí povedať to, čo je na obrazovke
+//    (`prepniBocnu` prepína podľa neho). `<head>` ich nastavil zo zariadenia
+//    a `demoPredvoleneVolby` zapíše do pamäti dema každú, ktorú vrátil na
+//    predvolenú — bez záznamu v pamäti je teda hodnota zariadenia zároveň
+//    predvolená, nie cudzia voľba;
+//  · `ez_jazda_vysvetlene` — nie je to voľba, ktorú ukážka ukazuje, ale fakt,
+//    že človek na tomto zariadení vysvetlenie merania polohy už čítal.
+//    Opakovať mu ho v deme je len prekážka pred ukážkovou jazdou.
 const _demoZariadenie=new Map();
-function gpsCitaj(kluc){
-  if(demoMode && _demoZariadenie.has(kluc)) return _demoZariadenie.get(kluc);
+const VOLBY_V_HTML=["eziv_tema", "eziv_zakryte", "eziv_bocna"];
+const ZARIADENIE_AJ_V_DEME=[...VOLBY_V_HTML, "ez_jazda_vysvetlene"];
+function zariadenieCitaj(kluc){
   try{ return localStorage.getItem(kluc); }catch(_){ return null; }
+}
+function gpsCitaj(kluc){
+  if(demoMode){
+    if(_demoZariadenie.has(kluc)) return _demoZariadenie.get(kluc);
+    return ZARIADENIE_AJ_V_DEME.includes(kluc) ? zariadenieCitaj(kluc) : null;
+  }
+  return zariadenieCitaj(kluc);
 }
 function gpsUloz(kluc, hodnota){
   if(demoMode){ _demoZariadenie.set(kluc, hodnota==null ? null : String(hodnota)); return; }
@@ -22338,7 +22387,9 @@ function zobrazCennik(modul){
       return `<div style="background:var(--brand-lite);border-left:3px solid var(--brand);border-radius:0 10px 10px 0;padding:11px 14px;margin-bottom:14px;font-size:13px;line-height:1.6">
         <b>Naplánovaná zmena:</b> od <b>${esc(kedy)}</b> budete mať <b>${esc(nazov)}</b>.
         Do vtedy vám ostáva súčasný plán a nič vám neúčtujeme.
-        <button class="abtn" style="margin-top:9px" onclick="zrusitZmenuPlanu()">Zrušiť naplánovanú zmenu</button>
+        ${mojaRolaVFirme()==="vlastnik"
+          ? `<button class="abtn" style="margin-top:9px" onclick="zrusitZmenuPlanu()">Zrušiť naplánovanú zmenu</button>`
+          : `<div style="margin-top:6px;color:var(--ink-soft)">${esc(ZMENA_PLANU_LEN_VLASTNIK)}</div>`}
       </div>`; })()}
     <div class="cenMriezka">
       ${kartaPlanu(PLANY.free)}
@@ -23213,8 +23264,13 @@ function zmenitNaFree(){
 }
 
 // zrušenie naplánovanej zmeny — vráti predplatné do pôvodného stavu
+// Len vlastník: `zrus_zmenu_planu` od admin_41 overuje `je_vlastnik` a iného
+// odmietne chybou 42501 (ROZHODNUTIA č. 88). Účtovník ani Náhľad tlačidlo
+// nedostanú; veta je tá istá ako hláška databázy.
+const ZMENA_PLANU_LEN_VLASTNIK = "Naplánovanú zmenu plánu môže zrušiť len vlastník firmy.";
 async function zrusitZmenuPlanu(){
   if(localMode || !sb || !firmaId) return;
+  if(mojaRolaVFirme()!=="vlastnik"){ alert(ZMENA_PLANU_LEN_VLASTNIK); return; }
   if(!confirm("Zrušiť naplánovanú zmenu plánu?\n\nVaše predplatné bude pokračovať bez zmeny.")) return;
   try{
     const { error } = await sb.rpc("zrus_zmenu_planu", { p_firma_id: firmaId });
