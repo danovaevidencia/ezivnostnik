@@ -3390,7 +3390,8 @@ function renderIdKontext(){
   // Nie je to tichý catch: keď sa platiteľstvo nedá prečítať, riadok tú
   // položku vynechá, ale chyba sa ohlási. Plocha je prvé, čo človek vidí —
   // nesmie ju zhasnúť (rovnako ako `pasRolyPlocha`).
-  try{ if(jePlatcaDPH()) kusy.push("platiteľ DPH"); }
+  try{ if(jePlatcaDPH()) kusy.push("platiteľ DPH");
+    else if(dphRegistracia()==="7a") kusy.push("registrovaný pre DPH (§ 7a)"); }
   catch(e){ console.error("riadok kontextu — platiteľstvo DPH:", e); }
   const txt = kusy.map(x=>`<b>${x}</b>`).join(`<span aria-hidden="true">·</span>`);
   if(dsk) dsk.innerHTML = txt;
@@ -3644,7 +3645,7 @@ function deMesiacneData(rok){
     // dátach to nebolo vidieť (taký doklad nemá ani jeden), ale smer bol
     // nepríjemný: evidencia hlásila vyšší základ než daňový prehľad.
     const vyd=(d.vydavky||[]).filter(x=>vydavokObdobieDane(x)===mk && !x.zaradenyOdpisovany);
-    let vydavky=r2(vyd.reduce((a,x)=>a+vydavokDoZakladu(x),0)+vydavkyDphVratenieObdobia(mk));   // PHL podľa zvoleného režimu
+    let vydavky=r2(vyd.reduce((a,x)=>a+vydavokDoZakladu(x),0)+vydavkyDphInehoObdobia(mk));   // PHL podľa zvoleného režimu
     // pri vlastnom aute nejdú do výdavkov bločky, ale náhrady prepočítané z knihy jázd
     const NAH=nahradyObdobie(rok, mk);
     if(NAH.aktivne && NAH.spolu) vydavky=r2(vydavky+NAH.spolu);
@@ -4354,7 +4355,7 @@ function calcDanRow(mesiacIdx, rok, S){
   const jeAktivny=faktB>0 || vyradenie>0 || nahrady>0 || (firmaData.vydavky||[]).some(x=>vydavokObdobieDane(x)===mk);
   const odpis=jeAktivny?odpisMes:0;
   // ostatné náklady = výdavky mesiaca bez DPH (okrem odpisovaného majetku)
-  const ostatne=r2((firmaData.vydavky||[]).filter(x=>vydavokObdobieDane(x)===mk && !x.zaradenyOdpisovany).reduce((a,x)=>a+vydavokDoZakladu(x),0)+vydavkyDphVratenieObdobia(mk)+nahrady);
+  const ostatne=r2((firmaData.vydavky||[]).filter(x=>vydavokObdobieDane(x)===mk && !x.zaradenyOdpisovany).reduce((a,x)=>a+vydavokDoZakladu(x),0)+vydavkyDphInehoObdobia(mk)+nahrady);
   const nakladySpolu=r2(odpis+ostatne+vyradenie);
   const ciastkZaklad=r2(faktB-nakladySpolu);              // čiastkový základ dane
   // SKUTOČNÉ zdravotné poistné z vymeriavacieho základu (nie preddavok!)
@@ -5599,15 +5600,15 @@ function _dashWidgetKatalogVypocet(){
       ]
     }
   };
-  // neplatiteľ DPH: bez DPH widgetu aj bez DPH metriky v grafe
-  if(!jePlatcaDPH()){
+  // bez registrácie pre DPH: bez DPH widgetu aj bez DPH metriky v grafe. Osoba
+  // podľa § 7a daň zo samozdanenia odvádza, „DPH na úhradu" sa jej týka (č. 85).
+  if(!jeRegistrovanyDPH()){
     delete kat.dph;
     if(kat.graf && kat.graf.metriky) kat.graf.metriky = kat.graf.metriky.filter(m=>m.k!=="dph");
-  } else {
-    // Platiteľ DPH paušál uplatniť NEMÔŽE (§ 6 ods. 10 ZDP) — porovnanie by mu
-    // ponúkalo voľbu, ktorú nemá. Rovnaké pravidlo ako pri DPH widgete, len opačne.
-    delete kat.pausal;
   }
+  // Platiteľ DPH paušál uplatniť NEMÔŽE (§ 6 ods. 10 ZDP) — porovnanie by mu
+  // ponúkalo voľbu, ktorú nemá. Osoba podľa § 7a platiteľom nie je, paušál môže.
+  if(jePlatcaDPH()) delete kat.pausal;
   return kat;
 }
 // dáta pre stĺpcový graf podľa metriky
@@ -8079,12 +8080,35 @@ function skontrolujICDPHpole(inp){
   });
 }
 
-// je firma platiteľ DPH? zdroj pravdy = IČ DPH v meta (rovnako ako inde v appke)
-function jePlatcaDPH(){
-  // admin konfigurácia má prednosť, ak platca_dph je explicitne nastavený
-  if(firmaConfig && typeof firmaConfig.platca_dph === "boolean") return firmaConfig.platca_dph;
-  return !!(firmaData && firmaData.meta && firmaData.meta.icdph);
+// DRUH REGISTRÁCIE PRE DPH — jedno pravidlo pre celú appku (ROZHODNUTIA č. 85).
+//   "platca" — platiteľ podľa § 4 zákona 222/2004 o DPH: daň odvádza aj odpočítava,
+//   "7a"     — osoba registrovaná podľa § 7a: IČ DPH má, platiteľom nie je
+//              („Osoby registrované podľa § 7a zákona o DPH nemajú postavenie
+//              platiteľa dane", informácia FR SR 7/DPH/2020/IM). Daň zo služby
+//              zo zahraničia platí (§ 69 ods. 3), „avšak nemá právo na odpočítanie
+//              dane" (FS podpora 080852; § 49 ods. 1 dáva odpočet len platiteľovi),
+//              priznanie podáva len za mesiac, v ktorom povinnosť vznikla (§ 78
+//              ods. 3), kontrolný výkaz nepodáva (§ 78a ods. 1, FS 835490),
+//              súhrnný výkaz za štvrťrok so službou do EÚ (§ 80 ods. 3),
+//   ""       — bez registrácie.
+// IČ DPH má osoba podľa § 7a rovnaké, aké dostane pri registrácii za platiteľa
+// (§ 4 ods. 12), takže sa z neho druh registrácie odvodiť nedá — voľba
+// v Nastaveniach (`settings.dphRegistracia`). Do 14. 9. 2026 bol platiteľom
+// každý s IČ DPH: osoba podľa § 7a mala odpočet samozdanenej dane, výdavok bez
+// DPH a zablokovaný paušál (dev/opravy/dph7.md, dph8.md).
+// Admin `platca_dph=false` prebije všetko; `true` len dopĺňa chýbajúce IČ DPH —
+// voľba § 7a pri vyplnenom IČ DPH je spresnenie a vyhráva (Roman, 14. 9. 2026).
+function dphRegistracia(){
+  if(firmaConfig && firmaConfig.platca_dph===false) return "";
+  const maIc=!!(firmaData && firmaData.meta && firmaData.meta.icdph);
+  if(maIc && ((firmaData.settings||{}).dphRegistracia==="7a")) return "7a";
+  if(firmaConfig && firmaConfig.platca_dph===true) return "platca";
+  return maIc ? "platca" : "";
 }
+// Platiteľ podľa § 4 — odpočet, výdavok bez DPH, paušál len v roku registrácie.
+function jePlatcaDPH(){ return dphRegistracia()==="platca"; }
+// Registrovaný pre DPH (platiteľ alebo § 7a) — modul DPH, priznanie, samozdanenie.
+function jeRegistrovanyDPH(){ return dphRegistracia()!==""; }
 
 // UI: prepínač režimu výdavkov v Nastaveniach + živé porovnanie skutočné vs paušál
 function nastVydavkyRezimHtml(){
@@ -8483,7 +8507,7 @@ function modulMimoPlanu(id){
 // Vráti false, keď sa modul neotvoril (DPH neplatiteľa, plán).
 function otvorApp(id){
   // neplatiteľ DPH → DPH modul neotvárame (obrana pri priamom volaní)
-  if(id==="dph" && !jePlatcaDPH()){
+  if(id==="dph" && !jeRegistrovanyDPH()){
     alert("DPH modul je dostupný len pre platiteľov DPH.\n\nAk ste sa stali platiteľom, doplňte IČ DPH v Nastaveniach → Firemné údaje.");
     return false;
   }
@@ -9349,7 +9373,8 @@ function prepniZalozku(m){
 function modulySkupiny(skupinaId){
   const g=SKUPINY.find(s=>s.id===skupinaId); if(!g) return [];
   let m=g.moduly.filter(x=>APPS[x]&&modulPovolenyPreModul(x));
-  if(!jePlatcaDPH()) m=m.filter(x=>x!=="dph");
+  // Osoba podľa § 7a modul potrebuje — priznanie za mesiac so samozdanením (č. 85).
+  if(!jeRegistrovanyDPH()) m=m.filter(x=>x!=="dph");
   return m;
 }
 // Skupina, v ktorej rámci sa modul otvára. Len keď skupina ukazuje záložky —
@@ -14474,6 +14499,46 @@ function vydavkyDphVratenieObdobia(obd){
     return (v && v.slice(0,o.length)===o) ? a+vydavokDphVratenieDoZakladu(x) : a;
   },0));
 }
+// ── DAŇ ZO SAMOZDANENIA U OSOBY PODĽA § 7a (ROZHODNUTIA č. 85) ──
+// Osoba podľa § 7a daň zo služby zo zahraničia odvedie a neodpočíta si ju (FS
+// podpora 080852). Vylúčenie DPH z výdavkov platí len „u platiteľov" (§ 21 ods. 2
+// písm. i) ZDP), takže je výdavkom rovnako ako cena služby, ku ktorej sa viaže
+// [odvodené — stanovisko FS nenájdené, dev/opravy/dph8.md]. Platí sa „do 25 dní po
+// skončení kalendárneho mesiaca, v ktorom vznikla daňová povinnosť", a daň do 5 €
+// sa neplatí (§ 78 ods. 3 zákona 222/2004). V daňovej evidencii je výdavkom až
+// zaplatená suma — preto ide do mesiaca po období DPH, decembrová daň do januára
+// ďalšieho roka (Roman, 14. 9. 2026). Kategória a krátenie (podiel, auto, PHL) ako
+// pri doklade: sumu počíta `vydavokDoZakladu` nad tou istou dokladom. Pri doklade
+// zaradenom do majetku by DPH patrila do vstupnej ceny (§ 25 ods. 5 písm. a)) —
+// appka ju tam nedáva a nepočíta ju ani tu (otvorené, dph8.md).
+// `obd` je „RRRR-MM" alebo „RRRR"; pripočíta sa tam, kde sa sčítava `vydavokDoZakladu`
+// podľa obdobia dane (`vydavkyDphInehoObdobia`).
+function vydavkySamozdanenie7aObdobia(obd){
+  const o=String(obd||"");
+  if(dphRegistracia()!=="7a" || !/^\d{4}(-\d{2})?$/.test(o)) return 0;
+  return memoRok("samozd7a·"+o, ()=>{
+    const ciele = o.length===4 ? Array.from({length:12},(_,i)=>o+"-"+String(i+1).padStart(2,"0")) : [o];
+    let s=0;
+    ciele.forEach(t=>{
+      const r=+t.slice(0,4), m=+t.slice(5,7);
+      const zdroj = m===1 ? (r-1)+"-12" : r+"-"+String(m-1).padStart(2,"0");
+      const riadky=dphZberMesiac(zdroj).filter(dk=>dk.smer==="vstup" && dk.samozdanenie);
+      if(r2(riadky.reduce((a,dk)=>a+(+dk.danSamozdanenie||0),0))<=5) return;   // daň do 5 € sa neplatí
+      riadky.forEach(dk=>{
+        const x=(firmaData.vydavky||[]).find(v=>v.id===dk.zdrojId);
+        if(!x || x.zaradenyOdpisovany) return;
+        s+=vydavokDoZakladu(Object.assign({}, x, {bez:+dk.danSamozdanenie||0, dph:0, zaokruhlenie:0, rozpis:null}));
+      });
+    });
+    return r2(s);
+  });
+}
+// DPH, ktorá je výdavkom v inom období než doklad: cudzia DPH so žiadosťou
+// o vrátenie (č. 77) a daň zo samozdanenia osoby podľa § 7a (č. 85). Jedno volanie
+// pre mesačný prehľad, ročný súhrn aj priznanie.
+function vydavkyDphInehoObdobia(obd){
+  return r2(vydavkyDphVratenieObdobia(obd)+vydavkySamozdanenie7aObdobia(obd));
+}
 function dphVratenieVeta(x){
   const rok=vydavokDphVratenieRok(x);
   return (rok && kategoriaOvplyvnujeZaklad(x)) ? " Do daňového výdavku pôjde DPH až v roku žiadosti o vrátenie ("+rok+")." : "";
@@ -19366,7 +19431,13 @@ function appData(){
         <div class="mfield"><label>DIČ</label><input id="set_dic" value="${esc((d.meta||{}).dic||'')}"></div>
         <div class="mfield"><label>IČ DPH</label><input id="set_icdph" value="${esc((d.meta||{}).icdph||'')}"></div>
       </div>
-      ${jePlatcaDPH()?`<div class="mfield"><label>Daňový úrad</label>
+      <div class="mfield"><label>Registrácia pre DPH</label>
+        <select id="set_dphRegistracia">
+          <option value="platca"${((d.settings||{}).dphRegistracia==="7a")?"":" selected"}>platiteľ DPH (§ 4)</option>
+          <option value="7a"${((d.settings||{}).dphRegistracia==="7a")?" selected":""}>registrovaný len podľa § 7a</option>
+        </select>
+        <div style="font-size:11.5px;color:var(--ink-soft);margin-top:4px">Platí, keď máte IČ DPH. Podľa § 7a sa registruje, kto platiteľom nie je, ale kupuje služby zo zahraničia alebo ich poskytuje do EÚ. Takto registrovaný DPH zo služby zo zahraničia odvedie, ale neodpočíta si ju, kontrolný výkaz nepodáva a paušálne výdavky uplatniť môže. Druh registrácie uvádza zoznam registrovaných pre DPH na portáli Finančnej správy.</div></div>
+      ${jeRegistrovanyDPH()?`<div class="mfield"><label>Daňový úrad</label>
         <input id="set_danovyUrad" value="${esc((d.meta||{}).danovyUrad||'')}" placeholder="napr. Žilina">
         <div style="font-size:11.5px;color:var(--ink-soft);margin-top:4px">Vypĺňa sa do hlavičky priznania k DPH a súhrnného výkazu. Appka si ho nedomýšľa — prázdny je lepší než cudzí.</div></div>`:''}
     </div>
@@ -19598,6 +19669,7 @@ async function ulozNastavenia(){
   if(document.getElementById("set_adresa")) firmaData.meta.adresa=val("set_adresa")||"";
   if(document.getElementById("set_dic")) firmaData.meta.dic=val("set_dic")||"";
   if(document.getElementById("set_icdph")) firmaData.meta.icdph=val("set_icdph")||"";
+  if(document.getElementById("set_dphRegistracia")) firmaData.settings.dphRegistracia=(val("set_dphRegistracia")==="7a")?"7a":"";
   if(document.getElementById("set_danovyUrad")) firmaData.meta.danovyUrad=val("set_danovyUrad")||"";
   const data=firmaData;
   poZmene();
@@ -19890,7 +19962,7 @@ function prognozaRok(rok){
   for(let mi=0;mi<12;mi++){ const c=calcDanRow(mi,+rok,S); zdravSkut+=c.zdrav; socSkut+=c.soc; preddavkyDanSkut+=c.danPreddavok; }
   const prijmyRok=r2(prijmySkut*faktor);
   const odpisRok=odpisDaneRok(rok, S).rok;
-  const vydavkyRealRok=r2((firmaData.vydavky||[]).filter(x=>vydavokVRoku(x, rok)).reduce((a,x)=>a+vydavokDoZakladu(x),0)+vydavkyDphVratenieObdobia(String(rok)));
+  const vydavkyRealRok=r2((firmaData.vydavky||[]).filter(x=>vydavokVRoku(x, rok)).reduce((a,x)=>a+vydavokDoZakladu(x),0)+vydavkyDphInehoObdobia(String(rok)));
   const vydavkyRok=r2(vydavkyRealRok+odpisRok);
   const zdravRok=r2(zdravSkut*faktor);
   let socMesiacov=0;
@@ -26973,6 +27045,10 @@ function vydavokZahranicnyDodavatel(x){
 // Uplatňuje si doklad odpočet? Kategóriu (vyššie) prebije ručné „Zaradenie do
 // výkazu" — rovnaká poistka pre výnimku ako v `dphOddielVydavok`.
 function vydavokUplatnujeOdpocet(x){
+  // Právo na odpočet vzniká len platiteľovi (§ 49 ods. 1 zákona o DPH). Osoba
+  // podľa § 7a daň zo samozdanenia v B.1 odvedie s odpočtom 0 (`dphOdpocetSamozdanenia`,
+  // FS podpora 080852) — ROZHODNUTIA č. 85.
+  if(!jePlatcaDPH()) return false;
   return !vydavokBezNarokuNaOdpocet(x) || !!(x && x.oddielRucne && DPH_ODDIELY[x.oddielRucne]);
 }
 // Koľko DPH z dokladu si naozaj odpočítate: nárok (kategória) aj krátenie
@@ -27049,7 +27125,12 @@ function dphOddielVydavok(x, riadok){
   if(zahrBezDane) return "B1";
   // doklad bez nároku na odpočet (súkromný nákup, reprezentácia) do výkazu
   // ani do odpočtu nejde — DPH na ňom je len súčasť ceny
-  if(bezNaroku) return "X";
+  // Osoba podľa § 7a si DPH neodpočítava (§ 49 ods. 1) a kontrolný výkaz nepodáva
+  // (§ 78a ods. 1, FS podpora 835490) — doklad s DPH do výkazu nejde, samozdanenie
+  // vyššie ostáva v B.1, daň odvádza (ROZHODNUTIA č. 85). Neplatiteľ bez IČ DPH
+  // nepodáva nič a odpočet má 0 cez `vydavokUplatnujeOdpocet`; zaradenie podľa druhu
+  // mu ostáva (test_oddiel_kv).
+  if(bezNaroku || dphRegistracia()==="7a") return "X";
   // Zahraničný doklad S daňou = cudzia DPH. Odpočítať sa dá daň z faktúry, ktorú
   // vystavil iný platiteľ (§ 49 ods. 2 písm. a) zákona o DPH), teda slovenská; cudziu DPH
   // vracia štát dodania na žiadosť o vrátenie dane z iného členského štátu.
@@ -27286,7 +27367,9 @@ let dphVybObdobie="";
 // mesiacmi, žiadna druhá kópia pravidiel oddielov a sadzieb (kap. 16).
 // Kód obdobia: "2026-05" (mesiac) alebo "2026-Q2" (štvrťrok). Tvar XML overený
 // proti oficiálnemu kv_dph_2025.xsd: Obdobie je Rok + CHOICE Mesiac/Stvrtrok.
-function dphJeStvrtrocny(){ return ((firmaData&&firmaData.settings)||{}).dphObdobie==="stvrtrocne"; }
+// Osoba podľa § 7a podáva priznanie za kalendárny mesiac (§ 78 ods. 3) — štvrťrok
+// je voľba platiteľa (§ 77 ods. 2), ROZHODNUTIA č. 85.
+function dphJeStvrtrocny(){ return jePlatcaDPH() && ((firmaData&&firmaData.settings)||{}).dphObdobie==="stvrtrocne"; }
 function dphParsujObdobie(kod){
   const q=String(kod||"").match(/^(\d{4})-Q([1-4])$/);
   if(q){ const st=+q[2];
@@ -27502,14 +27585,15 @@ function dphVykazHtml(rok){
 
   return `<div class="card" style="margin-bottom:14px">
     <h2 style="font-size:16px;margin-bottom:4px">Kontrolný výkaz a priznanie DPH</h2>
-    <div class="csub" style="margin-bottom:12px">Vyberte obdobie, skontrolujte zaradenie dokladov do oddielov, potom vygenerujte XML pre portál FS. <b>Za správnosť zodpovedá platiteľ.</b></div>
+    <div class="csub" style="margin-bottom:12px">Vyberte obdobie, skontrolujte zaradenie dokladov do oddielov, potom vygenerujte XML pre portál FS. ${jePlatcaDPH()?"<b>Za správnosť zodpovedá platiteľ.</b>"
+      :"Ako osoba registrovaná podľa § 7a podávate priznanie len za mesiac, v ktorom ste mali samozdanenie (§ 78 ods. 3), a kontrolný výkaz nie (§ 78a). DPH si neodpočítavate. <b>Za správnosť zodpovedáte vy.</b>"}</div>
     <div class="atool" style="flex-wrap:wrap">
       ${obdobia.map(o=>{const[oy,om]=o.split("-");const lbl=/^Q/.test(om)?om+" "+oy:MES_SK[+om-1].slice(0,3)+" "+oy;return `<span class="achip ${o===mk?'on':''}" onclick="dphVybObdobie='${o}';appDPH()">${lbl}</span>`}).join('')}
       <span style="margin-left:auto"></span>
-      <select onchange="dphNastavObdobieTyp(this.value)"${zam("dph")} title="Zdaňovacie obdobie podľa registrácie. Nový platiteľ je prvých 12 mesiacov mesačný; štvrťročné si môže zvoliť potom (obrat do 100 000 €)." style="background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-size:12px">
+      ${jePlatcaDPH()?`<select onchange="dphNastavObdobieTyp(this.value)"${zam("dph")} title="Zdaňovacie obdobie podľa registrácie. Nový platiteľ je prvých 12 mesiacov mesačný; štvrťročné si môže zvoliť potom (obrat do 100 000 €)." style="background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-size:12px">
         <option value="mesacne" ${dphJeStvrtrocny()?'':'selected'}>mesačný platiteľ</option>
         <option value="stvrtrocne" ${dphJeStvrtrocny()?'selected':''}>štvrťročný platiteľ</option>
-      </select>
+      </select>`:""}
     </div>
     <div class="amini" style="margin-top:12px">
       <div class="aminbox"><div class="al">DPH na výstupe</div><div class="av">${eur(S.vystupDanCelkom)}</div></div>
@@ -27549,9 +27633,9 @@ function dphVykazHtml(rok){
     </div>
 
     <div class="atool" style="margin-top:16px">
-      <button class="aabtn pri" onclick="dphExport('kv','${mk}')"${zam("dph")}>↧ Kontrolný výkaz (XML)</button>
-      <button class="aabtn" onclick="dphExport('dp','${mk}')"${zam("dph")}>↧ Priznanie DPH (XML)</button>
-      <button class="aabtn" onclick="dphNahladFormular('${mk}','kv')">▦ Náhľad pred podaním</button>
+      ${jePlatcaDPH()?`<button class="aabtn pri" onclick="dphExport('kv','${mk}')"${zam("dph")}>↧ Kontrolný výkaz (XML)</button>`:""}
+      <button class="aabtn${jePlatcaDPH()?"":" pri"}" onclick="dphExport('dp','${mk}')"${zam("dph")}>↧ Priznanie DPH (XML)</button>
+      <button class="aabtn" onclick="dphNahladFormular('${mk}','${jePlatcaDPH()?"kv":"dp"}')">▦ Náhľad pred podaním</button>
       <div style="flex-basis:100%;height:0"></div>
       ${(()=>{ const e=dphExportInfo(mk); if(!e) return "";
         const kedy=new Date(e.kv||e.dp).toLocaleDateString("sk-SK");
@@ -28419,6 +28503,39 @@ function rocnaKontrola(rok){
         [], {l:"Overiť dodávateľov", fn:"overOsobitnuUpravu("+R+")", modul:"vydavky"});
   }catch(e){ zlyhalo("osobitná úprava", e); }
 
+  // ── 7d. Registrácia za platiteľa počas roka — odpočet podľa § 55 ZDPH ──
+  // Platiteľ „môže výlučne v prvom zdaňovacom období uplatniť právo na odpočítanie
+  // dane viažucej sa k tovarom a službám, ktoré nadobudol alebo prijal v postavení
+  // zdaniteľnej osoby pred dňom, keď sa stal platiteľom", ak okrem zásob neboli
+  // v daňových výdavkoch predchádzajúcich rokov; pri odpisovanom majetku sa daň
+  // zníži o pomernú časť zodpovedajúcu odpisom (§ 55 ods. 1 zákona 222/2004).
+  // Odpočítaná DPH je potom súčasťou základu dane (§ 17 ods. 18 písm. a) ZDP), pri
+  // majetku znižuje vstupnú cenu. Appka odpočet podľa § 55 nepočíta a doklad spred
+  // registrácie vedie ako výdavok s DPH (`vydavokPlatcaDPH`) — preto len upozornenie
+  // bez výpočtu a len s dôkazom, že sa téma týka: dátum registrácie v tomto roku
+  // a majetok alebo doklad s DPH spred neho (ROZHODNUTIA č. 85, kap. 16).
+  try{
+    const od=String(S.dphPlatcaOd||"").slice(0,10);
+    if(jePlatcaDPH() && /^\d{4}-\d{2}-\d{2}$/.test(od) && od.slice(0,4)===R){
+      const majetok=(d.majetok||[]).filter(m=>m.typMajetku!=="drobny" && +m.vstupnaCena>0
+        && /^\d{4}-\d{2}-\d{2}$/.test(String(m.datumZaradenia||"").slice(0,10))
+        && String(m.datumZaradenia).slice(0,10)<od
+        && !(m.vyradeny && m.vyradeny.datum && String(m.vyradeny.datum).slice(0,10)<od));
+      const doklady=vydavky.filter(x=>(+x.dph||0)>0 && String(x.datum||"").slice(0,10)<od
+        && kategoriaOvplyvnujeZaklad(x));
+      if(majetok.length || doklady.length)
+        pridaj("pozor","dph55Registracia", "Odpočet DPH z nákupov pred registráciou (§ 55)",
+          "Platiteľom DPH ste sa stali "+fmtDatum(od)+". DPH z tovarov a služieb kúpených pred týmto dňom si môžete "
+          +"odpočítať, ale výlučne v priznaní za prvé zdaňovacie obdobie — okrem zásob len z toho, čo nie je "
+          +"v daňových výdavkoch predchádzajúcich rokov, a pri odpisovanom majetku len pomernú časť zodpovedajúcu "
+          +"ešte neuplatneným odpisom (§ 55 zákona o DPH). Appka tento odpočet nepočíta a doklady spred registrácie "
+          +"vedie ako výdavok s DPH. Ak si ho uplatníte, odpočítaná DPH patrí do základu dane (§ 17 ods. 18 zákona "
+          +"o dani z príjmov) a pri majetku znižuje vstupnú cenu — to treba upraviť ručne.",
+          [...majetok.slice(0,5).map(m=>"majetok · "+(m.nazov||"—")+" · zaradený "+fmtDatum(m.datumZaradenia)),
+           ...doklady.slice(0,5).map(x=>"doklad · "+(x.cislo||x.partner||"—")+" · "+fmtDatum(x.datum)+" · DPH "+eur(+x.dph||0))]);
+    }
+  }catch(e){ zlyhalo("odpočet pri registrácii", e); }
+
   // ── 8. Pohľadávky po splatnosti dlhšie ako rok ──
   const rokDozadu=new Date(Date.now()-365*86400000).toISOString().slice(0,10);
   const stare=(d.faktury||[]).filter(f=>f.splatnost && String(f.splatnost)<rokDozadu
@@ -29045,8 +29162,8 @@ function uzavierkaKontroly(mk){
     out.push({typ:"pozor", k:"faktBezAdresy", t:fakBezAdresy.length+" faktúr bez adresy odberateľa",
       d:"§ 74 ods. 1 zákona o DPH žiada na faktúre meno a adresu odberateľa."});
 
-  // ── DPH: len platiteľ ──
-  if(jePlatcaDPH()){
+  // ── DPH: platiteľ aj osoba podľa § 7a (priznanie za mesiac so samozdanením, č. 85) ──
+  if(jeRegistrovanyDPH()){
     const e=dphExportInfo(mk);
     const dokladov=(typeof dphZberMesiac==="function") ? dphZberMesiac(mk).length : 0;
     if(dokladov && (!e || (!e.kv && !e.dp)))
@@ -29737,7 +29854,11 @@ function dphGenerujDP(mk){
 `<nevzniklaPov>0</nevzniklaPov>\r\n`+
 `<typDP>\r\n<rdp>${D==="R"?1:0}</rdp>\r\n<odp>${D==="O"?1:0}</odp>\r\n<ddp>${D==="D"?1:0}</ddp>\r\n`+
 `<datumZisteniaDdp>${D==="D"?dnes:""}</datumZisteniaDdp>\r\n</typDP>\r\n`+
-`<osoba>\r\n<platitel>1</platitel>\r\n<registrovana>0</registrovana>\r\n<inaPovinna>0</inaPovinna>\r\n`+
+// Postavenie osoby: `registrovana` je v tlačive „Iná osoba registrovaná pre daň" —
+// osoba podľa § 7 a § 7a, ktorá „nemá postavenie platiteľa" (form.616.sb.xslt
+// eFormulára DPHv25, poučenie DPHv25 pozn. k bodu 3). Do 14. 9. 2026 natvrdo
+// platiteľ aj pre ňu (ROZHODNUTIA č. 85, dev/opravy/dph8.md).
+`<osoba>\r\n<platitel>${jePlatcaDPH()?1:0}</platitel>\r\n<registrovana>${dphRegistracia()==="7a"?1:0}</registrovana>\r\n<inaPovinna>0</inaPovinna>\r\n`+
 `<zdanitelna>0</zdanitelna>\r\n<zastupca>0</zastupca>\r\n<zastupca69aa>0</zastupca69aa>\r\n</osoba>\r\n`+
 `<zdanObd>\r\n<mesiac>${mes||""}</mesiac>\r\n<stvrtrok>${P.stvrtrok||""}</stvrtrok>\r\n<rok>${rok}</rok>\r\n</zdanObd>\r\n`+
 // Jeden `<riadok>` je ZÁMER, nie opomenutie. KROS posiela tri (dva prázdne)
@@ -29832,6 +29953,9 @@ function svCeleEura(v){ const x=+v||0; return x<0 ? -Math.round(-x) : Math.round
 // štvrťročne vždy, a pri tovare je pod limitom prakticky vždy. Voľbu ale
 // necháme na človeku — zákon ju dáva jemu, nie nám.
 function svJeStvrtrocny(){
+  // Osoba podľa § 7a podáva súhrnný výkaz „za každý kalendárny štvrťrok, v ktorom
+  // dodala službu" (§ 80 ods. 3 zákona o DPH) — mesačný jej zákon nedáva (č. 85).
+  if(dphRegistracia()==="7a") return true;
   const v=((firmaData&&firmaData.settings)||{}).svObdobie;
   return v ? v==="stvrtrocne" : true;
 }
@@ -33476,6 +33600,14 @@ function danoveTerminy(dnes, s, mesiacovDopredu){
   for(let off=0; off<=mesiacovDopredu; off++){
     const mm=m+off;
     const rok=y+Math.floor(mm/12), mesiac=((mm%12)+12)%12;
+    // Osoba podľa § 7a podáva priznanie len za mesiac, v ktorom jej vznikla povinnosť
+    // platiť daň (§ 78 ods. 3 zákona o DPH), a kontrolný výkaz nie — termín teda len
+    // za mesiac, ktorý samozdanenie v evidencii má (ROZHODNUTIA č. 85).
+    if(dphRegistracia()==="7a"){
+      const kod=(mesiac===0 ? (rok-1)+"-12" : rok+"-"+String(mesiac).padStart(2,"0"));
+      if(dphZberMesiac(kod).some(dk=>dk.samozdanenie))
+        list.push({d:dphTermin(kod), typ:"dph", nazov:"DPH priznanie (§ 7a)", detail:"za "+MES_SK[((mesiac-1)+12)%12], auto:true});
+    }
     // DPH priznanie + KV — mesačný platiteľ: za predošlý mesiac. Dátum z `dphTermin`,
     // aby kalendár a modul DPH nikdy neukázali iný deň.
     if(jePlatitelDPH && mesacnyDPH){
