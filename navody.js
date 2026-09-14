@@ -266,7 +266,7 @@ vydavky: {
         { nadpis: "Čo appka z dokladu prečíta",
           html: "<p>Dodávateľa, IČO, IČ DPH, číslo dokladu, dátumy, sumu bez DPH, DPH a sumu spolu. Text sa rozpoznáva priamo vo vašom prehliadači — prvýkrát si appka stiahne jazykové dáta (asi 15 MB).</p><p>Rozpoznanie z fotky nie je vždy presné, preto okno s kontrolou. Keď PDF nesie e-faktúru alebo ide o bloček s QR kódom, údaje sú presné a okno to napíše.</p>" },
         { nadpis: "Prečo appka pýta IČ DPH dodávateľa",
-          html: "<p>Keď je na slovenskom doklade DPH a nejde o bloček z pokladnice, appka ho bez platného IČ DPH dodávateľa neuloží — bez neho si DPH neodpočítate. Nájdete ho na doklade, prípadne v okne pod <b>📄 Čo appka prečítala z dokladu</b>.</p>" },
+          html: "<p>Keď je na slovenskom doklade DPH a nejde o bloček z pokladnice, appka ho bez platného IČ DPH dodávateľa neuloží — faktúra s DPH ho uvádzať má a platiteľ DPH si bez neho DPH neodpočíta. Nájdete ho na doklade, prípadne v okne pod <b>📄 Čo appka prečítala z dokladu</b>.</p>" },
         { nadpis: "Viac faktúr naraz",
           html: "<p>Viac došlých faktúr v PDF alebo XML načítate spolu cez <b>📥 Import faktúr (XML/PDF)</b>.</p>" },
       ],
@@ -285,7 +285,7 @@ vydavky: {
       tip: "Nájom, energie či predplatné, ktoré chodia každý mesiac, zaškrtnite v doklade ako <b>Tento doklad mi chodí pravidelne</b> — appka vám ich potom pripomenie pod <b>🔁 Opakované</b>.",
       podrobnosti: [
         { nadpis: "Kategória a daň",
-          html: "<p>Kategória rozhoduje, či výdavok zníži daň. <b>Neovplyvňuje základ dane</b> je pre súkromné nákupy, pohostenie klienta (reprezentáciu), splátky istiny úveru či prevody medzi vlastnými účtami — do daní nevstupuje a DPH z neho si neodpočítate. Pri službe zo zahraničia alebo prenose daňovej povinnosti daň zaplatiť treba, len odpočet k nej nie je. Ostatné bežné kategórie daň znižujú.</p><p>Vlastnú kategóriu pridať nejde, zoznam je pevný.</p>" },
+          html: "<p>Kategória rozhoduje, či výdavok zníži daň. <b>Súkromná spotreba</b> je pre nákupy pre seba či rodinu a <b>Neovplyvňuje základ dane</b> pre pohostenie klienta (reprezentáciu), splátky istiny úveru či prevody medzi vlastnými účtami. Ani jedna do daní nevstupuje a DPH z nich si neodpočítate. Líšia sa pri službe zo zahraničia: pri reprezentácii (a pri prenose daňovej povinnosti) daň zaplatiť treba, len odpočet k nej nie je; súkromná služba zo zahraničia sa nesamozdaňuje. Ostatné bežné kategórie daň znižujú.</p><p>Vlastnú kategóriu pridať nejde, zoznam je pevný.</p>" },
         { nadpis: "Vec používate aj súkromne",
           html: "<p>Pri bežných kategóriách je vo formulári pole <b>Koľko z toho je na podnikanie</b>. Zadajte len podnikateľskú časť — do daní appka započíta len tú. Tankovanie a doklady k osobnému autu majú vlastné pravidlá.</p>" },
         { nadpis: "Odvody a preddavky",
