@@ -226,7 +226,7 @@ efaktury: {
       nazov: "Zaevidovať prijatú e-faktúru",
       kedy: "Dodávateľ vám poslal faktúru sieťou Peppol.",
       kroky: [
-        { text: "V [[app:efaktury|module E-faktúry Peppol]] ťuknite na <b>Skontrolovať schránku</b>.", tlacidlo: "Skontrolovať schránku" },
+        { text: "Otvorte [[app:efaktury|modul E-faktúry Peppol]] — appka schránku skontroluje sama. Keď doklad čakáte a nevidíte ho, ťuknite na <b>Skontrolovať schránku</b>.", tlacidlo: "Skontrolovať schránku" },
         { text: "Pri faktúre v časti <b>Prijaté zo siete</b> ťuknite na <b>Zaevidovať</b>.", tlacidlo: "Zaevidovať" },
         { text: "Appka predvyplní výdavok v tom istom okne ako pri [[navod:vydavky/fotka|doklade z fotky]]. Skontrolujte ho a ťuknite na <b>Uložiť</b>." },
       ],
