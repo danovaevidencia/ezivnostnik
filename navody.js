@@ -1205,7 +1205,7 @@ data: {
         { text: "V časti <b>Firemné údaje</b> napíšte IČO.", tlacidlo: "Firemné údaje", snimka: "data-firma-1" },
         { text: "Ťuknite na <b>Doplniť z registra</b> — appka doplní názov a adresu.", tlacidlo: "Doplniť z registra", snimka: "data-firma-2",
           tip: "DIČ a IČ DPH doplní len vtedy, keď ich register má — inak ich dopíšte sami." },
-        { text: "Skontrolujte <b>DIČ</b> a <b>IČ DPH</b>; platiteľ DPH vyplní aj <b>Daňový úrad</b>.", tlacidlo: "Daňový úrad", snimka: "data-firma-3" },
+        { text: "Skontrolujte <b>DIČ</b> a <b>IČ DPH</b>; kto má IČ DPH, vyberie <b>Registrácia pre DPH</b> (platiteľ alebo len podľa § 7a) a vyplní aj <b>Daňový úrad</b>.", tlacidlo: "Daňový úrad", snimka: "data-firma-3" },
         { text: "Nižšie vyplňte <b>IBAN</b> — faktúry dostanú QR kód na platbu.", tlacidlo: "IBAN (pre QR platbu na faktúre)", snimka: "data-firma-4" },
         { text: "Na konci stránky ťuknite na <b>Uložiť všetky nastavenia</b>.", tlacidlo: "Uložiť všetky nastavenia", snimka: "data-firma-5" },
       ],

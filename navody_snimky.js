@@ -460,7 +460,7 @@ window.NAVODY_SNIMKY = {
  },
  "data-firma-3": {
   "m": {
-   "subor": "navody/data-firma-3.m.7d717216.webp",
+   "subor": "navody/data-firma-3.m.1751368d.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -471,7 +471,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/data-firma-3.d.6b03bf5f.webp",
+   "subor": "navody/data-firma-3.d.2d238c5c.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -975,7 +975,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/dph-udaje-1.d.d48d23eb.webp",
+   "subor": "navody/dph-udaje-1.d.582f795a.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -988,7 +988,7 @@ window.NAVODY_SNIMKY = {
  },
  "dph-udaje-2": {
   "m": {
-   "subor": "navody/dph-udaje-2.m.6607dea3.webp",
+   "subor": "navody/dph-udaje-2.m.b640ba46.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -999,7 +999,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/dph-udaje-2.d.b0a6497e.webp",
+   "subor": "navody/dph-udaje-2.d.56017c6e.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
