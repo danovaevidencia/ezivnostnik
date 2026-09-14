@@ -3528,6 +3528,9 @@ function zobrazFirmu(){
     </div>`;
     return;
   }
+  // Schránka e-faktúr a stav odoslaných bez kliknutia, pri spustení (Roman
+  // 14. 9. 2026). Na pozadí so stropom; demo a lokálny režim odfiltruje brána.
+  if(firmaData && typeof postarNaPozadi==="function") postarNaPozadi();
   const empty=document.getElementById("emptyCard");
   if(!firmaData){
     // nová firma bez dát → spusti onboarding sprievodcu (nie suchý import-only stav)
@@ -5414,9 +5417,11 @@ function _dashWidgetKatalogVypocet(){
           return polozky.map(p=>{
             const d=String(p.kedy||"").slice(0,10).split("-");
             const den=d[2]?(+d[2]):"", mes=d[1]?MES[(+d[1])-1]:"";
-            const zle=!!(p.e && p.e.nedorucitelne);
+            const st=String((p.e||{}).stav||"");
+            const zle=!!(p.e && (p.e.nedorucitelne || st==="odmietnuta" || st==="zlyhala"));
             const popis = p.smer==="von"
-              ? (zle ? "odoslaná · nedoručiteľná" : (p.e&&p.e.stav==="dorucena" ? "doručená odberateľovi" : "odoslaná"))
+              ? (p.e&&p.e.nedorucitelne ? "odoslaná · nedoručiteľná" : st==="dorucena" ? "doručená odberateľovi"
+                 : st==="odmietnuta" ? "odmietnutá sieťou" : st==="zlyhala" ? "odoslanie zlyhalo" : "odoslaná")
               : "prijatá zo siete";
             return `<div class="wrem"><div class="dd ${zle?"warn":""}">${den}<br>${mes}</div><div style="min-width:0"><div class="rt" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.smer==="von"?"↑":"↓"} ${esc(p.kto)}</div><div class="rs">${esc(p.cislo)} · ${eur(p.suma)} · ${popis}</div></div></div>`;
           }).join("");
@@ -5629,7 +5634,7 @@ function dashKonfig(){
   // ktorá každému ukazuje nulu, je len zabraté miesto (§5b.2). Kto ju skryje,
   // ostane skrytá.
   if(!cfg._efakturyPonuknute){
-    const maCo = (typeof postarDostupny==="function" && postarDostupny())
+    const maCo = (typeof postarMozeOdosielat==="function" && postarMozeOdosielat())
       || (d.efaktury||[]).length
       || (d.faktury||[]).some(f=>f && f.efaktura);
     if(maCo){
@@ -10605,6 +10610,8 @@ function faktPodlaDatumu(a, b){
 }
 function appFaktury(){
   if(prekresliVRamci("faktury")) return;   // rámec super apky (GY)
+  // Stav doručenia odoslaných e-faktúr (PLAN §21.3 bod 6) — na pozadí, so stropom.
+  if(typeof postarNaPozadi==="function") postarNaPozadi("stav");
   const d=firmaData, c=APPS.faktury.c;
   const vsetky=(d.faktury||[]).slice().sort(faktPodlaDatumu);
   // Rok a mesiac podľa obdobia DANE, nie podľa dátumu faktúry — rovnako ako
@@ -11500,8 +11507,9 @@ function kopirujFakturu(idx){
 //
 // Rozhoduje POTVRDENÉ prevzatie poštárom, nie to, že sme si XML stiahli:
 // súbor v priečinku nie je doručený doklad, sťahuje sa aj na kontrolu a
-// preklep v ňom sa musí dať opraviť. Stav píše adaptér `postar`, appka ho len
-// číta — kým poštár nie je zapojený, nezamyká sa nič.
+// preklep v ňom sa musí dať opraviť. Stav zapisuje appka z odpovede poštára:
+// pri odoslaní (`faktPeppolOdosli`) a pri obnove stavu doručenia
+// (`postarObnovStavOdoslanych`).
 //
 // Odmietnutý doklad sa NEZAMYKÁ: sieť ho neprevzala, odberateľ nedostal nič.
 const FAKT_ODOSLANE_STAVY = ["odoslana","dorucena"];
@@ -11601,7 +11609,10 @@ function vystavOpravu(idx, druh){
   k.opravujeDoklad=String(zdroj.cislo||"");
   k.druhOpravy = (druh==="tarchopis") ? "tarchopis" : "dobropis";
   // Dobropis aj storno majú v našich dátach ZÁPORNÉ sumy — tak ich čaká výkaz
-  // DPH aj súčty. Do siete odchádzajú kladné, znamienko nesie typ dokladu.
+  // DPH aj súčty. Export ich posiela ďalej tak, ako sú: `CreditNote` so
+  // ZÁPORNÝMI množstvami. Či majú ísť do siete kladné (znamienko by niesol typ
+  // dokladu, konvencia EN 16931), je otvorená otázka pre Verteco (PLAN §17.5):
+  // validátor prijme obe podoby, preto sa bez odpovede nemení nič.
   // Storno je dobropis na celú faktúru; pri čiastočnom si sumy upraví človek.
   if(druh!=="tarchopis"){
     k.polozky=(k.polozky||[]).map(p=>Object.assign({}, p, {mn: -(+p.mn||0)}));
@@ -19129,8 +19140,16 @@ function appData(){
          nemá dôvod hľadať. -->
     <div class="card" style="margin-bottom:14px">
       <h2 style="font-size:16px;margin-bottom:4px">E-faktúry</h2>
-      <div class="csub" style="margin-bottom:14px">Od 1. 1. 2027 sa faktúry doručujú sieťou Peppol cez certifikovaného sprostredkovateľa — digitálneho poštára. <b>Prijímať</b> musia všetci, <b>vystavovať</b> platitelia DPH. Príjem beží sám; odosielanie je voľba nižšie.</div>
+      <div class="csub" style="margin-bottom:14px">Od 1. 1. 2027 sa faktúry doručujú sieťou Peppol cez certifikovaného sprostredkovateľa — digitálneho poštára. <b>Prijímať</b> musia všetci, <b>vystavovať</b> platitelia DPH.</div>
+      <!-- Príjem má vlastnú voľbu, predvolene zapnutú (Roman 14. 9. 2026). Do
+           vtedy ho spúšťal prepínač odosielania a karta tvrdila „Príjem beží
+           sám", hoci appka schránku kontrolovala len tlačidlom (PLAN §21.3 bod 1). -->
       <label style="display:flex;align-items:center;gap:9px;font-size:13.5px;cursor:pointer">
+        <input type="checkbox" id="set_postarPrijem" ${postarPrijemZapnuty(d.settings)?'checked':''} style="width:17px;height:17px">
+        <span>Prijímať e-faktúry <b>zo siete Peppol</b></span>
+      </label>
+      <div class="ocr-hint" style="margin-top:5px">V každom pláne. Appka sa poštára na nové doklady pýta pri spustení a pri otvorení modulu E-faktúry, originál uloží do archívu a doklad ponúkne na zaevidovanie do výdavkov. Kým appka nie je otvorená, nekontroluje nič.</div>
+      <label style="display:flex;align-items:center;gap:9px;font-size:13.5px;cursor:pointer;margin-top:14px">
         <input type="checkbox" id="set_postar" ${(d.settings||{}).postarZapnuty?'checked':''} style="width:17px;height:17px">
         <span>Odosielať faktúry <b>sieťou Peppol</b> (skúšobná prevádzka)</span>
       </label>
@@ -19275,12 +19294,11 @@ function nastPeppolPlanHtml(){
   return `<div class="ocr-hint" style="margin-top:8px">Váš plán e-faktúry <b>prijíma</b>. Odosielať ich sieťou Peppol môžete v pláne Platiteľ DPH alebo Účtovník.</div>`;
 }
 function nastDicUpozornenieHtml(meta){
-  // Bez DIČ firma v sieti neexistuje a poštár nevie, kto posiela. Je to
-  // tvrdá podmienka `postarDostupny()` — povedať to treba TU, nie až
-  // pri prvom odoslaní, keď už má človek doklad rozpísaný.
-  const dic=String(((meta||{}).dic)||((meta||{}).icdph)||"").trim();
-  if(dic) return "";
-  return `<div class="ocr-hint" style="margin-top:8px;color:var(--ink-warn)">⚠ Firma nemá vyplnené DIČ — bez neho sa v sieti Peppol nedá vystupovať a voľba odosielania sa neponúkne. Doplňte ho vyššie v údajoch firmy.</div>`;
+  // Bez DIČ firma v sieti neexistuje: poštár nevie, kto posiela, ani komu
+  // doručiť. Je to tvrdá podmienka `postarMaIdentitu()` — povedať to treba TU,
+  // nie až pri prvom odoslaní, keď už má človek doklad rozpísaný.
+  if(peppolUcastnik((meta||{}).dic, (meta||{}).icdph)) return "";
+  return `<div class="ocr-hint" style="margin-top:8px;color:var(--ink-warn)">⚠ Firma nemá vyplnené DIČ — bez neho sa v sieti Peppol nedá vystupovať: e-faktúry sa neprijmú ani neodošlú. Doplňte ho vyššie v údajoch firmy.</div>`;
 }
 // IBAN — kontrolné číslice podľa ISO 13616 (mod 97): prvé štyri znaky idú na
 // koniec, písmená sa nahradia číslami (A=10 … Z=35) a zvyšok po delení 97 musí
@@ -19377,6 +19395,7 @@ async function ulozNastavenia(){
   s.pokladnaZaciatokOd=val("set_pokladnaZaciatokOd")||"";
   s.maEkasa=chk("set_maEkasa");
   if(document.getElementById("set_postar")) s.postarZapnuty=chk("set_postar");
+  if(document.getElementById("set_postarPrijem")) s.postarPrijem=chk("set_postarPrijem");
   // kniha jázd
   s.kjVodic=val("set_kjVodic")||"";
   s.kjAutoLimit=num("set_kjAutoLimit",50);
@@ -25244,7 +25263,8 @@ function efakturaInfo(){
 }
 // ═══ E-FAKTÚRA UBL 2.1 / Peppol BIS Billing 3.0 (povinné od 1.1.2027) ═══
 // Generuje štruktúrovaný XML podľa EN 16931. Súbor sa dá nahrať Digitálnemu poštárovi.
-// Odoslanie cez Peppol sieť rieši certifikovaný poskytovateľ (Access Point), nie appka.
+// Odosiela ho appka cez edge funkciu `postar` (`faktOdosliSietou`); doručuje
+// certifikovaný poskytovateľ (Access Point), nie my (spec 38.13).
 function ubl(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 function ublDatum(d){ const m=String(d||"").match(/(\d{4})-(\d{2})-(\d{2})/); if(m) return m[0]; const m2=String(d||"").match(/(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})/); if(m2) return `${m2[3]}-${String(m2[2]).padStart(2,"0")}-${String(m2[1]).padStart(2,"0")}`; return new Date().toISOString().slice(0,10); }
 // mapovanie mernej jednotky na UN/ECE kód (Peppol)
@@ -25317,10 +25337,17 @@ function adresaOdberatela(f){
 // IČ DPH je SK + DIČ. Medzery sa odstraňujú, lebo ostré dáta ich obsahujú
 // (IČO býva v nastaveniach zapísané s medzerami po trojiciach) a taký
 // identifikátor sieť nenájde.
+//
+// 🔴 Pravidlo je slovo od slova rovnaké ako `dicFirmy` v edge funkcii `postar`,
+// ktorá to isté číslo píše do hlavičky X-Peppol-Participant-Id: prvá hodnota
+// z (DIČ, IČ DPH), ktorá bez bielych znakov nie je prázdna, a bez predpony SK.
+// Do 14. 9. 2026 appka SK odstraňovala len z IČ DPH — DIČ zapísané ako
+// „SK2020123456" dalo v doklade iný EndpointID než v hlavičke odoslania
+// (PLAN §21.3 bod 8). test_oprava_postar porovnáva obe strany na tých istých vstupoch.
 var PEPPOL_SCHEMA_SK="0245";
 function peppolUcastnik(dic, icdph){
   const cistit=v=>String(v||"").replace(/\s/g,"");
-  return cistit(dic) || cistit(icdph).replace(/^SK/i,"");
+  return (cistit(dic) || cistit(icdph)).replace(/^SK/i,"");
 }
 // Kategória DPH podľa EN 16931 sa NEODVODZUJE zo sadzby, ale z DRUHU PLNENIA —
 // ten už faktúra nesie (`DRUHY_PLNENIA`). Požiadavky každej kategórie sú
@@ -25583,8 +25610,8 @@ function exportEFakturaUBL(idx){
 //  Prihlásenie sa posiela POUŽÍVATEĽOVÝM tokenom: o tom, ku ktorej firme sa
 //  volajúci dostane, rozhoduje RLS v databáze, nie táto funkcia.
 // ═══════════════════════════════════════════════════════════════
-async function postarVolaj(akcia, telo){
-  if(localMode || !sb || !firmaId) throw new Error("Odosielanie sieťou funguje len v cloudovom režime.");
+async function postarVolaj(akcia, telo, surove){
+  if(localMode || !sb || !firmaId) throw new Error("Sieť Peppol funguje len v cloudovom režime.");
   const tok=await ziskajToken();
   if(!tok) throw new Error(CHYBA_SESSION);
   const res=await fetch(SUPABASE_URL+"/functions/v1/postar",{
@@ -25592,35 +25619,55 @@ async function postarVolaj(akcia, telo){
     headers:{"Content-Type":"application/json","Authorization":"Bearer "+tok},
     body:JSON.stringify(Object.assign({akcia:akcia, firma_id:firmaId}, telo||{}))
   });
+  // `surove` — archívny originál ide po bajtoch, nie cez JSON (akcia `archiv`).
+  if(surove && res.ok) return await res.arrayBuffer();
   const d=await res.json().catch(()=>({}));
-  if(!res.ok){
-    const e=new Error(d.error || ("poštár odpovedal "+res.status));
-    e.chyby=d.chyby||[]; e.stav=res.status; throw e;
-  }
+  if(!res.ok) throw postarChyba(res, d);
   return d;
 }
-// Je odoslanie sieťou vôbec na stole? Tri podmienky a každá má dôvod:
-//   · cloudový režim — edge funkcia potrebuje prihlásenie
-//   · DIČ firmy — bez neho v Peppole neexistuje a poštár nevie, kto posiela
-//   · vedomé ZAPNUTIE v Nastaveniach
-//
-// 🔴 Tretia podmienka nie je opatrnosť navyše. Edge funkcia `postar` sa
-// nasadzuje samostatne a potrebuje tajomstvá; kým ich firma nemá, tlačidlo by
-// každému zlyhalo. Ponuka, ktorá vždy skončí chybou, je horšia než žiadna —
-// a odoslanie je nezvratné, takže predvolene VYPNUTÉ je aj tak správne.
-function postarDostupny(){
+// Chyba poštára povedaná tak, aby s ňou človek vedel niečo urobiť:
+//   · 429 — poštár obmedzuje počet volaní; Retry-After (server ho posiela aj
+//     v tele ako `retry_after`) povie, o koľko sekúnd to skúsiť znova
+//   · plan_neodosiela — server odmietol odoslanie podľa plánu (klient sa dá obísť)
+function postarChyba(res, d){
+  d=d||{};
+  const det=d.detail||{};
+  let sprava=d.error || ("poštár odpovedal "+res.status);
+  if(res.status===429){
+    const hl=(res.headers && res.headers.get) ? res.headers.get("Retry-After") : null;
+    const s=Math.round(+(det.retry_after!=null ? det.retry_after : hl) || 0);
+    sprava="Poštár práve neprijíma ďalšie požiadavky (priveľa naraz). Skúste to znova "+(s ? "o "+s+" s." : "o chvíľu.");
+  } else if(d.kod==="plan_neodosiela"){
+    sprava="Odosielanie e-faktúr sieťou Peppol je v pláne Platiteľ DPH a Účtovník. Prijímať ich môžete v každom pláne.";
+  }
+  const e=new Error(sprava);
+  e.chyby=d.chyby||[]; e.stav=res.status; e.kod=d.kod||det.kod||"";
+  return e;
+}
+// Tri brány a každá má dôvod (PLAN §21.3 bod 1, Roman 14. 9. 2026):
+//   · postarMaIdentitu — cloudový režim (edge funkcia potrebuje prihlásenie)
+//     a DIČ firmy (bez neho firma v Peppole neexistuje)
+//   · postarDostupny — PRÍJEM: identita + voľba príjmu, predvolene ZAPNUTÁ,
+//     v každom pláne (od 2027 zákonná povinnosť). Do 14. 9. 2026 bol príjem
+//     naviazaný na „Odosielať faktúry sieťou Peppol" — Free a Neplatiteľ DPH,
+//     ktorí odosielať nesmú, museli na príjem zapnúť odosielanie.
+//   · postarMozeOdosielat — ODOSIELANIE: identita + vedomé zapnutie + plán
+//     s `peppolOdosielanie` (Platiteľ DPH, Účtovník). Predvolene VYPNUTÉ:
+//     odoslanie je nezvratné a edge funkcia sa nasadzuje zvlášť — ponuka,
+//     ktorá by každému zlyhala, je horšia než žiadna. Poštára platí
+//     eživnostník (spec 96.9), klient sa dá obísť, a tak plán stráži aj edge
+//     funkcia `postar`; test_peppol_plan porovnáva obe.
+function postarMaIdentitu(){
   if(localMode || !sb || !firmaId) return false;
   const m=firmaData.meta||{};
-  if(!String(m.dic||m.icdph||"").trim()) return false;
-  return !!((firmaData.settings||{}).postarZapnuty);
+  return !!peppolUcastnik(m.dic, m.icdph);
 }
-// Kto smie ODOSIELAŤ: plán s `peppolOdosielanie` (Platiteľ DPH, Účtovník).
-// Príjem má každý plán a ide cez `postarDostupny` — preto plán NIE JE v nej:
-// Free a Neplatiteľ DPH by prestali prijímať, čo je od 2027 zákonná povinnosť.
-// Poštára platí eživnostník (spec 96.9), klient sa dá obísť, a tak to isté
-// pravidlo stráži aj edge funkcia `postar`; test_peppol_plan porovnáva obe.
+function postarPrijemZapnuty(s){ return (s||{}).postarPrijem!==false; }
+function postarDostupny(){ return postarMaIdentitu() && postarPrijemZapnuty(firmaData.settings); }
 function planOdosielaPeppol(kod){ return !!((PLANY[kod]||{}).peppolOdosielanie); }
-function postarMozeOdosielat(){ return postarDostupny() && planOdosielaPeppol(aktualnyPlan()); }
+function postarMozeOdosielat(){
+  return postarMaIdentitu() && !!((firmaData.settings||{}).postarZapnuty) && planOdosielaPeppol(aktualnyPlan());
+}
 // ═══════════════════════════════════════════════════════════════
 //  MODUL E-FAKTÚRY — čo odišlo a čo prišlo sieťou Peppol
 //
@@ -25643,12 +25690,17 @@ function efaktOdoslane(){
 const EFAKT_STAVY={
   odoslana:{n:"odoslaná", f:"var(--ink-info)"},
   dorucena:{n:"doručená", f:"var(--pos)"},
+  odmietnuta:{n:"odmietnutá", f:"var(--neg)"},
+  zlyhala:{n:"zlyhala", f:"var(--warn)"},
 };
 function efaktStavHtml(e){
   if(e && e.nedorucitelne)
     return `<span style="color:var(--warn);font-weight:600" title="Poštár doklad prevzal a nahlásil Finančnej správe, ale odberateľ v sieti Peppol nie je">nedoručiteľná</span>`;
   const S=EFAKT_STAVY[String((e||{}).stav||"")]||{n:String((e||{}).stav||"—"), f:"var(--ink-soft)"};
-  return `<span style="color:${S.f};font-weight:600">${esc(S.n)}</span>`
+  // Dôvod odmietnutia alebo opakovania je v titulku — do riadka sa nezmestí.
+  const tit=(e&&e.detail) ? ` title="${esc(e.detail)}"` : "";
+  return `<span style="color:${S.f};font-weight:600"${tit}>${esc(S.n)}</span>`
+    +((e&&e.retrying)?` <span class="csub" style="font-size:10.5px">· doručenie sa opakuje</span>`:"")
     +((e&&e.sandbox)?` <span class="apill" style="font-size:9px" title="Odoslaná len do testovacej siete — odberateľ ju nedostal">test</span>`:"");
 
 }
@@ -25657,6 +25709,7 @@ async function efaktSkontrolujSchranku(btn){
   if(btn){ btn.disabled=true; btn.textContent="Kontrolujem…"; }
   try{
     const n=await postarSynchronizuj();
+    await postarObnovStavOdoslanych();
     appEfaktury();
     alert(n ? ("Prevzaté nové doklady: "+n+"\n\nOriginály sú v archíve. Zaevidovať ich do výdavkov môžete nižšie.")
             : "V schránke nič nové nie je.");
@@ -25675,8 +25728,8 @@ function appEfaktury(){
     : `<button class="aabtn" onclick="otvorApp('data')">Nastaviť</button>`;
   document.getElementById("appScreen").innerHTML=appHlavicka("efaktury", akcia)+pasIbaCitanie("efaktury")+`
     ${zapnuty ? "" : `<div class="card" style="margin-bottom:14px;border-left:3px solid var(--warn)">
-      <b>Odosielanie a príjem sieťou nie sú zapnuté.</b>
-      <div class="csub" style="margin-top:5px">Zapnete ich v Nastaveniach. Od 1. 1. 2027 musí e-faktúry <b>prijímať každý</b> podnikateľ; vystavovať ich musia platitelia DPH. Do vtedy je to dobrovoľné a dá sa to skúšať.</div>
+      <b>Príjem e-faktúr zo siete nie je zapnutý.</b>
+      <div class="csub" style="margin-top:5px">${postarMaIdentitu() ? "Zapnete ho v Nastaveniach → E-faktúry." : "Potrebuje prihlásenie do cloudu a DIČ firmy vo firemných údajoch."} Od 1. 1. 2027 musí e-faktúry <b>prijímať každý</b> podnikateľ; vystavovať ich musia platitelia DPH. Do vtedy je to dobrovoľné a dá sa to skúšať.</div>
     </div>`}
     <div class="statgrid" style="margin-bottom:14px">
       <div class="sbox"><div class="sn">${odo.length}</div><div class="sl">odoslané sieťou</div></div>
@@ -25685,7 +25738,7 @@ function appEfaktury(){
 
     <div class="card" style="margin-bottom:14px">
       <h2 style="font-size:16px;margin-bottom:4px">Prijaté zo siete</h2>
-      <div class="csub" style="margin-bottom:12px">Originál je uložený v archíve — zákon žiada uchovať ho 10 rokov v pôvodnom formáte a poštár ho nedrží.</div>
+      <div class="csub" style="margin-bottom:12px">Schránku appka skontroluje pri spustení a pri otvorení tohto modulu. Originál je uložený v archíve — zákon žiada uchovať ho 10 rokov v pôvodnom formáte a poštár ho nedrží.</div>
       <div class="alist">${pri.length ? pri.map(z=>`
         <div class="efrow">
           <div class="ef-main">
@@ -25713,6 +25766,8 @@ function appEfaktury(){
           <div class="ef-akcie" style="font-size:11.5px">${efaktStavHtml(x.f.efaktura)}</div>
         </div>`).join("") : `<div class="aempty">Sieťou zatiaľ neodišlo nič.</div>`}</div>
     </div>`;
+  // Schránka a stav odoslaných bez kliknutia (strop raz za 5 minút).
+  if(typeof postarNaPozadi==="function") postarNaPozadi();
 }
 // ═══════════════════════════════════════════════════════════════
 //  PRÍJEM E-FAKTÚR ZO SIETE
@@ -25736,14 +25791,19 @@ function efakturaMam(id){ return efakturyPrijate().some(x=>String(x.id)===String
 // Prevzatie JEDNÉHO dokladu. Vracia zápis, alebo vyhodí chybu s dôvodom —
 // ticho zhltnutá chyba tu znamená stratený originál.
 async function postarPrevezmi(dokladId){
-  const d=await postarVolaj("detail", {doklad_id:dokladId});
-  const xml=String((d&&(d.payload||d.xml))||"");
-  if(!xml) throw new Error("poštár nevrátil obsah dokladu");
+  // Archívny originál (`GET …/receive/{id}/xml`) po bajtoch, nie `payload`
+  // z detailu — zdôvodnenie pri `archivXml` v edge funkcii (PLAN §21.3 bod 3).
+  // Doklad sa číta z toho istého súboru, takže zápis a archív nemôžu byť dve verzie.
+  const bajty=await postarVolaj("archiv", {doklad_id:dokladId}, true);
+  const xml=new TextDecoder("utf-8").decode(bajty||new ArrayBuffer(0));
+  if(!/<(?:[\w.-]+:)?(?:Invoice|CreditNote|StandardBusinessDocument)[\s>]/.test(xml))
+    throw new Error("poštár nevrátil XML dokladu");
   const R=parseUBLFaktura(xml)||parseIsdocFaktura(xml);
   const cislo=String((R&&R.cislo)||dokladId).replace(/[^\w.-]+/g,"_");
-  // Do úložiska ide SUROVÉ XML, presne ako prišlo — to je ten pôvodný formát,
-  // ktorý zákon žiada. Vlastný prefix `efaktura`, aby sa archív dal nájsť.
-  const subor=new File([xml], "efaktura_"+cislo+".xml", {type:"application/xml"});
+  // Do úložiska idú BAJTY presne tak, ako prišli (aj BOM a deklarácia
+  // kódovania) — to je ten pôvodný formát, ktorý zákon žiada. Vlastný prefix
+  // `efaktura`, aby sa archív dal nájsť.
+  const subor=new File([bajty], "efaktura_"+cislo+".xml", {type:"application/xml"});
   const cesta=await dokladUpload(subor, "efaktura");
   if(!cesta) throw new Error("originál sa nepodarilo uložiť do archívu");
   // Až teraz. Pred týmto riadkom je doklad u poštára a dá sa stiahnuť znova.
@@ -25759,9 +25819,10 @@ async function postarPrevezmi(dokladId){
   return zaznam;
 }
 
-// Príjem na pozadí. Polling je podľa dokumentácie poštára plnohodnotná cesta —
-// webhook je doplnok, nie podmienka. Doklad nie je vec, kde záleží na
-// sekundách, takže realtime spojenie by tu bolo réžia navyše.
+// Prevzatie nových dokladov zo schránky. Volá ju tlačidlo „Skontrolovať
+// schránku" a `postarNaPozadi` (pri spustení appky a otvorení E-faktúr).
+// Bez otvorenej appky dnes nekontroluje nič — príjem na serveri do 14 dní,
+// kým poštár obsah zmaže, je samostatná práca (PLAN §21.4).
 let _postarBezi=false;
 async function postarSynchronizuj(tiche){
   if(_postarBezi || !postarDostupny()) return 0;
@@ -25786,6 +25847,102 @@ async function postarSynchronizuj(tiche){
     if(!tiche && typeof cloudMsg==="function") cloudMsg("Schránku sa nepodarilo načítať: "+e.message,"warn");
   }finally{ _postarBezi=false; }
   return vzatych;
+}
+
+// ── STAV DORUČENIA ODOSLANÝCH (PLAN §21.3 bod 6) ───────────────────────────
+// Odoslanie vráti len prevzatie (ACCEPTED / REJECTED). Či doklad odberateľ
+// DOSTAL, povie až doručenka MLS — poštár ju ukazuje v `GET /sapi/document/sent`.
+// Do 14. 9. 2026 sa to nečítalo vôbec: odoslaná faktúra ostala „odoslaná"
+// navždy a odmietnutie sa nedozvedel nikto.
+//
+// Čo sa zapíše do `f.efaktura` (zámok podľa §17 — `FAKT_ODOSLANE_STAVY`):
+//   delivered          → dorucena            zamknutá
+//   rejected           → odmietnuta + dôvod  NEZAMKNUTÁ: odberateľ nedostal nič
+//   undeliverable      → nedorucitelne       zamknutá: poštár ju nahlásil FS
+//   failed             → zlyhala             nezamknutá: rovnaký kľúč pošle znova
+//   pending, submitted → ostáva odoslana; `retrying` pri `network_retrying:`
+const EFAKT_STAV_ZO_SIETE={ delivered:"dorucena", rejected:"odmietnuta", failed:"zlyhala" };
+function efaktCakaNaStav(e){
+  // Sandbox vracia prázdnu stránku (OpenAPI) — pýtať sa ho nemá zmysel.
+  return !!(e && !e.sandbox && e.stav==="odoslana" && !e.nedorucitelne);
+}
+function efaktZapisStav(f, d){
+  const e=f.efaktura, pred=JSON.stringify(e);
+  const s=String((d&&d.status)||"").toLowerCase();
+  if(!s) return false;
+  e.sietStav=s;
+  if(d.statusDetail!=null) e.detail=String(d.statusDetail);
+  if(d.statusDateTime) e.stavKedy=String(d.statusDateTime);
+  if(EFAKT_STAV_ZO_SIETE[s]) e.stav=EFAKT_STAV_ZO_SIETE[s];
+  if(s==="undeliverable") e.nedorucitelne=true;
+  if(s==="submitted" && /^network_retrying/.test(String(d.statusDetail||""))) e.retrying=true;
+  else delete e.retrying;
+  return JSON.stringify(e)!==pred;
+}
+let _postarStavBezi=false;
+async function postarObnovStavOdoslanych(tiche){
+  if(_postarStavBezi || !postarMaIdentitu()) return 0;
+  const cakaju=(firmaData.faktury||[]).filter(f=>f && efaktCakaNaStav(f.efaktura));
+  if(!cakaju.length) return 0;
+  _postarStavBezi=true;
+  let zmien=0;
+  try{
+    // Jedna faktúra = jedno volanie cez jej číslo. Viac = od najstaršieho
+    // odoslania; `since` vráti aj doklady so ZMENENÝM stavom, nielen nové.
+    const filtre = cakaju.length===1
+      ? { invoiceNumber:String(cakaju[0].cislo||""), limit:"200" }
+      : { since:new Date(Math.min(...cakaju.map(f=>Date.parse(f.efaktura.kedy)||Date.now()))-60000).toISOString(), limit:"200" };
+    const riadky=[];
+    let strana=null, n=0;
+    do{
+      const r=await postarVolaj("odoslane", {filtre: strana ? Object.assign({}, filtre, {pageToken:strana}) : filtre});
+      riadky.push(...((r&&r.documents)||[]));
+      strana=(r&&r.nextPageToken)||null;
+    }while(strana && ++n<20);
+    for(const f of cakaju){
+      // Párovanie podľa identifikátora z odoslania. Keď ho zoznam uvádza inak
+      // (zhodu providerDocumentId s documentId dokumentácia nesľubuje), podľa
+      // čísla faktúry — najnovší riadok.
+      const id=String(f.efaktura.id||"");
+      const d=riadky.find(x=>id && String(x.documentId||"")===id)
+        || riadky.filter(x=>String(x.invoiceNumber||"")===String(f.cislo||""))
+             .sort((a,b)=>String(b.creationDateTime||"").localeCompare(String(a.creationDateTime||"")))[0];
+      if(d && efaktZapisStav(f, d)) zmien++;
+    }
+    if(zmien) poZmene();
+  }catch(e){
+    console.error("stav odoslaných e-faktúr:", e);
+    if(!tiche && typeof cloudMsg==="function") cloudMsg("Stav odoslaných e-faktúr sa nepodarilo obnoviť: "+e.message,"warn");
+  }finally{ _postarStavBezi=false; }
+  return zmien;
+}
+
+// Schránka a stav odoslaných BEZ KLIKNUTIA (Roman 14. 9. 2026): pri spustení
+// appky (`zobrazFirmu`), pri otvorení E-faktúr (obe) a Faktúr (len stav).
+// Strop raz za 5 minút na firmu, aby prekreslenie modulu nevolalo server
+// pri každom ťuknutí. Rola len na čítanie na pozadí nezapisuje nič.
+const POSTAR_POZADIE_MS=5*60*1000;
+let _postarNaPozadiKedy=0, _postarStavKedy=0, _postarPozadieFirma=null;
+async function postarNaPozadi(len){
+  if(!postarMaIdentitu()) return 0;
+  if(_postarPozadieFirma!==firmaId){ _postarPozadieFirma=firmaId; _postarNaPozadiKedy=0; _postarStavKedy=0; }
+  const teraz=Date.now();
+  let n=0;
+  try{
+    if(len!=="stav" && postarDostupny() && mozemPisat("efaktury") && teraz-_postarNaPozadiKedy>=POSTAR_POZADIE_MS){
+      _postarNaPozadiKedy=teraz;
+      n+=await postarSynchronizuj(true);
+    }
+    if(mozemPisat("faktury") && teraz-_postarStavKedy>=POSTAR_POZADIE_MS){
+      _postarStavKedy=teraz;
+      n+=await postarObnovStavOdoslanych(true);
+    }
+    if(n){
+      const o=modulNaObrazovke();
+      if(o==="efaktury") appEfaktury(); else if(o==="faktury") appFaktury();
+    }
+  }catch(e){ console.error("e-faktúry na pozadí:", e); }
+  return n;
 }
 
 // Zaevidovanie prevzatej e-faktúry do výdavkov. Doklad sa NEZAKLADÁ sám —
@@ -25863,7 +26020,8 @@ async function faktOdosliSietou(idx){
     return;
   }
   _peppolOkno={ token:Date.now()+"-"+Math.random(), idx, v,
-    faza:"kontroly", reg:null, regChyba:"", platny:null, chyby:[], varovania:[], valChyba:"",
+    faza:"kontroly", reg:null, regChyba:"", sandbox:false, regOstro:null, regOstroChyba:"",
+    platny:null, chyby:[], varovania:[], valChyba:"",
     vysledok:null, chyba:null };
   openModal("Odoslať sieťou Peppol", peppolOknoHtml(), null);
   await peppolKontroly(_peppolOkno.token);
@@ -25880,6 +26038,7 @@ async function peppolKontroly(token){
     const n=await postarVolaj("najdi", {prijemca:O.v.prijemca});
     if(_peppolOkno!==O) return;
     O.reg=!!(n && n.registered);
+    O.sandbox=!!(n && n.sandbox);
   }catch(e){
     // Overenie príjemcu je predbežná otázka, nie podmienka. Keď zlyhá, treba
     // to povedať a nechať rozhodnutie na človeku — nie ticho pokračovať ani
@@ -25889,6 +26048,22 @@ async function peppolKontroly(token){
     O.reg=null; O.regChyba=e.message||String(e);
   }
   peppolPrekresli();
+  // 🔴 V testovacej sieti hovorí discovery o testovacej sieti, kde odberateľ
+  // takmer nikdy nie je — okno hlásilo „NIE JE registrovaný" každému (PLAN
+  // §13.1, §21.3 bod 2, zmerané znova 14. 9. 2026). Otázka „dostane to môj
+  // odberateľ naostro?" sa preto pýta ostrej siete.
+  if(O.sandbox){
+    try{
+      const o=await postarVolaj("najdi_ostro", {prijemca:O.v.prijemca});
+      if(_peppolOkno!==O) return;
+      O.regOstro=!!(o && o.registered);
+    }catch(e){
+      console.error("postar/najdi_ostro zlyhalo:", e);
+      if(_peppolOkno!==O) return;
+      O.regOstroChyba=e.message||String(e);
+    }
+    peppolPrekresli();
+  }
   try{
     const r=await postarVolaj("validuj", {xml:O.v.xml});
     if(_peppolOkno!==O) return;
@@ -25923,10 +26098,12 @@ function peppolOknoHtml(){
   if(O.faza==="vysledok"){
     const E=f.efaktura||{};
     const telo = O.chyba
-      ? `<div style="font-size:30px">✗</div><b>Odoslanie zlyhalo</b>
+      ? `<div style="font-size:30px">✗</div><b>${O.chyba.odmietnuta?"Sieť doklad odmietla":"Odoslanie zlyhalo"}</b>
          <div style="margin-top:8px;text-align:left">${esc(O.chyba.message||"")}
          ${(O.chyba.chyby&&O.chyba.chyby.length)?`<ul style="margin:8px 0 0 18px;font-size:12px">${O.chyba.chyby.slice(0,5).map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}</div>
-         <div class="csub" style="margin-top:10px">Faktúra ostáva nezmenená a dá sa odoslať znova.</div>`
+         <div class="csub" style="margin-top:10px">${O.chyba.odmietnuta
+           ? "Odberateľ nedostal nič a faktúra sa nezamkla — opravte ju a odošlite znova."
+           : "Faktúra ostáva nezmenená a dá sa odoslať znova."}</div>`
       : E.nedorucitelne
       ? `<div style="font-size:30px">⚠</div><b>Poštár doklad prevzal, ale odberateľovi sa nedoručil</b>
          <div class="csub" style="margin-top:8px">Odberateľ v sieti Peppol nie je. Poštár doklad nahlási Finančnej správe.</div>`
@@ -25935,7 +26112,8 @@ function peppolOknoHtml(){
          <div class="csub" style="margin-top:8px">Testovacia sieť doručenie nesimuluje — odberateľ faktúru nedostal. Faktúra ostáva otvorená: dá sa upraviť aj zmazať.</div>`
       : `<div style="font-size:30px;color:var(--pos)">✓</div><b>Faktúra odoslaná sieťou Peppol</b>
 
-         <div class="csub" style="margin-top:8px">Identifikátor dokladu: ${esc(E.id||"—")}${E.sietStav?" · stav "+esc(E.sietStav):""}</div>`;
+         <div class="csub" style="margin-top:8px">Identifikátor dokladu: ${esc(E.id||"—")}${E.sietStav?" · stav "+esc(E.sietStav):""}</div>
+         ${E.retrying?`<div class="csub" style="margin-top:6px">Prvý pokus o doručenie zlyhal${E.detail?" ("+esc(E.detail)+")":""} — poštár ho sám opakuje, spravidla do 20 minút. Stav sa obnoví pri otvorení Faktúr alebo E-faktúr.</div>`:""}`;
     return `<div style="text-align:center;padding:14px 6px">${telo}
       ${(O.chyba||E.sandbox)?"":`<div class="csub" style="margin-top:10px">Faktúra je odteraz zamknutá.
  Opraviť sa dá dobropisom, ťarchopisom alebo stornom.</div>`}
@@ -25947,6 +26125,11 @@ function peppolOknoHtml(){
     <span style="width:18px;text-align:center">${stav}</span><span style="flex:1;min-width:0">${text}</span></div>`;
   const regRiadok = O.faza==="kontroly" && O.reg===null && !O.regChyba
       ? kontrola("⏳","Overujem príjemcu v sieti Peppol…")
+    : O.sandbox ? (O.regOstro===true ? kontrola("✓","Odberateľ je v ostrej sieti Peppol registrovaný.")
+        : O.regOstro===false ? kontrola("⚠","Odberateľ v ostrej sieti Peppol registrovaný nie je — naostro by sa mu nedoručilo.")
+        : O.regOstroChyba ? kontrola("⚠","Nepodarilo sa overiť odberateľa v ostrej sieti ("+esc(O.regOstroChyba)+").")
+        : kontrola("⏳","Overujem odberateľa v ostrej sieti Peppol…"))
+      + kontrola("🧪","Appka je zapojená do testovacej siete — doklad odíde len tam a odberateľovi sa nedoručí.")
     : O.reg===true ? kontrola("✓","Odberateľ je v sieti Peppol registrovaný — doklad sa doručí.")
     : O.reg===false ? kontrola("⚠",`<b>Odberateľ v sieti Peppol registrovaný NIE JE.</b> Poštár doklad prevezme a nahlási Finančnej správe, ale odberateľovi sa NEDORUČÍ.`)
     : kontrola("⚠","Nepodarilo sa overiť, či je odberateľ v sieti ("+esc(O.regChyba)+"). Odoslať sa dá aj tak.");
@@ -26000,10 +26183,19 @@ async function faktPeppolOdosli(){
   // z iného zariadenia.
   if(faktOdoslana(f)){ O.faza="vysledok"; O.chyba={message:faktZamokVeta(faktOdoslana(f))}; peppolPrekresli(); return; }
   O.faza="odosiela"; peppolPrekresli();
+  // Pokus po odmietnutí dostane nový Idempotency-Key — inak by poštár opravenej
+  // faktúre prehral pôvodné odmietnutie (zdôvodnenie pri `idempotencyKluc` v postar).
+  const pred=f.efaktura||null;
+  const pokus=(pred ? (+pred.pokus||0) : 0) + (pred && pred.stav==="odmietnuta" ? 1 : 0);
   try{
-    const r=await postarVolaj("odosli", {xml:O.v.xml, prijemca:O.v.prijemca, cislo:O.v.cislo, doklad_id:f.id||O.v.cislo});
+    const r=await postarVolaj("odosli", {xml:O.v.xml, prijemca:O.v.prijemca, cislo:O.v.cislo, doklad_id:f.id||O.v.cislo, pokus});
+    // REJECTED prichádza s HTTP 202 a verdiktom v tele (SAPI-SK bez Prefer:
+    // handling=strict). Do 14. 9. 2026 sa zapísal ako „odoslana" a faktúru,
+    // ktorú sieť neprevzala, zamkol — odmietnutá sa nezamyká (§17).
+    const odmietnuta=String((r&&r.status)||"").toUpperCase()==="REJECTED";
     f.efaktura={
-      stav:"odoslana",
+      stav:odmietnuta?"odmietnuta":"odoslana",
+      pokus:pokus,
       kedy:new Date().toISOString(),
       id:String((r&&(r.providerDocumentId||r.id))||""),
       prijemca:O.v.prijemca,
@@ -26013,7 +26205,12 @@ async function faktPeppolOdosli(){
       siet:String((r&&r.siet)||""),
       sandbox:!!(r&&r.sandbox)
     };
-
+    // `detail` = dôvod odmietnutia; pri ACCEPTED dôvod opakovania alebo verdikt
+    // SML. `retrying` = prvý pokus zlyhal a poštár ho opakuje sám — konečný
+    // verdikt prinesie obnova stavu (`postarObnovStavOdoslanych`).
+    if(r && r.detail) f.efaktura.detail=String(r.detail);
+    if(r && r.retrying) f.efaktura.retrying=true;
+    if(odmietnuta) O.chyba={ message:"Sieť doklad odmietla"+(r.detail?" ("+r.detail+")":"")+".", odmietnuta:true };
     poZmene();
     obnovPoEditacii("faktury");
   }catch(e){
