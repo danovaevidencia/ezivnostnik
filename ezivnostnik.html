@@ -2445,6 +2445,9 @@ function demoNaRegistraciu(){
   // zapísať do skutočnej firmy. Ruší sa ešte v deme: `jazdaZmazStav` v ňom na
   // úložisko nesiaha, takže skutočná jazda zariadenia ostane nedotknutá.
   if(_jazda){ jazdaZastavMeranie(); jazdaZmazStav(); }
+  // Voľby zariadenia zmenené v deme sú len v pamäti karty (`gpsUloz`) a s demom
+  // sa zabudnú — aj súhlas s mapou, ktorý si karta drží bokom v premennej.
+  _demoZariadenie.clear(); _mapaVysvetlena=null;
   demoMode=false; localMode=false; firmaData=null; firmaConfig=null;   // plán dema sa nededí
   // Demo stojí na tých istých premenných ako skutočná firma — filtre, výbery,
   // otvorené okno a obrazovka modulu by inak prežili do prihlásenia. Ruší sa
@@ -13264,7 +13267,16 @@ function editVydavok(idx){
 //
 // Je async kvôli nahratiu originálu, ale `await` sa vykoná len vtedy, keď
 // originál naozaj je — editor tak ukladá synchrónne ako predtým.
-async function ulozVydavokZFormulara(idx, R){
+//
+// Druhé ťuknutie na Uložiť, kým sa nahráva originál, odmietne `ulozDokladyRaz`.
+// Len keď originál naozaj je: bez neho uloženie beží synchrónne, druhé ťuknutie
+// nemá do čoho vstúpiť a poistka by uvoľnila príznak až po ňom — dve uloženia
+// editora v tom istom kroku by druhé zamietla (test_zarok_odvody).
+function ulozVydavokZFormulara(idx, R){
+  const uloz=()=>ulozVydavokZFormularaRaz(idx, R);
+  return (R && _ocrFile) ? ulozDokladyRaz(uloz) : uloz();
+}
+async function ulozVydavokZFormularaRaz(idx, R){
   const d=firmaData; const nova=idx==null;
   const x=nova?null:d.vydavky[idx];   // upravovaný doklad
   const datum=val("m_datum");
@@ -17671,19 +17683,33 @@ const gpsZdroj={
 // hodí pri `localStorage` výnimku a jediná správna reakcia je zaobísť sa bez
 // neho — hlásiť to používateľovi by bolo hlásenie o ničom. Dôvod tu stojí raz,
 // nie pri každom volaní.
-function gpsCitaj(kluc){ try{ return localStorage.getItem(kluc); }catch(_){ return null; } }
+//
+// DEMO DO ZARIADENIA NEZAPISUJE. Voľby zariadenia patria jeho skutočnému
+// používateľovi: pomenované miesta z dema by sa ponúkali skutočnej firme,
+// súhlas s mapou by platil bez otázky a čas zálohy stiahnutej v deme by
+// skutočnej firme tvrdil, že je zálohovaná. V deme idú zápisy do pamäti karty —
+// ukážka funguje ďalej, odchod z dema (`demoNaRegistraciu`) ich zabudne. Čítanie
+// v deme berie najprv to, čo zmenilo demo, potom zariadenie. Rovnaké pravidlo ako
+// `eziv_firma` a `ez_jazda_beh`, tu na jednom mieste pre všetky kľúče, ktoré idú
+// cez tieto dve funkcie (ROZHODNUTIA č. 73, technické; dev/opravy/okno.md).
+const _demoZariadenie=new Map();
+function gpsCitaj(kluc){
+  if(demoMode && _demoZariadenie.has(kluc)) return _demoZariadenie.get(kluc);
+  try{ return localStorage.getItem(kluc); }catch(_){ return null; }
+}
 function gpsUloz(kluc, hodnota){
+  if(demoMode){ _demoZariadenie.set(kluc, hodnota==null ? null : String(hodnota)); return; }
   try{ hodnota==null ? localStorage.removeItem(kluc) : localStorage.setItem(kluc, hodnota); }catch(_){}
 }
 function jazdaPriznak(zapnut){
   const h=document.documentElement; if(!h || !h.setAttribute) return;
   if(zapnut) h.setAttribute("data-jazda","1"); else h.removeAttribute("data-jazda");
 }
-// Demo do zariadenia nezapisuje, rovnako ako `eziv_firma`. Ukážková jazda by po
-// odchode z dema čakala na zapísanie do skutočnej knihy jázd a prepísala by
-// skutočnú rozbehnutú jazdu, ktorá na zariadení už leží.
-function jazdaZapis(){ if(!demoMode) gpsUloz(GPS_KLUC, JSON.stringify(_jazda)); }
-function jazdaZmazStav(){ _jazda=null; if(!demoMode) gpsUloz(GPS_KLUC, null); jazdaPriznak(false); }
+// Demo do zariadenia nezapisuje (`gpsUloz`). Ukážková jazda by po odchode z dema
+// čakala na zapísanie do skutočnej knihy jázd a prepísala by skutočnú
+// rozbehnutú jazdu, ktorá na zariadení už leží.
+function jazdaZapis(){ gpsUloz(GPS_KLUC, JSON.stringify(_jazda)); }
+function jazdaZmazStav(){ _jazda=null; gpsUloz(GPS_KLUC, null); jazdaPriznak(false); }
 // Zastaví meranie. Čo s jazdou (zapísať, zahodiť, zrušiť s demom), rozhodne volajúci.
 function jazdaZastavMeranie(){
   gpsZdroj.stop(); jazdaUvolniLock();
@@ -17696,7 +17722,7 @@ function jazdaZastavMeranie(){
 // takže história o nič nepríde. Nahrádza to reverzný geokóding, ktorý by
 // znamenal ďalšiu tretiu stranu, ktorá vidí, kam človek chodí.
 function miestaNacitaj(){
-  try{ const s=localStorage.getItem(GPS_MIESTA); const p=s?JSON.parse(s):[]; return Array.isArray(p)?p:[]; }
+  try{ const s=gpsCitaj(GPS_MIESTA); const p=s?JSON.parse(s):[]; return Array.isArray(p)?p:[]; }
   catch(_){ return []; }
 }
 function miestoNajdi(bod){
@@ -23102,11 +23128,21 @@ function zamOkno(modul){
 // 14. 9. 2026, ROZHODNUTIA č. 62, technické). Zamyká `dokladOriginalyUloz` —
 // jediná cesta nahratia originálu pre okno dokladu aj import. Zamknuté sú len
 // tlačidlá, ktorými okno zatvára človek; `closeModal` z kódu ostáva voľné.
+//
+// Zatvorenie ZÁLOŽKY, Späť z appky či obnovenie stránky zastaviť nejde, dá sa
+// len opýtať: nahraté originály by ostali v úložisku bez dokladu (zapisuje sa
+// až po nahratí). Prehliadač sa pýta len počas nahrávania — trvalé varovanie by
+// sa ozývalo pri každom zatvorení a ľudia by sa ho naučili odklikávať. Text
+// otázky si píše prehliadač sám (ROZHODNUTIA č. 73, technické). Vlastnosť
+// `onbeforeunload`, nie poslucháč: appka iný nemá a zapnutie aj vypnutie je
+// jedno priradenie.
+function nahravanieNeodchadzaj(e){ e.preventDefault(); e.returnValue=""; return ""; }
 function oknoNahrava(zamknut){
   ["modalX","modalZrusit"].forEach(id=>{
     const b=document.getElementById(id); if(!b) return;
     b.disabled=!!zamknut; b.title=zamknut?"Počkajte, kým sa originály dokladov nahrajú":"";
   });
+  window.onbeforeunload=zamknut ? nahravanieNeodchadzaj : null;
 }
 function closeModal(){
   document.getElementById("modal").classList.remove("on"); modalSave=null; modalDelete=null; modalModul=null;
@@ -31823,16 +31859,16 @@ function faktPdfNahlad(){
 }
 // Uloženie hromadného importu. Nahrávanie originálov trvá — druhé ťuknutie na
 // Uložiť by kým beží naimportovalo dávku druhý raz (duplicita sa posudzuje
-// až nad uloženými dokladmi). Poistka to odmietne a okno nechá otvorené.
+// až nad uloženými dokladmi). Poistka (`ulozDokladyRaz`, tá istá ako v okne
+// dokladu) to odmietne a okno nechá otvorené.
 // Tlačidlo počas nahrávania ukazuje „Ukladám 3 z 20…" (ROZHODNUTIA č. 46);
 // jeho text sa vráti aj po Zrušiť alebo chybe, keď okno ostáva otvorené.
-let _faktPdfUklada=false;
-async function faktPdfUlozImport(){
-  if(_faktPdfUklada) return false;
-  _faktPdfUklada=true;
-  const tlacidlo=document.getElementById("modalOk"), text=tlacidlo?tlacidlo.textContent:"";
-  try{ return await faktPdfUlozImportRaz(); }
-  finally{ _faktPdfUklada=false; if(tlacidlo) tlacidlo.textContent=text; }
+function faktPdfUlozImport(){
+  return ulozDokladyRaz(async()=>{
+    const tlacidlo=document.getElementById("modalOk"), text=tlacidlo?tlacidlo.textContent:"";
+    try{ return await faktPdfUlozImportRaz(); }
+    finally{ if(tlacidlo) tlacidlo.textContent=text; }
+  });
 }
 async function faktPdfUlozImportRaz(){
     // Stav okna sa berie TERAZ, pred nahrávaním: `_faktPdfZse` môže medzitým
@@ -36417,7 +36453,7 @@ function exportFirmu(){
   // zaznač čas poslednej zálohy
   if(!firmaData.settings) firmaData.settings={};
   firmaData.settings.poslednaZaloha=new Date().toISOString();
-  try{ localStorage.setItem("eziv_poslednaZaloha", firmaData.settings.poslednaZaloha); }catch(_){}
+  gpsUloz("eziv_poslednaZaloha", firmaData.settings.poslednaZaloha);   // demo len do pamäti karty
   // Bez tohto zostal čas len v pamäti karty a v `localStorage` — cloud sa oň
   // nedozvedel a po najbližšom načítaní zvíťazila stará hodnota.
   firmaDirty=true; ulozNastavenieDebounced();
@@ -36495,6 +36531,20 @@ async function dokladOriginalNahraj(file, jeEf){
   return {cesta, chyba};
 }
 const ORIGINAL_LOKALNY="Originál e-faktúry sa neuložil — v lokálnom režime nie je archív. Odložte si XML sami.";
+// UKLADANIE DOKLADOV S ORIGINÁLMI BEŽÍ NARAZ LEN RAZ. Nahrávanie trvá sekundy
+// a Uložiť sa dá medzitým ťuknúť znova. V okne dokladu druhé uloženie prešlo
+// otázkami ešte pred zápisom prvého (duplicita ho nevidela), nahralo originál
+// druhý raz a zapísalo druhý doklad (overené behom 14. 9. 2026, ROZHODNUTIA
+// č. 73, technické). Jedna poistka pre okno dokladu (`ulozVydavokZFormulara`,
+// OCR aj editor) a hromadný import (`faktPdfUlozImport`). Odmietnuté ťuknutie
+// vráti false: okno ostane otvorené a zavrie ho prvé uloženie.
+let _dokladyUkladaju=false;
+async function ulozDokladyRaz(uloz){
+  if(_dokladyUkladaju) return false;
+  _dokladyUkladaju=true;
+  try{ return await uloz(); }
+  finally{ _dokladyUkladaju=false; }
+}
 // Originály dokladov pred zápisom — AŽ PO všetkých otázkach nad dokladom
 // (ROZHODNUTIA č. 20). `polozky` = [{subor, jeEf, nazov, cesta}]; nahratý
 // súbor si položka pamätá v `cesta` a opakovaný pokus ho nenahrá znova.
