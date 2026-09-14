@@ -15920,65 +15920,9 @@ function obratHtml(rok){
   </div>`;
 }
 
-// ── Náhľad dopadu (3b) ────────────────────────────────────────────────────
-// Meria sa na SKUTOČNÝCH dátach používateľa. Odhad z vymyslených čísel by
-// nepovedal nič — dopad zmeny sadzby závisí od toho, kde sa človek nachádza
-// voči hraniciam a pásmam.
-function sadzbyMerania(rok){
-  try {
-    const D=deDanovyVypocet(rok), S=firmaData.settings||{};
-    const N=(typeof nahradyObdobie==="function") ? nahradyObdobie(rok) : {zakladna:0};
-    const O=(typeof obratRoka==="function") ? obratRoka(rok) : {obrat:0};
-    const C=calcDanRow(11, rok, S);
-    return {zaklad:D.zaklad, nczd:D.nczd, dan:D.dan, nahrady:N.zakladna||0,
-            zdravMes:C.zdrav, obrat:O.obrat};
-  } catch(e){ return null; }
-}
-function konceptDopad(rok){
-  if(!sadzbyKoncept.length) return null;
-  const roky = rok ? [rok] : Array.from(new Set(sadzbyKoncept
-        .map(z=>+String(z.zaznam.od).slice(0,4)).filter(r=>r>2000))).sort();
-  const zaloha=JSON.stringify(SADZBY);
-  const out=[];
-  try {
-    roky.forEach(r=>{
-      const pred=sadzbyMerania(r);
-      const data=konceptDoSuboru("koncept");
-      sadzbyObnovZabudovane(); sadzbyZluc(data);
-      const po=sadzbyMerania(r);
-      Object.assign(SADZBY, JSON.parse(zaloha));
-      if(!pred||!po) return;
-      const riadky=Object.keys(pred).map(k=>({k, pred:pred[k], po:po[k], rozdiel:r2(po[k]-pred[k])}))
-                          .filter(x=>Math.abs(x.rozdiel)>0.005);
-      out.push({rok:r, riadky});
-    });
-  } finally { Object.assign(SADZBY, JSON.parse(zaloha)); }
-  return out;
-}
-const DOPAD_NAZVY={zaklad:"Základ dane", nczd:"Nezdaniteľné časti", dan:"Daň z príjmov",
-  nahrady:"Náhrady za km", zdravMes:"Zdravotné (december)", obrat:"Obrat pre DPH"};
-
-// Karta „čo spraví rozrobená zmena sadzieb s mojimi číslami".
-// Koncept vzniká v admin paneli, ale leží v localStorage na tej istej doméne,
-// takže ho appka vidí. Zmysel: overiť dopad PRED nasadením súboru — to je
-// jediné, čo chráni pred zámenou 0,16 za 0,15, lebo tvar aj rozsah prejdú.
-function sadzbyDopadHtml(){
-  const dopad=konceptDopad();
-  if(!dopad || !dopad.length) return "";
-  const blok=(d)=>{
-    const riadky=d.riadky.length
-      ? d.riadky.map(r=>`<div class="dphline"><span>${esc(DOPAD_NAZVY[r.k]||r.k)}</span><b>${eur(r.pred)} → ${eur(r.po)} <span style="color:${r.rozdiel>0?"var(--neg)":"var(--pos)"}">${r.rozdiel>0?"+":""}${eur(r.rozdiel)}</span></b></div>`).join("")
-      : `<div class="csub">Na tvoje čísla to nemá vplyv.</div>`;
-    return `<div style="margin-bottom:10px">
-      <div style="font-weight:700;font-size:13px;margin-bottom:4px">Rok ${d.rok}</div>${riadky}</div>`;
-  };
-  return `<div class="card" style="margin-top:14px">
-    <h2 style="font-size:16px;margin-bottom:4px">Rozrobená zmena sadzieb</h2>
-    <div class="csub" style="margin-bottom:10px">V admin paneli je pripravená zmena, ktorá ešte nie je nasadená.
-      Takto by sa prejavila na tvojich skutočných číslach.</div>
-    ${dopad.map(blok).join("")}
-  </div>`;
-}
+// Náhľad dopadu rozrobeného konceptu sadzieb (`sadzbyDopadHtml`) bol zmazaný
+// v deviatom kole (ROZHODNUTIA č. 96): appka koncept nenačítala (`konceptNacitaj`
+// volá len admin panel), takže karta bola vždy prázdna. Admin na ňu nespolieha.
 
 
 // Predletová kontrola pred podaním priznania. Zbalená, kým sa na ňu človek
@@ -16243,7 +16187,6 @@ function appSadzby(){
         <b style="color:var(--neg)">!</b> prepísané z pôvodného kódu, zdroj nikto nekontroloval
       </div>
     </div>
-    ${sadzbyDopadHtml()}
     ${Object.keys(SADZBY_SKUPINY).map(skupina).join("")}
     <div class="card" style="margin-top:14px">
       <h2 style="font-size:15px;margin-bottom:6px">Ročná revízia</h2>
@@ -18046,15 +17989,17 @@ const gpsZdroj={
 const _demoZariadenie=new Map();
 const VOLBY_V_HTML=["eziv_tema", "eziv_zakryte", "eziv_bocna"];
 const ZARIADENIE_AJ_V_DEME=[...VOLBY_V_HTML, "ez_jazda_vysvetlene"];
-function zariadenieCitaj(kluc){
-  try{ return localStorage.getItem(kluc); }catch(_){ return null; }
+// `popisChyby` — kto chybu úložiska nesmie zhltnúť ticho, dostane ju do konzoly
+// (`backupOverdue`: hlásenie o zálohe by sa inak nevysvetlene opieralo o jeden zdroj).
+function zariadenieCitaj(kluc, popisChyby){
+  try{ return localStorage.getItem(kluc); }catch(e){ if(popisChyby) console.error(popisChyby, e); return null; }
 }
-function gpsCitaj(kluc){
+function gpsCitaj(kluc, popisChyby){
   if(demoMode){
     if(_demoZariadenie.has(kluc)) return _demoZariadenie.get(kluc);
-    return ZARIADENIE_AJ_V_DEME.includes(kluc) ? zariadenieCitaj(kluc) : null;
+    return ZARIADENIE_AJ_V_DEME.includes(kluc) ? zariadenieCitaj(kluc, popisChyby) : null;
   }
-  return zariadenieCitaj(kluc);
+  return zariadenieCitaj(kluc, popisChyby);
 }
 function gpsUloz(kluc, hodnota){
   if(demoMode){ _demoZariadenie.set(kluc, hodnota==null ? null : String(hodnota)); return; }
@@ -22372,15 +22317,21 @@ function kartaPlanu(p){
         if(jeAkt){
           return `<button class="abtn" disabled style="width:100%;opacity:.5">Aktívny plán</button>`;
         }
+        // Nevlastník vidí, čo by sa dalo urobiť, ale stlmené — `stripe-checkout`
+        // by ho odmietol 403 (ROZHODNUTIA č. 95). Kto môže, povie veta nad cenníkom.
+        const smie = smiemMenitPredplatne();
+        const stlmene = (text)=>`<button class="abtn" disabled style="width:100%;opacity:.5" title="${esc(PREDPLATNE_LEN_VLASTNIK)}">${text}</button>`;
         if(p.cenaMes===0){
           // Free pri bežiacom predplatnom = zrušenie ku koncu obdobia
-          return akt!=="free"
+          if(akt==="free") return `<button class="abtn" disabled style="width:100%;opacity:.5">Základný plán</button>`;
+          return smie
             ? `<button class="abtn" style="width:100%;border-color:var(--neg);color:var(--neg)" onclick="zmenitNaFree()">Zrušiť predplatné</button>`
-            : `<button class="abtn" disabled style="width:100%;opacity:.5">Základný plán</button>`;
+            : stlmene("Zrušiť predplatné");
         }
         const jeZmena = akt!=="free";
-        return `<button class="abtn pri" style="width:100%;--_c:${p.farba}" onclick="spustiPredplatne('${p.kod}','${cennikRocne?'rok':'mes'}',null,${tier?tier.firmy:'null'})">${
-          jeZmena ? `Prejsť na ${p.nazov}` : `Predplatiť ${p.nazov}`}</button>`;
+        const text = jeZmena ? `Prejsť na ${p.nazov}` : `Predplatiť ${p.nazov}`;
+        if(!smie) return stlmene(text);
+        return `<button class="abtn pri" style="width:100%;--_c:${p.farba}" onclick="spustiPredplatne('${p.kod}','${cennikRocne?'rok':'mes'}',null,${tier?tier.firmy:'null'})">${text}</button>`;
       })()}
     </div>`;
 }
@@ -22391,20 +22342,22 @@ function zobrazCennik(modul){
   const poznamka = (modul && APPS[modul])
     ? `<div class="nv-plan"><span aria-hidden="true">🔒</span><span><b>${esc(APPS[modul].n)}</b> vo vašom pláne nie je.${planyModuluHtml(modul)}</span></div>`
     : "";
+  const lenVlastnik = smiemMenitPredplatne() ? ""
+    : `<div class="nv-plan"><span aria-hidden="true">🔒</span><span>${esc(PREDPLATNE_LEN_VLASTNIK)}</span></div>`;
   // Predvolí sa najmenší tier, ktorý pokryje to, čo účtovník UŽ spravuje.
   // Ponúknuť „do 2 firiem“ niekomu so siedmimi klientmi znamená predať plán,
   // pri ktorom mu server odmietne najbližšiu pozvánku.
   const uzSpravuje = typeof vyuzitieLimitu==="function" ? vyuzitieLimitu("firmy") : 0;
   const sedi = uctTiery().find(x=>x.firmy>=uzSpravuje);
   cennikTierFiriem = (sedi||uctTiery()[uctTiery().length-1]).firmy;
-  const html=`${poznamka}
+  const html=`${poznamka}${lenVlastnik}
     ${(()=>{ const zm=cakajucaZmena(); if(!zm) return "";
       const kedy = zm.od ? fmtDatum(String(zm.od).slice(0,10)) : "koncom obdobia";
       const nazov = zm.plan==="free" ? "Free" : ((PLANY[zm.plan]||{}).nazov || zm.plan);
       return `<div style="background:var(--brand-lite);border-left:3px solid var(--brand);border-radius:0 10px 10px 0;padding:11px 14px;margin-bottom:14px;font-size:13px;line-height:1.6">
         <b>Naplánovaná zmena:</b> od <b>${esc(kedy)}</b> budete mať <b>${esc(nazov)}</b>.
         Do vtedy vám ostáva súčasný plán a nič vám neúčtujeme.
-        ${mojaRolaVFirme()==="vlastnik"
+        ${smiemMenitPredplatne()
           ? `<button class="abtn" style="margin-top:9px" onclick="zrusitZmenuPlanu()">Zrušiť naplánovanú zmenu</button>`
           : `<div style="margin-top:6px;color:var(--ink-soft)">${esc(ZMENA_PLANU_LEN_VLASTNIK)}</div>`}
       </div>`; })()}
@@ -22464,7 +22417,7 @@ function zobrazCennik(modul){
                 style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:13px">
           ${volby.map(r=>`<option value="${r}"${kupene.includes(String(r))?" data-kupeny=\"1\"":""}>Rok ${r}${kupene.includes(String(r))?" ✓ zaplatené":""}</option>`).join("")}
         </select>
-        <button class="abtn" id="cenDoplnokBtn" onclick="kupPriznanieB()">${cenaDvojmo(DOPLNKY.priznanieB.cena).velka}</button>
+        <button class="abtn" id="cenDoplnokBtn"${smiemMenitPredplatne()?` onclick="kupPriznanieB()"`:` disabled title="${esc(PREDPLATNE_LEN_VLASTNIK)}"`}>${cenaDvojmo(DOPLNKY.priznanieB.cena).velka}</button>
       </div>
     </div>`;
     })()}
@@ -22484,12 +22437,14 @@ function cennikDoplnokStav(){
   const btn=document.getElementById("cenDoplnokBtn");
   if(!sel || !btn) return;
   const kupeny=maPriznanieBZaRok(sel.value);
-  btn.disabled=kupeny;
-  btn.style.opacity=kupeny?".5":"";
+  // Nevlastník tlačidlo dostane vypnuté — zmena roka ho nesmie zapnúť (č. 95).
+  btn.disabled=kupeny || !smiemMenitPredplatne();
+  btn.style.opacity=btn.disabled?".5":"";
   btn.textContent=kupeny ? "Máte zaplatené"
     : cenaDvojmo(DOPLNKY.priznanieB.cena).velka;
 }
 function kupPriznanieB(){
+  if(!smiemMenitPredplatne()){ alert(PREDPLATNE_LEN_VLASTNIK); return; }
   const sel=document.getElementById("cenDoplnokRok");
   const rok=sel ? sel.value : "";
   if(!rok){ alert("Vyberte rok, za ktorý priznanie potrebujete."); return; }
@@ -22889,6 +22844,8 @@ function planHradiUctovnik(){
 // plánoch je null a edge funkcia ho ignoruje.
 async function spustiPredplatne(plan, obdobie, rok, tier){
   if(localMode || !sb || !firmaId){ alert("Predplatné je dostupné len v prihlásenom (cloud) režime."); return; }
+  // Server nevlastníka odmietne 403 až po otázkach; povedať to hneď (č. 95).
+  if(!smiemMenitPredplatne()){ alert(PREDPLATNE_LEN_VLASTNIK); return; }
   // Firma, ktorej plán hradí účtovník, si ho nemá kupovať druhýkrát. Bez tejto
   // stráže by klient zaplatil za to, čo už má — a zistil by to až na výpise.
   if(planHradiUctovnik()){
@@ -23304,6 +23261,7 @@ function ocrDphDoCeny(){
 
 // prechod na Free = zrušenie predplatného ku koncu zaplateného obdobia
 function zmenitNaFree(){
+  if(!smiemMenitPredplatne()){ alert(PREDPLATNE_LEN_VLASTNIK); return; }
   const dokedy = (firmaConfig && firmaConfig.plan_do)
     ? fmtDatum(String(firmaConfig.plan_do).slice(0,10)) : "konca obdobia";
   if(!confirm("Zrušiť predplatné?\n\nVáš plán ostane aktívny do "+dokedy+
@@ -23316,9 +23274,16 @@ function zmenitNaFree(){
 // odmietne chybou 42501 (ROZHODNUTIA č. 88). Účtovník ani Náhľad tlačidlo
 // nedostanú; veta je tá istá ako hláška databázy.
 const ZMENA_PLANU_LEN_VLASTNIK = "Naplánovanú zmenu plánu môže zrušiť len vlastník firmy.";
+// Kto smie meniť predplatné — JEDINÉ miesto pravidla pre cenník (ROZHODNUTIA č. 95).
+// Predplatiť, Prejsť na, Zrušiť predplatné aj doplnok volajú `stripe-checkout`,
+// ktorý overí `firma.user_id` a iného odmietne 403; zrušenie naplánovanej zmeny
+// odmietne `zrus_zmenu_planu` (admin_41). Účtovník ani Náhľad akciu nedostanú,
+// len stlmené tlačidlo a vetu. Lokálny režim = vlastník (`mojaRolaVFirme`).
+function smiemMenitPredplatne(){ return mojaRolaVFirme()==="vlastnik"; }
+const PREDPLATNE_LEN_VLASTNIK = "Plán a predplatné môže meniť len vlastník firmy.";
 async function zrusitZmenuPlanu(){
   if(localMode || !sb || !firmaId) return;
-  if(mojaRolaVFirme()!=="vlastnik"){ alert(ZMENA_PLANU_LEN_VLASTNIK); return; }
+  if(!smiemMenitPredplatne()){ alert(ZMENA_PLANU_LEN_VLASTNIK); return; }
   if(!confirm("Zrušiť naplánovanú zmenu plánu?\n\nVaše predplatné bude pokračovať bez zmeny.")) return;
   try{
     const { error } = await sb.rpc("zrus_zmenu_planu", { p_firma_id: firmaId });
@@ -37456,11 +37421,11 @@ function backupOverdue(){
   // `localStorage` vie hodiť v súkromnom okne alebo pri zakázaných dátach
   // stránky — pôvodná verzia ho čítala bez poistky a vzala by so sebou celú
   // plochu. Chyba sa nezhltne: bez nej by sa hlásenie o zálohe len ticho
-  // opieralo o jeden zdroj a nikto by nevedel prečo.
-  try{
-    const b=localStorage.getItem("eziv_poslednaZaloha");
-    if(b) casy.push(new Date(b).getTime());
-  }catch(e){ console.error("posledná záloha z localStorage:", e); }
+  // opieralo o jeden zdroj a nikto by nevedel prečo (poistku drží `zariadenieCitaj`
+  // s popisom chyby). V deme len pamäť dema (`gpsCitaj`, ROZHODNUTIA č. 97) — ukážka
+  // nesmie tvrdiť „zálohované“ podľa zálohy skutočnej firmy na tomto zariadení.
+  const b=gpsCitaj("eziv_poslednaZaloha", "posledná záloha z localStorage:");
+  if(b) casy.push(new Date(b).getTime());
   const posl=casy.filter(x=>x>0 && !isNaN(x)).sort((x,y)=>y-x)[0];
   if(!posl) return {overdue:true, dni:null};
   const dni=Math.floor((Date.now()-posl)/86400000);
