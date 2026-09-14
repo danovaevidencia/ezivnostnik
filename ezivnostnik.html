@@ -2861,6 +2861,7 @@ function resetStavuModulov(){
   bFilter="vsetky"; bMesiac=""; vypisRozbaleny=null;
   vyber=null;   // výber zo zvončeka nesie kľúče predošlej firmy
   _cakajuciSpracovavany=null;   // rozpracovaný doklad zo Schránky patrí predošlej firme (č. 70)
+  _efakturaSpracovavana=null;   // rozpracovaná prijatá e-faktúra tiež (č. 81)
   Object.keys(STAV_CITANIA_RELACIA).forEach(k=>delete STAV_CITANIA_RELACIA[k]);   // stav čítania pod Náhľadom patrí firme (č. 58)
   // Otvorená skupina a modul. Obrazovka modulu sa nižšie skrýva, ale bočná
   // lišta kreslí rozbalenú skupinu podľa týchto premenných — po odchode z dema
@@ -11528,6 +11529,14 @@ function faktOdoslanaTest(f){
   const e=(f||{}).efaktura;
   return (e && e.sandbox && FAKT_ODOSLANE_STAVY.indexOf(String(e.stav||""))>=0) ? e : null;
 }
+// Nedoručiteľná faktúra (poštár ju prevzal a nahlásil FS, odberateľ v sieti
+// nebol) ostáva zamknutá, ale TEN ISTÝ doklad sa dá odoslať znova, keď sa
+// odberateľ zaregistruje (ROZHODNUTIA č. 81). Idempotency-Key sa pritom nemení
+// — zdôvodnenie pri výpočte pokusu vo `faktPeppolOdosli`.
+function faktOdoslatZnova(f){
+  const e=faktOdoslana(f);
+  return !!(e && e.nedorucitelne);
+}
 
 function faktZamokVeta(e){
   const kedy=(e&&e.kedy) ? " "+fmtDatum(String(e.kedy).slice(0,10)) : "";
@@ -11585,8 +11594,11 @@ function faktMenu(idx, zdroj){
   // Odoslanie sieťou stojí PRVÉ, ale len kým doklad neodišiel — potom je
   // ponuka na mieste, kde predtým bolo odoslanie, past na druhé odoslanie.
   const mozeOdoslat = !faktOdoslana(f) && postarMozeOdosielat();
+  // Nedoručiteľná: ten istý doklad znova, keď sa odberateľ zaregistruje (č. 81).
+  const odoslatZnova = faktOdoslatZnova(f) && postarMozeOdosielat();
   tbMenu("fakMenu", btn,
-    (mozeOdoslat ? pol(`faktMenuAkcia(${idx},'odosli')`,"📮","Odoslať sieťou Peppol")+TB_CIARA : "")
+    (mozeOdoslat ? pol(`faktMenuAkcia(${idx},'odosli')`,"📮","Odoslať sieťou Peppol")+TB_CIARA
+      : odoslatZnova ? pol(`faktMenuAkcia(${idx},'odosli')`,"📮","Odoslať znova sieťou Peppol")+TB_CIARA : "")
     +pol(`faktMenuAkcia(${idx},'dobropis')`,"➖","Dobropis")
     +TB_CIARA+pol(`faktMenuAkcia(${idx},'tarchopis')`,"➕","Ťarchopis")
     +TB_CIARA+pol(`faktMenuAkcia(${idx},'storno')`,"🚫","Storno — dobropis na celú sumu")
@@ -23308,6 +23320,9 @@ function closeModal(){
   // Uloženie ho spotrebuje skôr, než okno zavrie (oznacCakajuciSpracovany); bez
   // tohto by ďalší doklad z iného zdroja odbavil v schránke cudzí mail.
   _cakajuciSpracovavany=null;
+  // To isté pre prijatú e-faktúru zo siete (č. 81): zavretý formulár ju nesmie
+  // nechať rozpracovanú, inak ďalší uložený výdavok označí za zaevidovanú inú.
+  _efakturaSpracovavana=null;
   // Príznak karty pohybu musí padnúť tu, inak by `parPrekresli` po zavretí
   // kreslil do neviditeľného tela namiesto obrazovky, z ktorej sa akcia spustila.
   _kartaPohybuId=null;
@@ -25409,7 +25424,6 @@ function odkazRiadka(p){
 function efakturaXml(idx){
   const f=(firmaData.faktury||[])[idx]; const m=firmaData.meta||{};
   if(!f) return null;
-  if(!f){ alert("Faktúra sa nenašla."); return; }
   const s=faktSumy(f);
   // ŽIADNY `||0.23`. `faktSadzba` po oprave 91.3 vracia nulu legitímne
   // (neplatiteľ DPH, oslobodené plnenie) a `0||0.23` z nej spravilo 23 % —
@@ -25763,7 +25777,8 @@ function appEfaktury(){
             <div class="ef-sub">${esc(x.f.cislo||"—")} · ${esc(fmtDatum(String(x.f.efaktura.kedy).slice(0,10)))}</div>
           </div>
           <div class="ef-sum">${eur(+x.f.spolu||0)}</div>
-          <div class="ef-akcie" style="font-size:11.5px">${efaktStavHtml(x.f.efaktura)}</div>
+          <div class="ef-akcie" style="font-size:11.5px">${efaktStavHtml(x.f.efaktura)}${(faktOdoslatZnova(x.f) && postarMozeOdosielat())
+            ? ` <button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="event.stopPropagation();faktOdosliSietou(${x.i})"${zam("faktury")} title="Odberateľ v sieti Peppol nebol — keď sa zaregistruje, doklad mu odíde">Odoslať znova</button>` : ""}</div>
         </div>`).join("") : `<div class="aempty">Sieťou zatiaľ neodišlo nič.</div>`}</div>
     </div>`;
   // Schránka a stav odoslaných bez kliknutia (strop raz za 5 minút).
@@ -25829,11 +25844,25 @@ async function postarSynchronizuj(tiche){
   _postarBezi=true;
   let vzatych=0;
   try{
-    const z=await postarVolaj("prijate", {filtre:{limit:"50"}});
-    const zoznam=(z&&z.documents)||[];
-    for(const d of zoznam){
-      const id=d&&(d.documentId||d.id);
-      if(!id || efakturaMam(id)) continue;
+    // Len NEPOTVRDENÉ doklady (`status=received`) a všetky strany. Zoznam ide od
+    // najstaršieho a potvrdenie mení len stav u poštára — do 14. 9. 2026 appka
+    // brala prvých 50 bez filtra a firma s 50 potvrdenými dokladmi nové už
+    // nevidela nikdy (č. 81). `status` pozná len received / acknowledged, iná
+    // hodnota vráti SAPI-VAL-001; `limit` najviac 200 (OpenAPI 1.8.9, docs
+    // /developers, sonda sandboxu 14. 9. 2026). Zoznam sa prečíta CELÝ a až
+    // potom sa preberá: potvrdenie mení práve ten zoznam, po ktorom sa stránkuje.
+    const ids=[];
+    let strana=null, n=0;
+    do{
+      const z=await postarVolaj("prijate", {filtre:Object.assign({status:"received", limit:"200"}, strana?{pageToken:strana}:{})});
+      for(const d of ((z&&z.documents)||[])){
+        const id=d&&(d.documentId||d.id);
+        if(id && ids.indexOf(String(id))<0) ids.push(String(id));
+      }
+      strana=(z&&z.nextPageToken)||null;
+    }while(strana && ++n<20);
+    for(const id of ids){
+      if(efakturaMam(id)) continue;
       try{ await postarPrevezmi(id); vzatych++; }
       catch(e){
         // Jeden pokazený doklad nesmie zastaviť ostatné. A chyba sa NEZAHADZUJE:
@@ -25952,7 +25981,9 @@ async function postarNaPozadi(len){
 // Originál UŽ V ARCHÍVE JE, preto sa podáva jeho cesta: bez nej by ho tá cesta
 // nahrala druhýkrát a v úložisku by ležali dve kópie toho istého dokladu.
 // Ktorý prijatý doklad je práve otvorený v kontrolnom formulári. Zapíše sa pri
-// otvorení, spotrebuje pri uložení výdavku — presne ako `_cakajuciSpracovavany`.
+// otvorení, spotrebuje pri uložení výdavku — presne ako `_cakajuciSpracovavany`,
+// a rovnako ju ruší zavreté okno (`closeModal`), chyba pri otváraní a prepnutie
+// firmy (č. 81). Uloženie ju spotrebuje skôr, než okno zavrie.
 let _efakturaSpracovavana = null;
 function oznacEfakturuZaevidovanu(){
   const id=_efakturaSpracovavana; _efakturaSpracovavana=null;
@@ -25979,6 +26010,7 @@ async function efakturaZaevidujte(id){
     await spracujDokladZoSuboru(subor, null, z.cesta);
   }catch(e){
     console.error("zaevidovanie e-faktúry:", e);
+    _efakturaSpracovavana=null;   // formulár sa neotvoril — nič nie je rozpracované
     alert("Doklad sa nepodarilo otvoriť: "+e.message);
   }
 }
@@ -26012,7 +26044,8 @@ async function faktOdosliSietou(idx){
   const f=(firmaData.faktury||[])[idx];
   if(!f){ alert("Faktúra sa nenašla."); return; }
   const uz=faktOdoslana(f);
-  if(uz){ alert("🔒 "+faktZamokVeta(uz)+"\n\nTen istý doklad sa druhýkrát neposiela. Opraviť sa dá dobropisom alebo ťarchopisom."); return; }
+  // Výnimka je nedoručiteľná: ten istý doklad znova, keď sa odberateľ zaregistruje (č. 81).
+  if(uz && !faktOdoslatZnova(f)){ alert("🔒 "+faktZamokVeta(uz)+"\n\nTen istý doklad sa druhýkrát neposiela. Opraviť sa dá dobropisom alebo ťarchopisom."); return; }
   const v=efakturaXml(idx);
   if(!v) return;
   if(v.chyba.length){
@@ -26023,7 +26056,7 @@ async function faktOdosliSietou(idx){
     faza:"kontroly", reg:null, regChyba:"", sandbox:false, regOstro:null, regOstroChyba:"",
     platny:null, chyby:[], varovania:[], valChyba:"",
     vysledok:null, chyba:null };
-  openModal("Odoslať sieťou Peppol", peppolOknoHtml(), null);
+  openModal(faktOdoslatZnova(f) ? "Odoslať znova sieťou Peppol" : "Odoslať sieťou Peppol", peppolOknoHtml(), null);
   await peppolKontroly(_peppolOkno.token);
 }
 function peppolPrekresli(){
@@ -26106,7 +26139,7 @@ function peppolOknoHtml(){
            : "Faktúra ostáva nezmenená a dá sa odoslať znova."}</div>`
       : E.nedorucitelne
       ? `<div style="font-size:30px">⚠</div><b>Poštár doklad prevzal, ale odberateľovi sa nedoručil</b>
-         <div class="csub" style="margin-top:8px">Odberateľ v sieti Peppol nie je. Poštár doklad nahlási Finančnej správe.</div>`
+         <div class="csub" style="margin-top:8px">Odberateľ v sieti Peppol nie je. Poštár doklad nahlási Finančnej správe. Keď sa odberateľ zaregistruje, odošlete ho znova v E-faktúrach alebo v menu faktúry.</div>`
       : E.sandbox
       ? `<div style="font-size:30px">🧪</div><b>Faktúra odoslaná do testovacej siete</b>
          <div class="csub" style="margin-top:8px">Testovacia sieť doručenie nesimuluje — odberateľ faktúru nedostal. Faktúra ostáva otvorená: dá sa upraviť aj zmazať.</div>`
@@ -26150,6 +26183,16 @@ function peppolOknoHtml(){
         Opravte IBAN v Nastavenia a dáta → Firemné údaje a faktúru odošlite znova.`)
     : "";
   const mozeOdoslat = O.faza==="nahlad" && O.platny!==false && !O.v.ibanChyba;
+  // Veta o zámku podľa siete, do ktorej doklad odíde — to isté pravidlo ako
+  // zámok sám (`faktOdoslana`: sandbox nezamyká). Do 14. 9. 2026 okno
+  // v sandboxe tvrdilo „faktúra sa zamkne“ (č. 81). Kým overenie príjemcu sieť
+  // nepovie, platí ostrá veta — opatrnejšia z dvoch.
+  const zamkne=!!faktOdoslana({efaktura:{stav:"odoslana", sandbox:O.sandbox}});
+  const vetaZamku = faktOdoslatZnova(f)
+    ? `Doklad odíde <b>znova</b> s tým istým identifikátorom odoslania. Finančnej správe ho poštár nahlásil pri prvom odoslaní a faktúra ostáva zamknutá; odberateľ ho dostane, ak je už v sieti Peppol registrovaný.`
+    : zamkne
+    ? `Odoslanie sa <b>nedá vziať späť</b>: doklad dostane odberateľ, poštár ho nahlási Finančnej správe a faktúra sa zamkne.`
+    : `Doklad odíde len do <b>testovacej siete</b>: odberateľ ho nedostane a faktúra ostane otvorená — dá sa upraviť aj zmazať.`;
   const pol=(f.polozky||[]);
   return `
     ${riadok("Faktúra", `<b>${esc(O.v.cislo)}</b> · vystavená ${fmtDatum(f.vystavenie||f.datum||"")}${f.splatnost?" · splatná "+fmtDatum(f.splatnost):""}`)}
@@ -26169,7 +26212,7 @@ function peppolOknoHtml(){
     ${ibanRiadok}
     <details style="margin-top:8px"><summary style="cursor:pointer;font-size:12px;color:var(--ink-soft)">Zobraziť XML, ktoré sa odošle</summary>
       <pre style="max-height:220px;overflow:auto;font-size:10.5px;background:var(--bg);padding:8px;border-radius:8px;white-space:pre-wrap;overflow-wrap:anywhere">${esc(O.v.xml)}</pre></details>
-    <div class="ocr-hint" style="margin-top:10px">Odoslanie sa <b>nedá vziať späť</b>: doklad dostane odberateľ, poštár ho nahlási Finančnej správe a faktúra sa zamkne.</div>
+    <div class="ocr-hint" style="margin-top:10px">${vetaZamku}</div>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
       <button class="aabtn" onclick="closeModal()">Zrušiť</button>
       <button class="aabtn pri" onclick="faktPeppolOdosli()" ${mozeOdoslat?"":"disabled"}>📮 Odoslať</button>
@@ -26181,10 +26224,14 @@ async function faktPeppolOdosli(){
   const f=(firmaData.faktury||[])[O.idx]; if(!f) return;
   // Zámok ešte raz: medzi otvorením okna a stlačením mohol doklad odísť
   // z iného zariadenia.
-  if(faktOdoslana(f)){ O.faza="vysledok"; O.chyba={message:faktZamokVeta(faktOdoslana(f))}; peppolPrekresli(); return; }
+  if(faktOdoslana(f) && !faktOdoslatZnova(f)){ O.faza="vysledok"; O.chyba={message:faktZamokVeta(faktOdoslana(f))}; peppolPrekresli(); return; }
   O.faza="odosiela"; peppolPrekresli();
   // Pokus po odmietnutí dostane nový Idempotency-Key — inak by poštár opravenej
   // faktúre prehral pôvodné odmietnutie (zdôvodnenie pri `idempotencyKluc` v postar).
+  // NEDORUČITEĽNÁ ide znova s TÝM ISTÝM kľúčom (pokus sa nemení, č. 81): Verteco
+  // pri `undeliverable` kľúč uvoľní — „the same Idempotency-Key sends again once
+  // they register“ (OpenAPI 1.8.9, SentDocumentStatus; aj popis hlavičky). Nový
+  // kľúč by bol nový prenos a mohol by znamenať druhé hlásenie tej istej faktúry FS.
   const pred=f.efaktura||null;
   const pokus=(pred ? (+pred.pokus||0) : 0) + (pred && pred.stav==="odmietnuta" ? 1 : 0);
   try{
