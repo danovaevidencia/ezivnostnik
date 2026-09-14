@@ -5475,12 +5475,13 @@ function _dashWidgetKatalogVypocet(){
           return polozky.map(p=>{
             const d=String(p.kedy||"").slice(0,10).split("-");
             const den=d[2]?(+d[2]):"", mes=d[1]?MES[(+d[1])-1]:"";
-            const st=String((p.e||{}).stav||"");
-            const zle=!!(p.e && (p.e.nedorucitelne || st==="odmietnuta" || st==="zlyhala"));
-            const popis = p.smer==="von"
-              ? (p.e&&p.e.nedorucitelne ? "odoslaná · nedoručiteľná" : st==="dorucena" ? "doručená odberateľovi"
-                 : st==="odmietnuta" ? "odmietnutá sieťou" : st==="zlyhala" ? "odoslanie zlyhalo" : "odoslaná")
-              : "prijatá zo siete";
+            // Stav slovom aj zvýraznenie z `efaktStav` — to isté pravidlo ako
+            // E-faktúry a riadok faktúry. Dlaždica mala do 14. 9. 2026 vlastné
+            // texty („odoslanie zlyhalo“, „doručená odberateľovi“) a testovacie
+            // odoslanie v nej vyzeralo ako ostré (č. 97).
+            const S = p.smer==="von" ? efaktStav(p.e) : null;
+            const zle=!!(S && S.zle);
+            const popis = S ? S.n+(S.test?" · test":"") : "prijatá zo siete";
             return `<div class="wrem"><div class="dd ${zle?"warn":""}">${den}<br>${mes}</div><div style="min-width:0"><div class="rt" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.smer==="von"?"↑":"↓"} ${esc(p.kto)}</div><div class="rs">${esc(p.cislo)} · ${eur(p.suma)} · ${popis}</div></div></div>`;
           }).join("");
         }},
@@ -25762,14 +25763,23 @@ function peppolUcastnik(dic, icdph){
 function ublKategoriaDPH(f, sadzba, icdphDodavatela){
   // Neplatiteľ DPH nefakturuje daň vôbec. Doteraz mu export vyhlásil kategóriu
   // `S` s prázdnym IČ DPH, čo sieť odmieta (PEPPOL-EN16931-R008).
-  if(!String(icdphDodavatela||"").trim())
-    return {kod:"O", dovod:"Dodávateľ nie je platiteľ DPH", bezSadzby:true, bezIcDph:true};
+  const MIMO_DPH={kod:"O", dovod:"Dodávateľ nie je platiteľ DPH", bezSadzby:true, bezIcDph:true};
+  if(!String(icdphDodavatela||"").trim()) return MIMO_DPH;
   const dp=druhPlnenia(f);
   const MAPA={prenos69:"AE", eu_sluzba:"AE", eu_tovar:"K", vyvoz:"G", oslobodene:"E"};
   if(MAPA[dp]) return {kod:MAPA[dp], dovod:(DRUHY_PLNENIA[dp]||{}).n||"", cudzia:dp!=="prenos69"};
   // Tuzemské plnenie s nulovou sadzbou: prečo je nulová, appka nevie, a dôvod
   // si vymýšľať nesmie. `Z` je jediná kategória, ktorá dôvod ZAKAZUJE.
-  if(!(+sadzba>0)) return {kod:"Z"};
+  //
+  // Lenže `Z` je nulová sadzba PLATITEĽA. Osoba registrovaná podľa § 7a má
+  // IČ DPH, platiteľom ale nie je a tuzemsko daň neúčtuje vôbec — jej plnenie
+  // je mimo DPH, `O` (ROZHODNUTIA č. 91, dev/opravy/dph8.md bod 5). To isté
+  // firma, ktorej admin platiteľstvo vypol pri vyplnenom IČ DPH. Pri `O` nesmie
+  // byť v doklade IČ DPH dodávateľa ani odberateľa (BR-O-02) — `bezIcDph`.
+  // Kto je platiteľ, rozhoduje JEDNO pravidlo `dphRegistracia` (vlákno dph9 ho
+  // rozširuje o dátum registrácie), nie kópia nad nastaveniami. Druhy plnenia
+  // z MAPA vyššie (služba do EÚ…) a faktúra s kladnou sadzbou ostávajú bez zmeny.
+  if(!(+sadzba>0)) return jePlatcaDPH() ? {kod:"Z"} : MIMO_DPH;
   return {kod:"S"};
 }
 // Krajina sa berie z predpony IČ DPH — to je údaj, ktorý appka má. Adresa je
@@ -25813,6 +25823,8 @@ function efakturaXml(idx){
   const sadzbaPct=Math.round(sadzba*100);
   const dodIcDph=String(m.icdph||"").replace(/\s/g,"");
   const kat=ublKategoriaDPH(f, sadzba, dodIcDph);
+  // Pri `O` ide IČ DPH z dokladu von aj u DODÁVATEĽA (BR-O-02) — osoba podľa
+  // § 7a ho má vyplnené, a do 14. 9. 2026 ho export písal vždy, keď nebolo prázdne.
   // ── DRUH DOKLADU ──
   // Dobropis nie je faktúra so záporným znamienkom: je to INÝ DOKUMENT
   // (`CreditNote`) s vlastnou schémou — iné poradie prvkov, iné názvy riadkov
@@ -25923,7 +25935,7 @@ function efakturaXml(idx){
         <cbc:PostalZone>${ubl(da.psc)}</cbc:PostalZone>
         <cac:Country><cbc:IdentificationCode>SK</cbc:IdentificationCode></cac:Country>
       </cac:PostalAddress>
-      ${dodIcDph?`<cac:PartyTaxScheme>
+      ${(dodIcDph && !kat.bezIcDph)?`<cac:PartyTaxScheme>
         <cbc:CompanyID>${ubl(dodIcDph)}</cbc:CompanyID>
         <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
       </cac:PartyTaxScheme>`:""}
@@ -26084,18 +26096,22 @@ function efaktOdoslane(){
 const EFAKT_STAVY={
   odoslana:{n:"odoslaná", f:"var(--ink-info)"},
   dorucena:{n:"doručená", f:"var(--pos)"},
-  odmietnuta:{n:"odmietnutá", f:"var(--neg)"},
-  zlyhala:{n:"zlyhala", f:"var(--warn)"},
+  odmietnuta:{n:"odmietnutá", f:"var(--neg)", zle:true},
+  zlyhala:{n:"zlyhala", f:"var(--warn)", zle:true},
 };
 // Stav odoslanej e-faktúry slovom, farbou a vysvetlením. JEDNO pravidlo pre
-// E-faktúry aj riadok zoznamu faktúr (`faktPeppolZnacka`) — riadok do 14. 9. 2026
-// ukazoval pri nedoručiteľnej „📮✓ Odoslaná sieťou Peppol“ (č. 87).
+// E-faktúry, riadok zoznamu faktúr (`faktPeppolZnacka`) aj dlaždicu na ploche —
+// riadok do 14. 9. 2026 ukazoval pri nedoručiteľnej „📮✓ Odoslaná sieťou Peppol“
+// (č. 87) a dlaždica mala tretiu vlastnú kópiu textov (č. 97).
+//   zle  — odberateľ doklad nemá (zvýraznenie v zozname)
+//   test — odoslaná len do testovacej siete
 function efaktStav(e){
+  const test=!!(e && e.sandbox);
   if(e && e.nedorucitelne)
-    return {n:"nedoručiteľná", f:"var(--warn)", tit:"Poštár doklad prevzal a nahlásil Finančnej správe, ale odberateľ v sieti Peppol nie je"};
+    return {n:"nedoručiteľná", f:"var(--warn)", zle:true, test, tit:"Poštár doklad prevzal a nahlásil Finančnej správe, ale odberateľ v sieti Peppol nie je"};
   const S=EFAKT_STAVY[String((e||{}).stav||"")]||{n:String((e||{}).stav||"—"), f:"var(--ink-soft)"};
   // Dôvod odmietnutia alebo opakovania je v titulku — do riadka sa nezmestí.
-  return {n:S.n, f:S.f, tit:(e&&e.detail) ? String(e.detail) : ""};
+  return {n:S.n, f:S.f, zle:!!S.zle, test, tit:(e&&e.detail) ? String(e.detail) : ""};
 }
 function efaktStavHtml(e){
   const S=efaktStav(e);
@@ -26104,7 +26120,7 @@ function efaktStavHtml(e){
   const tit=S.tit ? ` title="${esc(S.tit)}"` : "";
   return `<span style="color:${S.f};font-weight:600"${tit}>${esc(S.n)}</span>`
     +((e&&e.retrying)?` <span class="csub" style="font-size:10.5px">· doručenie sa opakuje</span>`:"")
-    +((e&&e.sandbox)?` <span class="apill" style="font-size:9px" title="Odoslaná len do testovacej siete — odberateľ ju nedostal">test</span>`:"");
+    +(S.test?` <span class="apill" style="font-size:9px" title="Odoslaná len do testovacej siete — odberateľ ju nedostal">test</span>`:"");
 
 }
 // Značka zamknutej (ostro odoslanej) faktúry v riadku zoznamu faktúr. Stav
@@ -26266,7 +26282,10 @@ async function postarPrevezmiRaz(dokladId){
   // kódovania) — to je ten pôvodný formát, ktorý zákon žiada. Vlastný prefix
   // `efaktura`, aby sa archív dal nájsť.
   const subor=new File([bajty], "efaktura_"+cislo+".xml", {type:"application/xml"});
-  const cesta=await dokladUpload(subor, "efaktura");
+  // Cesta PODĽA IDENTIFIKÁTORA DOKLADU, nie podľa času (č. 97): opätovné prevzatie
+  // po zavretej karte nájde súbor z prvého pokusu a nenahrá druhý. `efaktura_peppol_`
+  // sa nezrazí s `efaktura_<čas>` z okna dokladu a `jeOriginalEfaktury` ho chráni.
+  const cesta=await dokladUpload(subor, "efaktura", "efaktura_peppol_"+String(dokladId).replace(/[^\w.-]+/g,"_")+".xml");
   if(!cesta) throw new Error("originál sa nepodarilo uložiť do archívu");
   if(firmaId!==firma) throw new Error(POSTAR_INA_FIRMA);
   // Bez `potvrd` — potvrdí sa až uložený záznam (`postarPotvrdUlozene`).
@@ -26371,12 +26390,36 @@ function efaktZapisStav(f, d){
   else delete e.retrying;
   return JSON.stringify(e)!==pred;
 }
+// Riadok zo zoznamu odoslaných, ktorý patrí faktúre `f`, alebo null.
+//   1. Podľa identifikátora z odoslania — len keď ho riadok potvrdí číslom
+//      faktúry, alebo (riadok bez čísla) keď to id nesie jediná faktúra firmy
+//      vrátane histórie pokusov. Kópia a opravný doklad odoslanej faktúry do
+//      14. 9. 2026 zdedili celé `efaktura` aj s id (dev/opravy/kopia-efaktura.md)
+//      a fantóm by dostal stav originálu — doručená, nedoručiteľná (č. 97).
+//      V produkcii fantómy nie sú (č. 93); je to poistka, nie oprava dát.
+//   2. Keď zoznam id uvádza inak (zhodu providerDocumentId s documentId
+//      dokumentácia nesľubuje), podľa čísla faktúry — najnovší riadok. Faktúra
+//      bez čísla sa takto nepáruje: prázdne číslo by sadlo na každý riadok bez čísla.
+function efaktRiadokOdoslanej(f, riadky, faktury){
+  const id=String(((f||{}).efaktura||{}).id||""), cislo=String((f||{}).cislo||"");
+  if(id){
+    const nesie=g=>g && g.efaktura && [g.efaktura].concat(g.efaktura.historia||[]).some(h=>String((h||{}).id||"")===id);
+    const jedina=(faktury||[]).filter(nesie).length===1;
+    const d=(riadky||[]).find(x=>String(x.documentId||"")===id
+      && (String(x.invoiceNumber||"") ? String(x.invoiceNumber)===cislo : jedina));
+    if(d) return d;
+  }
+  if(!cislo) return null;
+  return (riadky||[]).filter(x=>String(x.invoiceNumber||"")===cislo)
+    .sort((a,b)=>String(b.creationDateTime||"").localeCompare(String(a.creationDateTime||"")))[0] || null;
+}
 let _postarStavBezi=false;
 async function postarObnovStavOdoslanych(tiche){
   // Stav sa zapisuje do faktúr — rola bez zápisu do Faktúr ho neobnovuje (č. 88).
   if(_postarStavBezi || !postarMaIdentitu() || !mozemPisat("faktury")) return 0;
   const cakaju=(firmaData.faktury||[]).filter(f=>f && efaktCakaNaStav(f.efaktura));
   if(!cakaju.length) return 0;
+  const firma=firmaId;
   _postarStavBezi=true;
   let zmien=0;
   try{
@@ -26392,14 +26435,12 @@ async function postarObnovStavOdoslanych(tiche){
       riadky.push(...((r&&r.documents)||[]));
       strana=(r&&r.nextPageToken)||null;
     }while(strana && ++n<20);
+    // Stráž firmy po sieti (vzor `postarPotvrdUlozene`): `cakaju` sú objekty
+    // faktúr firmy, ktorá bola otvorená PRED volaním. Po prepnutí by sa stav
+    // zapísal do nich a `poZmene` by ukladalo inú firmu (č. 97).
+    if(firmaId!==firma) return 0;
     for(const f of cakaju){
-      // Párovanie podľa identifikátora z odoslania. Keď ho zoznam uvádza inak
-      // (zhodu providerDocumentId s documentId dokumentácia nesľubuje), podľa
-      // čísla faktúry — najnovší riadok.
-      const id=String(f.efaktura.id||"");
-      const d=riadky.find(x=>id && String(x.documentId||"")===id)
-        || riadky.filter(x=>String(x.invoiceNumber||"")===String(f.cislo||""))
-             .sort((a,b)=>String(b.creationDateTime||"").localeCompare(String(a.creationDateTime||"")))[0];
+      const d=efaktRiadokOdoslanej(f, riadky, firmaData.faktury);
       if(d && efaktZapisStav(f, d)) zmien++;
     }
     if(zmien) poZmene();
@@ -37483,7 +37524,15 @@ function backupOverdue(){
 // to musí zniesť rovnako ako zlyhaný upload.
 function ulozKoren(){ return firmaId || null; }
 
-async function dokladUpload(file, prefix){
+// `nazov` — PEVNÉ meno súboru namiesto `prefix_čas` (prevzatá e-faktúra podľa
+// identifikátora dokladu, č. 97). Súbor s tým menom tam už môže ležať: prevzatie,
+// ktorého záznam sa neuložil (karta zavretá pred uložením), sa opakuje. Nahrá sa
+// s `upsert:false` — originál sa neprepisuje — a keď súbor existuje, vráti sa
+// jeho cesta. O existencii rozhodne ZOZNAM priečinka, nie text chyby: tvar chyby
+// duplicity sa medzi verziami Storage API líši (400/409, `statusCode`, text)
+// a supabase-js ide z CDN ako `@2`. Do 14. 9. 2026 dostal každý pokus novú cestu
+// s `Date.now()` a `efaktura_…` sa nikdy nemaže (`dokladZmazOriginaly`).
+async function dokladUpload(file, prefix, nazov){
   if(localMode||!sb){ return null; } // v lokálnom režime doklady neukladáme do cloudu
   const { data:{ user } }=await sb.auth.getUser();
   if(!user) return null;
@@ -37491,9 +37540,20 @@ async function dokladUpload(file, prefix){
   if(!koren){ console.error("upload dokladu: nie je otvorená firma"); return null; }
   const ext=(file.name.split(".").pop()||"bin").toLowerCase();
   const cesta=`${koren}/${prefix||"doklad"}_${Date.now()}.${ext}`;
-  const { error }=await nahrajDoUloziska(cesta, file, { upsert:false });
-  if(error){ console.error("upload dokladu:",error); return null; }
-  return cesta; // uložíme do záznamu ako odkaz
+  const cil=nazov ? `${koren}/${nazov}` : cesta;
+  const { error }=await nahrajDoUloziska(cil, file, { upsert:false });
+  if(error){
+    if(nazov && await uloziskoMaSubor(koren, nazov)) return cil;
+    console.error("upload dokladu:",error); return null;
+  }
+  return cil; // uložíme do záznamu ako odkaz
+}
+async function uloziskoMaSubor(priecinok, nazov){
+  try{
+    const { data, error }=await sb.storage.from("dokumenty").list(priecinok, { search:nazov, limit:100 });
+    if(error){ console.error("zoznam úložiska:", error); return false; }
+    return (data||[]).some(o=>o && o.name===nazov);
+  }catch(e){ console.error("zoznam úložiska:", e); return false; }
 }
 // ── ORIGINÁL DOKLADU DO ÚLOŽISKA — jedna cesta pre okno dokladu aj import ──
 // Pri fotke bločka je to pohodlie. Pri e-faktúre zákonná povinnosť: § 76
