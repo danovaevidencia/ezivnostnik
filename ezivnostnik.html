@@ -5115,7 +5115,7 @@ function otvorMajetokNaRozhodnutie(){
         <div style="font-weight:600;font-size:13px">${esc(x.partner||x.popis||"—")}</div>
         <div class="csub" style="margin:2px 0 8px">${fmtDatum(x.datum)} · ${eur(+x.bez||0)} bez DPH${x.cislo?" · "+esc(x.cislo):""}</div>
         <div style="display:flex;gap:7px;flex-wrap:wrap">
-          <button class="aabtn pri" onclick="closeModal();vydavokDoMajetku(${i})">Zaradiť do majetku</button>
+          <button class="aabtn pri" onclick="closeModal();vydavokDoMajetku(${i})"${zam("majetok")}>Zaradiť do majetku</button>
           <button class="aabtn" onclick="oznacNieJeMajetok(${i});otvorMajetokNaRozhodnutie()">Nie je majetok</button>
         </div></div>`; }).join("");
   openModal("Majetok, alebo výdavok?", telo);
@@ -5753,22 +5753,38 @@ function notifPrecitaneMapa(){
 }
 function notifJePrecitana(kluc){ return !!notifPrecitaneMapa()[kluc]; }
 
-function notifPrecitaj(kluc, prekresli){
-  if(!firmaData) return;
+// STAV ČÍTANIA — prečítané notifikácie a články (notifPrecitane), trvalo skryté
+// odkazy na články (clankySkryte), zavreté oznámenie o dokladoch e-mailom
+// (dmOznamene). Nie je to agenda, je to preferencia k firme. Rola, ktorá do firmy
+// zapisovať nesmie (Náhľad), ho TICHO nezapíše (ROZHODNUTIA č. 42): klik na ×
+// by inak v ulozFirmu skončil hláškou „zmena sa neuložila“ a Nastavenia by ju
+// ukázali pri každom otvorení. Jedno miesto tej otázky pre všetky príznaky.
+// Vracia, či sa zapísalo — bez zápisu volajúci nemá čo prekresľovať.
+function zapisStavCitania(zmen){
+  if(!firmaData || !mozemPisat("data")) return false;
   if(!firmaData.settings) firmaData.settings={};
-  if(!firmaData.settings.notifPrecitane) firmaData.settings.notifPrecitane={};
-  firmaData.settings.notifPrecitane[kluc]=new Date().toISOString();
+  zmen(firmaData.settings);
   poZmene();
+  return true;
+}
+function notifPrecitaj(kluc, prekresli){
+  const kedy=new Date().toISOString();
+  if(!zapisStavCitania(S=>{
+    if(!S.notifPrecitane) S.notifPrecitane={};
+    S.notifPrecitane[kluc]=kedy;
+  })) return;
   renderNotifBadge();
   if(prekresli!==false) otvorNotifikacie();
 }
 function notifPrecitajVsetko(){
   const zoz=zbierNotifikacie();
   if(!zoz.length) return;
-  if(!firmaData.settings) firmaData.settings={};
-  if(!firmaData.settings.notifPrecitane) firmaData.settings.notifPrecitane={};
-  zoz.forEach(n=>{ firmaData.settings.notifPrecitane[n.kluc]=new Date().toISOString(); });
-  poZmene(); renderNotifBadge(); otvorNotifikacie();
+  const kedy=new Date().toISOString();
+  if(!zapisStavCitania(S=>{
+    if(!S.notifPrecitane) S.notifPrecitane={};
+    zoz.forEach(n=>{ S.notifPrecitane[n.kluc]=kedy; });
+  })) return;
+  renderNotifBadge(); otvorNotifikacie();
 }
 
 // ═══ DENNÍK AUTOMATIKY ═════════════════════════════════════════════════
@@ -5914,8 +5930,12 @@ function zapisAutomat(druh, kluce, mimoModul){
 let vyber=null;   // {modul, kluce:[…], popis, celkom}
 function otvorSVyberom(modul, kluce, popis, celkom){
   const zoz=(kluce||[]).map(String).filter(Boolean);
+  const predtym=vyber;
   vyber = zoz.length ? {modul, kluce:zoz, popis:popis||"", celkom:celkom||zoz.length} : null;
-  otvorApp(modul);
+  // Modul sa neotvoril (DPH neplatiteľa, plán): obrazovka ostáva a s ňou aj jej
+  // výber. Nový by visel a filtroval modul, keď sa neskôr otvorí inou cestou.
+  // Jedno miesto pre všetky dôvody, prečo otvorApp odmietne.
+  if(!otvorApp(modul)) vyber=predtym;
 }
 function vyberAktivny(modul){ return (vyber && vyber.modul===modul) ? vyber : null; }
 // KEDY VÝBER ZANIKNE — jedno pravidlo: výber žije, kým je na obrazovke modul,
@@ -8294,8 +8314,7 @@ function modulNaObrazovke(){
 // 13. 9. 2026, ROZHODNUTIA.md 30). Dlaždicu plán skryje, odkazy ju obchádzali.
 function modulMimoPlanu(id){
   if(modulPovolenyPreModul(id)) return false;
-  vyberPlatiPre(modulNaObrazovke());   // výber zo zvončeka pre neotvorený modul nevisí
-  zobrazCennik(id);
+  zobrazCennik(id);   // výber zo zvončeka pre neotvorený modul vráti otvorSVyberom
   return true;
 }
 // Vráti false, keď sa modul neotvoril (DPH neplatiteľa, plán).
@@ -8994,15 +9013,15 @@ function clankySkryteZoznam(){
 }
 // Natrvalo ide do settings, teda do cloudu: zavreté na mobile má ostať
 // zavreté aj na počítači. Nie je to tajomstvo, len preferencia.
+// Rola bez práva zapisovať (zapisStavCitania) trvalé skrytie neuloží — odkaz
+// sa aspoň skryje do zatvorenia appky, aby klik nevyzeral, že nič neurobil.
 function clankySkry(id, natrvalo){
-  if(natrvalo){
-    if(!firmaData) return;
-    if(!firmaData.settings) firmaData.settings={};
+  const ulozene = natrvalo && zapisStavCitania(()=>{
     const z=clankySkryteZoznam();
     if(!z.includes(id)) z.push(id);
     firmaData.settings.clankySkryte=z;
-    try{ poZmene(); }catch(_){}
-  } else CL_DOCASNE.add(id);
+  });
+  if(!ulozene) CL_DOCASNE.add(id);
   clankyPrekresli();
 }
 
@@ -12975,7 +12994,7 @@ function vydavokFormHtml(x, nova, idx){
         ${Object.keys(DPH_ODDIELY).map(o=>`<option value="${o}" ${x.oddielRucne===o?"selected":""}>${esc(DPH_ODDIELY[o])}</option>`).join("")}
       </select>
     </div>
-    ${!nova?(x.zaradenyMajetokId?`<div style="background:var(--sfc-pos);color:var(--pos);font-size:12.5px;padding:9px 12px;border-radius:9px">✓ Tento výdavok je zaradený do majetku.</div>`:`<button type="button" class="aabtn" style="width:100%;justify-content:center" onclick="closeModal();vydavokDoMajetku(${idx})">⌂ Zaradiť do majetku</button>`):''}`;
+    ${!nova?(x.zaradenyMajetokId?`<div style="background:var(--sfc-pos);color:var(--pos);font-size:12.5px;padding:9px 12px;border-radius:9px">✓ Tento výdavok je zaradený do majetku.</div>`:`<button type="button" class="aabtn" style="width:100%;justify-content:center" onclick="closeModal();vydavokDoMajetku(${idx})"${zam("majetok")}>⌂ Zaradiť do majetku</button>`):''}`;
 }
 
 // Bloček = zjednodušená faktúra z registračnej pokladnice. Appka ho pozná podľa
@@ -18546,9 +18565,7 @@ async function dmVykresliKartu(){
 // Zavretie sa ukladá k firme, nie do prehliadača — kto appku otvorí na inom
 // zariadení, nemá dôvod vidieť to isté oznámenie druhýkrát.
 function dmSkryOznamenie(){
-  if(!firmaData.settings) firmaData.settings={};
-  firmaData.settings.dmOznamene=true;
-  poZmene();
+  if(!zapisStavCitania(S=>{ S.dmOznamene=true; })) return;
   renderHomeStrip();
 }
 
@@ -18864,12 +18881,9 @@ function appData(){
   // Adresa aj počet čakajúcich sa ťahajú zo servera — obrazovka na ne nečaká.
   if(!localMode) dmVykresliKartu();
   // Kto sa dostal sem, o funkcii už vie — pás na ploche netreba.
-  // Rola bez práva ticho nič: zápis by sa neuložil a pri každom otvorení by hlásil chybu.
-  if(firmaData && !(firmaData.settings||{}).dmOznamene && mozemPisat("data")){
-    if(!firmaData.settings) firmaData.settings={};
-    firmaData.settings.dmOznamene=true;
-    poZmene();
-  }
+  // Rola bez práva ticho nič (zapisStavCitania): zápis by sa neuložil a pri
+  // každom otvorení by hlásil chybu.
+  if(firmaData && !(firmaData.settings||{}).dmOznamene) zapisStavCitania(S=>{ S.dmOznamene=true; });
 }
 // ── AUTOMATICKÉ DOPLNENIE FIRMY PODĽA IČO (register RPO ŠÚSR) ──
 // Zdroj: oficiálny Register právnických osôb (api.statistics.sk), verejný, CC-BY.
@@ -30842,7 +30856,11 @@ function nastavTemu(tmavy){
   // Grafy si farby čítajú pri kreslení — treba ich prekresliť, inak ostanú
   // v starej palete.
   try{ if(typeof renderHomeStrip==="function") renderHomeStrip(); }catch(_){}
-  try{ const mod=modulNaObrazovke(); if(mod && typeof otvorApp==="function") otvorApp(mod); }catch(_){}
+  // Párovanie ("split") nie je modul v appScreen — otvorApp by prepol na prázdnu
+  // obrazovku; prekreslí sa na mieste.
+  try{ const mod=modulNaObrazovke();
+    if(mod==="split") renderSplit();
+    else if(mod && typeof otvorApp==="function") otvorApp(mod); }catch(_){}
 }
 
 function prepniTemu(){
@@ -31381,7 +31399,7 @@ async function spracujDokladSubor(file, setStav, qrVopred, ignorujZse){
   return R;
 }
 async function faktPdfSpracuj(e){
-  if(!strazZapis("faktury")) return;
+  if(!strazZapis("vydavky")) return;   // import došlých faktúr zapisuje do výdavkov
   let files=[...e.target.files]; e.target.value="";
   if(!files.length) return;
   // Archív sa rozbalí ešte pred otvorením okna, aby počet v hlavičke sedel
@@ -31519,6 +31537,10 @@ async function faktPdfUlozImport(){
   finally{ _faktPdfUklada=false; }
 }
 async function faktPdfUlozImportRaz(){
+    // Vlastná stráž zápisovej cesty: okno importu nemá zamOkno, takže ho
+    // modalConfirm nestráži, a stráž vo faktPdfSpracuj kryje len otvorenie.
+    // Modul je ten, DO KTORÉHO sa zapisuje (výdavky), ako tlačidlo importu.
+    if(!strazZapis("vydavky")) return false;
     let preskocene=0;
     const prijate=[];   // {R, obj} — doklady, ktoré sa naozaj uložia
     _faktPdfData.forEach(R=>{
