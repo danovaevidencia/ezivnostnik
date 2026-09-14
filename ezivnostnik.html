@@ -6183,6 +6183,16 @@ function zbierNotifikacie(){
       akcia:()=>otvorSaasFaktury()});
     // automaticky pridané do výdavkov → informuj (nedávne)
     (firmaData.vydavky||[]).filter(v=>v.zdroj==="predplatne" && (!v.datum || dni(v.datum)>=-60)).forEach(v=>{
+      // Bez PDF: varovanie s dôvodom namiesto „aj s PDF“, ktoré dovtedy platilo
+      // pre každú faktúru (č. 97). Vlastný kľúč — prečítané „pridaná“ ho nezhasne.
+      // Keď človek doklad priloží, varovanie zmizne samo.
+      if(!v.doklad){
+        out.push({kluc:"saasfakt:bezpdf:"+(v.cislo||v.id), ic:"⚠", nal:"warn",
+          nazov:"Faktúra za predplatné je vo výdavkoch bez PDF",
+          detail:(v.cislo||"")+" · "+eur(v.spolu||0)+" — PDF sa k nej nepriložilo"+(v.pdfChyba?" ("+v.pdfChyba+")":"")+". Stiahnete ho v zozname faktúr za predplatné.",
+          akcia:()=>otvorSaasFaktury()});
+        return;
+      }
       out.push({kluc:"saasfakt:"+(v.cislo||v.id), ic:"🧾", nal:"info",
         nazov:"Faktúra za predplatné pridaná do výdavkov",
         detail:(v.cislo||"")+" · "+eur(v.spolu||0)+" — nájdete ju vo Výdavkoch aj s PDF.",
@@ -22519,6 +22529,9 @@ let _saasFaktury = null;      // cache, aby sa nesťahovali pri každom prekresl
 
 async function nacitajSaasFaktury(){
   if(localMode || !sb || !firmaId) return [];
+  // Odpoveď môže prísť až po prepnutí firmy (ROZHODNUTIA č. 97). Zoznam aj chyba
+  // patria firme, za ktorú sa pýtalo — do premenných novej firmy sa nezapisujú.
+  const firma=firmaId;
   try{
     const { data, error } = await sb.from("saas_faktury")
       .select("cislo, popis, obdobie_od, obdobie_do, zaklad, sadzba_dph, dph, spolu, mena, vystavene, "+
@@ -22528,12 +22541,14 @@ async function nacitajSaasFaktury(){
       // zákazníkov a `autoZaevidujSaasFaktury` mu ich zaúčtuje do výdavkov
       // ako cudzie náklady. Reálne sa to stalo: vlastná tržba skončila
       // v našich výdavkoch. Appka si dáta scopuje sama, RLS je až druhá obrana.
-      .eq("firma_id", firmaId)
+      .eq("firma_id", firma)
       .order("vystavene", { ascending:false }).limit(24);
+    if(firmaId!==firma) return [];
     if(error) throw error;
     _saasFaktury = data || [];
     _saasChyba = null;
   }catch(e){
+    if(firmaId!==firma){ console.error("nacitajSaasFaktury (medzitým iná firma):", e); return []; }
     // Chyba siete/RLS nesmie vyzerať ako „žiadne faktúry" (kap. 45.5, vzor EO)
     _saasFaktury = [];
     _saasChyba = e.message || String(e);
@@ -22550,8 +22565,15 @@ let _saasAutoDone=false;
 async function autoZaevidujSaasFaktury(){
   if(localMode || !sb || !firmaId || !firmaData) return 0;
   if(!mozemPisat("vydavky")) return 0;
+  // STRÁŽ FIRMY PO KAŽDOM AWAIT (ROZHODNUTIA č. 97). Beží na pozadí a čaká na
+  // načítanie faktúr, PDF aj nahratie; človek sa medzitým prepne do inej firmy
+  // a zápis do globálneho `firmaData` by výdavok dal JEJ — aj s `poZmene`, ktoré
+  // by ho uložilo (overené behom, test_oprava_fotky9). Po prepnutí sa dávka
+  // zastaví bez zápisu; faktúry predošlej firmy zaeviduje jej ďalšie otvorenie.
+  const firma=firmaId, data=firmaData;
+  const inaFirma=()=>firmaId!==firma || firmaData!==data;
   try{
-    const zoz = await nacitajSaasFaktury();
+    const zoz = await nacitajSaasFaktury();   // po prepnutí firmy vráti [] sama
     // Dve podmienky, nie jedna: faktúra sa pridá len ak vo výdavkoch NIE JE
     // a zároveň tam ešte NIKDY nebola. Prvá sama by zmazanú faktúru vrátila.
     const nove = (zoz||[]).filter(f=>!saasFakturaZaevidovana(f.cislo) && !saasUzZaevidovana(f.cislo));
@@ -22559,7 +22581,7 @@ async function autoZaevidujSaasFaktury(){
     // Nahráva PDF a až po celej dávke zapisuje — zatvorenie záložky sa pýta cez
     // celú dávku (`nahravanie`, ROZHODNUTIA č. 81). Okno nezamyká: beží na pozadí.
     return await nahravanie(async()=>{
-      if(!firmaData.vydavky) firmaData.vydavky=[];
+      if(!data.vydavky) data.vydavky=[];
       let n=0;
       for(const f of nove){
         // Tú istú faktúru môže práve evidovať človek ťuknutím — alebo ju medzitým
@@ -22575,18 +22597,25 @@ async function autoZaevidujSaasFaktury(){
         obj.id="v"+Date.now()+Math.random().toString(36).slice(2,7);
         _saasEviduje.add(f.cislo);
         try{
+          // Výdavok vznikne aj bez PDF, ale NIE BEZ STOPY (č. 97): dôvod ide do
+          // záznamu a zvonček ho povie (`zbierNotifikacie`). Dovtedy to vedela len
+          // konzola a `dokladUpload` → null nepovedala ani tá.
+          let dovod="";
           try{
             const blob=(await saasFakturaPDF(f)).output("blob");
+            if(inaFirma()) break;
             const cesta=await dokladUpload(new File([blob],"faktura-"+f.cislo+".pdf",{type:"application/pdf"}),"predplatne");
-            if(cesta) obj.doklad=cesta;
-          }catch(e){ console.error("PDF príloha SaaS faktúry "+f.cislo+":", e); }  // výdavok vznikne aj bez prílohy
-          firmaData.vydavky.push(obj);
+            if(cesta) obj.doklad=cesta; else dovod="úložisko súbor neprijalo";
+          }catch(e){ dovod=(e&&e.message)||String(e); console.error("PDF príloha SaaS faktúry "+f.cislo+":", e); }
+          if(inaFirma()){ if(obj.doklad) console.error("PDF faktúry za predplatné "+f.cislo+" ostalo v úložisku predošlej firmy bez záznamu: "+obj.doklad); break; }
+          if(!obj.doklad) obj.pdfChyba=dovod;
+          data.vydavky.push(obj);
           saasOznacZaevidovanu(f.cislo);
           if(typeof zapamatajPartnera==="function") zapamatajPartnera(obj);
           n++;
         }finally{ _saasEviduje.delete(f.cislo); }
       }
-      if(n){ poZmene(); try{ renderNotifBadge(); }catch(_){} }
+      if(n && !inaFirma()){ poZmene(); try{ renderNotifBadge(); }catch(_){} }
       return n;
     });
   }catch(e){ console.error("autoZaevidujSaasFaktury:", e); return 0; }
@@ -22682,6 +22711,7 @@ async function zaevidujSaasFakturuRaz(cislo){
     if(cesta){ obj.doklad=cesta; prilozene=true; }
     else dovodPdf="úložisko súbor neprijalo";
   }catch(e){ dovodPdf=(e&&e.message)||String(e); console.error("PDF k výdavku sa nepodarilo priložiť:", e); }
+  if(!obj.doklad) obj.pdfChyba=dovodPdf;   // zvonček povie dôvod aj neskôr (č. 97)
 
   firmaData.vydavky.push(obj);
   saasOznacZaevidovanu(f.cislo);
@@ -22851,7 +22881,7 @@ async function zaevidujVsetkySaasFakturyRaz(){
         const cesta=await dokladUpload(new File([blob],"faktura-"+f.cislo+".pdf",{type:"application/pdf"}),"predplatne");
         if(cesta) obj.doklad=cesta; else dovod="úložisko súbor neprijalo";
       }catch(e){ dovod=(e&&e.message)||String(e); console.error("PDF faktúry za predplatné "+f.cislo+":", e); }
-      if(!obj.doklad) bezPdf.push(f.cislo+" ("+dovod+")");
+      if(!obj.doklad){ bezPdf.push(f.cislo+" ("+dovod+")"); obj.pdfChyba=dovod; }
       firmaData.vydavky.push(obj);
       saasOznacZaevidovanu(f.cislo);
       if(typeof zapamatajPartnera==="function") zapamatajPartnera(obj);
@@ -37485,15 +37515,122 @@ function ulozKoren(){ return firmaId || null; }
 
 async function dokladUpload(file, prefix){
   if(localMode||!sb){ return null; } // v lokálnom režime doklady neukladáme do cloudu
-  const { data:{ user } }=await sb.auth.getUser();
-  if(!user) return null;
+  // Firma sa berie PRED prvým await a po ňom sa overí (ROZHODNUTIA č. 97).
+  // Kým sa čakalo na prihlásenie a zmenšenie fotky, človek sa mohol prepnúť do
+  // inej firmy — súbor by išiel do jej priečinka.
   const koren=ulozKoren();
   if(!koren){ console.error("upload dokladu: nie je otvorená firma"); return null; }
-  const ext=(file.name.split(".").pop()||"bin").toLowerCase();
+  const { data:{ user } }=await sb.auth.getUser();
+  if(!user) return null;
+  const F=await fotkaPreUlozisko(file);
+  if(ulozKoren()!==koren){ console.error("upload dokladu: medzitým sa otvorila iná firma — súbor "+(file.name||"")+" sa nenahrá"); return null; }
+  if(F.chyba) fotkaNezmensenaPovedz(file, F.chyba);
+  const subor=F.subor;
+  const ext=(subor.name.split(".").pop()||"bin").toLowerCase();
   const cesta=`${koren}/${prefix||"doklad"}_${Date.now()}.${ext}`;
-  const { error }=await nahrajDoUloziska(cesta, file, { upsert:false });
+  const { error }=await nahrajDoUloziska(cesta, subor, { upsert:false });
   if(error){ console.error("upload dokladu:",error); return null; }
   return cesta; // uložíme do záznamu ako odkaz
+}
+// ── FOTKA DO ÚLOŽISKA ZMENŠENÁ (ROZHODNUTIA č. 92) ──
+// Fotka 4000×3000 z telefónu má 4–4,5 MB a pri pomalom 4G (750 kbit/s) sa
+// nahrávala 43–48 s (dev/opravy/ukladanie8.md). Do úložiska ide kópia s dlhšou
+// stranou FOTKA_STROP_PX v JPEG kvality FOTKA_KVALITA: ~0,8 MB, ~9 s.
+//
+// LEN FOTKA A LEN KÓPIA PRE ÚLOŽISKO. PDF, XML (aj SVG) ani iný súbor sa
+// nemení nikdy — e-faktúra musí ostať v pôvodnom formáte (§ 76 ZDPH). OCR a QR
+// čítajú fotku v plnom rozlíšení ešte pred oknom dokladu (`spracujDokladSubor`);
+// zmenšuje sa až tu, pri nahratí. Jediné miesto je `dokladUpload`: ostatné
+// zápisy do úložiska (`nahrajDoUloziska`) nesú XML.
+//
+// Prečo 2400 px: OCR samo pracuje nad výrezom dokladu zmenšeným na 1900 px
+// (`predspracujCanvas`). Kópia s 2400 px drží na doklade aspoň toľko pixelov,
+// kým doklad zaberá aspoň 79 % dlhšej strany záberu — pri 2000 px by to bolo
+// 95 %. Menšia kvalita než 0,85 ušetrí ~20 % a na drobnom písme je už vidieť
+// artefakty. WebP pri tej istej kvalite menší nebol a Safari ho plátnom
+// nezakóduje. Meranie: dev/opravy/fotky9.md.
+//
+// ORIENTÁCIA: kópia z plátna nemá EXIF, preto sa kreslí už otočená
+// (`imageOrientation:"from-image"`). Pri JPEG s orientáciou 5–8 sa rozmermi
+// overí, že dekodér naozaj otočil — inak by sa doklad uložil na boku a nahrá sa
+// originál (EXIF v ňom ostane). Orientácie 2–4 strany nemenia, tie sa overiť
+// nedajú; ten istý dekodér používa aj OCR (`souborNaCanvas`).
+//
+// ZLYHANIE: nahrá sa originál a appka to povie — raz za reláciu pre ten istý
+// dôvod (dávka 20 fotiek by inak ukázala 20 okien), do konzoly zakaždým.
+// Kópia, ktorá nie je menšia než originál, nie je porucha: ide originál.
+const FOTKA_STROP_PX=2400, FOTKA_KVALITA=0.85, FOTKA_PRAH_B=1000000;
+const _fotkaHlasene=new Set();
+function jeFotkaNaZmensenie(file){
+  if(typeof Blob==="undefined" || !(file instanceof Blob)) return false;
+  const typ=String(file.type||"").toLowerCase();
+  if(typ) return /^image\/(jpeg|jpg|pjpeg|png|webp|heic|heif)$/.test(typ);
+  return /\.(jpe?g|png|webp|heic|heif)$/i.test(String(file.name||""));
+}
+// Z hlavičky JPEG: orientácia z EXIF (1–8) a uložené rozmery zo SOF.
+function jpegHlavicka(b){
+  const R={orientacia:1, w:0, h:0};
+  if(!b || b.length<4 || b[0]!==0xFF || b[1]!==0xD8) return R;
+  let i=2;
+  while(i+4<=b.length){
+    if(b[i]!==0xFF){ i++; continue; }
+    const m=b[i+1];
+    if(m===0xFF){ i++; continue; }
+    if(m===0x01 || (m>=0xD0 && m<=0xD8)){ i+=2; continue; }
+    if(m===0xD9 || m===0xDA) break;
+    const zac=i+4, dlzka=(b[i+2]<<8)|b[i+3];
+    if(m===0xE1 && b[zac]===0x45 && b[zac+1]===0x78 && b[zac+2]===0x69 && b[zac+3]===0x66){
+      const t=zac+6, le=b[t]===0x49;
+      const u16=o=>le ? (b[o]|(b[o+1]<<8)) : ((b[o]<<8)|b[o+1]);
+      const u32=o=>le ? (u16(o)+u16(o+2)*65536) : (u16(o)*65536+u16(o+2));
+      const ifd=t+u32(t+4), n=u16(ifd)||0;
+      for(let k=0;k<n && ifd+14+k*12<=b.length;k++){
+        const e=ifd+2+k*12;
+        if(u16(e)===0x0112){ R.orientacia=u16(e+8); break; }
+      }
+    }
+    if(m>=0xC0 && m<=0xCF && m!==0xC4 && m!==0xC8 && m!==0xCC){ R.h=(b[zac+1]<<8)|b[zac+2]; R.w=(b[zac+3]<<8)|b[zac+4]; break; }
+    i=zac+dlzka-2;
+  }
+  return R;
+}
+// → {subor, chyba}. `subor` je kópia alebo pôvodný súbor, `chyba` len pri poruche.
+async function fotkaPreUlozisko(file){
+  if(!jeFotkaNaZmensenie(file) || file.size<=FOTKA_PRAH_B) return {subor:file};
+  let bmp=null;
+  try{
+    const jeJpeg=/jpe?g$/i.test(file.type||"") || (!file.type && /\.jpe?g$/i.test(file.name||""));
+    const hl=jeJpeg ? jpegHlavicka(new Uint8Array(await file.slice(0, 262144).arrayBuffer())) : null;
+    bmp=await createImageBitmap(file, {imageOrientation:"from-image"});
+    if(hl && hl.orientacia>=5 && hl.orientacia<=8){
+      if(!hl.w || !hl.h) throw new Error("fotka je otočená cez EXIF a jej rozmery sa nedajú overiť");
+      if(hl.w!==hl.h && bmp.width===hl.w && bmp.height===hl.h) throw new Error("prehliadač neotočil fotku podľa EXIF orientácie");
+    }
+    const k=Math.min(1, FOTKA_STROP_PX/Math.max(bmp.width, bmp.height));
+    const w=Math.max(1, Math.round(bmp.width*k)), h=Math.max(1, Math.round(bmp.height*k));
+    const c=document.createElement("canvas"); c.width=w; c.height=h;
+    const x=c.getContext("2d");
+    x.fillStyle="#fff"; x.fillRect(0, 0, w, h);   // priehľadné PNG by v JPEG sčernelo
+    x.imageSmoothingEnabled=true; x.imageSmoothingQuality="high";
+    x.drawImage(bmp, 0, 0, w, h);
+    const blob=await new Promise(r=>c.toBlob(r, "image/jpeg", FOTKA_KVALITA));
+    if(!blob) throw new Error("prehliadač fotku nezakódoval");
+    if(blob.type!=="image/jpeg") throw new Error("prehliadač vrátil "+(blob.type||"neznámy formát")+" namiesto JPEG");
+    if(blob.size>=file.size) return {subor:file};
+    const meno=String(file.name||"fotka").replace(/\.[^./]*$/, "")+".jpg";
+    return {subor:new File([blob], meno, {type:"image/jpeg", lastModified:file.lastModified||Date.now()})};
+  }catch(e){
+    return {subor:file, chyba:(e&&e.message)||String(e)};
+  }finally{
+    try{ if(bmp && bmp.close) bmp.close(); }catch(_){}
+  }
+}
+function fotkaNezmensenaPovedz(file, chyba){
+  console.error("fotka sa nezmenšila, nahráva sa originál ("+(file.name||"")+"):", chyba);
+  if(_fotkaHlasene.has(chyba)) return;
+  _fotkaHlasene.add(chyba);
+  const mb=(file.size/1e6).toFixed(1).replace(".", ",");
+  alert("Fotku dokladu sa nepodarilo zmenšiť ("+chyba+").\n\nUkladám ju celú — "+mb+" MB. Pri pomalom pripojení to potrvá dlhšie.");
 }
 // ── ORIGINÁL DOKLADU DO ÚLOŽISKA — jedna cesta pre okno dokladu aj import ──
 // Pri fotke bločka je to pohodlie. Pri e-faktúre zákonná povinnosť: § 76
