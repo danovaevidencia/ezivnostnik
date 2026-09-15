@@ -6258,6 +6258,21 @@ function zbierNotifikacie(){
     });
   }catch(_){}
 
+  // ── výdavok uložený bez dokladu (ROZHODNUTIA č. 114) ──
+  // Úložisko súbor neprijalo a výdavok sa uložil bez neho. Hláška po uložení
+  // zmizne; zvonček to drží, kým výdavok doklad nemá alebo kým ju človek
+  // neodklikne. Kľúč nesie id výdavku.
+  try{
+    (firmaData.vydavky||[]).forEach(v=>{
+      if(v.doklad || !v.dokladChyba) return;
+      out.push({kluc:"vydavok:bezdokladu:"+(v.id||dokladKluc(v)), ic:"⚠", nal:"warn",
+        nazov:"Výdavok je uložený bez dokladu",
+        detail:(v.partner||"—")+" · "+eur(+v.spolu||0)+(v.datum?" · "+fmtDatum(v.datum):"")
+          +" — doklad sa do cloudu neuložil ("+v.dokladChyba+"). Originál si odložte, v appke pri výdavku nie je.",
+        akcia:()=>otvorApp("vydavky")});
+    });
+  }catch(e){ console.error("zvonček — výdavky bez dokladu:", e); }
+
   // ── daňové termíny do 14 dní ──
   try{
     danoveTerminy(dnes, firmaData.settings||{}, 1)
@@ -13722,10 +13737,12 @@ async function ulozVydavokZFormularaRaz(idx, R){
   // Prefix, lokálny režim aj otázka pri zlyhaní sú v `dokladOriginalyUloz` —
   // tá istá cesta ako pri hromadnom importe. Že sa v lokálnom režime originál
   // e-faktúry neuloží, hovorí okno dokladu už pri otvorení (`otvorOcrVysledok`).
+  let bezDokladu=null;
   if(R && _ocrFile){
     const P={subor:_ocrFile, jeEf:!!R._efaktura, nazov:_ocrFile.name||"doklad"};
     if(!await dokladOriginalyUloz([P], "Uložiť výdavok aj tak?")) return false;   // _ocrFile ostáva, dá sa skúsiť znova
     if(P.cesta) obj.doklad=P.cesta;
+    else if(P.chyba){ obj.dokladChyba=P.chyba; bezDokladu=P; }   // č. 114
     _ocrFile=null;
   }
   if(R){
@@ -13778,6 +13795,14 @@ async function ulozVydavokZFormularaRaz(idx, R){
   // Okno dokladu sa otvára aj z E-faktúr a z plochy — tam sa Výdavky nekreslia.
   if(R){ if(modulNaObrazovke()==="vydavky") appVydavky(); }
   else obnovPoEditacii("vydavky");
+  // Doklad sa do úložiska nedostal (ROZHODNUTIA č. 114). Výdavok je uložený —
+  // hláška nič neblokuje, len hovorí to, čo dovtedy vedela len konzola. Až po
+  // zavretí okna. E-faktúra sa pýtala už pred zápisom; doklad zo Schránky
+  // ukazuje na originál z e-mailu (`cakajuciOriginalPoUlozeni`).
+  if(bezDokladu && !bezDokladu.jeEf && !ulozeny.doklad)
+    setTimeout(()=>alert("⚠ Výdavok je uložený, ale doklad „"+bezDokladu.nazov+"“ sa do cloudu NEULOŽIL.\n\n"
+      +"Dôvod: "+bezDokladu.chyba+"\n\n"
+      +"Originál si odložte — v appke pri výdavku nie je. Pripomenie to aj zvonček."), 100);
   return true;
 }
 // ── editor rozpisu na viac sadzieb ──
@@ -32372,6 +32397,11 @@ async function oznacCakajuciSpracovany(){
 //   - s vlastnou kópiou sa originál poznačí a zmaže ho `oznacCakajuciSpracovany`
 //     až po odbavení mailu, cez `dokladZmazOriginaly` (po uložení do cloudu a len
 //     keď naň nič v dátach neukazuje).
+//   - `null` = uložené údaje originál nepotrebujú: výpis ZSE zapísaný do
+//     nabíjaní (ROZHODNUTIA č. 114). Poznačí sa rovnako a zmaže po odbavení —
+//     do 15. 9. 2026 ostával `email_…` v úložisku bez odkazu.
+// Výdavok, ktorý ukáže na originál z e-mailu, doklad má: príznak neuloženej
+// kópie (`dokladChyba`) by klamal a zvonček by hlásil chýbajúci doklad.
 // Zmenšovať v edge funkcii netreba: server nemá plátno a o tom, či je príloha
 // doklad, rozhodne až človek v appke.
 let _cakajuciNahradeny=null;
@@ -32379,8 +32409,8 @@ function cakajuciOriginalPoUlozeni(v){
   _cakajuciNahradeny=null;
   const id=_cakajuciSpracovavany;
   const z=id!=null && (cakajuceDoklady||[]).find(x=>x.id===id);
-  if(!z || !z.subor_cesta || !v) return;
-  if(!v.doklad){ v.doklad=z.subor_cesta; return; }
+  if(!z || !z.subor_cesta || v===undefined) return;
+  if(v && !v.doklad){ v.doklad=z.subor_cesta; delete v.dokladChyba; return; }
   _cakajuciNahradeny={ id, cesta:z.subor_cesta };
 }
 
@@ -33219,7 +33249,14 @@ async function faktPdfUlozImportRaz(){
     const tlacidlo=document.getElementById("modalOk");
     if(!await dokladOriginalyUloz(polozky, "OK = importovať aj tak · Zrušiť = neimportovať nič, skúsim znova",
       (i,n)=>{ if(tlacidlo) tlacidlo.textContent="⏳ "+i+" z "+n; })) return false;   // krátke: na 390 px je tlačidlo polovica pätičky
-    prijate.forEach(P=>{ if(P.R._original && P.R._original.cesta) P.obj.doklad=P.R._original.cesta; });
+    // Súbor, ktorý úložisko neprijalo: dôvod v zázname a v záverečnej hláške
+    // (ROZHODNUTIA č. 114) — dovtedy to vedela len konzola.
+    const bezDokladu=[];
+    prijate.forEach(P=>{
+      const O=P.R._original;
+      if(O && O.cesta) P.obj.doklad=O.cesta;
+      else if(O && O.chyba){ P.obj.dokladChyba=O.chyba; bezDokladu.push(O.nazov+" ("+O.chyba+")"); }
+    });
 
     if(!firmaData.vydavky) firmaData.vydavky=[];
     prijate.forEach(({obj})=>{
@@ -33234,6 +33271,7 @@ async function faktPdfUlozImportRaz(){
     for(const Z of zse) await spracujZse({target:{files:[Z.subor], value:""}});
     if(pridane || preskocene || !zse.length) setTimeout(()=>alert("Importovaných "+pridane+" faktúr."
       +(preskocene?"\nPreskočených "+preskocene+" duplicít (už evidované).":"")
+      +(bezDokladu.length?"\n\n⚠ Doklad sa do cloudu neuložil: "+bezDokladu.join(", ")+". Výdavky sú uložené, originály si odložte.":"")
       +(lokalnaVeta?"\n\n"+lokalnaVeta:"")
       +(opravenych?"\n\n⚠ Pri "+opravenych+" dokladoch nesedel základ + DPH so sumou Spolu — "
         +"prepočítali sme ich zo sumy Spolu. Skontrolujte ich podľa originálov.":"")),100);
@@ -33865,10 +33903,13 @@ async function spracujDokladZoSuboru(file, qrVopred, archivCesta){
         // mieril doklad zo schránky, zo zdieľania či z importu (`strazImportu`).
         // Odmietnutý výpis ostáva v schránke.
         if(!strazImportu([R])) return;
+        // Označiť až TERAZ, keď sú nabíjania uložené: zrušená otázka musí výpis
+        // nechať v schránke. Nabíjania na súbor neukazujú — `email_…` ide tým
+        // istým pravidlom ako originál fotky z e-mailu a zmaže sa po odbavení
+        // (č. 114). Volania tesne za uložením: test_doklady_mailom meria odstup.
         const pridanych=zseUlozNabijania(R._zseTxns);
         _cakajuciSpracovavany=cakajuci;
-        // Až TERAZ, keď sú nabíjania uložené: zrušená otázka musí výpis
-        // nechať v schránke.
+        if(typeof cakajuciOriginalPoUlozeni==="function") cakajuciOriginalPoUlozeni(null);
         if(typeof oznacCakajuciSpracovany==="function") oznacCakajuciSpracovany();
         alert("ZSE výpis: pridaných "+pridanych+" nabíjaní, "+kwh.toFixed(2)+" kWh.");
         return;
@@ -38029,6 +38070,9 @@ async function dokladOriginalNahraj(file, jeEf){
   let cesta=null, chyba="";
   try{ cesta=await dokladUpload(file, jeEf?"efaktura":"vydavok"); }
   catch(e){ chyba=(e&&e.message)||String(e); console.error("archív dokladu:",e); }
+  // `dokladUpload` → null bez výnimky je tiež zlyhanie; podrobnosti už sú
+  // v konzole. Nie v lokálnom režime — tam cloud nie je vôbec (č. 114).
+  if(!cesta && !chyba && !localMode) chyba="úložisko súbor neprijalo";
   return {cesta, chyba};
 }
 const ORIGINAL_LOKALNY="Originál e-faktúry sa neuložil — v lokálnom režime nie je archív. Odložte si XML sami.";
@@ -38131,7 +38175,10 @@ window.addEventListener("online", ulozPoNavrateSiete);
 //
 // Vráti true = zapisovať; false = originál e-faktúry sa neuložil a človek
 // zvolil Zrušiť. Na e-faktúry sa pýta RAZ za všetky položky; neuložená fotka
-// či PDF sa nepýta (bez originálu to nie je zákonný problém).
+// či PDF sa nepýta (bez originálu to nie je zákonný problém) — ale nesmie
+// ostať ticho: dôvod si položka pamätá v `chyba`, volajúci ho zapíše do
+// záznamu (`dokladChyba`), povie ho a zvonček ho drží (ROZHODNUTIA č. 114).
+// Do 15. 9. 2026 sa výdavok uložil bez dokladu a chyba bola len v konzole.
 //
 // Lokálny režim nie je porucha — cloud tam nie je vôbec, preto sa nepýta.
 // Či sa nahráva, rozhoduje len `dokladUpload` (v lokálnom režime vráti null).
@@ -38151,7 +38198,8 @@ async function dokladOriginalyUloz(polozky, pokracovanie, priebeh){
       if(priebeh) priebeh(i+1, zoz.length);
       const v=await dokladOriginalNahraj(P.subor, P.jeEf);
       P.cesta=v.cesta||null;
-      if(!P.cesta && P.jeEf && !localMode) neulozene.push(v.chyba ? Object.assign({}, P, {chyba:v.chyba}) : P);
+      P.chyba=P.cesta ? "" : v.chyba;
+      if(!P.cesta && P.jeEf && !localMode) neulozene.push(P);
     }
   }finally{ oknoNahrava(false); }
   if(!neulozene.length) return true;
