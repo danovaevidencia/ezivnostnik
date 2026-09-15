@@ -2995,6 +2995,16 @@ function behFirmy(){
   const data=firmaData, koren=ulozKoren();
   return { data, koren, platny:()=>firmaData===data && ulozKoren()===koren };
 }
+// BEH JE POVINNÝ (ROZHODNUTIA č. 125). Do 15. 9. 2026 mali `postarPrevezmiRaz`,
+// `dokladUpload` a `dokladOriginalyUloz` zálohu `beh=beh||behFirmy()`: volajúci, ktorý beh
+// neodovzdal, dostal firmu zachytenú až vo volanej funkcii — teda PO svojom čakaní
+// (načítanie PDF, otázky, sieť) — a stráž nechránila nič. Volanie bez behu je chyba kódu,
+// preto výnimka hneď, pred prvou sieťou a zápisom. Nie `console.error` a návrat: volajúci
+// by návrat prečítal ako „súbor sa neuložil“ a záznam by zapísal bez dokladu.
+function behPovinny(beh, kto){
+  if(beh && typeof beh.platny==="function") return beh;
+  throw new TypeError(kto+": chýba beh firmy — volajúci ho zachytí cez behFirmy() pred prvým await (ROZHODNUTIA č. 125)");
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  ROLY A OPRÁVNENIA (fáza 2 plánu Účtovník, kap. 38.11)
@@ -3645,6 +3655,9 @@ function zobrazFirmu(){
   doplnChybajuceId();
   opravKluceKategorii();
   migrujUhrady();
+  // Stav faktúry odoslanej do siete počas prepnutia firmy (č. 123) — pred `postarNaPozadi`
+  // nižšie, aby sa obnova stavu na ňu hneď spýtala.
+  peppolZapisOdlozene();
   // Istá zhoda príjmu s faktúrou sa zapíše aj bez kliknutia. Beží tu, nie až
   // v Banke, lebo `uhrady` číta rovnako pohľadávky, DPH aj ročná kontrola —
   // modul, ktorý používateľ práve neotvoril, by inak ukazoval iný stav.
@@ -26775,8 +26788,8 @@ async function postarPrevezmiRaz(dokladId, beh){
   // firmy. Originál aj záznam by išli k nej: úložisko aj zápis berú firmaId
   // a firmaData až v tej chvíli. Stráž dátami (č. 118) — pri A → B → A by starý
   // beh zapísal doklad do znovu otvorenej A druhýkrát. `beh` dáva schránka,
-  // ktorá dávku začala; volanie bez neho si ho zachytí samo.
-  beh=beh||behFirmy();
+  // ktorá dávku začala; volanie bez neho je chyba (č. 125).
+  behPovinny(beh, "postarPrevezmiRaz");
   // Archívny originál (`GET …/receive/{id}/xml`) po bajtoch, nie `payload`
   // z detailu — zdôvodnenie pri `archivXml` v edge funkcii (PLAN §21.3 bod 3).
   // Doklad sa číta z toho istého súboru, takže zápis a archív nemôžu byť dve verzie.
@@ -27170,7 +27183,11 @@ function peppolOknoHtml(){
   // ── výsledok ──
   if(O.faza==="vysledok"){
     const E=f.efaktura||{};
-    const telo = O.chyba
+    // Faktúra odišla počas prepnutia firmy (č. 123): nie „zlyhalo“ ani „dá sa odoslať znova“.
+    const telo = O.chyba && O.chyba.odislo
+      ? `<div style="font-size:30px">⚠</div><b>Faktúra do siete odišla</b>
+         <div style="margin-top:8px;text-align:left">${esc(O.chyba.message||"")}</div>`
+      : O.chyba
       ? `<div style="font-size:30px">✗</div><b>${O.chyba.odmietnuta?"Sieť doklad odmietla":"Odoslanie zlyhalo"}</b>
          <div style="margin-top:8px;text-align:left">${esc(O.chyba.message||"")}
          ${(O.chyba.chyby&&O.chyba.chyby.length)?`<ul style="margin:8px 0 0 18px;font-size:12px">${O.chyba.chyby.slice(0,5).map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}</div>
@@ -27277,46 +27294,46 @@ async function faktPeppolOdosli(){
   const pokus=(pred ? (+pred.pokus||0) : 0) + (pred && pred.stav==="odmietnuta" ? 1 : 0);
   try{
     const r=await postarVolaj("odosli", {xml:O.v.xml, prijemca:O.v.prijemca, cislo:O.v.cislo, doklad_id:f.id||O.v.cislo, pokus});
-    // Prepnutie firmy počas odoslania (ROZHODNUTIA č. 119). Faktúra do siete ODIŠLA, ale
-    // `f` patrí dátam predošlej firmy: stav by sa zapísal do objektu, ktorý sa neuloží,
-    // a `poZmene` by uložilo otvorenú firmu. Nezapíše sa nič a okno to povie nahlas —
-    // záznam o odoslaní chýba a faktúra sa nezamkne (dev/opravy/straz13.md, otvorené).
-    if(!beh.platny()){
-      console.error("postar/odosli: faktúra "+(O.v.cislo||"")+" odišla ("+String((r&&r.status)||"")+"), ale medzitým sa otvorila iná firma — stav odoslania sa nezapísal", r);
-      O.chyba={ message:"Faktúra "+(O.v.cislo||"")+" do siete odišla, ale medzitým ste otvorili inú firmu — stav odoslania sa k nej nezapísal. "
-        +"Neodosielajte ju znova naslepo: vráťte sa do pôvodnej firmy a pred ďalším odoslaním overte u odberateľa, či ju dostal." };
-      O.faza="vysledok";
-      peppolPrekresli();
-      return;
-    }
+    const kedy=new Date().toISOString();
     // REJECTED prichádza s HTTP 202 a verdiktom v tele (SAPI-SK bez Prefer:
     // handling=strict). Do 14. 9. 2026 sa zapísal ako „odoslana" a faktúru,
     // ktorú sieť neprevzala, zamkol — odmietnutá sa nezamyká (§17).
     const odmietnuta=String((r&&r.status)||"").toUpperCase()==="REJECTED";
+    // Zápis výsledku do faktúry `g` — funkcia, lebo po prepnutí firmy sa zapisuje až po
+    // návrate do nej, do faktúry s tým istým id v nových dátach (č. 123, `peppolZapisOdlozene`).
     // História pokusov (č. 87): opakované odoslanie (nedoručiteľná, po odmietnutí)
     // predošlý záznam NEPREPÍŠE — čas a identifikátor prvého odoslania aj dôvod
-    // odmietnutia ostávajú v `historia`, od najstaršieho.
-    const predosly = pred ? Object.assign({}, pred) : null;
-    if(predosly) delete predosly.historia;
-    const historia = pred ? (pred.historia||[]).concat([predosly]) : [];
-    f.efaktura={
-      stav:odmietnuta?"odmietnuta":"odoslana",
-      pokus:pokus,
-      kedy:new Date().toISOString(),
-      id:String((r&&(r.providerDocumentId||r.id))||""),
-      prijemca:O.v.prijemca,
-      sietStav:String((r&&r.status)||""),
-      nedorucitelne:!!(r&&r.undeliverable),
-      // Sieť, do ktorej doklad odišiel. Sandbox nezamyká (`faktOdoslana`).
-      siet:String((r&&r.siet)||""),
-      sandbox:!!(r&&r.sandbox)
+    // odmietnutia ostávajú v `historia`, od najstaršieho. Predošlý záznam sa berie
+    // z faktúry, do ktorej sa zapisuje.
+    const zapis=(g)=>{
+      const doterajsi=g.efaktura||null;
+      const predosly = doterajsi ? Object.assign({}, doterajsi) : null;
+      if(predosly) delete predosly.historia;
+      const historia = doterajsi ? (doterajsi.historia||[]).concat([predosly]) : [];
+      g.efaktura={
+        stav:odmietnuta?"odmietnuta":"odoslana",
+        pokus:pokus,
+        kedy:kedy,
+        id:String((r&&(r.providerDocumentId||r.id))||""),
+        prijemca:O.v.prijemca,
+        sietStav:String((r&&r.status)||""),
+        nedorucitelne:!!(r&&r.undeliverable),
+        // Sieť, do ktorej doklad odišiel. Sandbox nezamyká (`faktOdoslana`).
+        siet:String((r&&r.siet)||""),
+        sandbox:!!(r&&r.sandbox)
+      };
+      // `detail` = dôvod odmietnutia; pri ACCEPTED dôvod opakovania alebo verdikt
+      // SML. `retrying` = prvý pokus zlyhal a poštár ho opakuje sám — konečný
+      // verdikt prinesie obnova stavu (`postarObnovStavOdoslanych`).
+      if(r && r.detail) g.efaktura.detail=String(r.detail);
+      if(r && r.retrying) g.efaktura.retrying=true;
+      if(historia.length) g.efaktura.historia=historia;
     };
-    // `detail` = dôvod odmietnutia; pri ACCEPTED dôvod opakovania alebo verdikt
-    // SML. `retrying` = prvý pokus zlyhal a poštár ho opakuje sám — konečný
-    // verdikt prinesie obnova stavu (`postarObnovStavOdoslanych`).
-    if(r && r.detail) f.efaktura.detail=String(r.detail);
-    if(r && r.retrying) f.efaktura.retrying=true;
-    if(historia.length) f.efaktura.historia=historia;
+    // Prepnutie firmy počas odoslania (ROZHODNUTIA č. 119, 123). Faktúra do siete ODIŠLA, ale
+    // `f` patrí dátam predošlej firmy: stav by sa zapísal do objektu, ktorý sa neuloží,
+    // a `poZmene` by uložilo otvorenú firmu. Výsledok sa podrží a zapíše po návrate.
+    if(!beh.platny()){ peppolOdlozVysledok(beh, f, O, r, pokus, zapis); return; }
+    zapis(f);
     if(odmietnuta) O.chyba={ message:"Sieť doklad odmietla"+(r.detail?" ("+r.detail+")":"")+".", odmietnuta:true };
     poZmene();
     obnovPoEditacii("faktury");
@@ -27326,6 +27343,75 @@ async function faktPeppolOdosli(){
   }
   O.faza="vysledok";
   peppolPrekresli();
+}
+
+// ── VÝSLEDOK ODOSLANIA PO NÁVRATE DO FIRMY (ROZHODNUTIA č. 123) ──
+// Faktúra odoslaná do siete, keď sa medzitým prepla firma (menu firiem, klávesnica pod
+// oknom, načítanie tej istej firmy po konflikte uloženia — dev/opravy/straz13.md bod 0),
+// do siete ODIŠLA. Stráž `behFirmy` zápis do starých dát správne zastaví, ale do 15. 9. 2026
+// sa výsledok zahodil: faktúra ostala nezamknutá, bez histórie pokusu a obnova stavu
+// (`postarObnovStavOdoslanych` číta len faktúry so záznamom) o nej nevedela.
+//
+// Výsledok sa preto podrží V PAMÄTI RELÁCIE, kľúčovaný koreňom firmy (id riadku firmy)
+// a id faktúry, a zapíše sa pri najbližšom zobrazení TEJ firmy (`zobrazFirmu`) do faktúry
+// s tým istým id — nikdy do inej firmy, aj keď tam faktúra s tým id je (id je jedinečné
+// len vo firme). Zámerne nie v `resetStavuModulov`: pamäť má prežiť práve prepnutie.
+//
+// Načítanie stránky nanovo pamäť zmaže. Faktúra potom ostane nezamknutá; opakované
+// odoslanie ide s tým istým Idempotency-Key (firma, číslo, pokus) a poštár vráti pôvodný
+// výsledok bez druhého doručenia (dev/opravy/beh14.md).
+const _peppolOdlozene=new Map();
+function peppolOdlozVysledok(beh, f, O, r, pokus, zapis){
+  const cislo=String((O.v&&O.v.cislo)||f.cislo||""), idSiete=String((r&&(r.providerDocumentId||r.id))||"");
+  const firma=((firmyZoznam||[]).find(x=>x.id===beh.koren)||{}).nazov||"";
+  const stopa="faktúra "+cislo+(firma?" (firma "+firma+")":"")+" odišla do siete ("+String((r&&r.status)||"")+(idSiete?", identifikátor "+idSiete:"")+")";
+  let sprava;
+  if(!beh.koren || !f.id){
+    console.error("postar/odosli: "+stopa+", ale medzitým sa otvorila iná firma a faktúra nemá id — stav odoslania sa nezapíše", r);
+    sprava="Faktúra "+cislo+" do siete odišla, ale medzitým ste otvorili inú firmu — stav odoslania sa k nej nezapísal. "
+      +"Neodosielajte ju znova naslepo: vráťte sa do pôvodnej firmy a pred ďalším odoslaním overte u odberateľa, či ju dostal.";
+  } else {
+    const kluc=beh.koren+"|"+f.id;
+    _peppolOdlozene.set(kluc, { kluc, koren:beh.koren, id:String(f.id), cislo, idSiete, pokus, zapis });
+    console.error("postar/odosli: "+stopa+", ale medzitým sa otvorila iná firma — stav odoslania sa zapíše po návrate do nej", r);
+    // Firma už môže byť späť (A → B → A, alebo tá istá firma načítaná nanovo po konflikte).
+    const hned=peppolZapisOdlozene(true).find(x=>x.kluc===kluc);
+    if(hned){ sprava=hned.sprava; if(hned.ok) obnovPoEditacii("faktury"); }
+    else sprava="Faktúra "+cislo+(firma?" firmy „"+firma+"“":"")+" do siete odišla, ale medzitým ste otvorili inú firmu. "
+      +"Stav odoslania sa k faktúre zapíše, keď sa do pôvodnej firmy vrátite. Dovtedy appku nezatvárajte ani nenačítavajte nanovo — "
+      +"inak sa stav stratí a faktúra ostane nezamknutá.";
+  }
+  O.chyba={ odislo:true, message:sprava };
+  O.faza="vysledok";
+  // Po prepnutí je okno zavreté (`resetStavuModulov`) — text v neviditeľnom okne by nikto nevidel.
+  const m=document.getElementById("modal");
+  if(_peppolOkno===O && m && m.classList.contains("on")) peppolPrekresli();
+  else alert("📮 "+sprava);
+}
+// Zapíše podržané výsledky odoslania do OTVORENEJ firmy. Vracia [{kluc, ok, sprava}].
+// `tiche` — hlášku povie volajúci (odoslanie, ktoré dobehlo, keď už je firma späť).
+function peppolZapisOdlozene(tiche){
+  const vysledky=[], koren=ulozKoren();
+  if(!firmaData || !koren || !_peppolOdlozene.size) return vysledky;
+  let zmena=false;
+  for(const P of [..._peppolOdlozene.values()]){
+    if(P.koren!==koren) continue;
+    _peppolOdlozene.delete(P.kluc);
+    const f=(firmaData.faktury||[]).find(x=>x && String(x.id||"")===P.id);
+    if(!f){
+      console.error("stav odoslania faktúry "+P.cislo+" (identifikátor "+(P.idSiete||"—")+") sa nezapísal — faktúra sa vo firme nenašla");
+      vysledky.push({ kluc:P.kluc, ok:false, sprava:"Faktúra "+P.cislo+" do siete odišla"+(P.idSiete?" (identifikátor "+P.idSiete+")":"")
+        +", ale vo firme sa už nenašla — stav odoslania sa k nej nezapísal. Neodosielajte ju znova naslepo." });
+      continue;
+    }
+    // Ten istý výsledok už zapísalo iné zariadenie — druhý záznam v histórii pokusov by klamal.
+    const e=f.efaktura;
+    if(!(e && P.idSiete && String(e.id||"")===P.idSiete && (+e.pokus||0)===P.pokus)){ P.zapis(f); zmena=true; }
+    vysledky.push({ kluc:P.kluc, ok:true, sprava:"Faktúra "+P.cislo+" do siete odišla, kým bola otvorená iná firma. Stav odoslania sa k nej teraz zapísal." });
+  }
+  if(zmena) poZmene();
+  if(!tiche && vysledky.length) setTimeout(()=>alert("📮 "+vysledky.map(x=>x.sprava).join("\n\n")), 400);
+  return vysledky;
 }
 
 // PayBySquare QR (slovenský platobný štandard)
@@ -38292,15 +38378,15 @@ function ulozKoren(){ return firmaId || null; }
 // Volá sa LEN cez `dokladNahraj` (jeden tvar výsledku, ROZHODNUTIA č. 120). Vracia
 // cestu alebo null; dôvod neúspechu a to, či súbor vznikol práve teraz, zapíše do
 // nepovinného `stav`. `beh` dáva volajúci, ktorý firmu zachytil skôr — pred vlastným
-// await (nahratie viacerých súborov, načítanie PDF); inak sa zachytí tu.
+// await (nahratie viacerých súborov, načítanie PDF). Bez neho výnimka (č. 125).
 async function dokladUpload(file, prefix, nazov, beh, stav){
+  behPovinny(beh, "dokladUpload");
   if(localMode||!sb){ return null; } // v lokálnom režime doklady neukladáme do cloudu
   // Firma sa berie PRED prvým await a po ňom sa overí (ROZHODNUTIA č. 97).
   // Kým sa čakalo na prihlásenie a zmenšenie fotky, človek sa mohol prepnúť do
   // inej firmy — súbor by išiel do jej priečinka. Pravidlo drží koreň úložiska
   // aj dáta (`behFirmy`, č. 118): pri A → B → A sa koreň vráti, ale záznam, pre
   // ktorý sa nahrávalo, patrí predošlému načítaniu.
-  beh=beh||behFirmy();
   const koren=beh.koren, S=stav||{};
   if(!koren){ S.chyba=DOKLAD_DOVOD.bezFirmy.text; console.error("upload dokladu: nie je otvorená firma"); return null; }
   const { data:{ user } }=await sb.auth.getUser();
@@ -38372,6 +38458,8 @@ function dokladDovodUloziska(error, fotkaChyba){
 // v `chyba` a zároveň `vynimka` — volajúci, ktorý ju ukazoval ako chybu appky
 // (`dokUloz` → `modalConfirm`), ju pošle ďalej.
 async function dokladNahraj(file, prefix, nazov, beh){
+  // Mimo `try`: chýbajúci beh nie je dôvod neuloženého dokladu, ale chyba kódu (č. 125).
+  behPovinny(beh, "dokladNahraj");
   const S={};
   let cesta=null, vynimka=null;
   try{ cesta=await dokladUpload(file, prefix, nazov, beh, S); }
@@ -38663,7 +38751,7 @@ window.addEventListener("online", ulozPoNavrateSiete);
 // súbory nenahrávajú, nepýta sa nič a vráti false. Volajúci sa pýta `beh.platny()`
 // SKÔR než výsledku: nezapíše nič a nahraté súbory (`P.novy`) zmaže (č. 121).
 async function dokladOriginalyUloz(polozky, pokracovanie, priebeh, beh){
-  beh=beh||behFirmy();
+  behPovinny(beh, "dokladOriginalyUloz");   // bez behu chyba, nie firma zachytená až tu (č. 125)
   const zoz=(polozky||[]).filter(P=>P && P.subor);
   if(localMode && zoz.some(P=>P.jeEf) && typeof cloudMsg==="function") cloudMsg(ORIGINAL_LOKALNY,"warn");
   const neulozene=[];
