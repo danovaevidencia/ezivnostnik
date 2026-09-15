@@ -2084,17 +2084,52 @@ html[data-jazda] .jazdapruh{display:flex}
 <script src="sadzby.js"></script>
 <script>
 // knižnice načítavané na požiadanie (OCR, pdf.js) — aby sa appka rýchlo spustila
-let _tesseract=null, _pdfjs=null;
+//
+// STROP ČASU (ROZHODNUTIA č. 131). Okno „Spracúvam doklad…“ je počas čítania bez ✕
+// (č. 124) a čaká na knižnicu zo siete. `<script>` ani `import()` vlastný strop nemajú:
+// keď požiadavka ticho visí (nie chyba, ale nič), okno sa do obnovenia stránky nedalo
+// zavrieť. Po strope príde chyba s vetou pre človeka (`nacitanie:true` — rada
+// „skontrolujte pripojenie“, nie „kvalitnejšiu fotku“), okno sa odomkne a ďalší pokus
+// vloží <script> nanovo: rozbehnuté načítanie sa pamätá len kým beží, potom sa zahodí.
+// Keď visiaci skript dobehne neskôr, knižnicu nájde ďalšie volanie v globálnej premennej.
+// 45 s zvládne pdf.min.js (~320 kB) aj na EDGE; vlastné stopky na tú istú sieť má
+// overenie IČ DPH (30 s). `let`, aby ho test vedel skrátiť.
+let STROP_NACITANIA=45000;
+let STROP_OCR_TICHO=180000;   // nečinnosť rozpoznávania textu — viď obrazokNaText
+function chybaNacitania(veta){ const e=new Error(veta); e.nacitanie=true; return e; }
+function sStropom(prisl, popis){
+  let cas=null;
+  const strop=new Promise((_,rej)=>{ cas=setTimeout(()=>rej(chybaNacitania(popis+" sa nenačítala ani za "
+    +Math.round(STROP_NACITANIA/1000)+" s. Skontrolujte pripojenie a skúste to znova.")), STROP_NACITANIA); });
+  return Promise.race([prisl, strop]).finally(()=>clearTimeout(cas));
+}
+const _nacitavaSa=new Map();
+function nacitajKniznicu(url, hotova, popis){
+  const uz=hotova(); if(uz) return Promise.resolve(uz);
+  if(_nacitavaSa.has(url)) return _nacitavaSa.get(url);
+  const s=document.createElement("script");
+  const p=sStropom(new Promise((res,rej)=>{
+    s.onload=()=>{ const k=hotova(); k ? res(k) : rej(chybaNacitania(popis+" sa načítala neúplná. Skúste to znova.")); };
+    s.onerror=()=>rej(chybaNacitania(popis+" sa nepodarilo načítať. Skontrolujte pripojenie a skúste to znova."));
+    s.src=url; document.head.appendChild(s);
+  }), popis).catch(e=>{
+    s.onload=null; s.onerror=null;
+    console.error("Načítanie knižnice "+url+":", e);
+    throw e;
+  }).finally(()=>_nacitavaSa.delete(url));
+  _nacitavaSa.set(url, p);
+  return p;
+}
 async function ensureTesseract(){
-  if(_tesseract) return _tesseract;
-  await new Promise((res,rej)=>{ const s=document.createElement("script"); s.src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"; s.onload=res; s.onerror=rej; document.head.appendChild(s); });
-  _tesseract=Tesseract; return _tesseract;
+  return nacitajKniznicu("https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js",
+    ()=>window.Tesseract||null, "Knižnica na čítanie textu (OCR)");
 }
 async function ensurePdfjs(){
-  if(_pdfjs) return _pdfjs;
-  await new Promise((res,rej)=>{ const s=document.createElement("script"); s.src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"; s.onload=res; s.onerror=rej; document.head.appendChild(s); });
-  _pdfjs=window.pdfjsLib; _pdfjs.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-  return _pdfjs;
+  return nacitajKniznicu("https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js", ()=>{
+    const p=window.pdfjsLib; if(!p) return null;
+    if(p.GlobalWorkerOptions && !p.GlobalWorkerOptions.workerSrc) p.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+    return p;
+  }, "Knižnica na čítanie PDF");
 }
 </script>
 <script>
@@ -12499,10 +12534,9 @@ async function ekasaDoplnDoFormulara(receiptId){
   }
   if(stav){ stav.textContent="Načítavam z FS…"; stav.style.color="var(--ink-soft)"; }
   const d=await ekasaDotiahni(id);
-  if(!d){
-    chyba("Finančná správa neodpovedala. Skúste to o chvíľu znova — údaje môžete zatiaľ zadať ručne.");
-    return;
-  }
+  // Každý dôvod vlastnou vetou (č. 134): nenasadená proxy, výpadok siete a chyba FS
+  // sa dovtedy hlásili ako „Finančná správa neodpovedala.“
+  if(d.chyba){ chyba(d.chyba); return; }
   // 🔴 4. 9. 2026: FS na neznáme ID odpovie „doklad neexistuje" a proxy to
   // dovtedy prekladala na úspech so samými prázdnymi poľami. Appka nedoplnila
   // nič a napísala „✓ Doplnené z FS" — zelená pečiatka na údajoch, ktoré boli
@@ -12691,18 +12725,48 @@ async function overICDPH(icdph){
   if(vysl.stav!=="neznamy") _icdphCache.set(v, vysl);
   return vysl;
 }
-// dotiahnutie dokladu z FS eKasa podľa ID (cez proxy) — vráti {suma,dodavatel,...} alebo null
+// Dotiahnutie dokladu z FS eKasa podľa ID (cez proxy). Vráti odpoveď proxy —
+// {ok, suma, dodavatel, …} alebo {ok, najdene:false, dovod} — a pri zlyhaní
+// {chyba:"veta pre človeka"}. Nikdy null (ROZHODNUTIA č. 134, N3).
+//
+// Do 15. 9. 2026 tu bolo `catch(_){ return null; }` a null vracala aj nenasadená
+// proxy, chyba FS aj výpadok siete. Formulár potom na všetko písal „Finančná správa
+// neodpovedala“ a v konzole nebolo nič — nedalo sa zistiť, či je chyba v sieti,
+// v proxy, alebo vôbec nie (doklad len FS nepozná, to je odpoveď, nie porucha).
+// Stopky: dotiahnutie beží aj počas zamknutého okna „Spracúvam doklad…“ (č. 131).
 async function ekasaDotiahni(receiptId){
-  if(!receiptId || !sb || _proxyFunguje===false) return null;
+  const zlyhalo=(veta, detail)=>{ console.error("eKasa (FS cez proxy): "+detail); return {chyba:veta}; };
+  if(!receiptId) return {chyba:"Zadajte ID dokladu z bločku — začína O-."};
+  // Bez cloudu (lokálny režim) sa nepýtame nikoho — je to stav, nie porucha.
+  if(!sb) return {chyba:"Doklad z Finančnej správy sa dá dotiahnuť len v prihlásenej appke. Údaje zadajte ručne."};
+  const nedostupna="Služba na sťahovanie dokladov z Finančnej správy teraz nie je dostupná. Údaje zadajte ručne.";
+  if(_proxyFunguje===false) return zlyhalo(nedostupna, "proxy nie je nasadená (skôr vrátila 404)");
+  const stop=new AbortController();
+  const cas=setTimeout(()=>stop.abort(), STROP_NACITANIA);
   try{
     const res=await fetch(SUPABASE_URL+"/functions/v1/proxy",{
       method:"POST", headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({akcia:"ekasa", receiptId})
+      body:JSON.stringify({akcia:"ekasa", receiptId}), signal:stop.signal
     });
-    if(res.status===404){ _proxyFunguje=false; return null; }
-    if(!res.ok) return null;
-    _proxyFunguje=true; const d=await res.json(); return d.ok?d:null;
-  }catch(_){ return null; }
+    if(res.status===404){ _proxyFunguje=false; return zlyhalo(nedostupna, "proxy vrátila 404 — nie je nasadená"); }
+    if(!res.ok){
+      // Telo ako TEXT: proxy do neho píše, čo vrátila FS („FS eKasa vrátila 503“).
+      const telo=await res.text().catch(()=>"");
+      const m=telo.match(/"error"\s*:\s*"([^"]{0,160})"/);
+      const detail=m ? m[1] : "chyba "+res.status;
+      return zlyhalo("Sťahovanie z Finančnej správy zlyhalo ("+detail+"). Skúste to o chvíľu znova — údaje môžete zatiaľ zadať ručne.",
+        "proxy vrátila "+res.status+" — "+(m ? m[1] : telo.slice(0,160)));
+    }
+    const d=await res.json().catch(()=>null);
+    if(!d || !d.ok) return zlyhalo("Finančná správa vrátila odpoveď, ktorej appka nerozumie. Údaje zadajte ručne.",
+      "nečitateľná odpoveď proxy: "+JSON.stringify(d).slice(0,160));
+    _proxyFunguje=true;
+    return d;   // aj {najdene:false} — to je odpoveď FS, nie porucha
+  }catch(e){
+    if(e && e.name==="AbortError")
+      return zlyhalo("Finančná správa neodpovedala. Čakali sme "+Math.round(STROP_NACITANIA/1000)+" s — skúste to o chvíľu znova, údaje môžete zatiaľ zadať ručne.", "vypršal čas");
+    return zlyhalo("Nepodarilo sa spojiť so serverom — skontrolujte pripojenie a skúste to znova.", (e && e.message) || String(e));
+  }finally{ clearTimeout(cas); }
 }
 
 // volanie RPO: najprv cez Supabase proxy (rieši CORS/výpadky), pri zlyhaní priamo z prehliadača
@@ -19578,10 +19642,12 @@ function suhlasOknoUkaz(chyba){
     <div class="modalft"><button class="abtn" onclick="suhlasZavri()">Neskôr</button>
       <button class="abtn pri" onclick="suhlasPrijmi()"${_suhlasUklada?" disabled":""}>Prijímam</button></div>
   </div>`;
+  oknoVrstvy();   // okno nad oknom: tabulátor, inert a návrat focusu (č. 132)
 }
 function suhlasZavri(){
   const o=document.getElementById("suhlasOkno");
   if(o) o.remove();
+  oknoVrstvy();
 }
 // Poistka proti dvojitému ťuknutiu: druhé „Prijímam“ počas zápisu nič neurobí.
 async function suhlasPrijmi(){
@@ -24101,44 +24167,103 @@ function exportDanXLS(rok){
 
 // ── MODÁL ──
 let modalSave=null, modalDelete=null, modalModul=null;
-// OKNO JE UZAVRETÉ PRE KLÁVESNICU (ROZHODNUTIA č. 124, spec kap. 48.9 bod 2).
+// OKNO JE UZAVRETÉ PRE KLÁVESNICU (ROZHODNUTIA č. 124 a 132, spec kap. 48.9 bod 2).
 // Do 15. 9. 2026 to bola vedomá medzera: tabulátor z okna vyšiel do stránky pod
 // ním — v prehliadači 55 zo 60 stlačení Tab stálo mimo okna, ⚙ v lište bola
 // dosiahnuteľná a jej menu sa otvorilo NAD oknom (dev/opravy/okno14.md). Teraz:
-//   · stránka pod oknom je `inert` (`oknoPodklad`) — nedá sa na ňu dostať
-//     tabulátorom ani ju ťuknúť; karta okna má role="dialog" aria-modal="true";
-//   · Tab a Shift+Tab na okraji okna prejdú na druhý koniec (`oknoTabulator`)
-//     — z posledného ovládača by inak focus odišiel do lišty prehliadača;
-//   · po zavretí sa focus vráti na prvok, ktorý okno otvoril (`_oknoOtvoril`).
+//   · okná sú VRSTVY (`oknoVrstvy`): #modal, súhlas s dokumentmi (iné `.modal`)
+//     a prekryv s vlastným z-index nad oknom (skener QR 99999). Vrchná je tá
+//     s najvyšším z-index, pri zhode neskoršia v dokumente. Všetko ostatné —
+//     stránka AJ spodné okno — je `inert` (`oknoPodklad`); karta okna má
+//     role="dialog" aria-modal="true";
+//   · Tab a Shift+Tab na okraji VRCHNEJ vrstvy prejdú na druhý koniec
+//     (`oknoTabulator`) — z posledného ovládača by inak focus odišiel do lišty
+//     prehliadača, a zo súhlasu nad oknom do okna pod ním (č. 132);
+//   · po zavretí vrstvy sa focus vráti tam, kde stál, keď sa objavila
+//     (`_oknoNavrat`): do spodného okna, alebo na otvárač na stránke.
 //     Nadväzujúce okno (openModal z otvoreného okna, alebo closeModal a hneď
 //     openModal) si nechá PRVÝ otvárač: ovládač v tele predošlého okna už nie je.
+//     Okno otvorené z menu lišty má za otvárač tlačidlo menu (⚙) — vráti ho `tbMenu`;
+//   · Escape zavrie vrchnú vrstvu tak ako ✕ (`oknoEscape`, č. 132) — nie počas
+//     spracovania dokladu (✕ skryté) ani počas nahrávania (✕ zamknuté). Pri
+//     rozpísanom formulári sa opýta: Escape zatvára aj našepkávanie či výber v poli
+//     a jeden kláves navyše by bez stopy zahodil vyplnené údaje.
 // Keď akciu spustí klávesnica na prvku s role="button", `vratFocus` presunie
 // focus na krížik (kap. 48.6e) — to ostáva. Doplňovanie tabindex sa tu nemení:
 // zoznam pre Tab sa skladá až pri stlačení, teda po prechode pozorovateľa
 // (`setTimeout`), a `inert` vyradí aj prvok, ktorému pozorovateľ tabindex dal.
-// Escape okno ďalej nezatvára — jediné miesto, kde appka Escape spracúva, je
-// pole IČ DPH v module DPH. Rozhodnutie č. 124 to nežiada a rozpísaný formulár
-// by sa zavrel jedným klávesom.
 // `okText` — tlačidlo, ktoré neukladá, nesmie sa volať „Uložiť" (Meranie jazdy
 // ním spúšťa GPS). Nastavuje sa pri KAŽDOM otvorení, inak by text ostal viseť.
 const OKNO_FOKUS="button,a[href],input,select,textarea,summary,[tabindex]";
-let _oknoOtvoril=null;
-// Zamyká sa každé dieťa <body> okrem okna. Nezamyká sa, čo leží NAD oknom a človek
-// to musí vedieť ovládať: iné okno (súhlas s dokumentmi, trieda `modal`) a prekryv
-// s vlastným z-index nad oknom (skener QR 99999; `.modal` má v CSS 80). Odomyká sa
-// len to, čo zamklo okno — cudzí `inert` ostáva.
-function oknoPodklad(zamknut){
-  const modal=document.getElementById("modal");
+// Vrstva: otvorené `.modal` alebo prekryv s vlastným z-index nad oknom (`.modal` má
+// v CSS 80). Menu z lišty a mini menu majú tiež 200, ale oknom nie sú — zatvárajú sa.
+function oknoJeVrstva(el){
+  if(!el || !el.classList || typeof el.hasAttribute!=="function") return false;
+  if(el.hasAttribute("data-tbmenu") || el.classList.contains("minimenu")) return false;
+  return (el.classList.contains("modal") && el.classList.contains("on")) || (+(el.style && el.style.zIndex) || 0) > 80;
+}
+// Vrstvy zdola nahor.
+function oknoZoznamVrstiev(){
+  const deti=(document.body && document.body.children) ? [...document.body.children] : [];
+  return deti.map((el,i)=>({el, i, z:+(el && el.style && el.style.zIndex) || 80}))
+    .filter(x=>oknoJeVrstva(x.el)).sort((a,b)=>a.z-b.z || a.i-b.i).map(x=>x.el);
+}
+function oknoVrchne(){ const v=oknoZoznamVrstiev(); return v[v.length-1] || null; }
+// Zamyká sa každé dieťa <body> okrem vrchnej vrstvy. Odomyká sa len to, čo zamklo
+// okno — cudzí `inert` ostáva.
+function oknoPodklad(vrch){
   const deti=(document.body && document.body.children) ? [...document.body.children] : [];
   deti.forEach(el=>{
-    if(el===modal || typeof el.setAttribute!=="function") return;
-    if(!zamknut){
+    if(!el || typeof el.setAttribute!=="function") return;
+    if(!vrch || el===vrch){
       if(el.hasAttribute("data-okno-inert")){ el.removeAttribute("inert"); el.removeAttribute("data-okno-inert"); }
       return;
     }
-    if(el.hasAttribute("inert") || el.classList.contains("modal") || (+(el.style && el.style.zIndex) || 0) > 80) return;
+    if(el.hasAttribute("inert")) return;
     el.setAttribute("inert", ""); el.setAttribute("data-okno-inert", "");
   });
+}
+const oknoNikde=a=>!a || a===document.body || a===document.documentElement;
+// Focus do vrstvy: na ✕, keď ✕ nie je vidieť, na kartu okna, inak na prvý ovládač
+// (skener nemá ani hlavičku, ani kartu).
+function oknoFokusDnu(vrch){
+  const x=vrch.querySelector(".modalx"), karta=vrch.querySelector(".modalcard[tabindex]");
+  const ciel=(x && !x.disabled && typeof x.getClientRects==="function" && x.getClientRects().length) ? x
+    : (karta || oknoFokusovatelne(vrch)[0]);
+  if(ciel) ciel.focus({ preventScroll:true });
+}
+// Prepočet vrstiev. Volá ho každé otvorenie a zatvorenie okna: openModal,
+// closeModal, súhlas s dokumentmi, skener QR. `_oknoNavrat` — kde stál focus,
+// keď sa vrstva objavila; záznam žije, kým vrstva existuje.
+const _oknoNavrat=new Map();
+let _oknoVrch=null, _oknoPoradie=[];
+function oknoVrstvy(){
+  const vrstvy=oknoZoznamVrstiev();
+  const vrch=vrstvy[vrstvy.length-1] || null;
+  if(vrch && vrch!==_oknoVrch) oknoZavriMenu();
+  const a0=document.activeElement;
+  vrstvy.forEach(v=>{ if(!_oknoNavrat.has(v))
+    _oknoNavrat.set(v, (!oknoNikde(a0) && !(typeof v.contains==="function" && v.contains(a0))) ? a0 : null); });
+  // Zmiznuté vrstvy odvrchu. Keď ich zmizne viac naraz (súhlas aj okno), platí návrat
+  // najvyššej, ktorý sa ešte dá použiť — skener otvorený nad oknom žiadny nemá.
+  const zmizle=_oknoPoradie.filter(v=>!vrstvy.includes(v)).reverse();
+  const navraty=zmizle.map(v=>_oknoNavrat.get(v)).filter(Boolean);
+  [..._oknoNavrat.keys()].forEach(v=>{ if(!vrstvy.includes(v)) _oknoNavrat.delete(v); });
+  _oknoVrch=vrch; _oknoPoradie=vrstvy;
+  // Odomknúť PRED vrátením focusu — do `inert` sa focus nepostaví.
+  oknoPodklad(vrch);
+  // Focus sa presúva, len keď je nikde, v zmiznutej vrstve alebo pod inert —
+  // kód okolo ho už mohol postaviť inam.
+  const vZmiznutej=el=>zmizle.some(v=>typeof v.contains==="function" && v.contains(el));
+  const a=document.activeElement;
+  const zly=oknoNikde(a) || vZmiznutej(a) || !!(a.closest && a.closest("[inert]"));
+  if(!zly && (!vrch || (typeof vrch.contains==="function" && vrch.contains(a)))) return;
+  for(const n of navraty){
+    if(!n.isConnected || typeof n.focus!=="function" || (n.closest && n.closest("[inert]")) || vZmiznutej(n)) continue;
+    n.focus({ preventScroll:true });
+    if(document.activeElement===n) return;
+  }
+  if(vrch && typeof vrch.querySelector==="function") oknoFokusDnu(vrch);
 }
 // Na čo sa v okne dá postaviť tabulátorom: nie zakázané, nie skryté (✕ počas
 // spracovania dokladu, zbalený <details>), nie tabindex="-1".
@@ -24151,12 +24276,10 @@ function oknoFokusovatelne(modal){
 // Zachytávanie (true), aby posluchač modulu Tab nezhltol skôr.
 function oknoTabulator(e){
   if(e.key!=="Tab") return;
-  const modal=document.getElementById("modal");
-  if(!modal || !modal.classList.contains("on")) return;
+  const modal=oknoVrchne();   // vrchná vrstva: okno, súhlas nad ním, skener (č. 132)
+  if(!modal) return;
   const a=document.activeElement;
   const vOkne=!!(a && modal.contains(a));
-  // Focus v okne NAD týmto (súhlas, skener) tabulátor nechá tak.
-  if(!vOkne && a && a!==document.body && a!==document.documentElement && !a.closest("[data-okno-inert]")) return;
   const zoz=oknoFokusovatelne(modal);
   let ciel=null;
   if(!zoz.length) ciel=modal.querySelector(".modalcard");
@@ -24185,20 +24308,35 @@ function openModal(title, bodyHTML, onSave, onDelete, trieda, okText){
   if(onDelete) del.classList.remove("hidden"); else del.classList.add("hidden");
   const ok=document.getElementById("modalOk");
   if(ok){ ok.style.display=onSave?"":"none"; ok.textContent=okText||"Uložiť"; }
-  const modal=document.getElementById("modal");
-  const aktivny=document.activeElement;
-  if(!modal.classList.contains("on"))
-    _oknoOtvoril=(aktivny && aktivny!==document.body && aktivny!==document.documentElement) ? aktivny : null;
+  _oknoZmenene=false;
+  // Menu z lišty zavrieť PRED prepočtom vrstiev: focus z položky menu sa vráti na
+  // tlačidlo menu a to je otvárač okna (č. 132).
   oknoZavriMenu();
-  modal.classList.add("on");
-  oknoPodklad(true);
-  // Focus do okna, keď je mimo neho: na ✕, a keď okno ✕ nemá, na kartu.
-  if(aktivny && typeof modal.contains==="function" && !modal.contains(aktivny)){
-    const x=document.getElementById("modalX");
-    const ciel=(x && !x.disabled && x.getClientRects().length) ? x : karta;
-    if(ciel) ciel.focus({ preventScroll:true });
-  }
+  document.getElementById("modal").classList.add("on");
+  // Zamknúť stránku, zapamätať otvárač (len prvé otvorenie) a dať focus do okna.
+  oknoVrstvy();
 }
+// Escape = ✕ vrchnej vrstvy (č. 132). Zatvárač je ✕ v hlavičke okna, pri prekryve
+// bez hlavičky tlačidlo so značkou `data-okno-zavri` (Zrušiť v skeneri). Skryté ✕
+// (spracovanie dokladu) a zakázané ✕ (nahrávanie) Escape nezavrie. V bublaní, nie
+// v zachytávaní: ovládač v okne, ktorý Escape spracuje sám, zavolá preventDefault.
+// Rozpísaný = v tele okna prišla udalosť input/change od človeka; formulár, ktorý
+// si polia doplní sám po otvorení, rozpísaný nie je.
+let _oknoZmenene=false;
+["input","change"].forEach(typ=>document.addEventListener(typ, e=>{
+  const t=e.target;
+  if(!e.defaultPrevented && !_oknoZamknute && t && t.closest && t.closest("#modalBody")) _oknoZmenene=true;
+}, true));
+function oknoEscape(e){
+  if(e.key!=="Escape" || e.defaultPrevented || e.isComposing) return;
+  const vrch=oknoVrchne(); if(!vrch) return;
+  const x=vrch.querySelector(".modalhd .modalx") || vrch.querySelector("[data-okno-zavri]");
+  if(!x || x.disabled || !x.getClientRects().length) return;
+  e.preventDefault();
+  if(vrch.id==="modal" && _oknoZmenene && !confirm("Zavrieť okno? Rozpísané údaje sa neuložia.")) return;
+  x.click();
+}
+document.addEventListener("keydown", oknoEscape);
 // OKNO „SPRACÚVAM DOKLAD…“ SA POČAS ČÍTANIA NEDÁ ZAVRIEŤ (ROZHODNUTIA č. 124).
 // ✕ a Zrušiť sa skryjú (CSS `#modal.spracuva`); Escape ani klik mimo okno
 // nezatvárajú nikde v appke. Zavretie čítanie nezastavilo — formulár dokladu sa
@@ -24324,17 +24462,12 @@ function oknoUklada(zapnut){
 }
 function closeModal(){
   document.getElementById("modal").classList.remove("on"); modalSave=null; modalDelete=null; modalModul=null;
-  // Stránku odomknúť PRED vrátením focusu — do `inert` sa focus nepostaví.
-  // Focus sa vracia len vtedy, keď ostal v zavretom okne alebo nikde: kód za
-  // closeModal ho už mohol postaviť inam. Otvárač, ktorý prekreslenie zahodilo,
-  // sa nehľadá — to robí `vratFocus` pri klávesnici.
+  // Odomknutie stránky a návrat focusu robí `oknoVrstvy`: focus sa vracia len vtedy,
+  // keď ostal v zavretom okne alebo nikde — kód za closeModal ho už mohol postaviť
+  // inam. Otvárač, ktorý prekreslenie zahodilo, sa nehľadá — to robí `vratFocus`.
   oknoSpracuva(false);
-  oknoPodklad(false);
-  const kam=_oknoOtvoril; _oknoOtvoril=null;
-  if(kam && kam.isConnected && typeof kam.focus==="function"){
-    const modal=document.getElementById("modal"), a=document.activeElement;
-    if(!a || a===document.body || a===document.documentElement || modal.contains(a)) kam.focus({ preventScroll:true });
-  }
+  _oknoZmenene=false;
+  oknoVrstvy();
   // Zavreté okno = rozpracovaný doklad zo Schránky sa zrušil (ROZHODNUTIA č. 70).
   // Uloženie ho spotrebuje skôr, než okno zavrie (oznacCakajuciSpracovany); bez
   // tohto by ďalší doklad z iného zdroja odbavil v schránke cudzí mail.
@@ -31393,7 +31526,8 @@ function svVykazHtml(){
 //  workeru a buffer sa odpojí.)
 async function pdfTextAPrilohy(arrbuf){
   const pdfjs=await ensurePdfjs();
-  const pdf=await pdfjs.getDocument({data:arrbuf}).promise;
+  // Otvorenie PDF si ťahá worker pdf.js z CDN — aj ten môže ticho visieť (č. 131).
+  const pdf=await sStropom(pdfjs.getDocument({data:arrbuf}).promise, "Knižnica na čítanie PDF");
   let text="";
   for(let i=1;i<=Math.min(pdf.numPages,3);i++){
     const page=await pdf.getPage(i);
@@ -31420,8 +31554,8 @@ async function pdfTextAPrilohy(arrbuf){
 async function qrZPdfStrany(arrbuf){
   try{
     const pdfjs=await ensurePdfjs();
-    const pdf=await pdfjs.getDocument({data:arrbuf.slice(0)}).promise;
-    const jsQRmod=await import("https://esm.sh/jsqr@1.4.0");
+    const pdf=await sStropom(pdfjs.getDocument({data:arrbuf.slice(0)}).promise, "Knižnica na čítanie PDF");
+    const jsQRmod=await sStropom(import("https://esm.sh/jsqr@1.4.0"), "Knižnica na čítanie QR kódov");
     const jsQR=jsQRmod.default||jsQRmod;
     const page=await pdf.getPage(1);
     // Dve mierky: QR na faktúre býva 2–3 cm, pri 150 dpi má ~120 px, čo jsQR
@@ -31608,20 +31742,33 @@ async function obrazokNaText(file, onProgress, opts){
   let _priechod=0, _zobrazene=0;
   const POPIS_PRIECHODU=["","skúšam bez úprav…","skúšam iné natočenie…","skúšam iné natočenie…","posledný pokus…"];
 
+  // Strop NEČINNOSTI, nie celkového času (ROZHODNUTIA č. 131): jazykové dáta a jadro
+  // si Tesseract ťahá zo siete a na slabom telefóne trvá rozpoznávanie aj desiatky
+  // sekúnd — to sa odrezať nesmie. Visí len to, čo sa STROP_OCR_TICHO nepohne
+  // (logger nehlási nič). Sťahovanie dát hlási len začiatok a koniec, preto tri
+  // minúty: ~15 MB pri 750 kbit/s trvá okolo 160 s.
   const rozpoznaj=async(src)=>{
     const [od,do_]=PASMA[Math.min(_priechod,PASMA.length-1)];
     const popis=POPIS_PRIECHODU[Math.min(_priechod,POPIS_PRIECHODU.length-1)];
-    const { data }=await T.recognize(src,"slk+eng",{ logger:m=>{
-      if(!onProgress) return;
-      if(m.status==="recognizing text"){
-        const celkovo=od+(do_-od)*(m.progress||0);
-        if(celkovo>_zobrazene) _zobrazene=celkovo;   // späť nikdy
-        onProgress(Math.round(_zobrazene), popis);
-      }
-      else if(FAZY[m.status]!==undefined && FAZY[m.status]) onProgress(FAZY[m.status]);
-    }});
-    _priechod++;
-    return data.text||"";
+    let cas=null, odmietni=null;
+    const ticho=new Promise((_,rej)=>{ odmietni=rej; });
+    const budik=()=>{ clearTimeout(cas); cas=setTimeout(()=>odmietni(chybaNacitania("Rozpoznávanie textu (OCR) sa "
+      +Math.round(STROP_OCR_TICHO/1000)+" s nepohlo — jazykové dáta sa zrejme nesťahujú. Skontrolujte pripojenie a skúste to znova.")), STROP_OCR_TICHO); };
+    budik();
+    try{
+      const { data }=await Promise.race([T.recognize(src,"slk+eng",{ logger:m=>{
+        budik();
+        if(!onProgress) return;
+        if(m.status==="recognizing text"){
+          const celkovo=od+(do_-od)*(m.progress||0);
+          if(celkovo>_zobrazene) _zobrazene=celkovo;   // späť nikdy
+          onProgress(Math.round(_zobrazene), popis);
+        }
+        else if(FAZY[m.status]!==undefined && FAZY[m.status]) onProgress(FAZY[m.status]);
+      }}), ticho]);
+      _priechod++;
+      return data.text||"";
+    }finally{ clearTimeout(cas); }
   };
 
   // 2) ak sa canvas nepodaril, klasické OCR priamo zo súboru
@@ -33068,6 +33215,17 @@ function tbMenu(id, btn, html, sirka){
   const menu=document.createElement("div");
   menu.id=id;
   menu.setAttribute("data-tbmenu", "");   // openModal ho zavrie (oknoZavriMenu)
+  // Focus späť na tlačidlo, ktoré menu otvorilo (ROZHODNUTIA č. 132). Položka menu ho
+  // odstráni skôr, než otvorí okno (uctoVyber, rdVyber, výber firmy…), focus spadol
+  // na <body> a okno potom nemalo otvárač — po zavretí sa nevrátil nikam. Jedno miesto
+  // pre všetky menu a každú cestu zatvorenia (položka, druhý klik, openModal). Len keď
+  // focus stál V menu: klik mimo ho už posadil tam, kam človek klikol.
+  const odpoj=menu.remove.bind(menu);
+  menu.remove=()=>{
+    const a=document.activeElement, vnutri=!!(a && typeof menu.contains==="function" && menu.contains(a));
+    odpoj();
+    if(vnutri && btn && btn.isConnected && typeof btn.focus==="function") btn.focus({ preventScroll:true });
+  };
   menu.style.cssText="position:fixed;z-index:200;background:var(--paper,#fff);border:1px solid var(--line);"
     +"border-radius:12px;box-shadow:0 10px 30px rgba(19,28,43,.16);overflow:hidden;visibility:hidden;min-width:"+(sirka||210)+"px";
   menu.innerHTML=html;
@@ -33598,7 +33756,10 @@ async function spracujDokladSubor(file, setStav, qrVopred, ignorujZse){
         R._surovyText="";
         return R;
       }
-      setStav("FS neodpovedala, čítam text dokladu…");
+      // Nenájdený doklad je odpoveď FS, nie výpadok (č. 134) — dôvod výpadku
+      // zapísal ekasaDotiahni do konzoly a formulár ho povie pri automatickom pokuse.
+      if(d.najdene===false) setStav("Finančná správa doklad s týmto ID nepozná, čítam text dokladu…");
+      else setStav("FS neodpovedala, čítam text dokladu…");
     }
     setStav("OCR obrázka…");
     // Uhol z QR: OCR nemusí skúšať štyri natočenia, keď ho poznáme.
@@ -33987,7 +34148,7 @@ let _skenStop=null, _skenChyba="";
 function zavriSkener(){
   if(_skenStop){ _skenStop(); _skenStop=null; }
   const el=document.getElementById("qrSkener");
-  if(el) el.remove();
+  if(el){ el.remove(); oknoVrstvy(); }
 }
 // Kamera sa musí pustiť aj vtedy, keď je stream už zavretý — preto obal.
 // Je to jediné miesto, kde sa tu chyba naozaj zahodiť smie: zastavovanie
@@ -34008,9 +34169,10 @@ async function skenujQRkamerou(){
    +'</div>'
    +'<div id="qrSkenStav" style="position:absolute;bottom:88px;left:0;right:0;text-align:center;color:#fff;font-size:12.5px;text-shadow:0 1px 3px #000"></div>'
    +'<div style="position:absolute;bottom:0;left:0;right:0;padding:16px;display:flex;gap:10px;justify-content:center;background:linear-gradient(#0000,#000c)">'
-   +'<button type="button" id="qrSkenZrus" style="padding:11px 22px;font-size:14px;border-radius:10px;border:0;background:#fff;color:#111">Zrušiť</button>'
+   +'<button type="button" id="qrSkenZrus" data-okno-zavri style="padding:11px 22px;font-size:14px;border-radius:10px;border:0;background:#fff;color:#111">Zrušiť</button>'
    +'</div>';
   document.body.appendChild(box);
+  oknoVrstvy();   // skener je vrstva nad oknom (č. 132); Escape = Zrušiť (data-okno-zavri)
   const video=box.querySelector("#qrVideo");
   const stav=box.querySelector("#qrSkenStav");
 
@@ -34123,11 +34285,12 @@ async function odfotDoklad(){
    // sa. Na 390 px je hore miesta málo a text nesmie zakryť doklad v zábere.
    +'<div id="qrSkenStav" style="position:absolute;bottom:118px;left:16px;right:16px;text-align:center;color:#fff;font-size:12.5px;text-shadow:0 1px 3px #000"></div>'
    +'<div style="position:absolute;bottom:0;left:0;right:0;padding:18px 16px 26px;display:flex;gap:14px;align-items:center;justify-content:space-between;background:linear-gradient(#0000,#000c)">'
-   +'<button type="button" id="qrZrus" style="padding:11px 18px;font-size:14px;border-radius:10px;border:0;background:#ffffff33;color:#fff">Zrušiť</button>'
+   +'<button type="button" id="qrZrus" data-okno-zavri style="padding:11px 18px;font-size:14px;border-radius:10px;border:0;background:#ffffff33;color:#fff">Zrušiť</button>'
    +'<button type="button" id="qrSpust" aria-label="Odfotiť" style="width:74px;height:74px;border-radius:50%;border:5px solid #ffffff66;background:#fff"></button>'
    +'<button type="button" id="qrSvetlo" style="padding:11px 18px;font-size:14px;border-radius:10px;border:0;background:#ffffff33;color:#fff">💡</button>'
    +'</div>';
   document.body.appendChild(box);
+  oknoVrstvy();
   const video=box.querySelector("#qrVideo");
   const stav=box.querySelector("#qrSkenStav");
 
@@ -34295,7 +34458,7 @@ async function precitajQRzObrazka(file){
   }
   // 2) fallback jsQR — viac mierok, výrezov a predspracovanie (desktop / zošikmené fotky)
   try{
-    const jsQRmod=await import("https://esm.sh/jsqr@1.4.0").catch(e=>{
+    const jsQRmod=await sStropom(import("https://esm.sh/jsqr@1.4.0"), "Knižnica na čítanie QR kódov").catch(e=>{
       // Knižnica sa ťahá zo siete. Keď sa nenačíta, QR sa nenájde NIKDY
       // a bez tejto hlášky to vyzerá ako doklad bez kódu.
       kroky.push("jsQR sa nenačítal: "+(e && e.message || e));
@@ -34443,7 +34606,8 @@ async function dekodujPayBySquare(raw){
   if(!parsePayBySquareQR(raw)) return null;
   let model;
   try{
-    const bysq=await import("https://esm.sh/bysquare@4/pay");
+    // Strop (č. 131): dekódovanie beží aj počas zamknutého okna „Spracúvam doklad…“.
+    const bysq=await sStropom(import("https://esm.sh/bysquare@4/pay"), "Knižnica na platobné QR kódy");
     model=bysq.decode(String(raw).trim().toUpperCase());
   }catch(_){ return null; }   // nesedí CRC, nie je to bysquare, alebo nejde sieť
   const pl=(model && model.payments && model.payments[0]) || null;
@@ -34600,7 +34764,12 @@ async function spracujDokladZoSuboru(file, qrVopred, archivCesta){
     if(R._chyba){ document.getElementById("modalBody").innerHTML=`<div style="padding:10px;color:var(--neg)">${esc(R.partner||"Doklad sa nepodarilo spracovať")}.<br><br>Skúste kvalitnejšiu fotku alebo zadajte výdavok ručne.</div>`; return; }
     otvorOcrVysledok(R);
   }catch(err){
-    document.getElementById("modalBody").innerHTML=`<div style="padding:10px;color:var(--neg)">Spracovanie zlyhalo: ${esc(err.message)}<br><br>Skúste kvalitnejšiu fotku alebo zadajte výdavok ručne.</div>`;
+    console.error("čítanie dokladu:", err);
+    // Knižnica sa nenačítala (strop času, č. 131): fotka za to nemôže.
+    const rada=(err && err.nacitanie)
+      ? "Keď pripojenie funguje, nahrajte doklad znova — alebo zadajte výdavok ručne."
+      : "Skúste kvalitnejšiu fotku alebo zadajte výdavok ručne.";
+    document.getElementById("modalBody").innerHTML=`<div style="padding:10px;color:var(--neg)">Spracovanie zlyhalo: ${esc(err.message)}<br><br>${rada}</div>`;
   }finally{
     // Chyba, prepnutie firmy aj zamietnutý výpis ZSE: okno sa dá zavrieť ako doteraz.
     // Formulár dokladu odomkol už svojím openModal.
