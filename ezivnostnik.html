@@ -3601,7 +3601,7 @@ function zobrazFirmu(){
     }
   }catch(e){ console.error("autoParujPohyby pri zobrazení firmy:", e); }
   // faktúry za predplatné rovno do výdavkov (raz za session, na pozadí)
-  if(!_saasAutoDone && firmaData && !localMode){ _saasAutoDone=true; autoZaevidujSaasFaktury(); }
+  if(!_saasAutoDone && firmaData && !localMode) saasAutomatikaSpusti();
   // pozastavený účet (admin nastavil aktivny=false) → zablokuj appku
   if(firmaConfig && firmaConfig.aktivny === false){
     const app=document.getElementById("appScreen")||document.body;
@@ -22447,7 +22447,7 @@ function spracujNavratZPlatby(){
       }
       if(hotovo){
         saasRelaciaVyprazdni();
-        try{ await autoZaevidujSaasFaktury(); }catch(_){}
+        try{ await saasAutomatikaSpusti(); }catch(_){}
         if(jeDoplnok){
           alert("✓ Ďakujeme za platbu!\n\nDaňové priznanie typ B za rok "+(rokDoplnku||"")+" máte odomknuté natrvalo.\n"+
                 "Sprievodcu nájdete v sekcii Podania.\nFaktúru sme pridali do vašich Výdavkov a poslali e-mailom.");
@@ -22720,6 +22720,10 @@ let _saasAutoDone=false;
 // prepnutie nechalo: druhá firma v tej istej relácii automatické zaevidovanie
 // nedostala a zvonček jej ponúkal faktúry a chybu predošlej firmy.
 function saasRelaciaVyprazdni(){ _saasFaktury=null; _saasChyba=null; _saasAutoDone=false; }
+// Jediné spustenie automatiky, ktoré si ho aj zapíše (`zobrazFirmu`, návrat
+// z platby). Do 15. 9. 2026 ju návrat z platby volal priamo po vyprázdnení
+// a hneď nato `zobrazFirmu` pri vynulovanom príznaku druhýkrát (č. 114).
+function saasAutomatikaSpusti(){ _saasAutoDone=true; return autoZaevidujSaasFaktury(); }
 async function autoZaevidujSaasFaktury(){
   if(localMode || !sb || !firmaId || !firmaData) return 0;
   if(!mozemPisat("vydavky")) return 0;
@@ -26632,7 +26636,7 @@ async function postarObnovStavOdoslanych(tiche){
   if(_postarStavBezi===firmaData || !postarMaIdentitu() || !mozemPisat("faktury")) return 0;
   const cakaju=(firmaData.faktury||[]).filter(f=>f && efaktCakaNaStav(f.efaktura));
   if(!cakaju.length) return 0;
-  const firma=firmaId, beh=firmaData;
+  const beh=firmaData;
   _postarStavBezi=beh;
   let zmien=0;
   try{
@@ -26648,10 +26652,12 @@ async function postarObnovStavOdoslanych(tiche){
       riadky.push(...((r&&r.documents)||[]));
       strana=(r&&r.nextPageToken)||null;
     }while(strana && ++n<20);
-    // Stráž firmy po sieti (vzor `postarPotvrdUlozene`): `cakaju` sú objekty
-    // faktúr firmy, ktorá bola otvorená PRED volaním. Po prepnutí by sa stav
-    // zapísal do nich a `poZmene` by ukladalo inú firmu (č. 97).
-    if(firmaId!==firma) return 0;
+    // Stráž firmy po sieti: `cakaju` sú objekty faktúr dát, ktoré boli otvorené
+    // PRED volaním. Po prepnutí by sa stav zapísal do nich a `poZmene` by ukladalo
+    // inú firmu (č. 97). Porovnávajú sa DÁTA, nie `firmaId` (č. 114): pri A → B → A
+    // sa `firmaId` vráti, ale znovu otvorená A má nové objekty — stav by išiel do
+    // predošlého načítania, ktoré už nikto nezobrazí, a `poZmene` by zbytočne uložilo.
+    if(firmaData!==beh) return 0;
     for(const f of cakaju){
       const d=efaktRiadokOdoslanej(f, riadky, firmaData.faktury);
       if(d && efaktZapisStav(f, d)) zmien++;
