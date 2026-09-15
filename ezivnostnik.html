@@ -2098,9 +2098,15 @@ let STROP_NACITANIA=45000;
 let STROP_OCR_TICHO=180000;   // nečinnosť rozpoznávania textu — viď obrazokNaText
 function chybaNacitania(veta){ const e=new Error(veta); e.nacitanie=true; return e; }
 function sStropom(prisl, popis){
+  return sCasom(prisl, STROP_NACITANIA, ()=>{ throw chybaNacitania(popis+" sa nenačítala ani za "
+    +Math.round(STROP_NACITANIA/1000)+" s. Skontrolujte pripojenie a skúste to znova."); });
+}
+// Spoločný strop: po `ms` rozhodne `poStrope()` — hodí chybu (načítanie knižnice) alebo vráti
+// značku, ktorú volajúci spozná (nahrávanie dokladu, č. 136). Pôvodný prísľub beží ďalej;
+// čo s jeho neskorým výsledkom, rieši volajúci.
+function sCasom(prisl, ms, poStrope){
   let cas=null;
-  const strop=new Promise((_,rej)=>{ cas=setTimeout(()=>rej(chybaNacitania(popis+" sa nenačítala ani za "
-    +Math.round(STROP_NACITANIA/1000)+" s. Skontrolujte pripojenie a skúste to znova.")), STROP_NACITANIA); });
+  const strop=new Promise((res,rej)=>{ cas=setTimeout(()=>{ try{ res(poStrope()); }catch(e){ rej(e); } }, ms); });
   return Promise.race([prisl, strop]).finally(()=>clearTimeout(cas));
 }
 const _nacitavaSa=new Map();
@@ -34168,6 +34174,30 @@ function zavriSkener(){
 function pustiKameru(stream){
   try{ stream.getTracks().forEach(t=>t.stop()); }catch(_){}
 }
+// ZRUŠIŤ PLATÍ OD CHVÍLE, KEĎ JE PREKRYV NA OBRAZOVKE (ROZHODNUTIA č. 135). Do 15. 9. 2026
+// skener aj fotoaparát priradili Zrušiť až po `getUserMedia` a `video.play()`: kým kamera
+// neodpovedala (otázka na povolenie, kamera obsadená inou appkou, visiaci prehrávač), čierny
+// prekryv so z-index 99999 nešiel zavrieť klikom ani Escapom až do obnovenia stránky.
+// Zrušiť hneď po vložení prekryvu zavolá `zavriSkener` → `_skenStop` = zrušenie čakania.
+// `cakaj(prisl)` vráti výsledok kamery, alebo SKENER_ZRUSENY, keď človek zrušil skôr; kamera,
+// ktorá dobehne až po zrušení, sa zastaví (`pustiKameru`) — inak by svietila kontrolka a
+// kamera by ostala obsadená. Volajúci porovná výsledok so SKENER_ZRUSENY a po zrušení už
+// nesiaha na DOM — `#qrSkener` môže patriť ďalšiemu skeneru. Ďalšia stráž za `await` netreba:
+// keď závod vyhrá kamera, pokračovanie beží v tej istej dávke mikroúloh a klik ani Escape
+// (udalosť = makroúloha) medzi ne nevojde (overené sanity checkom, dev/opravy/skener16.md).
+const SKENER_ZRUSENY=Symbol("skener zrušený");
+function skenerZrusenie(tlacidlo){
+  let zrusene=false, oznam=null;
+  const signal=new Promise(r=>{ oznam=r; });
+  _skenStop=()=>{ zrusene=true; oznam(SKENER_ZRUSENY); };
+  tlacidlo.onclick=()=>zavriSkener();
+  return {
+    cakaj(prisl){
+      const p=Promise.resolve(prisl).then(v=>{ if(zrusene && v && typeof v.getTracks==="function") pustiKameru(v); return v; });
+      return Promise.race([p, signal]);
+    },
+  };
+}
 // Vráti obsah QR (string) alebo null, keď človek skenovanie zruší.
 async function skenujQRkamerou(){
   zavriSkener();
@@ -34184,23 +34214,28 @@ async function skenujQRkamerou(){
    +'<button type="button" id="qrSkenZrus" data-okno-zavri style="padding:11px 22px;font-size:14px;border-radius:10px;border:0;background:#fff;color:#111">Zrušiť</button>'
    +'</div>';
   document.body.appendChild(box);
+  // Zrušiť a Escape platia hneď, aj kým sa čaká na kameru (č. 135).
+  const zrusenie=skenerZrusenie(box.querySelector("#qrSkenZrus"));
   oknoVrstvy();   // skener je vrstva nad oknom (č. 132); Escape = Zrušiť (data-okno-zavri)
   const video=box.querySelector("#qrVideo");
   const stav=box.querySelector("#qrSkenStav");
 
   let stream=null;
   try{
-    stream=await navigator.mediaDevices.getUserMedia({
+    const kamera=navigator.mediaDevices.getUserMedia({
       video:{ facingMode:{ideal:"environment"}, width:{ideal:1920}, height:{ideal:1080} }, audio:false });
+    stream=await zrusenie.cakaj(kamera);
   }catch(e){
     zavriSkener();
     alert("Kameru sa nepodarilo otvoriť: "+(e && e.message || e)+"\n\nSkontrolujte povolenie prístupu ku kamere.");
     return null;
   }
+  if(stream===SKENER_ZRUSENY) return null;
   video.srcObject=stream;
   // Autoplay na mobile vie spadnúť, kým stream nabieha; obraz sa rozbehne aj
   // tak a ďalšia snímka to dorovná — ale nech je v konzole stopa.
-  try{ await video.play(); }catch(e){ console.warn("QR skener — video.play:", e); }
+  try{ if(await zrusenie.cakaj(video.play())===SKENER_ZRUSENY){ pustiKameru(stream); return null; } }
+  catch(e){ console.warn("QR skener — video.play:", e); }
 
   return await new Promise((hotovo)=>{
     let bezi=true, snimok=0;
@@ -34302,14 +34337,16 @@ async function odfotDoklad(){
    +'<button type="button" id="qrSvetlo" style="padding:11px 18px;font-size:14px;border-radius:10px;border:0;background:#ffffff33;color:#fff">💡</button>'
    +'</div>';
   document.body.appendChild(box);
+  const zrusenie=skenerZrusenie(box.querySelector("#qrZrus"));   // Zrušiť hneď, aj kým kamera nabieha (č. 135)
   oknoVrstvy();
   const video=box.querySelector("#qrVideo");
   const stav=box.querySelector("#qrSkenStav");
 
   let stream=null;
   try{
-    stream=await navigator.mediaDevices.getUserMedia({
+    const kamera=navigator.mediaDevices.getUserMedia({
       video:{ facingMode:{ideal:"environment"}, width:{ideal:1920}, height:{ideal:1080} }, audio:false });
+    stream=await zrusenie.cakaj(kamera);
   }catch(e){
     zavriSkener();
     console.error("odfotDoklad — kamera:", e);
@@ -34317,6 +34354,7 @@ async function odfotDoklad(){
     document.getElementById("ocrInput").click();
     return;
   }
+  if(stream===SKENER_ZRUSENY) return;   // zrušené, kým kamera nabiehala — náhradný výber súboru nie
   const track=stream.getVideoTracks()[0];
   let cap={};
   try{ cap=track.getCapabilities(); }catch(e){ console.warn("getCapabilities:", e); }
@@ -34327,7 +34365,8 @@ async function odfotDoklad(){
   // dvanásťmegapixelových. Zdvíhať sa oplatí len pre zálohu cez plátno, ktorá
   // rozlíšenie z náhľadu naozaj berie.
   video.srcObject=stream;
-  try{ await video.play(); }catch(e){ console.warn("odfotDoklad — video.play:", e); }
+  try{ if(await zrusenie.cakaj(video.play())===SKENER_ZRUSENY){ pustiKameru(stream); return; } }
+  catch(e){ console.warn("odfotDoklad — video.play:", e); }
 
   // prisvietenie — na bločkoch v aute alebo večer rozhoduje
   const tlSvetlo=box.querySelector("#qrSvetlo");
@@ -38797,7 +38836,18 @@ async function dokladUpload(file, prefix, nazov, beh, stav){
   // ktorý sa nahrávalo, patrí predošlému načítaniu.
   const koren=beh.koren, S=stav||{};
   if(!koren){ S.chyba=DOKLAD_DOVOD.bezFirmy.text; console.error("upload dokladu: nie je otvorená firma"); return null; }
-  const { data:{ user } }=await sb.auth.getUser();
+  // Strop celého nahratia jedného súboru (ROZHODNUTIA č. 136, `stropNahratia`): overenie
+  // prihlásenia, nahratie aj zoznam priečinka idú sieťou a ani jedno vlastný strop nemá.
+  const STROP=Symbol("strop nahrávania"), doba=stropNahratia(file), od=Date.now();
+  const doStropu=p=>sCasom(p, Math.max(0, od+doba-Date.now()), ()=>STROP);
+  const poStrope=(krok)=>{
+    S.chyba=dokladDovodStropu(doba);
+    console.error("upload dokladu: "+krok+" neskončilo ani za "+Math.round(doba/1000)+" s (strop času) — súbor "+(file.name||"")+" sa neuložil");
+    return null;
+  };
+  const prihlasenie=await doStropu(sb.auth.getUser());
+  if(prihlasenie===STROP) return poStrope("overenie prihlásenia");
+  const { data:{ user } }=prihlasenie;
   if(!beh.platny()){ S.chyba=DOKLAD_DOVOD.prepnutie.text; console.error("upload dokladu: medzitým sa otvorila iná firma — súbor "+(file.name||"")+" sa nenahrá"); return null; }
   // Do 15. 9. 2026 tu bol null bez slova a hláška tvrdila „úložisko súbor neprijalo“ (č. 120).
   if(!user){ S.chyba=DOKLAD_DOVOD.neprihlaseny.text; console.error("upload dokladu: nie ste prihlásený — súbor "+(file.name||"")+" sa nenahrá"); return null; }
@@ -38810,10 +38860,22 @@ async function dokladUpload(file, prefix, nazov, beh, stav){
   // Pevný názov (e-faktúra, ROZHODNUTIA č. 97) a zmenšená kópia fotky (č. 92)
   // sa skladajú: nahráva sa `subor`, cieľ je `nazov` alebo nová cesta.
   const cil=nazov ? `${koren}/${nazov}` : cesta;
-  const { error }=await nahrajDoUloziska(cil, subor, { upsert:false });
+  const nahratie=nahrajDoUloziska(cil, subor, { upsert:false });
+  const vysledok=await doStropu(nahratie);
+  if(vysledok===STROP){
+    // Nahratie, ktoré dobehne až po strope, vytvorilo súbor, na ktorý nič neukazuje — doklad
+    // je už zapísaný bez neho (`dokladChyba`) — a zmaže sa hneď (postup č. 121). Súbor
+    // s pevným menom (prevzatá e-faktúra, č. 97) nie: ďalšie prevzatie ho nájde a použije.
+    nahratie.then(r=>{ if(r && !r.error && !nazov) return dokladZmazNahraty(cil, "nahrávanie dobehlo až po strope času"); },
+      e=>console.error("upload dokladu: nahrávanie po strope času zlyhalo ("+cil+"):", e));
+    return poStrope("nahrávanie");
+  }
+  const { error }=vysledok;
   if(error){
     // Súbor s pevným menom už leží v úložisku — nevznikol teraz, preto sa ani nemaže.
-    if(nazov && await uloziskoMaSubor(koren, nazov)){
+    const ma=nazov ? await doStropu(uloziskoMaSubor(koren, nazov)) : false;
+    if(ma===STROP) return poStrope("zoznam priečinka");
+    if(ma){
       if(beh.platny()) return cil;
       S.chyba=DOKLAD_DOVOD.prepnutie.text; return null;
     }
@@ -38846,7 +38908,30 @@ const DOKLAD_DOVOD={
   bezFirmy:{ text:"nie je otvorená firma", rada:"Otvorte firmu a doklad priložte znova." },
   offline:{ text:"chýba pripojenie k internetu", rada:"Doklad priložte, keď budete online." },
   uloziste:{ text:"úložisko súbor neprijalo", rada:"Skúste ho priložiť znova o chvíľu. Ak sa to opakuje, napíšte na podpora@ezivnostnik.eu." },
+  strop:{ text:"nahrávanie trvalo príliš dlho", rada:"Skontrolujte pripojenie a doklad priložte znova, keď bude sieť lepšia (napríklad na Wi-Fi)." },
 };
+// ── STROP NAHRÁVANIA (ROZHODNUTIA č. 136) ──
+// Okno sa počas nahrávania nedá zavrieť (`oknoNahrava`) a supabase-js ani fetch vlastný strop
+// nemajú: ticho visiaca požiadavka (nie chyba, ale nič) ho do 15. 9. 2026 nechala zamknuté
+// natrvalo. Priebeh nahrávania appka nevidí, takže pomalé, ale živé nahratie sa od visiaceho
+// dá rozlíšiť len časom — preto strop rastie s veľkosťou súboru:
+//   STROP_NACITANIA (45 s — spojenie a TLS na zlej sieti, tá istá hodnota ako pri knižniciach)
+//   + 1 s na každých 40 kB (320 kbit/s, menej ako polovica pomalého 4G — 750 kbit/s, ukladanie8)
+// Fotka po zmenšení ~0,8 MB (č. 92, ~9 s pri 750 kbit/s) → 65 s; nezmenšená 4,5 MB (zmerané
+// 43–48 s) → 157 s; PDF 10 MB → ~5 min. Visiace nahratie malého súboru okno odomkne do minúty.
+// Veľkosť je z pôvodného súboru (pred zmenšením): strop je potom štedrejší a pokryje aj
+// zmenšenie fotky, ktoré beží v tom istom čase (na telefóne do 4 s, č. 106).
+// Po strope: dôvod v `dokladChyba` a v hláške volajúceho, okno sa odomkne (`finally` pri
+// `oknoNahrava`) a doklad sa dá priložiť dodatočne (č. 117). Neskorý súbor zmaže `dokladUpload`.
+const NAHRATIE_B_ZA_S=40000;
+function stropNahratia(file){
+  return STROP_NACITANIA + Math.round((+(file && file.size) || 0) / NAHRATIE_B_ZA_S * 1000);
+}
+// Bez siete (prehliadač to vie) je dôvod pripojenie, nie „príliš dlho“ — rada je iná (č. 120).
+function dokladDovodStropu(doba){
+  const offline=typeof navigator!=="undefined" && navigator.onLine===false;
+  return (offline ? DOKLAD_DOVOD.offline.text : DOKLAD_DOVOD.strop.text)+" (neskončilo ani za "+Math.max(1, Math.round(doba/1000))+" s)";
+}
 function dokladDovodRada(chyba){
   const c=String(chyba||"");
   return (Object.values(DOKLAD_DOVOD).find(d=>c.startsWith(d.text)) || DOKLAD_DOVOD.uloziste).rada;
