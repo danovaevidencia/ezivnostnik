@@ -15,7 +15,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/banka-automat-1.d.a4c0ab6e.webp",
+   "subor": "navody/banka-automat-1.d.086cb8d6.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -28,7 +28,7 @@ window.NAVODY_SNIMKY = {
  },
  "banka-automat-2": {
   "m": {
-   "subor": "navody/banka-automat-2.m.25b850d3.webp",
+   "subor": "navody/banka-automat-2.m.d92e71a0.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -39,7 +39,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/banka-automat-2.d.2cb04e86.webp",
+   "subor": "navody/banka-automat-2.d.e6620fca.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -172,7 +172,7 @@ window.NAVODY_SNIMKY = {
  },
  "banka-prehlad-1": {
   "m": {
-   "subor": "navody/banka-prehlad-1.m.bb55eee5.webp",
+   "subor": "navody/banka-prehlad-1.m.8bc2c7cc.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -652,7 +652,7 @@ window.NAVODY_SNIMKY = {
  },
  "dokumenty-platnost-1": {
   "m": {
-   "subor": "navody/dokumenty-platnost-1.m.fa95df83.webp",
+   "subor": "navody/dokumenty-platnost-1.m.66819fd1.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -663,7 +663,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/dokumenty-platnost-1.d.01ec4aa4.webp",
+   "subor": "navody/dokumenty-platnost-1.d.13cdaf5f.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -2058,7 +2058,7 @@ window.NAVODY_SNIMKY = {
  },
  "knihy-kniha-1": {
   "m": {
-   "subor": "navody/knihy-kniha-1.m.d3314f28.webp",
+   "subor": "navody/knihy-kniha-1.m.379128fd.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -2586,7 +2586,7 @@ window.NAVODY_SNIMKY = {
  },
  "superdash-rok-1": {
   "m": {
-   "subor": "navody/superdash-rok-1.m.99499642.webp",
+   "subor": "navody/superdash-rok-1.m.462748c7.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -2597,7 +2597,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/superdash-rok-1.d.597c8c92.webp",
+   "subor": "navody/superdash-rok-1.d.79eaa480.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
