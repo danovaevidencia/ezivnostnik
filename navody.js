@@ -271,6 +271,8 @@ vydavky: {
           html: "<p>Keď je na slovenskom doklade DPH a nejde o bloček z pokladnice, appka ho bez platného IČ DPH dodávateľa neuloží — faktúra s DPH ho uvádzať má a platiteľ DPH si bez neho DPH neodpočíta. Nájdete ho na doklade, prípadne v okne pod <b>📄 Čo appka prečítala z dokladu</b>.</p>" },
         { nadpis: "Viac faktúr naraz",
           html: "<p>Viac došlých faktúr v PDF alebo XML načítate spolu cez <b>📥 Import faktúr (XML/PDF)</b>.</p>" },
+        { nadpis: "Doklad sa do cloudu neuložil",
+          html: "<p>Výdavok sa uloží aj tak a v zozname má pred menom dodávateľa <b>⚠</b>. Otvorte ho a ťuknite na <b>📎 Priložiť doklad</b> — alebo ťuknite na pripomienku v zvončeku.</p>" },
       ],
     },
     {
