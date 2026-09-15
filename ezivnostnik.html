@@ -1358,6 +1358,8 @@ h1,h2,h3,h4,.chead,.wbig,.sbox .sn,.sp-title b,.splittitle{text-wrap:balance}
 /* 37 px ako všetko ostatné (kap. 90.14). Zatvorenie modálu je terč, ktorý sa
    trafí naslepo — človek mieri palcom do rohu, nie na ikonu. */
 .modalx{width:37px;height:37px;border-radius:9px;border:1px solid var(--line);background:var(--bg);cursor:pointer;font-size:15px;color:var(--ink-soft)}
+/* Okno „Spracúvam doklad…“ počas čítania nemá čím zavrieť (ROZHODNUTIA č. 124, oknoSpracuva). */
+#modal.spracuva #modalX,#modal.spracuva #modalZrusit{display:none}
 .modalx:disabled,#modalZrusit:disabled{opacity:.45;cursor:default}
 /* Uloženie beží (`oknoUklada`, č. 88) — text hovorí „Ukladám…“, kurzor čaká. */
 #modalOk.uklada{cursor:progress;opacity:.8}
@@ -2064,7 +2066,7 @@ html[data-jazda] .jazdapruh{display:flex}
 
 <!-- MODÁL na editovanie -->
 <div class="modal" id="modal">
-  <div class="modalcard">
+  <div class="modalcard" role="dialog" aria-modal="true" aria-labelledby="modalTitle" tabindex="-1">
     <div class="modalhd">
       <h3 id="modalTitle">Upraviť</h3>
       <button class="modalx" id="modalX" onclick="closeModal()">✕</button>
@@ -24063,21 +24065,82 @@ function exportDanXLS(rok){
 
 // ── MODÁL ──
 let modalSave=null, modalDelete=null, modalModul=null;
-// ⚠ Okno NIE JE uzavreté pre klávesnicu — vedomá medzera, nie prehliadnutie.
-// Čo funguje: keď akciu spustí klávesnica, `vratFocus` presunie focus na
-// krížik okna (kap. 48.6e). Čo NEfunguje:
-//   · tabulátor z okna vyjde do stránky pod ním (focus trap tu nie je);
-//   · Escape okno nezatvára — jediné miesto, kde appka Escape spracúva, je
-//     pole IČ DPH v module DPH.
-// Kým to tak je, okno sa dá otvoriť aj ovládať, ale nedá sa z neho slušne
-// odísť. Riešenie patrí sem, do `openModal`/`closeModal`, nie do posluchača
-// pri `spristupniOvladace` — ten nevie, ktoré okno je práve otvorené.
-// Spec kap. 48.9, bod 2.
+// OKNO JE UZAVRETÉ PRE KLÁVESNICU (ROZHODNUTIA č. 124, spec kap. 48.9 bod 2).
+// Do 15. 9. 2026 to bola vedomá medzera: tabulátor z okna vyšiel do stránky pod
+// ním — v prehliadači 55 zo 60 stlačení Tab stálo mimo okna, ⚙ v lište bola
+// dosiahnuteľná a jej menu sa otvorilo NAD oknom (dev/opravy/okno14.md). Teraz:
+//   · stránka pod oknom je `inert` (`oknoPodklad`) — nedá sa na ňu dostať
+//     tabulátorom ani ju ťuknúť; karta okna má role="dialog" aria-modal="true";
+//   · Tab a Shift+Tab na okraji okna prejdú na druhý koniec (`oknoTabulator`)
+//     — z posledného ovládača by inak focus odišiel do lišty prehliadača;
+//   · po zavretí sa focus vráti na prvok, ktorý okno otvoril (`_oknoOtvoril`).
+//     Nadväzujúce okno (openModal z otvoreného okna, alebo closeModal a hneď
+//     openModal) si nechá PRVÝ otvárač: ovládač v tele predošlého okna už nie je.
+// Keď akciu spustí klávesnica na prvku s role="button", `vratFocus` presunie
+// focus na krížik (kap. 48.6e) — to ostáva. Doplňovanie tabindex sa tu nemení:
+// zoznam pre Tab sa skladá až pri stlačení, teda po prechode pozorovateľa
+// (`setTimeout`), a `inert` vyradí aj prvok, ktorému pozorovateľ tabindex dal.
+// Escape okno ďalej nezatvára — jediné miesto, kde appka Escape spracúva, je
+// pole IČ DPH v module DPH. Rozhodnutie č. 124 to nežiada a rozpísaný formulár
+// by sa zavrel jedným klávesom.
 // `okText` — tlačidlo, ktoré neukladá, nesmie sa volať „Uložiť" (Meranie jazdy
 // ním spúšťa GPS). Nastavuje sa pri KAŽDOM otvorení, inak by text ostal viseť.
+const OKNO_FOKUS="button,a[href],input,select,textarea,summary,[tabindex]";
+let _oknoOtvoril=null;
+// Zamyká sa každé dieťa <body> okrem okna. Nezamyká sa, čo leží NAD oknom a človek
+// to musí vedieť ovládať: iné okno (súhlas s dokumentmi, trieda `modal`) a prekryv
+// s vlastným z-index nad oknom (skener QR 99999; `.modal` má v CSS 80). Odomyká sa
+// len to, čo zamklo okno — cudzí `inert` ostáva.
+function oknoPodklad(zamknut){
+  const modal=document.getElementById("modal");
+  const deti=(document.body && document.body.children) ? [...document.body.children] : [];
+  deti.forEach(el=>{
+    if(el===modal || typeof el.setAttribute!=="function") return;
+    if(!zamknut){
+      if(el.hasAttribute("data-okno-inert")){ el.removeAttribute("inert"); el.removeAttribute("data-okno-inert"); }
+      return;
+    }
+    if(el.hasAttribute("inert") || el.classList.contains("modal") || (+(el.style && el.style.zIndex) || 0) > 80) return;
+    el.setAttribute("inert", ""); el.setAttribute("data-okno-inert", "");
+  });
+}
+// Na čo sa v okne dá postaviť tabulátorom: nie zakázané, nie skryté (✕ počas
+// spracovania dokladu, zbalený <details>), nie tabindex="-1".
+function oknoFokusovatelne(modal){
+  return [...modal.querySelectorAll(OKNO_FOKUS)].filter(el=>
+    !el.disabled && el.tabIndex>=0 && !el.closest("[inert]") && el.getClientRects().length>0
+    && getComputedStyle(el).visibility!=="hidden");
+}
+// Zasahuje len na okraji; medzi ovládačmi v okne ide tabulátor prehliadača.
+// Zachytávanie (true), aby posluchač modulu Tab nezhltol skôr.
+function oknoTabulator(e){
+  if(e.key!=="Tab") return;
+  const modal=document.getElementById("modal");
+  if(!modal || !modal.classList.contains("on")) return;
+  const a=document.activeElement;
+  const vOkne=!!(a && modal.contains(a));
+  // Focus v okne NAD týmto (súhlas, skener) tabulátor nechá tak.
+  if(!vOkne && a && a!==document.body && a!==document.documentElement && !a.closest("[data-okno-inert]")) return;
+  const zoz=oknoFokusovatelne(modal);
+  let ciel=null;
+  if(!zoz.length) ciel=modal.querySelector(".modalcard");
+  else if(!vOkne) ciel=e.shiftKey ? zoz[zoz.length-1] : zoz[0];
+  else if(e.shiftKey){ if(!zoz.some(x=>a.compareDocumentPosition(x) & Node.DOCUMENT_POSITION_PRECEDING)) ciel=zoz[zoz.length-1]; }
+  else if(!zoz.some(x=>a.compareDocumentPosition(x) & Node.DOCUMENT_POSITION_FOLLOWING)) ciel=zoz[0];
+  if(ciel){ e.preventDefault(); ciel.focus(); }
+}
+document.addEventListener("keydown", oknoTabulator, true);
+// Menu z lišty (`tbMenu`, z-index 200) a mini menu dlaždice by ostali NAD oknom.
+// Otvárajú sa len zo stránky, nie z okna, takže pri otvorení okna sa zavrú.
+function oknoZavriMenu(){
+  document.querySelectorAll("[data-tbmenu],.minimenu").forEach(m=>{
+    if(typeof m._zavri==="function") m._zavri(); else m.remove();
+  });
+}
 function openModal(title, bodyHTML, onSave, onDelete, trieda, okText){
   modalSave=onSave; modalDelete=onDelete||null; modalModul=null;
   if(_oknoZamknute) zamkniOkno(false);
+  oknoSpracuva(false);
   const karta=document.querySelector("#modal .modalcard");
   if(karta){ karta.classList.remove("siroky"); if(trieda) karta.classList.add(trieda); }
   document.getElementById("modalTitle").textContent=title;
@@ -24086,7 +24149,36 @@ function openModal(title, bodyHTML, onSave, onDelete, trieda, okText){
   if(onDelete) del.classList.remove("hidden"); else del.classList.add("hidden");
   const ok=document.getElementById("modalOk");
   if(ok){ ok.style.display=onSave?"":"none"; ok.textContent=okText||"Uložiť"; }
-  document.getElementById("modal").classList.add("on");
+  const modal=document.getElementById("modal");
+  const aktivny=document.activeElement;
+  if(!modal.classList.contains("on"))
+    _oknoOtvoril=(aktivny && aktivny!==document.body && aktivny!==document.documentElement) ? aktivny : null;
+  oknoZavriMenu();
+  modal.classList.add("on");
+  oknoPodklad(true);
+  // Focus do okna, keď je mimo neho: na ✕, a keď okno ✕ nemá, na kartu.
+  if(aktivny && typeof modal.contains==="function" && !modal.contains(aktivny)){
+    const x=document.getElementById("modalX");
+    const ciel=(x && !x.disabled && x.getClientRects().length) ? x : karta;
+    if(ciel) ciel.focus({ preventScroll:true });
+  }
+}
+// OKNO „SPRACÚVAM DOKLAD…“ SA POČAS ČÍTANIA NEDÁ ZAVRIEŤ (ROZHODNUTIA č. 124).
+// ✕ a Zrušiť sa skryjú (CSS `#modal.spracuva`); Escape ani klik mimo okno
+// nezatvárajú nikde v appke. Zavretie čítanie nezastavilo — formulár dokladu sa
+// po dočítaní otvoril aj tak, len nad obrazovkou, kam človek medzitým odišiel.
+// Skryť, nie `disabled` ako pri nahrávaní (`oknoNahrava`): tam tlačidlá patria
+// k rozpísanému formuláru, tu nie je čo zrušiť. Odomyká každé ďalšie `openModal`,
+// `closeModal` aj `finally` v `spracujDokladZoSuboru` — chyba a prepnutie firmy
+// nechajú okno zavrieť ako doteraz.
+function oknoSpracuva(zamknut){
+  const m=document.getElementById("modal"); if(!m) return;
+  if(!zamknut){ m.classList.remove("spracuva"); return; }
+  m.classList.add("spracuva");
+  const a=document.activeElement;
+  if(a && (a.id==="modalX" || a.id==="modalZrusit")){
+    const k=m.querySelector(".modalcard"); if(k) k.focus({ preventScroll:true });
+  }
 }
 // FORMULÁR, KTORÝ ZAPISUJE DO MODULU. Okno samo nevie, komu patrí — Uložiť
 // a Zmazať sú jedno tlačidlo pre všetky formuláre —, preto mu modul povie ten,
@@ -24196,6 +24288,17 @@ function oknoUklada(zapnut){
 }
 function closeModal(){
   document.getElementById("modal").classList.remove("on"); modalSave=null; modalDelete=null; modalModul=null;
+  // Stránku odomknúť PRED vrátením focusu — do `inert` sa focus nepostaví.
+  // Focus sa vracia len vtedy, keď ostal v zavretom okne alebo nikde: kód za
+  // closeModal ho už mohol postaviť inam. Otvárač, ktorý prekreslenie zahodilo,
+  // sa nehľadá — to robí `vratFocus` pri klávesnici.
+  oknoSpracuva(false);
+  oknoPodklad(false);
+  const kam=_oknoOtvoril; _oknoOtvoril=null;
+  if(kam && kam.isConnected && typeof kam.focus==="function"){
+    const modal=document.getElementById("modal"), a=document.activeElement;
+    if(!a || a===document.body || a===document.documentElement || modal.contains(a)) kam.focus({ preventScroll:true });
+  }
   // Zavreté okno = rozpracovaný doklad zo Schránky sa zrušil (ROZHODNUTIA č. 70).
   // Uloženie ho spotrebuje skôr, než okno zavrie (oznacCakajuciSpracovany); bez
   // tohto by ďalší doklad z iného zdroja odbavil v schránke cudzí mail.
@@ -32762,6 +32865,7 @@ function tbMenu(id, btn, html, sirka){
   if(ex){ ex.remove(); return null; }   // druhý klik zatvára
   const menu=document.createElement("div");
   menu.id=id;
+  menu.setAttribute("data-tbmenu", "");   // openModal ho zavrie (oknoZavriMenu)
   menu.style.cssText="position:fixed;z-index:200;background:var(--paper,#fff);border:1px solid var(--line);"
     +"border-radius:12px;box-shadow:0 10px 30px rgba(19,28,43,.16);overflow:hidden;visibility:hidden;min-width:"+(sirka||210)+"px";
   menu.innerHTML=html;
@@ -32781,6 +32885,7 @@ function tbMenu(id, btn, html, sirka){
     document.removeEventListener("click", naKlik, true);
     window.removeEventListener("scroll", zavri, true);
     window.removeEventListener("resize", zavri); };
+  menu._zavri=zavri;
   function naKlik(e){ if(!menu.contains(e.target) && e.target!==btn && !(btn&&btn.contains&&btn.contains(e.target))) zavri(); }
   setTimeout(()=>{
     document.addEventListener("click", naKlik, true);
@@ -34244,6 +34349,7 @@ async function spracujDokladZoSuboru(file, qrVopred, archivCesta){
     <div style="font-size:12px;color:var(--ink-soft);margin-top:8px">OCR beží priamo v prehliadači, môže to chvíľu trvať.</div>
   </div>`, null);
   document.getElementById("modalDelete").classList.add("hidden");
+  oknoSpracuva(true);   // bez ✕ a Zrušiť, kým sa číta (č. 124)
   try{
     const setStav=s=>{ const el=document.getElementById("ocrStav"); if(el) el.textContent=s; };
     let R=await spracujDokladSubor(file, setStav, qrVopred);
@@ -34285,6 +34391,7 @@ async function spracujDokladZoSuboru(file, qrVopred, archivCesta){
         <div class="spin" style="margin:0 auto 14px"></div>
         <div id="ocrStav">Načítavam...</div></div>`, null);
       document.getElementById("modalDelete").classList.add("hidden");
+      oknoSpracuva(true);
       R=await spracujDokladSubor(file, setStav, qrVopred, true);
       if(!beh.platny()){ zahodPoPrepnuti(); return; }
     }
@@ -34292,6 +34399,10 @@ async function spracujDokladZoSuboru(file, qrVopred, archivCesta){
     otvorOcrVysledok(R);
   }catch(err){
     document.getElementById("modalBody").innerHTML=`<div style="padding:10px;color:var(--neg)">Spracovanie zlyhalo: ${esc(err.message)}<br><br>Skúste kvalitnejšiu fotku alebo zadajte výdavok ručne.</div>`;
+  }finally{
+    // Chyba, prepnutie firmy aj zamietnutý výpis ZSE: okno sa dá zavrieť ako doteraz.
+    // Formulár dokladu odomkol už svojím openModal.
+    oknoSpracuva(false);
   }
 }
 // OCR výsledok používa iné názvy polí než uložený výdavok (`vs` vs `variabilny`,
