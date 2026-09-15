@@ -26589,8 +26589,9 @@ function appEfaktury(){
 function efakturyPrijate(){ return (firmaData && firmaData.efaktury) || []; }
 function efakturaMam(id){ return efakturyPrijate().some(x=>String(x.id)===String(id)); }
 
-// Prevzatie JEDNÉHO dokladu. Vracia zápis, alebo vyhodí chybu s dôvodom —
-// ticho zhltnutá chyba tu znamená stratený originál.
+// Prevzatie JEDNÉHO dokladu (`postarPrevezmiRaz`) vracia zápis, alebo vyhodí chybu
+// s dôvodom — ticho zhltnutá chyba tu znamená stratený originál. Samo nepotvrdzuje:
+// u poštára potvrdzuje len `postarPotvrdUlozene`, a to až uložené záznamy.
 //
 // 🔴 POTVRDENIE AŽ PO ULOŽENÍ ZÁZNAMU DO CLOUDU (ROZHODNUTIA č. 88). Do 14. 9. 2026
 // bolo poradie archív → `potvrd` → zápis → uloženie. Karta zavretá po potvrdení
@@ -26600,14 +26601,10 @@ function efakturaMam(id){ return efakturyPrijate().some(x=>String(x.id)===String
 // `potvrd` (`postarPotvrdUlozene`). Zavretá karta pred potvrdením nestratí nič:
 // doklad sa prevezme znova.
 //
-// Zatvorenie záložky sa pýta od nahratia originálu, kým sa záznam neuloží
-// (`nahravanie`, `nahrateUlozene`, č. 81).
-async function postarPrevezmi(dokladId){
-  const beh=behFirmy();
-  const zaznam=await nahravanie(()=>postarPrevezmiRaz(dokladId, beh));
-  await postarPotvrdUlozene([String(dokladId)], beh);
-  return zaznam;
-}
+// Zatvorenie záložky sa pýta od nahratia originálu, kým sa záznam neuloží —
+// preto `postarSynchronizuj` preberá cez `nahravanie` (`nahrateUlozene`, č. 81).
+// Jediná cesta príjmu je schránka; samostatné prevzatie jedného dokladu
+// s potvrdením nemalo v appke volajúceho a je zmazané (č. 122).
 // Potvrdí u poštára prevzatie dokladov, ktorých záznam je UŽ V CLOUDE. Počká na
 // všetky uloženia (aj zaradené za bežiace) a potvrdí len vtedy, keď sa firmaData
 // naozaj uložili (`pockajNaUlozenie`) a firma je stále tá istá. Neuložené
@@ -26634,7 +26631,7 @@ async function postarPrevezmiRaz(dokladId, beh){
   // firmy. Originál aj záznam by išli k nej: úložisko aj zápis berú firmaId
   // a firmaData až v tej chvíli. Stráž dátami (č. 118) — pri A → B → A by starý
   // beh zapísal doklad do znovu otvorenej A druhýkrát. `beh` dáva schránka,
-  // ktorá dávku začala; samostatné prevzatie si ho zachytí samo.
+  // ktorá dávku začala; volanie bez neho si ho zachytí samo.
   beh=beh||behFirmy();
   // Archívny originál (`GET …/receive/{id}/xml`) po bajtoch, nie `payload`
   // z detailu — zdôvodnenie pri `archivXml` v edge funkcii (PLAN §21.3 bod 3).
