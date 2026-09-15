@@ -23954,9 +23954,15 @@ function cakajucaZmena(){
 // ── GDPR pre zákazníka: export vlastných dát a zmazanie účtu (cez edge-function) ──
 // Bez `firma_id`: „moje dáta“ sú účet, ktorý server vezme z tokenu (ROZHODNUTIA
 // č. 81). Otvorená firma môže byť klientska — účtovník by inak dostal 403.
+// Kedy nie je server, ktorý by účet vydal alebo zmazal: demo a lokálny režim.
+// Otvorená firma o tom nerozhoduje — operácia je nad ÚČTOM (č. 81). Do 15. 9. 2026
+// tu bola aj `!firmaId`, takže prihlásený účet bez firmy (nedokončený onboarding,
+// účtovník bez posledného prístupu) dostal pri zmazaní hlášku o demo režime
+// a zmazať sa nedal (nález N1, č. 134). Jedno pravidlo pre export aj zmazanie.
+function gdprBezServera(){ return localMode || demoMode || !sb; }
 async function gdprMojExport(){
   const msg=document.getElementById("gdprMsg");
-  if(localMode || !sb || !firmaId){
+  if(gdprBezServera()){
     // lokálny/demo režim → export priamo z pamäte
     try{
       const blob=new Blob([JSON.stringify(firmaData,null,2)],{type:"application/json"});
@@ -23982,25 +23988,28 @@ async function gdprMojExport(){
 
 async function gdprMojeZmazanie(){
   const msg=document.getElementById("gdprMsg");
+  // Z menu účtu počas onboardingu Nastavenia nie sú a `gdprMsg` neexistuje —
+  // výsledok (hlavne chyba) by inak nebolo kde vidieť.
+  const hlas=(t)=>{ if(msg) msg.textContent=t; else if(!/…$/.test(t)) alert(t); };
   if(!confirm("Naozaj chcete natrvalo zmazať svoj účet a VŠETKY dáta? Túto akciu nie je možné vrátiť.\n\nOdporúčame si najprv stiahnuť export.")) return;
   if(!confirm("Posledné potvrdenie: účet a všetky faktúry, výdavky a záznamy budú nenávratne zmazané. Pokračovať?")) return;
-  if(localMode || !sb || !firmaId){
-    if(msg){ msg.textContent="V lokálnom/demo režime nie je čo mazať na serveri."; }
+  if(gdprBezServera()){
+    hlas("V lokálnom/demo režime nie je čo mazať na serveri.");
     return;
   }
-  if(msg){ msg.textContent="Mažem účet…"; }
+  hlas("Mažem účet…");
   try{
     const _tok=await ziskajToken();
-    if(!_tok){ if(msg){msg.textContent=CHYBA_SESSION;} return; }
+    if(!_tok){ hlas(CHYBA_SESSION); return; }
     const res=await fetch(SUPABASE_URL+"/functions/v1/gdpr",{
       method:"POST", headers:{"Content-Type":"application/json","Authorization":"Bearer "+_tok},
       body:JSON.stringify({akcia:"zmazat"})
     });
     const r=await res.json().catch(()=>({}));
-    if(!res.ok || !r.ok){ if(msg){msg.textContent="Zmazanie zlyhalo: "+(r.error||res.status);} return; }
+    if(!res.ok || !r.ok){ hlas("Zmazanie zlyhalo: "+(r.error||res.status)); return; }
     alert("Váš účet a všetky dáta boli zmazané. Ďakujeme, že ste eživnostník používali.");
     await sb.auth.signOut(); location.reload();
-  }catch(e){ if(msg){msg.textContent="Chyba: "+e.message;} }
+  }catch(e){ hlas("Chyba: "+e.message); }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -33476,6 +33485,7 @@ function otvorUctoMenu(btn){
     <button onclick="uctoVyber('zaloha')" style="${TB_POLOZKA}">↧ Stiahnuť zálohu</button>
     ${TB_CIARA}
     <button onclick="uctoVyber('odhlasit')" style="${TB_POLOZKA};color:var(--neg)">→ Odhlásiť sa</button>
+    ${!gdprBezServera() && !firmaId?`${TB_CIARA}<button onclick="uctoVyber('zmazatUcet')" style="${TB_POLOZKA};color:var(--neg)">🗑 Zmazať účet<div style="font-size:11.5px;color:var(--ink-soft);margin-top:2px">účet zatiaľ nemá firmu</div></button>`:""}
   `, 230);
   // E-mail sa načíta asynchrónne — menu naň nečaká, doplní sa keď príde.
   if(!_uctoEmail && sb && !localMode){
@@ -33494,6 +33504,8 @@ function uctoVyber(co){
   if(co==="firma"){ otvorFirmaMenu(document.getElementById("userMenu")); return; }
   if(co==="tema"){ prepniTemu(); return; }
   if(co==="zakryte"){ prepniZakrytie(); return; }
+  // Účet bez firmy (onboarding) nemá Nastavenia — zmazanie účtu je preto aj tu (N1).
+  if(co==="zmazatUcet"){ gdprMojeZmazanie(); return; }
   if(co==="nastavenia") otvorApp("data");
   else if(co==="zaloha") exportFirmu();
   else if(co==="odhlasit"){
