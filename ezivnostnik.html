@@ -2815,12 +2815,23 @@ function dphObdobiePovolene(kod){
   return modulZaplateny("dph") || !planFirmy().dphPre7a || dphObdobieMa7a(kod);
 }
 // Odmietnutie platiteľského obdobia bez plánu — hláška a cenník. true = môže pokračovať.
+// Plán mení len vlastník (`smiemMenitPredplatne`, ROZHODNUTIA č. 95): účtovník a Náhľad dostanú
+// vetu, že plán mení vlastník, a cenník sa im neotvorí (č. 114).
 function dphStrazObdobia(kod){
   if(dphObdobiePovolene(kod)) return true;
+  const smie=smiemMenitPredplatne();
   alert("Za "+dphParsujObdobie(kod).nazov+" ste už platiteľ DPH. Priznanie a kontrolný výkaz platiteľa sú v pláne Platiteľ DPH — "
-    +"mesiace, keď ste boli registrovaný podľa § 7a, máte v pláne Neplatiteľ DPH ďalej.");
-  zobrazCennik("dph");
+    +"mesiace, keď ste boli registrovaný podľa § 7a, máte v pláne Neplatiteľ DPH ďalej."
+    +(smie ? "" : "\n\n"+PREDPLATNE_LEN_VLASTNIK));
+  if(smie) zobrazCennik("dph");
   return false;
+}
+// Akcia pri obdobiach, ktoré plán Neplatiteľ DPH nepokrýva (modul DPH, súhrnný výkaz): vlastníkovi
+// tlačidlo na cenník, nevlastníkovi veta, že plán mení vlastník — to isté pravidlo ako stráž vyššie.
+function dphPlanPlatitelAkciaHtml(){
+  return smiemMenitPredplatne()
+    ? `<div style="margin-top:8px"><button class="aabtn" onclick="zobrazCennik('dph')">Plán Platiteľ DPH</button></div>`
+    : `<div style="margin-top:8px;color:var(--ink-soft)">${esc(PREDPLATNE_LEN_VLASTNIK)}</div>`;
 }
 // mapovanie jemných appkových modulov na hrubé konfiguračné kategórie
 const MODUL_KATEGORIA={
@@ -8401,16 +8412,6 @@ function nastavOdvodyRoka(rok, druh, hodnota){
   if(v==="") delete firmaData.settings.odvodyRoky[R][druh];
   else firmaData.settings.odvodyRoky[R][druh]=r2(parseFloat(v.replace(",","."))||0);
   if(!Object.keys(firmaData.settings.odvodyRoky[R]).length) delete firmaData.settings.odvodyRoky[R];
-  poZmene();
-  appData();
-}
-// Zápis dátumu registrácie platiteľa mimo formulára. Pole v Režime výdavkov, ktoré ho volalo,
-// je od č. 104d len vo Firemných údajoch (ukladá `ulozNastavenia`); funkciu drží stráž práv
-// v test_oprava_rola2 — na zlúčení rozhodnúť, či ju zmazať aj s riadkom testu (dph10.md).
-function nastavDphPlatcaOd(d){
-  if(!strazPole("data", appData)) return;
-  firmaData.settings=firmaData.settings||{};
-  firmaData.settings.dphPlatcaOd=String(d||"").slice(0,10);
   poZmene();
   appData();
 }
@@ -27938,7 +27939,7 @@ function dphVykazHtml(rok){
     ? `<div style="background:var(--sfc-warn);border-left:3px solid var(--warn);border-radius:0 9px 9px 0;padding:10px 13px;margin-top:12px;font-size:12.5px;line-height:1.55">
         Obdobia, v ktorých ste už platiteľ DPH (${vsetky.length-obdobia.length}), tu nie sú: priznanie a kontrolný výkaz platiteľa sú v pláne Platiteľ DPH.
         Mesiace, keď ste boli registrovaný podľa § 7a, ostávajú.
-        <div style="margin-top:8px"><button class="aabtn" onclick="zobrazCennik('dph')">Plán Platiteľ DPH</button></div></div>`
+        ${dphPlanPlatitelAkciaHtml()}</div>`
     : "";
   if(!obdobia.length) return `<div class="card" style="margin-bottom:14px"><h2 style="font-size:16px;margin-bottom:6px">Kontrolný výkaz a priznanie DPH</h2><div class="csub">Zatiaľ žiadne doklady na vykázanie.</div>${planVeta}</div>`;
   if(!dphVybObdobie || !obdobia.includes(dphVybObdobie)) dphVybObdobie=obdobia[0];
@@ -30390,6 +30391,26 @@ function svJeStvrtrocny(kod){
   const v=((firmaData&&firmaData.settings)||{}).svObdobie;
   return v ? v==="stvrtrocne" : true;
 }
+// ŠTVRŤROK ZMENY REGISTRÁCIE § 7a → PLATITEĽ (ROZHODNUTIA č. 114) — "" alebo upozornenie pred podaním.
+// Poučenie k súhrnnému výkazu (SVDPHv20, časť V „Postup pri podávaní súhrnného výkazu pri zmene
+// registrácie“): platiteľ, ktorý bol predtým registrovaný podľa § 7 alebo § 7a, „môže za kalendárny
+// štvrťrok, v ktorom došlo k zmene registrácie podať jeden súhrnný výkaz“ za obe postavenia, a) ak
+// dodával len služby podľa § 15 ods. 1, alebo b) ak hodnota tovarov nepresiahla v štvrťroku a súčasne
+// v predchádzajúcich štyroch štvrťrokoch 50 000 €. Povinnosť podať dva výkazy ani postup pre ne
+// neuvádza poučenie, § 80 zákona 222/2004 (ods. 2 a 3 poznajú len štvrťrok a mesiac podľa postavenia)
+// ani metodický pokyn FR SR k § 80 (2019.12.31_MP_par_80) — rešerš 15. 9. 2026, dev/opravy/dph11.md.
+// Appka pripraví jeden výkaz (`svJeStvrtrocny`), podmienku b) nepočíta a upozorní.
+// Zmenu opačným smerom (platiteľ → § 7a) appka nemodeluje — hlási ju `dphObdobiaPrekryv`.
+function svZmenaRegistracieVeta(kod){
+  if(!dphParsujObdobie(kod).stvrtrok || dphRegistraciaObdobia(kod)!=="platca" || !dphObdobieMa7a(kod)) return "";
+  const od=String(((firmaData&&firmaData.settings)||{}).dphPlatcaOd||"").slice(0,10);
+  return "V tomto štvrťroku ste sa stali platiteľom DPH"+(od?" (od "+fmtDatum(od)+")":"")+". "
+    +"Appka pripraví jeden súhrnný výkaz za celý štvrťrok — dodania ako osoba registrovaná podľa § 7a aj ako platiteľ spolu. "
+    +"Finančná správa v poučení k súhrnnému výkazu uvádza, že taký jeden výkaz môže podať, ak ste v štvrťroku dodávali "
+    +"len služby, alebo ak hodnota tovaru nepresiahla 50 000 € v tomto ani v predchádzajúcich štyroch štvrťrokoch. "
+    +"Ako podať výkazy osobitne, neuvádza a appka ich nepripraví — ak podmienku nespĺňate alebo chcete podať osobitne, "
+    +"overte postup na daňovom úrade.";
+}
 function svNastavObdobieTyp(v){
   if(!strazZapis("dph")) return;
   firmaData.settings=firmaData.settings||{};
@@ -30541,6 +30562,12 @@ function svKontrola(kod){
       detail:"Údaje sa v súhrnnom výkaze uvádzajú v celých eurách (§ 80 ods. 5). Riadok sa vykáže s nulou."});
   });
 
+  // Štvrťrok zmeny registrácie — jeden výkaz za obe postavenia (ROZHODNUTIA č. 114).
+  {
+    const v=doklady.length ? svZmenaRegistracieVeta(kod) : "";
+    if(v) podozrenia.push({text:v});
+  }
+
   {
     const ex=svExportInfo(kod);
     if(ex && svDruhPodania(kod)==="R"){
@@ -30620,7 +30647,7 @@ function svVykazHtml(){
   const obdobia=svDostupneObdobia().filter(dphObdobiePovolene);
   if(!obdobia.length) return `<div class="card"><h2 style="font-size:16px;margin-bottom:6px">Súhrnný výkaz</h2>
     <div class="csub">Súhrnný výkaz za obdobia, v ktorých ste už platiteľ DPH, je v pláne Platiteľ DPH.</div>
-    <div style="margin-top:8px"><button class="aabtn" onclick="zobrazCennik('dph')">Plán Platiteľ DPH</button></div></div>`;
+    ${dphPlanPlatitelAkciaHtml()}</div>`;
   if(!svVybObdobie || !obdobia.includes(svVybObdobie)) svVybObdobie=obdobia[0];
   const kod=svVybObdobie;
   const P=dphParsujObdobie(kod);
