@@ -2586,7 +2586,7 @@ window.NAVODY_SNIMKY = {
  },
  "superdash-rok-1": {
   "m": {
-   "subor": "navody/superdash-rok-1.m.5e733168.webp",
+   "subor": "navody/superdash-rok-1.m.99499642.webp",
    "w": 390,
    "h": 600,
    "ciel": {
