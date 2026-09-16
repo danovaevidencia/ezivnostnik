@@ -6304,6 +6304,15 @@ function zbierNotifikacie(){
     try{
       const I=(firmaData.settings||{}).poslednyImportBanka;
       if(I && I.davka){
+        // Nesúlad kontrolných súčtov výpisu sa hlási aj vtedy, keď niet čo
+        // zatrieďovať: je to tvrdenie o ÚPLNOSTI dát, nie o práci navyše.
+        // Hláška po importe zmizne zavretím okna, toto ostane.
+        if(I.nesulad){
+          out.push({kluc:"bankaNesulad:"+I.davka, ic:"⚠", nal:"warn",
+            nazov:"Výpis z banky nesedí s vlastnými kontrolnými súčtami",
+            detail:String(I.nesulad).split("\n").join(" "),
+            akcia:()=>otvorApp("banka")});
+        }
         const V=bankaVedra();
         // Zmizne SAMA, keď niet čo vybaviť. Notifikácia, ktorú treba odklikať
         // aj po vybavení, učí odklikávať všetko.
@@ -14307,6 +14316,7 @@ function appBanka(){
                 ${z.cesta?`<button class="aabtn" style="padding:3px 9px;font-size:11px" onclick="stiahniVypisOriginal(${i})" title="Otvoriť pôvodný súbor výpisu">⬇</button>`:""}
                 <b>${z.mesiace&&z.mesiace.length?z.mesiace.map(mesiacLabel).join(", "):"bez pohybov"}</b>
                 <span style="color:var(--ink-soft)">${z.pohybov} pohybov${z.novych!=null?" · nových "+z.novych:""} · nahraté ${new Date(z.kedy).toLocaleDateString("sk-SK")}${z.nazov?" · "+esc(z.nazov):""}${z.cesta?"":" · originál sa neuchoval"+(z.bezOriginalu?" ("+esc(z.bezOriginalu)+")":"")}</span>
+                ${z.nesulad?`<div style="flex-basis:100%;color:var(--ink-soft);font-size:11.5px">${esc(String(z.nesulad).split("\n").join(" "))}</div>`:""}
               </div>`).join("")}
               ${ev.length>20?`<div style="font-size:11px;color:var(--ink-soft)">… a ďalších ${ev.length-20}</div>`:""}
             </div>
@@ -25202,9 +25212,24 @@ function vypisTatra(riadky){
 
 const VYPIS_PDF_BANKY=[vypisPrima, vypisTatra];
 
-// Overenie, bez ktorého by sa PDF importovať nemalo. Vracia {ok, sprava}.
+// Overenie výpisu proti jeho VLASTNÝM kontrolným číslam — jediné miesto, kde
+// sa porovnáva, pre PDF aj XML. Líši sa len to, čo sa s výsledkom stane:
+// PDF import odmietne (text čítaný z obrazu sa dá zmýliť potichu), XML sa
+// naimportuje a nesúlad sa POVIE (rozhodnutie Romana 16. 9. 2026). Dve kópie
+// pravidla by sa rozišli a jedna z nich by prestala kontrolovať rovnicu.
+//
+// Vracia {ok, sprava, neoveritelne, bezDatumu}:
+//  · ok:false + neoveritelne:true — výpis kontrolné čísla vôbec NENESIE. To
+//    nie je chyba výpisu, len sa nedá overiť. Pri PDF je to dôvod neimportovať,
+//    pri XML nie je čo hlásiť: poplach bez dôkazu učí preskakovať aj pravé
+//    nálezy. Tie dva stavy sa nesmú zamieňať.
+//  · bezDatumu — počet pohybov, ktoré nemajú dátum. Zámerne NIE je medzi
+//    `chyby`: výpis si sedí sám so sebou, ale taký pohyb sa nespáruje
+//    s faktúrou a v peňažnom denníku nepatrí do žiadneho mesiaca. Je to nález
+//    na povedanie, nie dôvod odmietnuť import.
 function overVypisPdf(P){
-  if(!P || !P.txns || !P.txns.length) return {ok:false, sprava:"Vo výpise sa nenašla ani jedna transakcia."};
+  const bezDatumu=((P&&P.txns)||[]).filter(t=>!String(t.datum||"").trim()).length;
+  if(!P || !P.txns || !P.txns.length) return {ok:false, sprava:"Vo výpise sa nenašla ani jedna transakcia.", bezDatumu:0};
   const K=P.kontrola||{};
   const s=(smer)=>r2(P.txns.filter(t=>t.smer===smer).reduce((a,t)=>a+(+t.suma||0),0));
   const naseP=s("prijem"), naseV=s("vydaj");
@@ -25223,10 +25248,11 @@ function overVypisPdf(P){
     if(Math.abs(ocak-K.koniec)>0.02)
       chyby.push("zostatok nesedí: "+eur(K.zaciatok)+" + "+eur(naseP)+" − "+eur(naseV)
                  +" = "+eur(ocak)+", ale výpis končí na "+eur(K.koniec));
-  } else if(K.prijem==null && K.vydaj==null){
-    return {ok:false, sprava:"Vo výpise sa nenašli kontrolné súčty, takže sa nedá overiť, či sme ho prečítali celý."};
+  } else if(K.prijem==null && K.vydaj==null && K.pocetPrijem==null && K.pocetVydaj==null){
+    return {ok:false, neoveritelne:true, bezDatumu,
+      sprava:"Vo výpise sa nenašli kontrolné súčty, takže sa nedá overiť, či sme ho prečítali celý."};
   }
-  return chyby.length ? {ok:false, sprava:chyby.join("\n· ")} : {ok:true, sprava:""};
+  return chyby.length ? {ok:false, sprava:chyby.join("\n· "), bezDatumu} : {ok:true, sprava:"", bezDatumu};
 }
 
 async function parseVypisPdf(arrbuf){
@@ -26110,8 +26136,45 @@ function importujVypisText(text, nazovSuboru, parsedVopred){
   // Evidencia nahratých výpisov (kap. 47.9). Zapisuje sa aj vtedy, keď import
   // nepridal ani jeden pohyb: práve to je informácia, že mesiac JE pokrytý
   // a prázdny — bez nej by ho appka počítala medzi nenahraté.
+  // ── KONTROLNÉ SÚČTY VÝPISU (rozhodnutie Romana 16. 9. 2026) ──────────────
+  //
+  // Výpis nesie vlastné kontrolné čísla a `overVypisPdf` ich vie porovnať.
+  // Pri PDF rozhodujú o tom, či sa import vôbec urobí; pri XML sa import
+  // urobí VŽDY — XML je strojový zápis, nie čítanie textu z obrazu, a
+  // odmietnuť import používanej cesty by bola väčšia škoda než nesúlad.
+  // Ticho prejsť to ale nesmie: presne takto appka ohlásila „Import hotový:
+  // pridaných 1 pohybov“ nad výpisom, z ktorého prečítala jediný pohyb — a to
+  // ešte bez dátumu (ROZHODNUTIA č. 144).
+  //
+  // Rozlišujú sa DVA stavy a zameniť sa nesmú: „nesedí“ (dôkaz je) a „nedá sa
+  // overiť“ (výpis kontrolné čísla nenesie). Z druhého poplach nie je —
+  // falošný poplach je drahší než žiadny, naučí preskakovať aj pravé nálezy.
+  //
+  // Volá sa aj pre PDF, hoci tam už raz prešlo: druhé volanie nad tými istými
+  // dátami vráti to isté, a jedna cesta pre obe je menej miest na rozídenie.
+  const O=overVypisPdf(parsed);
+  const nesuladCasti=[];
+  if(!O.ok && !O.neoveritelne && O.sprava)
+    nesuladCasti.push("⚠ KONTROLNÉ SÚČTY VÝPISU NESEDIA:\n· "+O.sprava
+      +"\nPohyby sa uložili tak, ako ich appka prečítala. Rozdiel znamená, že vo výpise je niečo, "
+      +"čo appka nevidí — porovnajte Banku s výpisom z internet bankingu.");
+  if(O.bezDatumu)
+    nesuladCasti.push("⚠ "+O.bezDatumu+" "+sklonPohyb(O.bezDatumu)+" vo výpise "
+      +(O.bezDatumu===1?"nemá":"nemajú")+" dátum (ani zaúčtovania, ani valuty).\n"
+      +"Bez dátumu sa "+(O.bezDatumu===1?"nespáruje":"nespárujú")+" s faktúrou a v peňažnom denníku "
+      +(O.bezDatumu===1?"nepatrí":"nepatria")+" do žiadneho mesiaca. Nájdete "
+      +(O.bezDatumu===1?"ho":"ich")+" v Banke.");
+  const nesuladTxt=nesuladCasti.join("\n\n");
+  // Stopa mimo hlášky: `alert` zmizne zavretím a s ním aj jediná zmienka o tom,
+  // že sa niečo nezhodovalo. Chyba, ktorá po sebe nenechá riadok, sa nedá
+  // nájsť (spec kap. 101.2). Trvalá stopa je na zázname výpisu a v zvončeku.
+  if(nesuladTxt) console.error("import výpisu — kontrola nesedí:", nesuladTxt.split("\n").join(" "));
   const uzBol=vypisUzNahraty(text);
   const ev=zapisVypisDoEvidencie(text, parsed, nove.length, nazovSuboru);
+  // Nesúlad ostáva NA VÝPISE — v Banke pri zozname nahratých výpisov ho vidno
+  // aj o týždeň. Pri opakovanom importe toho istého súboru sa prepíše: po
+  // oprave parsera musí zmiznúť, inak by strašil navždy.
+  if(ev){ if(nesuladTxt) ev.nesulad=nesuladTxt; else delete ev.nesulad; }
   // Originál sa nahráva na pozadí — import sa naň nesmie čakať. Keď zlyhá,
   // zapíše sa dôvod do záznamu; evidencia aj pohyby platia tak či tak.
   ulozOriginalVypisu(text, ev);
@@ -26132,7 +26195,10 @@ function importujVypisText(text, nazovSuboru, parsedVopred){
       kedy: new Date().toISOString(),
       mesiace: (ev && ev.mesiace) || [],
       pridanych: nove.length, sparenych: sparene, dokladov: dokladov,
-      caka: V.caka
+      caka: V.caka,
+      // Prázdny reťazec, nie vynechané pole: pri ďalšom importe musí nesúlad
+      // z predošlej dávky zmiznúť aj zo zvončeka.
+      nesulad: nesuladTxt
     };
   }catch(e){ console.error("zápis výsledku importu:", e); }
   poZmene();
@@ -26152,6 +26218,7 @@ function importujVypisText(text, nazovSuboru, parsedVopred){
         ? "Tento výpis už evidujete (nahratý "+new Date(uzBol.kedy).toLocaleDateString("sk-SK")+")."+
           "\nVšetkých "+parsed.txns.length+" pohybov je v evidencii — nič sa nepridalo."
         : "Všetkých "+parsed.txns.length+" pohybov už evidujete — nič sa nepridalo."))
+    + (nesuladTxt ? "\n\n"+nesuladTxt : "")
     + (ev.mesiace.length ? "\n\nVýpis pokrýva: "+ev.mesiace.map(mesiacLabel).join(", ") : "")
     + (zluc.zlucenych ? "\n\n"+zluc.zlucenych+" z nich už appka poznala z notifikácií — nahradili sa údajmi z výpisu vrátane priradení." : "")
     + (osirene.length ? "\n\n⚠ "+osirene.length+" pohybov z notifikácií výpis neobsahuje, hoci to obdobie pokrýva.\n"
