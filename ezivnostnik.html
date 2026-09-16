@@ -3048,6 +3048,11 @@ function behPovinny(beh, kto){
   if(beh && typeof beh.platny==="function") return beh;
   throw new TypeError(kto+": chýba beh firmy — volajúci ho zachytí cez behFirmy() pred prvým await (ROZHODNUTIA č. 125)");
 }
+// Meno firmy, z ktorej beh vyšiel, v úvodzovkách — do hlášky po prepnutí firmy (ROZHODNUTIA č. 138).
+// Po prepnutí patrí `firmaData.meta` už inej firme, preto sa meno berie zo zoznamu firiem podľa koreňa.
+function menoFirmyBehu(beh){
+  return "„"+(((firmyZoznam||[]).find(x=>x.id===beh.koren)||{}).nazov||"Bez názvu")+"“";
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  ROLY A OPRÁVNENIA (fáza 2 plánu Účtovník, kap. 38.11)
@@ -23937,14 +23942,24 @@ async function zrusitZmenuPlanu(){
   if(localMode || !sb || !firmaId) return;
   if(!smiemMenitPredplatne()){ alert(ZMENA_PLANU_LEN_VLASTNIK); return; }
   if(!confirm("Zrušiť naplánovanú zmenu plánu?\n\nVaše predplatné bude pokračovať bez zmeny.")) return;
+  // Firma, ktorej zmenu rušíme, zachytená pred prvým await (ROZHODNUTIA č. 138). RPC ju dostane
+  // v argumente, ale do 15. 9. 2026 sa po jeho await načítal plán `firmaId` — po prepnutí firmy teda
+  // plán otvorenej B — a hláška bez mena tvrdila, že zmena sa zrušila tam, kde sa človek práve pozerá.
+  // Po prepnutí sa plán nenačítava ani neprekresľuje; zrušenie už prebehlo, povie sa to s menom firmy.
+  const beh=behFirmy();
+  const zrusenaInde=()=>alert("Naplánovaná zmena plánu firmy "+menoFirmyBehu(beh)+" bola zrušená.\n\n"
+    +"Medzitým ste otvorili inú firmu — plán firmy "+menoFirmyBehu(beh)+" uvidíte, keď ju otvoríte znova.\n\n"
+    +"POZNÁMKA: zmenu treba zrušiť aj v Stripe —\nozvite sa nám, ak ju treba zrušiť aj tam.");
   try{
     const { error } = await sb.rpc("zrus_zmenu_planu", { p_firma_id: firmaId });
     if(error) throw error;
+    if(!beh.platny()){ zrusenaInde(); return; }
     await nacitajFirmaConfig(firmaId);
+    if(!beh.platny()){ zrusenaInde(); return; }
     zobrazCennik(); renderHomeStrip();
     alert("Naplánovaná zmena bola zrušená.\n\nPOZNÁMKA: zmenu treba zrušiť aj v Stripe —\n"+
           "ozvite sa nám, ak ju treba zrušiť aj tam.");
-  }catch(e){ alert("Nepodarilo sa zrušiť zmenu: "+(e.message||e)); }
+  }catch(e){ alert("Nepodarilo sa zrušiť zmenu"+(beh.platny()?"":" firmy "+menoFirmyBehu(beh))+": "+(e.message||e)); }
 }
 
 // čakajúca zmena plánu (naplánovaná na hranicu obdobia), alebo null
@@ -28905,8 +28920,15 @@ function kontrolaPredPodanim(mk, typ){
     // Súhrnné oddiely (bločky B.3.1, tržby nepodnikateľom D.1/D.2) sa vykazujú
     // jedným riadkom bez identifikácie protistrany — tlačivo tam pole na IČ DPH nemá.
     const vyzadujeIcDph = !["B31","D1","D2"].includes(dk.oddiel);
-    if((+dk.dan)>0 && !dk.zahranicny && vyzadujeIcDph){
-      if(!dk.icDph) chyby.push({text:`Doklad „${dk.cislo||dk.partner||"—"}" má DPH ${eur(dk.dan)}, ale chýba IČ DPH.`, detail:"Bez IČ DPH ho FS v KV odmietne (oddiel A/B).", zdrojId:dk.zdrojId||""});
+    // B.2 má IČ DPH dodávateľa povinné BEZ OHĽADU na daň a krajinu dodávateľa: v kv_dph_2025.xsd
+    // (ekr.financnasprava.sk, overené 15. 9. 2026) je pri B2 atribút Dod typu IcDphSkType
+    // s use="required", pri B1 a C2 voliteľný. Riadok B.2 s nulovou daňou alebo zahraničného
+    // dodávateľa (oddiel zvolený ručne) kontrola do 15. 9. 2026 nehlásila a portál FS by výkaz
+    // odmietol. Strážila to len nevolaná druhá kópia sťahovania `exportKVDPH` (ROZHODNUTIA č. 139).
+    const b2BezPodmienky = dk.oddiel==="B2" && !((+dk.dan)>0 && !dk.zahranicny);
+    if(((+dk.dan)>0 && !dk.zahranicny && vyzadujeIcDph) || b2BezPodmienky){
+      if(!dk.icDph && b2BezPodmienky) chyby.push({text:`Doklad „${dk.cislo||dk.partner||"—"}“ je v oddiele B.2, ale chýba IČ DPH dodávateľa.`, detail:"V oddiele B.2 je IČ DPH dodávateľa povinné aj pri nulovej dani a zahraničnom dodávateľovi — bez neho portál Finančnej správy kontrolný výkaz odmietne. Doplňte ho v doklade, alebo doklad preraďte do správneho oddielu.", zdrojId:dk.zdrojId||""});
+      else if(!dk.icDph) chyby.push({text:`Doklad „${dk.cislo||dk.partner||"—"}" má DPH ${eur(dk.dan)}, ale chýba IČ DPH.`, detail:"Bez IČ DPH ho FS v KV odmietne (oddiel A/B).", zdrojId:dk.zdrojId||""});
       else if(!platneICDPH(dk.icDph)) chyby.push({text:`Doklad „${dk.cislo||dk.partner||"—"}" má neplatné IČ DPH: ${dk.icDph}`, detail:"Neprešlo kontrolou deliteľnosti 11 — FS odmietne.", zdrojId:dk.zdrojId||""});
     }
     // dátum mimo obdobia
@@ -31100,29 +31122,10 @@ function dphGenerujDP(mk){
 telo+`\r\n</telo>\r\n</dokument>\r\n`;
 }
 
-// 🔴 5. 9. 2026: porovnanie s výkazom z KROSu za február ukázalo, že appka
-// vyexportuje B2 riadky BEZ `Dod`, teda bez IČ DPH dodávateľa. KROS ho má na
-// všetkých siedmich, appka na jednom z ôsmich. Kontrolný výkaz bez IČ DPH
-// dodávateľa Finančná správa neprijme — a človek sa to dozvie až od nej.
-//
-// Ročná kontrola to hlási („27 dokladov si odpočítava DPH bez IČ DPH"), lenže
-// to je iná obrazovka a iný okamih. Varovanie musí prísť TAM, kde sa súbor
-// sťahuje, inak sa exportuje výkaz, ktorý sa nedá podať.
-function exportKVDPH(mk){
-  const xml=dphGenerujKV(mk);
-  const b2=xml.split("<B2 ").slice(1);
-  const bezDod=b2.filter(r=>r.indexOf(' Dod="')<0 || r.indexOf(' Dod=""')>=0);
-  if(bezDod.length){
-    const dan=bezDod.reduce((a,r)=>{ const m=r.match(/ D="([\d.]+)"/); return a+(m?parseFloat(m[1]):0); },0);
-    if(!confirm("⚠ "+bezDod.length+" z "+b2.length+" riadkov oddielu B.2 nemá IČ DPH dodávateľa"
-      +(dan?" (odpočet "+eur(r2(dan))+")":"")+".\n\n"
-      +"Finančná správa taký kontrolný výkaz odmietne. Doplňte IČ DPH v dokladoch — "
-      +"pomôže tlačidlo „Skontrolovať / doplniť z registra“ v doklade.\n\n"
-      +"Stiahnuť aj tak?")) return;
-  }
-  downloadBlob(new Blob([xml],{type:"application/xml"}),"kv_dph_"+mk+".xml");
-}
-function exportDPDPH(mk){ downloadBlob(new Blob([dphGenerujDP(mk)],{type:"application/xml"}),"dp_dph_"+mk+".xml"); }
+// Varovanie o riadkoch B.2 bez IČ DPH dodávateľa (nález z porovnania s KROSom 5. 9. 2026) je
+// v `kontrolaPredPodanim`, ktorú spúšťa tlačidlo cez `dphExport` pred každým stiahnutím. Druhá kópia
+// cesty sťahovania (`exportKVDPH`, `exportDPDPH`) nemala volajúceho a jej kontrola hlásila každý
+// riadok B.2, aj s IČ DPH — zmazaná 15. 9. 2026 (ROZHODNUTIA č. 139).
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  SÚHRNNÝ VÝKAZ DPH (§ 80) — S3 zo špecifikácie
@@ -32657,6 +32660,14 @@ async function potlacOpakovane(index){
     +"Ďalšie sa už neuložia ani nezobrazia — appka si bude len počítať, koľko ich prišlo, "
     +"a v Nastavení sa to dá kedykoľvek zrušiť.\n\n"
     +(pocet?"Tých "+pocet+", čo už čakajú, sa zároveň odstráni.":""))) return;
+  // Pravidlo, maily aj ich súbory patria firme, ktorej schránka skupinu ukázala (ROZHODNUTIA č. 138).
+  // Cesty súborov sa berú PRED prvým await: do 15. 9. 2026 sa čítali z `cakajuceDoklady` až po zápise
+  // pravidla — po prepnutí firmy tam už bola schránka inej firmy a súbory firmy pôvodu v úložisku ostali.
+  const beh=behFirmy();
+  const cesty=(cakajuceDoklady||[])
+    .filter(z=>sk.ids.includes(z.id) && z.subor_cesta).map(z=>z.subor_cesta);
+  const hotovoInde=()=>alert("Maily „"+predmet+"“ od "+odKoho+" už vo firme "+menoFirmyBehu(beh)+" neuvidíte"
+    +(pocet?" — "+pocet+" čakajúcich sme odstránili":"")+".\n\nMedzitým ste otvorili inú firmu — jej schránka sa nemenila.");
   try{
     const { error } = await sb.from("doklady_potlacene")
       .insert({ firma_id:firmaId, od_koho:String(odKoho||"").toLowerCase().trim(), predmet:String(predmet||"") });
@@ -32665,8 +32676,6 @@ async function potlacOpakovane(index){
     if(error && !/duplicate key|unique/i.test(error.message||"")) throw error;
 
     if(sk && sk.ids.length){
-      const cesty=(cakajuceDoklady||[])
-        .filter(z=>sk.ids.includes(z.id) && z.subor_cesta).map(z=>z.subor_cesta);
       if(cesty.length){
         try{ await sb.storage.from("dokumenty").remove(cesty); }
         catch(e){ console.warn("Súbory sa nepodarilo zmazať:", e.message||e); }
@@ -32675,15 +32684,20 @@ async function potlacOpakovane(index){
         .update({ stav:"odmietnute", spracovane:new Date().toISOString() }).in("id", sk.ids);
       if(e2) throw e2;
     }
+    if(!beh.platny()){ hotovoInde(); return; }
     await nacitajCakajuce(true);
+    if(!beh.platny()){ hotovoInde(); return; }
     cloudMsg("Hotovo — tieto maily už neuvidíte.","ok");
     otvorCakajuce();
-  }catch(e){ alert("Nepodarilo sa nastaviť: "+(e.message||e)); }
+  }catch(e){ alert("Nepodarilo sa nastaviť"+(beh.platny()?"":" (firma "+menoFirmyBehu(beh)+")")+": "+(e.message||e)); }
 }
 
 // Prehľad pravidiel. Počítadlo je tu podstatné: bez neho by potlačený mail
 // zmizol bez stopy a nedalo by sa zistiť, či pravidlo ešte niečo chytá.
 async function spravujPotlacene(){
+  // Zoznam patrí firme, v ktorej sa okno otvorilo (ROZHODNUTIA č. 138): po prepnutí firmy by sa pravidlá
+  // firmy A ukázali nad firmou B. Zahodí sa bez hlášky — len čítanie, nič sa nezmenilo.
+  const beh=behFirmy();
   let zoznam=[];
   try{
     const { data, error } = await sb.from("doklady_potlacene")
@@ -32691,10 +32705,12 @@ async function spravujPotlacene(){
     if(error) throw error;
     zoznam=data||[];
   }catch(e){
+    if(!beh.platny()){ console.error("umlčané maily predošlej firmy:", e); return; }
     alert("Zoznam sa nepodarilo načítať: "+(e.message||e)
       +"\n\nAk ste ešte nespustili admin_34, tabuľka neexistuje.");
     return;
   }
+  if(!beh.platny()) return;
   openModal("🔕 Umlčané maily", `
     <div class="ocr-hint" style="margin-bottom:12px">
       Sem patria opakované oznamy, ktoré nikdy nebudú dokladom — napríklad denný
@@ -32759,8 +32775,15 @@ async function poslednyMailHtml(){
 
 async function otvorCakajuce(){
   if(localMode){ alert("Doklady e-mailom fungujú len v cloudovom režime — prihláste sa."); return; }
+  // Schránka patrí firme, v ktorej sa otvorila (ROZHODNUTIA č. 138). Po prepnutí firmy počas načítania
+  // by okno ukázalo prijímaciu adresu firmy A nad firmou B a `cakajuceDoklady` by ešte držal maily A
+  // (prepnutie zoznam nemaže, B si ho načíta až po chvíli) — „Spracovať“ by doklad z A uložil do B.
+  // Výsledok sa zahodí bez hlášky: nič sa nezmenilo a človek je už v inej firme.
+  const beh=behFirmy();
   await nacitajCakajuce();
+  if(!beh.platny()) return;
   const adresa = await dokladyAdresa(false);
+  if(!beh.platny()) return;
   const nove   = cakajuceDoklady.filter(x=>x.stav==="nove");
   const cudzie = cakajuceDoklady.filter(x=>x.stav==="neznamy_odosielatel");
   // Notifikácie o pohybe sa vyberajú z „bez prílohy" AJ z „nové" — mail od
@@ -32777,6 +32800,7 @@ async function otvorCakajuce(){
   const bezPril = cakajuceBezPrilohy(notifik);
   const opakuje= cakajuceOpakovane();
   const posledny= await poslednyMailHtml();
+  if(!beh.platny()) return;
 
   openModal("📨 Doklady e-mailom", `
     <div class="mfield">
@@ -32897,7 +32921,15 @@ function kopirujAdresu(){
 async function prerazDokladyToken(){
   if(!strazZapis("data")) return;
   if(!confirm("Vygenerovať novú prijímaciu adresu?\n\nStará okamžite prestane fungovať — kto ju má uloženú v kontaktoch, musí dostať novú.")) return;
+  const beh=behFirmy();   // firma, ktorej adresu meníme (ROZHODNUTIA č. 138)
   const a=await dokladyAdresa(true);
+  // Po prepnutí firmy sa adresa zmenila firme pôvodu a jej stará adresa prestala platiť — to sa musí
+  // povedať s menom firmy a novou adresou. Správa pod inou firmou a jej schránka by klamali.
+  if(a && !beh.platny()){
+    alert("Firma "+menoFirmyBehu(beh)+" má novú prijímaciu adresu:\n\n"+a
+      +"\n\nStará adresa prestala fungovať. Medzitým ste otvorili inú firmu — jej adresa sa nemenila.");
+    return;
+  }
   if(a){ cloudMsg("Nová adresa: "+a,"ok"); otvorCakajuce(); }
 }
 
@@ -32906,11 +32938,15 @@ async function blokujOdosielatela(email){
   const e=String(email||"").toLowerCase().trim();
   if(!e) return;
   if(!confirm("Zablokovať "+e+"?\n\nPrílohy z tejto adresy sa už neuložia. Mail sa aj tak zaznamená, aby ste vedeli, že vám píše.")) return;
+  // Po prepnutí firmy počas zápisu sa adresa zablokovala firme pôvodu — povie sa to s jej menom
+  // a schránka otvorenej firmy sa neotvára (ROZHODNUTIA č. 138).
+  const beh=behFirmy();
   try{
     const { error } = await sb.from("doklady_odosielatelia")
       .upsert({ firma_id: firmaId, email: e, blokovany: true, poznamka: "blokované" },
               { onConflict:"firma_id,email" });
     if(error) throw error;
+    if(!beh.platny()){ alert("Adresa "+e+" je vo firme "+menoFirmyBehu(beh)+" zablokovaná.\n\nMedzitým ste otvorili inú firmu — v nej sa nič nezmenilo."); return; }
     cloudMsg(e+" je zablokovaná.","ok");
     otvorCakajuce();
   }catch(err){ alert("Nepodarilo sa zablokovať: "+(err.message||err)); }
@@ -32920,10 +32956,12 @@ async function odblokujPodlaEmailu(email){
   if(!strazZapis("data")) return;
   const e=String(email||"").toLowerCase().trim();
   if(!e) return;
+  const beh=behFirmy();   // ako pri blokovaní (ROZHODNUTIA č. 138)
   try{
     const { error } = await sb.from("doklady_odosielatelia")
       .update({ blokovany:false }).eq("firma_id", firmaId).eq("email", e);
     if(error) throw error;
+    if(!beh.platny()){ alert("Adresa "+e+" je vo firme "+menoFirmyBehu(beh)+" odblokovaná.\n\nMedzitým ste otvorili inú firmu — v nej sa nič nezmenilo."); return; }
     cloudMsg(e+" je odblokovaná.","ok");
     otvorCakajuce();
   }catch(err){ alert("Nepodarilo sa odblokovať: "+(err.message||err)); }
@@ -32937,12 +32975,14 @@ async function odblokujOdosielatela(id){
 }
 
 async function spravujOdosielatelov(){
+  const beh=behFirmy();   // zoznam firmy, v ktorej sa okno otvorilo — ako umlčané maily (ROZHODNUTIA č. 138)
   let zoznam=[];
   try{
     const { data } = await sb.from("doklady_odosielatelia")
       .select("*").eq("firma_id", firmaId).eq("blokovany", true).order("email");
     zoznam=data||[];
   }catch(_){}
+  if(!beh.platny()) return;
   openModal("🚫 Blokované adresy", `
     <div class="ocr-hint" style="margin-bottom:12px">
       Doklady prijímame od kohokoľvek — do evidencie sa aj tak nedostanú samy, čakajú na vaše potvrdenie.
