@@ -27034,19 +27034,22 @@ async function edgeFunkciaVolaj(funkcia, akcia, telo){
 async function peppolNacitajSiet(){
   const S=_peppolSiet;
   if(localMode || !sb || !firmaId || S.bezi) return;
-  const firma=firmaId;
+  // Beh firmy pred prvým await (ROZHODNUTIA č. 125, 129). Porovnanie `firmaId`
+  // nestačí: pri A → B → A sa identifikátor vráti, ale `firmaData` je už z nového
+  // načítania — stav zo starého behu by sa zapísal do neho (č. 118).
+  const firma=firmaId, beh=behFirmy();
   S.bezi=true;
   try{
     const o=await edgeFunkciaVolaj("peppol-portal","stav");
-    if(firmaId!==firma) return;
+    if(!beh.platny()) return;
     Object.assign(S,{firma, nacitane:true, odpoved:o, chyba:""});
-    if(mozemPisat("efaktury")) await peppolPrevezmiZoServera(firma);
+    if(mozemPisat("efaktury")) await peppolPrevezmiZoServera(beh);
   }catch(e){
     console.error("stav firmy v sieti Peppol:", e);
-    if(firmaId===firma) Object.assign(S,{firma, nacitane:!!S.odpoved && S.firma===firma, chyba:e.message||String(e)});
+    if(beh.platny()) Object.assign(S,{firma, nacitane:!!S.odpoved && S.firma===firma, chyba:e.message||String(e)});
   }finally{
     S.bezi=false;
-    if(firmaId===firma && peppolEfakturyOtvorene()) appEfaktury();
+    if(beh.platny() && peppolEfakturyOtvorene()) appEfaktury();
   }
 }
 // Prijaté e-faktúry, ktorých originál stiahol SERVER hneď po doručení (poštár
@@ -27055,7 +27058,8 @@ async function peppolNacitajSiet(){
 // Server sa dozvie „prevzaté“ až pri ĎALŠOM načítaní, keď je doklad už
 // v uložených dátach firmy — `poZmene` ukladá neskôr a označiť skôr by pri
 // zlyhanom uložení doklad z appky stratilo (originál by ostal len v úložisku).
-async function peppolPrevezmiZoServera(firma){
+async function peppolPrevezmiZoServera(beh){
+  behPovinny(beh, "peppolPrevezmiZoServera");
   const odp=await edgeFunkciaVolaj("peppol-portal","prijate");
   const nove=[], ulozene=[];
   for(const d of ((odp&&odp.doklady)||[])){
@@ -27076,7 +27080,7 @@ async function peppolPrevezmiZoServera(firma){
     nove.push({ id, cesta:d.cesta, prijate:d.prijate_siet||d.vytvorene||new Date().toISOString(), stav:"nove",
       cislo, dodavatel, datum, spolu:isFinite(spolu)?spolu:0, mena, zdroj:"server" });
   }
-  if(firmaId!==firma) return 0;
+  if(!beh.platny()) return 0;   // doklady patria firme, za ktorú sa pýtalo (č. 129)
   if(nove.length){
     if(!firmaData.efaktury) firmaData.efaktury=[];
     firmaData.efaktury.unshift(...nove);
@@ -27102,10 +27106,15 @@ async function peppolMigruj(btn){
   const kod=String((pole&&pole.value)||"").trim();
   if(!kod){ alert("Vložte migračný kód, ktorý vám vydal doterajší poskytovateľ."); return; }
   if(btn){ btn.disabled=true; btn.textContent="Preberám…"; }
+  // Prevzatie záznamu je zmena u firmy, za ktorú sa kliklo — po prepnutí firmy
+  // sa stav nezapíše do otvorenej firmy, ale hláška musí prísť s jej menom (č. 138).
+  const beh=behFirmy();
   try{
     const o=await edgeFunkciaVolaj("peppol-portal","migruj",{kod});
-    _peppolSiet.odpoved={stav:o.stav};
-    alert("Hotovo. Záznam v národnom registri Peppol je prevzatý — e-faktúry vám odteraz chodia sem.");
+    if(beh.platny()) _peppolSiet.odpoved={stav:o.stav};
+    alert(beh.platny()
+      ? "Hotovo. Záznam v národnom registri Peppol je prevzatý — e-faktúry vám odteraz chodia sem."
+      : "Hotovo. Záznam v národnom registri Peppol je prevzatý pre firmu "+menoFirmyBehu(beh)+" — e-faktúry jej odteraz chodia sem. Uvidíte to, keď ju otvoríte.");
   }catch(e){
     console.error("migračný kód:", e);
     alert(e.message||String(e));
@@ -27117,8 +27126,11 @@ async function peppolMigruj(btn){
 async function peppolPrijimamInde(ano){
   if(!strazZapis("efaktury")) return;
   if(ano && !confirm("E-faktúry budete ďalej prijímať u doterajšieho poskytovateľa a pripomienka migračného kódu zmizne.\n\nOdosielať cez eživnostník môžete naďalej. Pokračovať?")) return;
+  // Beh až po otázke: `confirm` drží kód, kým človek odpovie (č. 129).
+  const beh=behFirmy();
   try{
     const o=await edgeFunkciaVolaj("peppol-portal","prijimam_inde",{ano:!!ano});
+    if(!beh.platny()){ console.error("prijímanie u iného poskytovateľa: medzitým sa otvorila iná firma — stav sa nezapíše"); return; }
     _peppolSiet.odpoved={stav:o.stav};
   }catch(e){
     console.error("prijímanie u iného poskytovateľa:", e);
