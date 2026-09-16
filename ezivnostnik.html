@@ -25249,27 +25249,58 @@ async function parseVypisPdf(arrbuf){
   }
   return null;
 }
+// ── ČÍTANIE camt.053: MENNÉ PRIESTORY A DÁTUMY (ROZHODNUTIA č. 144) ────────
+// `getElementsByTagName` porovnáva KVALIFIKOVANÉ meno aj s prefixom, takže
+// <camt:Ntry> nenájde pod menom "Ntry". Prefix si pritom volí banka a nič
+// neznamená — význam nesie menný priestor, nie skratka pred dvojbodkou.
+// Výpis s prefixom preto vyzeral ako súbor, ktorý sa nedá prečítať.
+// Hľadá sa podľa LOKÁLNEHO mena; `*` berie aj doklad úplne bez menných
+// priestorov (zmerané 16. 9. 2026 v prehliadači aj v xmldom — obe rovnako).
+// Vracia POLE zámerne: atrapa DOMParsera v testoch NS metódu nemá a jej
+// NodeList sa nedá rozbaliť cez `...`.
+const prvkyVypisu=(el,tag)=>{
+  if(!el) return [];
+  if(el.getElementsByTagNameNS){
+    const n=el.getElementsByTagNameNS("*",tag);
+    if(n && n.length) return Array.prototype.slice.call(n);
+  }
+  const p=el.getElementsByTagName ? el.getElementsByTagName(tag) : null;
+  return p ? Array.prototype.slice.call(p) : [];
+};
+const prvyPrvok=(el,tag)=>prvkyVypisu(el,tag)[0]||null;
+// Dátum je v camt typ DateAndDateTime2Choice: raz <Dt>2026-03-02</Dt>,
+// inokedy <DtTm>2026-03-02T09:15:00+01:00</DtTm> — a banka si vyberá. Prvých
+// desať znakov textu je v oboch prípadoch RRRR-MM-DD, takže na oboje stačí
+// jedno pravidlo. Čo na ten tvar nesedí, je "dátum nemáme" — prázdny reťazec,
+// nie odhad: odhadnutý dátum vyzerá ako údaj a nikde nesvieti.
+const datumPrvku=el=>{
+  const t=el ? String(el.textContent||"").trim().slice(0,10) : "";
+  return /^\d{4}-\d{2}-\d{2}$/.test(t) ? t : "";
+};
 function parseVypis(xmlText){
   let doc;
   try{ doc=new DOMParser().parseFromString(xmlText,"text/xml"); }catch(_){ return null; }
   if(!doc || (doc.getElementsByTagName && doc.getElementsByTagName("parsererror").length)) return null;
-  const stmt=doc.getElementsByTagName("Stmt")[0]; if(!stmt) return null;
-  const acct=stmt.getElementsByTagName("Acct")[0];
-  const mojIban=acct? ((acct.getElementsByTagName("IBAN")[0]||{}).textContent||"") : "";
-  const ntrys=stmt.getElementsByTagName("Ntry");
+  const stmt=prvyPrvok(doc,"Stmt"); if(!stmt) return null;
+  const acct=prvyPrvok(stmt,"Acct");
+  const mojIban=acct? ((prvyPrvok(acct,"IBAN")||{}).textContent||"") : "";
+  const ntrys=prvkyVypisu(stmt,"Ntry");
   const txns=[];
   for(let i=0;i<ntrys.length;i++){
     const n=ntrys[i];
-    const g=(el,tag)=>{ const x=el.getElementsByTagName(tag)[0]; return x?x.textContent.trim():""; };
+    const g=(el,tag)=>{ const x=prvyPrvok(el,tag); return x?x.textContent.trim():""; };
     const suma=parseFloat(g(n,"Amt"))||0;
     const smer=g(n,"CdtDbtInd")==="CRDT"?"prijem":"vydaj";
-    const bookg=n.getElementsByTagName("BookgDt")[0];
-    const datum=bookg? ((bookg.getElementsByTagName("Dt")[0]||{}).textContent||"") : "";
-    const mena=[...n.getElementsByTagName("Nm")].map(x=>x.textContent.trim());
-    const ibany=[...n.getElementsByTagName("IBAN")].map(x=>x.textContent.trim()).filter(ib=>ib!==mojIban);
+    // Dátum zaúčtovania; keď ho výpis nenesie, platí dátum valuty (ValDt).
+    // Pohyb bez dátumu sa dosiaľ uložil TICHO s prázdnym mesiacom: nespároval
+    // sa s faktúrou, v peňažnom denníku nepatril do žiadneho mesiaca a výpis
+    // sa tváril, že nepokrýva nič — pritom hláška hlásila úspešný import.
+    const datum=datumPrvku(prvyPrvok(n,"BookgDt")) || datumPrvku(prvyPrvok(n,"ValDt"));
+    const mena=prvkyVypisu(n,"Nm").map(x=>x.textContent.trim());
+    const ibany=prvkyVypisu(n,"IBAN").map(x=>x.textContent.trim()).filter(ib=>ib!==mojIban);
     const proti=mena.find(m=>!jeMojeMeno(m)) || mena[mena.length-1] || "";
     const ibanProti=ibany[0]||"";
-    const ustrd=[...n.getElementsByTagName("Ustrd")].map(x=>x.textContent.trim()).join(" ");
+    const ustrd=prvkyVypisu(n,"Ustrd").map(x=>x.textContent.trim()).join(" ");
     const addtl=g(n,"AddtlNtryInf");
     const popis=ustrd||addtl||"";
     const vsM=(n.textContent||"").match(/\/VS(\d+)/);
@@ -25286,10 +25317,10 @@ function parseVypis(xmlText){
   // PRCD je konečný stav predošlého výpisu — to isté číslo z druhej strany,
   // preto sa berie ako počiatočný, keď OPBD chýba.
   const balSuma=b=>{
-    const a=b.getElementsByTagName("Amt")[0]; if(!a) return null;
+    const a=prvyPrvok(b,"Amt"); if(!a) return null;
     const v=parseFloat(a.textContent); if(isNaN(v)) return null;
     // Záporný zostatok je v camt kladná suma so smerom DBIT.
-    const smer=((b.getElementsByTagName("CdtDbtInd")[0]||{}).textContent||"").trim();
+    const smer=((prvyPrvok(b,"CdtDbtInd")||{}).textContent||"").trim();
     return r2(smer==="DBIT" ? -v : v);
   };
   // Ku každému zostatku patrí DÁTUM a výpis ho nesie. Dosiaľ sa nečítal
@@ -25298,26 +25329,24 @@ function parseVypis(xmlText){
   // 24. 4. namiesto 30. 4. a 28. 8. namiesto 31. 8. Nevadilo to len preto,
   // že sa v tých medzerách nič nepohlo; prvý pohyb v nich by vyrobil falošný
   // nález. Výpis je autorita — treba ho čítať celý (kap. 88.5).
-  const balDatum=b=>{
-    const d=b.getElementsByTagName("Dt")[0];
-    const t=d ? String(d.textContent||"").trim().slice(0,10) : "";
-    return /^\d{4}-\d{2}-\d{2}$/.test(t) ? t : null;
-  };
+  // Ten istý výber Dt/DtTm ako pri pohybe — preto cez `datumPrvku`. Dve kópie
+  // pravidla by sa rozišli a jedna z nich by prestala čítať DtTm.
+  const balDatum=b=>datumPrvku(prvyPrvok(b,"Dt"))||null;
   let zaciatok=null, koniec=null, zaciatokDatum=null, koniecDatum=null;
-  const baly=stmt.getElementsByTagName("Bal");
+  const baly=prvkyVypisu(stmt,"Bal");
   for(let i=0;i<baly.length;i++){
     const b=baly[i];
-    const kod=((b.getElementsByTagName("Cd")[0]||{}).textContent||"").trim().toUpperCase();
+    const kod=((prvyPrvok(b,"Cd")||{}).textContent||"").trim().toUpperCase();
     // CLAV je disponibilný konečný stav, CLBD účtovný. Berie sa CLBD —
     // reťaz porovnáva účtovné stavy a disponibilný je o blokácie nižší.
     if((kod==="OPBD"||kod==="PRCD") && zaciatok===null){ zaciatok=balSuma(b); zaciatokDatum=balDatum(b); }
     else if(kod==="CLBD"){ koniec=balSuma(b); koniecDatum=balDatum(b); }
   }
   const sumBlok=tag=>{
-    const el=stmt.getElementsByTagName(tag)[0];
+    const el=prvyPrvok(stmt,tag);
     if(!el) return {pocet:null, suma:null};
-    const p=parseInt((el.getElementsByTagName("NbOfNtries")[0]||{}).textContent,10);
-    const s=parseFloat((el.getElementsByTagName("Sum")[0]||{}).textContent);
+    const p=parseInt((prvyPrvok(el,"NbOfNtries")||{}).textContent,10);
+    const s=parseFloat((prvyPrvok(el,"Sum")||{}).textContent);
     return {pocet:isNaN(p)?null:p, suma:isNaN(s)?null:r2(s)};
   };
   const kr=sumBlok("TtlCdtNtries"), de=sumBlok("TtlDbtNtries");
