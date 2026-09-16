@@ -2999,12 +2999,14 @@ function resetStavuModulov(){
   // pri zatvorení záložky zhasne (č. 81). Bežiace nahrávania ju zhasnú samy.
   _nahrateNeulozene=false; _ulozenieZlyhalo=false; odchodStraz();
   pristupyFirmy=[];   // prístupy sú PER FIRMU — inak by platili oprávnenia predošlej
+  pristupyDetail=[]; zdielanieChyba=null;   // e-maily účtovníkov a hláška o zdieľaní patria tej istej firme
   fFilter="vsetky"; fRok=""; fMesiac=""; fakVybrane=new Set(); fakPoslednyList=[];
   vFilter="vsetky"; vRok=""; vMesiac=""; vydVybrane=new Set(); vydPoslednyList=[];
   bFilter="vsetky"; bMesiac=""; vypisRozbaleny=null;
   vyber=null;   // výber zo zvončeka nesie kľúče predošlej firmy
   _cakajuciSpracovavany=null;   // rozpracovaný doklad zo Schránky patrí predošlej firme (č. 70)
   _efakturaSpracovavana=null;   // rozpracovaná prijatá e-faktúra tiež (č. 81)
+  cakajuceVyprazdni();          // celá schránka e-mailom vrátane ciest do úložiska predošlej firmy (16. 9. 2026)
   saasRelaciaVyprazdni();       // faktúry za predplatné a ich automatika patria firme (č. 104)
   Object.keys(STAV_CITANIA_RELACIA).forEach(k=>delete STAV_CITANIA_RELACIA[k]);   // stav čítania pod Náhľadom patrí firme (č. 58)
   // Otvorená skupina a modul. Obrazovka modulu sa nižšie skrýva, ale bočná
@@ -3016,6 +3018,8 @@ function resetStavuModulov(){
   Object.keys(_zobrazLimit).forEach(k=>delete _zobrazLimit[k]);
   dphTab="vykaz"; dphVybObdobie="";
   splitVybranyPohyb=null; splitMesiac=""; splitStavFilter="nespar"; splitVsetciKand=false; splitDokladyMesiac="";
+  splitVybranyDoklad=null; splitDokStavFilter="neuhr";   // druhá polovica Párovania — smer „od dokladu“
+  dokFilter="vsetky";   // filter Dokumentov je per firma rovnako ako filtre vyššie
   vwFilterKm=0; _vwParsed=[]; _vwMeta=null; _vwTankovania=[];
   if(typeof vwSprievodca==="function") vwSprievodca._init=false;
   // zavri všetko rozpracované, nech na obrazovke nezostane cudzí obsah
@@ -32609,6 +32613,26 @@ let _ocrArchiv=null;
 let cakajuceDoklady = [];
 let _cakajuceNacitane = false;
 let _cakajuceChyba = null;
+
+// SCHRÁNKA PATRÍ FIRME — po prepnutí sa vyprázdni CELÁ (16. 9. 2026, dev/opravy/cakajuce16.md).
+// Do tohto dňa ju `resetStavuModulov` nemazal a zmeraná následnosť bola takáto:
+// `zobrazFirmu` kreslí plochu (`renderHomeStrip`) PRED tým, než pustí `nacitajCakajuce`,
+// takže odznak „Nové v schránke“ novej firmy ukázal počet PREDOŠLEJ — aj keď nová
+// firma nemá v schránke nič. V pamäti pritom ostali aj cesty do úložiska predošlej
+// firmy (`subor_cesta`) a príznak `_cakajuceNacitane`, ktorý tvrdil, že zoznam je
+// načítaný pre otvorenú firmu. Stráž v `otvorCakajuce` (č. 138) bránila len oknu.
+//
+// Vyprázdnenie je TU, vedľa údajov, nie vypísané v resete — rovnako ako
+// `saasRelaciaVyprazdni`: pravidlo patrí k tomu, čoho sa týka. Funkcia siaha aj na
+// premenné deklarované nižšie (`_cakajucePosledne`, `_adresaChyba`, `_cakajuciNahradeny`);
+// to je bezpečné, lebo `resetStavuModulov` sa volá výhradne z obsluhy (prepnutie firmy,
+// odchod z dema), teda dávno po vyhodnotení skriptu — nikdy nie počas neho.
+function cakajuceVyprazdni(){
+  cakajuceDoklady=[]; _cakajuceNacitane=false; _cakajuceChyba=null;
+  _cakajucePosledne=0;       // brzda 20 s patrila predošlej firme — nová sa smie spýtať hneď
+  _adresaChyba=null;         // hláška o prijímacej adrese predošlej firmy
+  _cakajuciNahradeny=null;   // cesta k originálu v úložisku predošlej firmy (dvojica k `_cakajuciSpracovavany`)
+}
 
 // Značka, ktorou edge funkcia označí, že v `telo` nie je text mailu, ale
 // DÔVOD, prečo prílohu neprijala. Tá istá veta musí byť v
