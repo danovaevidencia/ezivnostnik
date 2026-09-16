@@ -27202,9 +27202,10 @@ async function postarPrevezmiRaz(dokladId, beh){
   // `efaktura`, aby sa archív dal nájsť.
   const subor=new File([bajty], "efaktura_"+cislo+".xml", {type:"application/xml"});
   // Cesta PODĽA IDENTIFIKÁTORA DOKLADU, nie podľa času (č. 97): opätovné prevzatie
-  // po zavretej karte nájde súbor z prvého pokusu a nenahrá druhý. `efaktura_peppol_`
-  // sa nezrazí s `efaktura_<čas>` z okna dokladu a `jeOriginalEfaktury` ho chráni.
-  const v=await dokladNahraj(subor, "efaktura", "efaktura_peppol_"+String(dokladId).replace(/[^\w.-]+/g,"_")+".xml", beh);
+  // po zavretej karte nájde súbor z prvého pokusu a nenahrá druhý. Pevné meno
+  // (`EFAKTURA_PEVNE`) sa nezrazí s `efaktura_<čas>` z okna dokladu a chráni ho
+  // `jeOriginalEfakturyPevny` — ani nahratý nadarmo sa nemaže.
+  const v=await dokladNahraj(subor, "efaktura", EFAKTURA_PEVNE+String(dokladId).replace(/[^\w.-]+/g,"_")+".xml", beh);
   if(!beh.platny()) throw new Error(POSTAR_INA_FIRMA);
   if(!v.cesta) throw new Error("originál sa nepodarilo uložiť do archívu"+(v.chyba?" ("+v.chyba+")":""));
   const cesta=v.cesta;
@@ -39096,13 +39097,23 @@ async function dokladNahraj(file, prefix, nazov, beh){
   if(cesta) return { cesta, chyba:"", novy:!!S.novy, vynimka:null };
   return { cesta:null, chyba:S.chyba || (localMode ? "" : DOKLAD_DOVOD.uloziste.text), novy:false, vynimka };
 }
-// Súbor nahratý pre záznam, ktorý sa nezapíše (prepnutie firmy, ROZHODNUTIA č. 121).
-// Nie `dokladZmazOriginaly`: tá čaká na uloženie a hľadá cestu v `firmaData` — tu na
-// súbor nič neukazuje a otvorená je iná firma. Originál e-faktúry sa nemaže nikdy
-// (§ 76 ZDPH); zlyhanie ide nahlas do konzoly s cestou.
+// Súbor nahratý pre záznam, ktorý sa nezapíše (prepnutie firmy, ROZHODNUTIA č. 121;
+// strop času č. 136). Nie `dokladZmazOriginaly`: tá čaká na uloženie a hľadá cestu
+// v `firmaData` — tu na súbor nič neukazuje a otvorená býva iná firma.
+//
+// MAŽE AJ ORIGINÁL E-FAKTÚRY `efaktura_<čas>` (16. 9. 2026). Do vtedy to zakazovalo
+// široké pravidlo č. 83 bod 3 (§ 76 ZDPH) a originál z okna dokladu, ktorého nahratie
+// dobehlo až po strope alebo po prepnutí firmy, ostal v úložisku navždy — v appke naň
+// nič neukazovalo, človek o ňom nevedel a osirelé súbory sa neriešia (č. 84). § 76
+// chráni ZAEVIDOVANÝ doklad: tu sa záznam nezapísal, človek dostal hlášku, že sa
+// doklad neuložil, a originál má stále u seba. Zaevidovaný doklad maže
+// `dokladZmazOriginaly` a tam pravidlo platí doslova ďalej.
+//
+// Výnimka je pevné meno (`EFAKTURA_PEVNE`, č. 97): ten súbor osirelý nie je, ďalšie
+// prevzatie ho nájde a použije. Zlyhanie mazania ide nahlas do konzoly s cestou.
 async function dokladZmazNahraty(cesta, preco){
   if(!cesta || localMode || !sb) return;
-  if(jeOriginalEfaktury(cesta)){ console.error("Originál e-faktúry ostáva v úložisku bez záznamu ("+preco+"): "+cesta); return; }
+  if(jeOriginalEfakturyPevny(cesta)){ console.error("Originál e-faktúry s pevným menom ostáva v úložisku — ďalšie prevzatie ho nájde a použije ("+preco+"): "+cesta); return; }
   let chyba=null;
   try{ chyba=(await sb.storage.from("dokumenty").remove([cesta])).error||null; }
   catch(e){ chyba=e; }
@@ -39431,7 +39442,15 @@ async function dokladUrl(cesta){
 // HNEĎ — aj pri nahradení súboru pred uložením nového odkazu a aj keď sa uloženie
 // potom nepodarilo (overené behom, test_oprava_ukladanie8). Existujúce osirelé
 // súbory sa neriešia (č. 84). supabase-js chybu vracia v `error`, nehádže (116.3).
+// PEVNÉ MENO PREVZATEJ E-FAKTÚRY (ROZHODNUTIA č. 97). Skladá sa aj rozoznáva
+// z jednej konštanty — dve kópie toho istého reťazca sa vždy rozídu (kap. 16).
+const EFAKTURA_PEVNE="efaktura_peppol_";
 function jeOriginalEfaktury(cesta){ return /(^|\/)efaktura_/.test(String(cesta||"")); }
+// Originál prevzatý zo siete má pevné meno podľa identifikátora dokladu, takže
+// OSIRIEŤ NEVIE: keď sa záznam nezapíše, ďalšie prevzatie toho istého dokladu ho
+// nájde cez `uloziskoMaSubor` a použije. Preto sa nemaže ani v `dokladZmazNahraty`,
+// kde sa `efaktura_<čas>` z okna dokladu od 16. 9. 2026 maže.
+function jeOriginalEfakturyPevny(cesta){ return String(cesta||"").split("/").pop().indexOf(EFAKTURA_PEVNE)===0; }
 async function dokladZmazOriginaly(cesty){
   const zoz=[...new Set((cesty||[]).filter(c=>c && typeof c==="string" && !jeOriginalEfaktury(c)))];
   if(!zoz.length || localMode || !sb || demoMode) return;
