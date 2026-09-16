@@ -172,7 +172,7 @@ window.NAVODY_SNIMKY = {
  },
  "banka-prehlad-1": {
   "m": {
-   "subor": "navody/banka-prehlad-1.m.8bc2c7cc.webp",
+   "subor": "navody/banka-prehlad-1.m.bb55eee5.webp",
    "w": 390,
    "h": 600,
    "ciel": {
