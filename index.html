@@ -148,6 +148,26 @@ a.brand{color:inherit;text-decoration:none}
 .ph-tile .i{font-size:17px}
 .ph-tile .t{font-size:8.5px;color:var(--ink-soft);margin-top:3px;font-weight:600}
 
+/* ══ POHYBLIVÝ HERO — SKUTOČNÉ OBRAZOVKY ══
+   Mockup nad ohybom bol kreslený v CSS s vymyslenými číslami. Odteraz sú v
+   ráme tie isté snímky, aké ukazuje sekcia nižšie — generované z appky
+   (dev/navody/snimky.js), teda to, čo človek naozaj uvidí. Statický mockup
+   ostáva v HTML ako ZÁCHRANA: keď sa snímky nenačítajú (starý cache, chýbajúci
+   navody_snimky.js), rám nesmie ostať prázdny. */
+.hs{position:relative;background:var(--bg);overflow:hidden}
+.hs img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:top center;
+  opacity:0;transition:opacity .6s ease}
+.hs img.on{opacity:1}
+.hs-desk{aspect-ratio:1024/600}
+.hs-tel{aspect-ratio:390/600}
+/* Popis je NAD snímkou, nie pod rámom: rám je odrezaný spodkom stránky, takže
+   riadok pod ním by sa na časti obrazoviek nezmestil. */
+.hs-popis{position:absolute;left:0;right:0;bottom:0;padding:26px 16px 12px;text-align:center;
+  font-size:12.5px;font-weight:600;color:var(--ink);
+  background:linear-gradient(transparent,rgba(247,250,253,.93) 45%)}
+.hs-popis b{color:var(--brand-deep)}
+@media (max-width:760px){ .hs-popis{font-size:11.5px;padding:22px 12px 10px} }
+
 /* ══ DESKTOP NÁHĽAD (na šírku) ══ */
 .deskshot{display:none} /* na mobile skrytý, telefón sa zobrazí */
 .browser{max-width:860px;margin:0 auto;background:var(--paper);border-radius:14px 14px 0 0;border:1px solid var(--line);border-bottom:none;box-shadow:0 -2px 50px rgba(19,28,43,.13);overflow:hidden}
@@ -775,6 +795,80 @@ document.addEventListener("DOMContentLoaded", function(){
   document.querySelectorAll(".nahlad").forEach(postav);
   const sekcia = document.getElementById("nahladySekcia");
   if (sekcia && !sekcia.querySelector(".nh-tel")) sekcia.hidden = true;
+});
+
+// ═══ HERO — POHYBLIVÉ OBRAZOVKY ═══
+// Mockup nad ohybom bol kreslený v CSS a čísla v ňom boli vymyslené. Teraz sú
+// v ráme tie isté generované snímky ako v sekcii nižšie — teda to, čo človek
+// v deme naozaj uvidí. Rozdiel oproti sekcii nižšie: tá učí POSTUP (kroky
+// jedného návodu, oranžový rámik), hero ukazuje ZÁBER (päť modulov, bez rámika
+// a pomalšie) — inak by nad ohybom blikalo niečo, čo sa nedá prečítať.
+//
+// Statický mockup sa nahrádza AŽ keď sú snímky naozaj po ruke. Keď mapa chýba
+// (starý cache, nenačítaný navody_snimky.js), ostane pôvodný rám — prázdny rám
+// nad ohybom by bol horší než kreslený.
+document.addEventListener("DOMContentLoaded", function(){
+  const MAPA = window.NAVODY_SNIMKY || {};
+  const TRVANIE = 4200;
+  const pokoj = !!(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches);
+  // Poradie je prísľub z nadpisu „Vaše účtovníctvo. Na jednom mieste." —
+  // päť modulov, nie päť krokov jedného postupu.
+  const ZABERY = [
+    { id:"superdash-rok-2",     popis:"<b>Prehľad</b> — koľko si odložiť na dane a odvody" },
+    { id:"faktury-vystavit-4",  popis:"<b>Faktúra</b> hotová aj s QR kódom na platbu" },
+    { id:"vydavky-fotka-3",     popis:"<b>Bloček</b> odfotíte, appka ho prečíta za vás" },
+    { id:"banka-automat-3",     popis:"<b>Banka</b> — platby sa priradia k faktúram samy" },
+    { id:"dph-podat-2",         popis:"<b>DPH</b> aj priznanie pripravené na podanie" },
+  ];
+
+  function postav(stary, variant, trieda, zmaz){
+    if (!stary) return false;
+    const zabery = ZABERY.map(function(z){
+      const v = MAPA[z.id] && MAPA[z.id][variant];
+      return v ? { popis:z.popis, subor:v.subor } : null;
+    }).filter(Boolean);
+    // Jedna snímka nie je pohyb a dve sú blikanie — vtedy je kreslený mockup
+    // lepší než chudobná striedačka.
+    if (zabery.length < 3) return false;
+
+    const scena = document.createElement("div"); scena.className = "hs " + trieda;
+    const popis = document.createElement("div"); popis.className = "hs-popis";
+    const imgs = zabery.map(function(z, j){
+      const im = document.createElement("img");
+      im.alt = ""; im.decoding = "async"; im.dataset.src = z.subor;
+      // Prvá snímka je to, čo vidí návštevník v prvej sekunde — ťahá sa hneď
+      // a prednostne. Zvyšok až keď sa rám dostane na obrazovku.
+      if (j === 0) { im.src = z.subor; im.setAttribute("fetchpriority", "high"); im.classList.add("on"); }
+      scena.appendChild(im);
+      return im;
+    });
+    popis.innerHTML = zabery[0].popis;
+    scena.appendChild(popis);
+    (zmaz || []).forEach(function(el){ if (el) el.remove(); });
+    stary.replaceWith(scena);
+
+    let i = 0, casovac = null, nacitane = false;
+    function ukaz(n){
+      i = n % zabery.length;
+      imgs.forEach(function(im, j){ im.classList.toggle("on", j === i); });
+      popis.innerHTML = zabery[i].popis;
+    }
+    function start(){
+      if (!nacitane) { nacitane = true; imgs.forEach(function(im){ if (!im.src) im.src = im.dataset.src; }); }
+      if (pokoj || casovac) return;
+      casovac = setInterval(function(){ ukaz(i + 1); }, TRVANIE);
+    }
+    function stop(){ clearInterval(casovac); casovac = null; }
+    if ("IntersectionObserver" in window) {
+      new IntersectionObserver(function(zaz){ zaz.forEach(function(z){ z.isIntersecting ? start() : stop(); }); },
+        { rootMargin: "120px" }).observe(scena);
+    } else start();
+    return true;
+  }
+
+  postav(document.querySelector(".browser .br-body"), "d", "hs-desk");
+  postav(document.querySelector(".phone .ph-body"),   "m", "hs-tel",
+         [document.querySelector(".phone .ph-top")]);
 });
 
 // ═══ KAM VEDIE appka ═══
