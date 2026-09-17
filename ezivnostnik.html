@@ -2150,7 +2150,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.17-OT";  // Zvonček hlási prijaté e-faktúry čakajúce na zaevidovanie (č. 158); pravidlo „čaká“ na jednom mieste
+const APP_VERZIA = "2026.09.17-OU";  // Platba kartou sa číta z notifikácie (štítok „Platba kartou“); nečitateľný mail z banky dvíha odznak a zvonček hlási schránku (č. 159)
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -6441,6 +6441,21 @@ function zbierNotifikacie(){
       detail:(caka===1?"1 doklad":caka<5?caka+" doklady":caka+" dokladov")+" zo siete Peppol",
       akcia:()=>otvorApp("efaktury")});
   }catch(e){ console.error("zvonček — prijaté e-faktúry:", e); }
+
+  // ── schránka: doklady a pohyby čakajúce na spracovanie ──
+  // Jedno pravidlo na celú schránku, nie štyri: `cakajuceVeta` už vie povedať,
+  // čo v nej je, a štyri riadky o tom istom mieste učia zvonček preskakovať.
+  // Dôvod, prečo tu vôbec je: dlaždica na ploche a odznak v menu ho nenahradia
+  // — zvonček je to, kam sa Roman pozerá, a sedem notifikácií z banky sa inak
+  // dva týždne nikam nedostalo (ROZHODNUTIA č. 159). Kľúč nesie počet, takže
+  // po ďalšom maile sa ozve znova a po spracovaní zmizne aj bez „prečítané“.
+  try{
+    const p=(typeof cakajucePocty==="function") ? cakajucePocty() : {spolu:0};
+    if(p.spolu) out.push({kluc:"schranka:"+p.spolu, ic:"📨", nal:p.nezname?"warn":"info",
+      nazov:"Doklady e-mailom čakajú v schránke",
+      detail:cakajuceVeta(),
+      akcia:()=>otvorCakajuce()});
+  }catch(e){ console.error("zvonček — schránka:", e); }
 
   // ── meškajúce faktúry (všetky, nielen dve) ──
   try{
@@ -24802,13 +24817,18 @@ const NOTIF_BANKY = [
 // sa príjmy neprečítali vôbec.
 const NOTIF_STITKY = {
   sumaPrijem: ["pripisana suma","pripisana ciastka","suma pripisu","pripisane na ucet"],
-  sumaVydaj:  ["odpisana suma","odpisana ciastka","suma odpisu","odpisane z uctu"],
+  // „Platba kartou" je zároveň suma AJ smer — Prima banka v potvrdení
+  // o transakcii kartou iný štítok sumy nepoužíva. Bez neho parser skončil na
+  // „nenašla sa suma" a pohyb nevznikol: sedem platieb kartou z 2.–16. 9. 2026
+  // ležalo v schránke bez toho, aby na ne čokoľvek ukazovalo (kap. 127).
+  sumaVydaj:  ["odpisana suma","odpisana ciastka","suma odpisu","odpisane z uctu",
+               "platba kartou"],
   suma:       ["suma","ciastka","suma transakcie","suma platby","hodnota transakcie"],
   datum:      ["datum","datum transakcie","datum a cas","datum zauctovania","datum uctovania"],
   ibanProti:  ["ucet prijemcu","ucet platitela","ucet protistrany","protiucet",
                "cislo uctu prijemcu","cislo uctu platitela","iban prijemcu","iban platitela"],
   proti:      ["nazov prijemcu","nazov platitela","prijemca","platitel","protistrana",
-               "nazov protistrany","obchodnik"],
+               "nazov protistrany","obchodnik","informacie o platbe"],
   vs:         ["variabilny symbol","vs"],
   ss:         ["specificky symbol","ss"],
   ks:         ["konstantny symbol","ks"],
@@ -24818,6 +24838,13 @@ const NOTIF_STITKY = {
                "zostatok na ucte","zostatok"],
   vlastne:    ["vlastne prostriedky"],
   typ:        ["typ transakcie","druh transakcie","typ platby","typ operacie"],
+  // Tieto dva sa nikde nečítajú — sú tu ako ZARÁŽKY. Hodnota poľa siaha po
+  // najbližší ďalší štítok, takže bez nich `datum` v potvrdení o platbe kartou
+  // zhltol aj číslo účtu, číslo karty a obchodníka. Vlastný účet sa aj tak
+  // hľadá po riadkoch (maskovaný tvar „SK*5600*…"), nie odtiaľto; číslo karty
+  // do evidencie nepatrí vôbec.
+  ucet:       ["cislo uctu"],
+  karta:      ["cislo karty"],
 };
 
 // Číslo v slovenskom aj anglickom zápise. Keď sú prítomné bodka aj čiarka,
@@ -32777,8 +32804,16 @@ const cakajuceNove = () => cakajuceDoklady.filter(x=>x.stav==="nove").length;
 // takto ticho pribudlo päť pohybov a Roman hlásil „nevidím posledné“.
 //
 // Ráta sa len to, s čím sa dá niečo urobiť: pohyb, ktorý sa naozaj podarilo
-// prečítať a ktorý ešte nie je vo výpise. Mail od banky, ktorému nerozumieme,
-// odznak nedvíha — ten patrí do schránky ako nález, nie ako úloha.
+// prečítať a ktorý ešte nie je vo výpise.
+//
+// ~~Mail od banky, ktorému nerozumieme, odznak nedvíha — ten patrí do schránky
+// ako nález, nie ako úloha.~~ 🔴 PREKONANÉ 17. 9. 2026 ostrými dátami. Prima
+// banka píše sumu platby kartou pod štítkom „Platba kartou", ktorý parser
+// nepoznal, takže SEDEM platieb z 2.–16. 9. skončilo ako „nenašla sa suma".
+// Odznak mlčal, zvonček tiež — a päť výdavkov ostalo neuhradených, pričom
+// peniaze z účtu odišli. Nález, na ktorý nikde nič neukazuje, je to isté ako
+// žiadny riadok (kap. 101.2). Je to ÚLOHA: prepošle ho inak, alebo ho nahlási
+// a my doplníme štítok. Odznak ho preto dvíha (ROZHODNUTIA č. 159).
 //
 // 🔴 12. 9. 2026 pribudol tretí počet. Mail, ktorému appka prílohu neprijala,
 // nedvíhal odznak vôbec — a keďže doteraz po ňom neostal ani riadok, vyzeralo
@@ -32787,11 +32822,15 @@ const cakajuceNove = () => cakajuceDoklady.filter(x=>x.stav==="nove").length;
 function cakajucePocty(){
   const doklady=(cakajuceDoklady||[]).filter(x=>x.stav==="nove").length;
   const neprijate=cakajuceNeprijate().length;
-  let pohyby=0;
+  let pohyby=0, nezname=0;
   // Parser beží nad cudzím textom; keď spadne, odznak nesmie zhodiť plochu.
-  try{ pohyby=cakajuceNotifikacie().filter(x=>x.pohyb && !x.uzMam).length; }
+  try{
+    const n=cakajuceNotifikacie();
+    pohyby=n.filter(x=>x.pohyb && !x.uzMam).length;
+    nezname=n.filter(x=>x.chyba).length;
+  }
   catch(e){ console.error("cakajucePocty:", e); }
-  return { doklady, pohyby, neprijate, spolu:doklady+pohyby+neprijate };
+  return { doklady, pohyby, neprijate, nezname, spolu:doklady+pohyby+neprijate+nezname };
 }
 // Veta bez slovesa zámerne: „2 doklady a 1 pohyb" sa inak musí ohýbať podľa
 // oboch čísel naraz a pri každej kombinácii to znie inak.
@@ -32801,6 +32840,8 @@ function cakajuceVeta(){
   if(p.pohyby)  casti.push(p.pohyby+" "+(p.pohyby===1?"pohyb":(p.pohyby<5?"pohyby":"pohybov")));
   if(p.neprijate) casti.push(p.neprijate+" "+(p.neprijate===1?"neprijatá príloha"
     :(p.neprijate<5?"neprijaté prílohy":"neprijatých príloh")));
+  if(p.nezname) casti.push(p.nezname+" "+(p.nezname===1?"neprečítaný mail z banky"
+    :(p.nezname<5?"neprečítané maily z banky":"neprečítaných mailov z banky")));
   return casti.join(" a ");
 }
 
