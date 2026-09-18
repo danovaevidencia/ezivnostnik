@@ -161,6 +161,14 @@ const SADZBY = {
     h:[{od:"2025-01-01", v:62500, zdroj:"§ 4 zákona o DPH"}]},
   svLimitTovar:   {n:"Súhrnný výkaz — limit pre štvrťročné podávanie", sk:"dph", mienaSa:"zriedka", overenost:"zdroj", kontrola:"2026-08-23",
     h:[{od:"2020-01-01", v:50000, zdroj:"§ 80 ods. 2 zákona o DPH — štvrťročne len do 50 000 € hodnoty TOVARU za štvrťrok a v žiadnom zo štyroch predchádzajúcich; hodnota služieb sa do limitu nezahŕňa"}]},
+  // § 19 ods. 2 písm. p) ZDP: SZČO si za odpracovaný deň dá do výdavkov 55 %
+  // zo sumy stravného pre pracovnú cestu 5 až 12 hodín. Mení to opatrenie
+  // MPSVR kedykoľvek počas roka, nie k 1. januáru — preto sa viaže na dátum
+  // dňa, nie na rok. Do 18. 9. 2026 to bola jedna hodnota v nastaveniach
+  // firmy (kap. 128.5); história pred 1. 4. 2025 v tabuľke zatiaľ nie je.
+  stravneDen:     {n:"Stravné SZČO za odpracovaný deň", sk:"dan", mienaSa:"opatrenim", overenost:"zdroj", kontrola:"2026-09-18",
+    h:[{od:"2025-04-01", v:4.84, zdroj:"55 % zo stravného 8,80 € (5–12 h), opatrenie MPSVR od 1. 4. 2025"},
+       {od:"2025-12-01", v:5.12, zdroj:"55 % zo stravného 9,30 € (5–12 h), oznámenie MPSVR č. 280/2025 Z. z."}]},
   nahradaKmOsobne:{n:"Základná náhrada za km — osobné", sk:"auto", mienaSa:"opatrenim", overenost:"zdroj", kontrola:"2026-07-21",
     h:[{od:"2025-03-01", v:0.281, zdroj:"oznámenie MPSVR platné od 1. 3. 2025"},
        {od:"2025-06-01", v:0.296, zdroj:"oznámenie MPSVR platné od 1. 6. 2025"},
@@ -607,6 +615,7 @@ function sadzbaFormat(k, v){
   if(/Sadzba|sadzba|Koef|danPrijem|zdravSadzba|vzKoef/.test(k) && v<1 && v>0)
     return (v*100).toFixed(v*100%1?4:0).replace(".",",")+" %";
   if(/nahradaKm/.test(k)) return String(v).replace(".",",")+" €/km";
+  if(k==="stravneDen") return String(v).replace(".",",")+" €/deň";
   return sadzbaEur(v);
 }
 
