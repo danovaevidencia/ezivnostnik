@@ -2160,7 +2160,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.18-OW";  // Platba kartou cez mobil; e-faktúry ako samostatná apka prvá v poradí, Návody do hlavičky, panel bez duplicít (č. 164–166)
+const APP_VERZIA = "2026.09.18-OX";  // Prijatý doklad sa dá nezaevidovať (uvítacie správy nevisia v počte); zvonček vidí novú e-faktúru aj pri návrate do appky
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -27559,7 +27559,11 @@ function appEfaktury(){
           <div class="ef-sum">${eur(+z.spolu||0)}</div>
           <div class="ef-akcie">${efakturaVybavena(z)
             ? `<span style="color:var(--pos);font-size:11.5px;font-weight:600">zaevidovaná</span>`
-            : `<button class="aabtn pri" style="padding:5px 9px;font-size:11px" onclick="efakturaZaevidujte('${esc(z.id)}')"${zam("efaktury")}>${z.stav==="zaevidovana"?"Zaevidovať znova":"Zaevidovať"}</button>`}
+            : efakturaPreskocena(z)
+            ? `<span style="color:var(--ink-soft);font-size:11.5px">preskočená</span>
+               <button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="efakturaVratSpat('${esc(z.id)}')"${zam("efaktury")} title="Vrátiť medzi čakajúce">Predsa zaevidovať</button>`
+            : `<button class="aabtn pri" style="padding:5px 9px;font-size:11px" onclick="efakturaZaevidujte('${esc(z.id)}')"${zam("efaktury")}>${z.stav==="zaevidovana"?"Zaevidovať znova":"Zaevidovať"}</button>
+               <button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="efakturaPreskoc('${esc(z.id)}')"${zam("efaktury")} title="Doklad sa evidovať nebude — originál ostáva v archíve">Nezaevidovať</button>`}
             <button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="otvorDokladSubor('${esc(z.cesta)}')" title="Otvoriť originál XML">XML</button></div>
         </div>`).join("") : `<div class="aempty">Zo siete zatiaľ neprišlo nič.</div>`}</div>
     </div>
@@ -27627,7 +27631,41 @@ function efakturaVybavena(z){
   if(!String(z.cesta||"").trim()) return true;
   return efakturaMaDoklad(z);
 }
-function efakturyCakajuce(){ return efakturyPrijate().filter(z=>z && !efakturaVybavena(z)); }
+// Doklad, ktorý sa evidovať NEBUDE — uvítacia správa poštára, duplicita,
+// doklad pre inú firmu. Do 18. 9. 2026 z prijatých viedla jediná cesta von:
+// zaevidovať. Uvítacie správy na 0,00 € tak ostávali navždy „čaká" a počet
+// na dlaždici by nikdy neklesol na nulu — a počítadlo, ktoré sa nedá vynulovať,
+// sa človek naučí prehliadať aj vtedy, keď ukazuje skutočnú faktúru.
+//
+// Nie je to zmazanie: originál ostáva v archíve (zákon žiada 10 rokov) a
+// rozhodnutie sa dá vrátiť. Preto „preskočená", nie „odmietnutá".
+function efakturaPreskocena(z){ return !!z && z.stav==="preskocena"; }
+function efakturyCakajuce(){
+  return efakturyPrijate().filter(z=>z && !efakturaVybavena(z) && !efakturaPreskocena(z));
+}
+function efakturaPreskoc(id){
+  if(!strazZapis("efaktury")) return;
+  const z=efakturyPrijate().find(x=>String(x.id)===String(id));
+  if(!z) return;
+  // Pri nenulovej sume sa pýtame: preskočiť skutočnú faktúru znamená, že
+  // nebude vo výdavkoch — a to je rozhodnutie o dani, nie o poriadku v zozname.
+  const suma=+z.spolu||0;
+  if(suma>0 && !confirm("Doklad „"+(z.cislo||z.id)+"“ na "+eur(suma)+" sa nezaeviduje do výdavkov.\n\n"
+      +"Originál ostáva v archíve a rozhodnutie sa dá vrátiť.\n\nPokračovať?")) return;
+  z.stav="preskocena"; z.preskocene=new Date().toISOString();
+  poZmene();
+  if(typeof appEfaktury==="function" && modulNaObrazovke()==="efaktury") appEfaktury();
+  if(typeof renderLauncher==="function") renderLauncher();
+}
+function efakturaVratSpat(id){
+  if(!strazZapis("efaktury")) return;
+  const z=efakturyPrijate().find(x=>String(x.id)===String(id));
+  if(!z) return;
+  z.stav="nove"; delete z.preskocene;
+  poZmene();
+  if(typeof appEfaktury==="function" && modulNaObrazovke()==="efaktury") appEfaktury();
+  if(typeof renderLauncher==="function") renderLauncher();
+}
 function efakturaMam(id){ return efakturyPrijate().some(x=>String(x.id)===String(id)); }
 
 // Prevzatie JEDNÉHO dokladu (`postarPrevezmiRaz`) vracia zápis, alebo vyhodí chybu
@@ -33119,6 +33157,20 @@ function zapniObnovuCakajucich(){
     if(Date.now() - _cakajucePosledne < 20000) return;
     _cakajucePosledne = Date.now();
     if(typeof nacitajCakajuce==="function") nacitajCakajuce(true);
+    // 🔴 18. 9. 2026, Roman: „zvonček neupozornil na novú e-faktúru, iba na
+    // bankovú transakciu." Schránka mailov sa pri návrate na kartu obnovovala,
+    // prijaté e-faktúry NIE — tie sa ťahali len pri spustení appky a pri
+    // otvorení modulu. Doklad, ktorý prišiel počas otvorenej appky, sa tak
+    // ohlásil až po reštarte. Dva kanály dovnútra, dve rôzne pravidlá — presne
+    // to sa v tomto projekte vždy rozíde.
+    //
+    // Vlastný strop päť minút na firmu si `postarNaPozadi` drží sám, takže
+    // prepínanie kariet server nezaplaví. Zvonček sa prekreslí po oboch.
+    if(typeof postarNaPozadi==="function"){
+      Promise.resolve(postarNaPozadi()).then(()=>{
+        if(typeof renderNotifBadge==="function") renderNotifBadge();
+      }).catch(e=>console.error("obnova prijatých e-faktúr pri návrate:", e));
+    }
   });
 }
 
