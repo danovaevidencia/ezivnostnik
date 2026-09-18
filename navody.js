@@ -196,11 +196,11 @@ efaktury: {
   ulohy: [
     {
       id: "zapnut",
-      nazov: "Zapnúť odosielanie",
-      kedy: "Raz, predtým než pošlete prvú e-faktúru.",
+      nazov: "Zapnúť alebo vypnúť odosielanie",
+      kedy: "V pláne Platiteľ DPH a Účtovník je odosielanie zapnuté od začiatku. Sem idete, len keď ho chcete vypnúť alebo znova zapnúť.",
       kroky: [
         { text: "Otvorte [[app:data#set_postar|nastavenia — kartu E-faktúry]].", tlacidlo: "E-faktúry", snimka: "efaktury-zapnut-1" },
-        { text: "Zaškrtnite <b>Odosielať faktúry sieťou Peppol</b> a nastavenia uložte.", tlacidlo: "sieťou Peppol", snimka: "efaktury-zapnut-2" },
+        { text: "Zaškrtnite alebo odškrtnite <b>Odosielať faktúry sieťou Peppol</b> a nastavenia uložte.", tlacidlo: "sieťou Peppol", snimka: "efaktury-zapnut-2" },
       ],
       tip: "Voľba sa neponúkne, kým firma nemá vyplnené [[app:data#set_dic|DIČ]] — podľa neho vás sieť pozná.",
     },
