@@ -273,8 +273,10 @@ function dniPokojaZTextu(text){
   return {v, chyby: chyby.length ? chyby : dniPokojaChyby(v)};
 }
 
-// Hodnota platná k dátumu. Berie posledný záznam, ktorého účinnosť už nastala.
-function sadzbaKuDnu(kluc, datum){
+// Celý záznam platný k dátumu — hodnota, odkedy platí a odkiaľ je. Karta
+// v Nastaveniach ukazuje všetky tri: holé číslo bez pôvodu sa nedá overiť
+// a človek nemá ako zistiť, či appka počíta podľa aktuálneho zákona.
+function sadzbaZaznam(kluc, datum){
   const zoz=(SADZBY[kluc]||{}).h;
   if(!zoz || !zoz.length) return undefined;
   const d = datum instanceof Date
@@ -282,7 +284,12 @@ function sadzbaKuDnu(kluc, datum){
     : String(datum||"").slice(0,10);
   let najdene;
   zoz.forEach(z=>{ if(!z.od || (d && z.od<=d)) { if(!najdene || !najdene.od || (z.od && z.od>=najdene.od)) najdene=z; } });
-  return najdene ? najdene.v : undefined;
+  return najdene;
+}
+// Hodnota platná k dátumu. Berie posledný záznam, ktorého účinnosť už nastala.
+function sadzbaKuDnu(kluc, datum){
+  const z=sadzbaZaznam(kluc, datum);
+  return z ? z.v : undefined;
 }
 // Chýbajúca sadzba nesmie skončiť ako undefined vo výpočte — z toho vznikne NaN
 // alebo tichá nula a nikto si to nevšimne. Keď sa pýtame na obdobie staršie než

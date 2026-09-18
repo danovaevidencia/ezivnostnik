@@ -4724,6 +4724,67 @@ function ocistiNastaveniaOdSadzieb(S){
   return {ponechane, odstranene};
 }
 
+// ── PREHĽAD SADZIEB V NASTAVENIACH (č. 160) ────────────────────────────────
+// Do 17. 9. 2026 tu bolo šesť editovateľných polí s legislatívnymi sadzbami.
+// Nepatrili tam z troch dôvodov naraz: mení ich zákon (nie zákazník), appka
+// ich už má v tabuľke sadzieb, ktorú spravuje admin, a formulár do dát firmy
+// vracal zastarané defaulty (viď `ulozNastavenia`). Ostáva prehľad — čítať
+// sa dá, prepísať nie.
+//
+// Prepísanie sa ale nesmie stratiť: kto ho má z minulosti, musí ho VIDIEŤ.
+// Skryté prepísanie je horšie než žiadne — appka by počítala inak, než hovorí
+// zákon, a nikde by to nesvietilo (kap. 16, „nálepka namiesto údaja“).
+const NAST_SADZBY_PREHLAD = [
+  { kluc:"danPrijem",   popis:"Daň z príjmu",                          tvar:"pct" },
+  { kluc:"sadzbaDPH",   popis:"Sadzba DPH",                            tvar:"pct" },
+  { kluc:"zdravSadzba", popis:"Zdravotné poistenie — sadzba",          tvar:"pct" },
+  { kluc:"vzKoef",      popis:"Koeficient vymeriavacieho základu",     tvar:"cislo" },
+  { kluc:"minVZmesZP",  popis:"Minimálny mesačný vymeriavací základ ZP", tvar:"eur" },
+  { kluc:"minOdvodZP",  popis:"Minimálny mesačný odvod ZP",            tvar:"eur" },
+  { kluc:"nezdanitCast",popis:"Nezdaniteľná časť na daňovníka",        tvar:"eur", nastavenia:["nezdanitCast2026"] },
+];
+function nastSadzbaTvar(v, tvar){
+  if(v==null || isNaN(v)) return "—";
+  if(tvar==="pct")   return (Math.round(v*10000)/100).toLocaleString("sk")+" %";
+  if(tvar==="cislo") return String(v).replace(".", ",");
+  return eur(v);
+}
+// Kľúč v nastaveniach firmy, ktorý sadzbu prebíja — alebo null, keď žiadny.
+function nastSadzbaPrepisana(S, r){
+  const alt=[].concat(r.nastavenia||[], r.kluc);
+  for(const k of alt){ const v=+(S||{})[k]; if((S||{})[k]!==undefined && (S||{})[k]!=="" && !isNaN(v) && v!==0) return k; }
+  return null;
+}
+function nastSadzbyPrehladHtml(S){
+  const dnes=new Date();
+  const riadky=NAST_SADZBY_PREHLAD.map(r=>{
+    const z=sadzbaZaznam(r.kluc, dnes);
+    const prepis=nastSadzbaPrepisana(S, r);
+    const zakon=z ? nastSadzbaTvar(z.v, r.tvar) : "—";
+    const hodnota=prepis ? nastSadzbaTvar(+S[prepis], r.tvar) : zakon;
+    return `<div style="display:flex;align-items:baseline;gap:10px;padding:7px 0;border-top:1px solid var(--line)">
+      <div style="flex:1;min-width:0">${esc(r.popis)}
+        <div style="font-size:11px;color:var(--ink-soft)">${z && z.od ? "platí od "+esc(sadzbaDatum(z.od)) : "bez dátumu účinnosti"}${z && z.zdroj ? " · "+esc(z.zdroj) : ""}</div>
+        ${prepis?`<div style="font-size:11px;color:var(--neg);margin-top:2px">Máte vlastnú hodnotu — appka počíta ňou, nie sadzbou zo zákona (${esc(zakon)}).
+          <button class="btn mini" onclick="vratSadzbuZakon('${esc(r.kluc)}')" style="margin-left:6px"${zam("data")}>Vrátiť zákonnú</button></div>`:""}
+      </div>
+      <b style="white-space:nowrap${prepis?";color:var(--neg)":""}">${esc(hodnota)}</b>
+    </div>`;
+  }).join("");
+  return `<div style="font-size:12.5px">${riadky}</div>`;
+}
+// Zmazanie vlastnej hodnoty. Nie je to „obnovenie defaultu“ — je to návrat
+// k tabuľke, takže sadzba odteraz pôjde s legislatívou aj spätne za roky,
+// ktoré prepísanie prebíjalo (prepísanie totiž rok neriešilo vôbec).
+function vratSadzbuZakon(kluc){
+  if(!strazZapis("data")) return;
+  const r=NAST_SADZBY_PREHLAD.find(x=>x.kluc===kluc); if(!r) return;
+  const S=firmaData.settings||{};
+  [].concat(r.nastavenia||[], r.kluc).forEach(k=>{ delete S[k]; });
+  poZmene();
+  appData();
+  cloudMsg("Sadzba sa znova berie zo zákona.","ok");
+}
 
 
 // ── NORMY SPOTREBY — jeden zdroj pravdy ──
@@ -8406,6 +8467,27 @@ function dphRegistracia(datum){
 function jePlatcaDPH(datum){ return dphRegistracia(datum)==="platca"; }
 // Registrovaný pre DPH (platiteľ alebo § 7a) — modul DPH, priznanie, samozdanenie.
 function jeRegistrovanyDPH(datum){ return dphRegistracia(datum)!==""; }
+
+// ── SADZBA DPH — jedno miesto (č. 161) ─────────────────────────────────────
+// Do 18. 9. 2026 stála sadzba na ôsmich miestach v tvare
+// `S.sadzbaDPH != null ? +S.sadzbaDPH : 0.23`, kým `sadzbaFirmy("sadzbaDPH")`
+// sa nevolala ANI RAZ. Zmena v `sadzby.json` sa teda do výpočtu nedostala
+// nikdy — presne to, čo mala odstrániť kap. 30 („sadzby zamrznuté v dátach
+// zákazníka“). Číslo 0,23 bolo pritom na každom z tých miest napísané zvlášť.
+//
+// Dva dôsledky navyše, oba mizli z dohľadu:
+//  · onboarding zapisuje neplatiteľovi `sadzbaDPH: 0` a migrácia nulu ponechá
+//    (v histórii nikdy nebola). Po registrácii k DPH by tá nula išla do
+//    výpočtu — `sadzbaFirmy` ju preskakuje, takže je odteraz neškodná;
+//  · sadzba sa viaže na DÁTUM dokladu, nie na dnešok. História sadzby začína
+//    1. 1. 2025; starší doklad dostane najstaršiu známu hodnotu a `sadzbaSPoistkou`
+//    to nahlási ako medzeru, namiesto aby ticho počítal dneškom.
+function sadzbaDPHzakon(datum){
+  const rok=+String(datum||"").slice(0,4) || new Date().getFullYear();
+  return sadzbaFirmy("sadzbaDPH", rok);
+}
+// Sadzba pre NAŠU firmu k dátumu dokladu — neplatiteľ nemá DPH žiadnu.
+function sadzbaDPHfirmy(datum){ return jePlatcaDPH(datum) ? sadzbaDPHzakon(datum) : 0; }
 // Druh registrácie za obdobie „RRRR-MM" / „RRRR-Qn" podľa jeho POSLEDNÉHO dňa —
 // hlavička priznania, tlačidlá modulu DPH, kalendár, uzávierka. Doklady sa zaraďujú
 // podľa vlastného dátumu; mesiac prechodu na platiteľa appka ako celok neroztrhne
@@ -11160,8 +11242,7 @@ function editPrijmovyDoklad(idx){
     ? {typDokladu:"prijmovy", cislo:dalsieCisloPrijmoveho(), datum:new Date().toISOString().slice(0,10),
        popis:"", odberatel:"", spolu:""}
     : Object.assign({}, firmaData.faktury[idx]);
-  const S=firmaData.settings||{};
-  const sadzba = jePlatcaDPH() ? (S.sadzbaDPH!=null ? +S.sadzbaDPH : 0.23) : 0;
+  const sadzba = sadzbaDPHfirmy(f.datum);
   openModal(nova?"Príjem v hotovosti":"Upraviť príjmový doklad", `
     <div class="mrow2">
       <div class="mfield"><label>Číslo dokladu</label><input id="pd_cislo" value="${esc(f.cislo||"")}"></div>
@@ -11215,8 +11296,7 @@ function editPrijmovyDoklad(idx){
 // hotovosť, myslí v sume „na ruku" a základ dane v hlave nepočíta.
 function pdPozn(){
   const p=document.getElementById("pd_pozn"); if(!p) return;
-  const S=firmaData.settings||{};
-  const sadzba = jePlatcaDPH() ? (S.sadzbaDPH!=null ? +S.sadzbaDPH : 0.23) : 0;
+  const sadzba = sadzbaDPHfirmy(val("pd_datum"));
   const suma=r2(parseFloat(String(val("pd_spolu")).replace(",","."))||0);
   if(!(suma>0)){ p.textContent=""; return; }
   if(!sadzba){ p.innerHTML="Do príjmov sa započíta <b>"+eur(suma)+"</b>."; return; }
@@ -11488,8 +11568,7 @@ function faktSadzba(f){
   if(ul!=null && +ul>=0) return +ul>1 ? r2(+ul/100) : +ul;
   const bez=+((f||{}).bez)||0, dph=+((f||{}).dph)||0;
   if(bez>0) return r2(dph/bez);
-  const S=firmaData.settings||{};
-  return jePlatcaDPH() ? (S.sadzbaDPH!=null ? +S.sadzbaDPH : 0.23) : 0;
+  return sadzbaDPHfirmy((f||{}).datum);
 }
 function faktSumy(f){
   const sadzba=faktSadzba(f);
@@ -12566,8 +12645,7 @@ function odvodSadzbuDPH(bez, dph, zaloha){
       return ZAKONNE_SADZBY_DPH.reduce((a,x)=>Math.abs(x-pomer)<Math.abs(a-pomer)?x:a, 0.23);
     }
   }
-  const zo=(firmaData&&firmaData.settings&&firmaData.settings.sadzbaDPH);
-  return (zaloha!=null?zaloha:(zo!=null?+zo:0.23));
+  return (zaloha!=null ? zaloha : sadzbaDPHzakon());
 }
 
 // UI: dotiahne doklad z FS a vyplní OCR formulár (partner, suma, IČO, IČ DPH, dátum)
@@ -14381,7 +14459,7 @@ function vypisPridajVydavok(txId){
   const tx=vypisNajdiPohyb(txId); if(!tx){ alert("Pohyb sa nenašiel."); return; }
   const datum=(tx.datum||"").slice(0,10);
   const suma=Math.abs(+tx.suma||0);
-  const sadzba=(firmaData.settings||{}).sadzbaDPH||0.23;
+  const sadzba=sadzbaDPHfirmy(datum);
   const bez=r2(suma/(1+sadzba)), dph=r2(suma-bez);
   openModal("Výdavok z bankového pohybu", `
     <div style="background:var(--brand-lite);color:var(--brand-deep);font-size:12px;padding:9px 12px;border-radius:9px;margin-bottom:14px">Vytvárame výdavok z pohybu <b>${esc(tx.proti||"")}</b> · ${eur(suma)}. Skontrolujte rozpad DPH.</div>
@@ -19198,7 +19276,7 @@ function majetokPorovnajOtvor(id){
 function porovnajScenar(m, datum, trhova){
   const S=firmaData.settings||{};
   const jePlatca=!!(firmaData.meta&&firmaData.meta.icdph);
-  const sadzbaDPH=+S.sadzbaDPH||0.23;
+  const sadzbaDPH=sadzbaDPHzakon(datum);
   const rokVyr=+String(datum||"").slice(0,4)||new Date().getFullYear();
   const rokZar=+String(m.datumZaradenia||m.zaradenie||"").slice(0,4)||rokVyr;
   const pl=odpisPlan(m);
@@ -19862,20 +19940,9 @@ function appData(){
     </div>
     <div class="card" style="margin-bottom:14px">
       <h2 style="font-size:16px;margin-bottom:4px">Daňové sadzby</h2>
-      <div class="csub" style="margin-bottom:14px">Vstupujú do daňových výpočtov. Zmeňte pri legislatívnych zmenách.</div>
-      <div class="mrow2">
-        <div class="mfield"><label>Daň z príjmu (0.15 = 15 %)</label><input type="number" step="0.01" id="set_danPrijem" value="${esc((d.settings||{}).danPrijem??0.15)}"></div>
-        <div class="mfield"><label>Sadzba DPH (0.23 = 23 %)</label><input type="number" step="0.01" id="set_sadzbaDPH" value="${esc((d.settings||{}).sadzbaDPH??0.23)}"></div>
-      </div>
-      <div class="mrow2">
-        <div class="mfield"><label>Zdravotné — sadzba (2026: 0.16 = 16 %)</label><input type="number" step="0.01" id="set_zdravSadzba" value="${esc((d.settings||{}).zdravSadzba??0.16)}"></div>
-        <div class="mfield"><label>Koeficient vymeriavacieho základu</label><input type="number" step="0.000001" id="set_vzKoef" value="${esc((d.settings||{}).vzKoef??0.672948)}"></div>
-      </div>
-      <div class="mrow2">
-        <div class="mfield"><label>Min. mesačný VZ zdravotné (2026: 762 €)</label><input type="number" step="0.01" id="set_minVZmesZP" value="${esc((d.settings||{}).minVZmesZP??762)}"></div>
-        <div class="mfield"><label>Min. mesačný odvod ZP (2026: 121,92 €)</label><input type="number" step="0.01" id="set_minOdvodZP" value="${esc((d.settings||{}).minOdvodZP??121.92)}"></div>
-      </div>
-      <div class="mrow2">
+      <div class="csub" style="margin-bottom:14px">Čísla, z ktorých appka počíta. Nie sú na nastavenie — mení ich zákon a appka si ich ťahá z tabuľky sadzieb, takže sa k vám dostanú aj bez aktualizácie.</div>
+      ${nastSadzbyPrehladHtml(d.settings||{})}
+      <div class="mrow2" style="margin-top:16px">
         <div class="mfield"><label>Mesačný odpis auta (€, bez DPH)</label><input type="number" step="0.01" id="set_odpisAutoMes" value="${esc((d.settings||{}).odpisAutoMes||0)}">
           <div style="font-size:11.5px;color:var(--ink-soft);margin-top:4px">${
             odpisDaneRok(new Date().getFullYear(), d.settings||{}).zdroj==="majetok"
@@ -19883,7 +19950,6 @@ function appData(){
             : "Použije sa dovtedy, kým si auto nezaevidujete v <b>Majetku</b>. Potom appka počíta odpisy sama a toto číslo prestane platiť."
           }</div>
         </div>
-        <div class="mfield"><label>Nezdaniteľná časť ${new Date().getFullYear()} (€)</label><input type="number" step="0.01" id="set_nczd" value="${esc((d.settings||{}).nezdanitCast2026||5966.73)}"></div>
         <div class="mfield">
           <label>III. pilier — zaplatené za rok (€)</label>
           <input type="number" step="0.01" min="0" id="set_3pilier" value="${esc((d.settings||{}).nczd3pilier||0)}">
@@ -20184,14 +20250,14 @@ async function ulozNastavenia(){
   if(!firmaData.settings) firmaData.settings={};
   const s=firmaData.settings, num=(id,def)=>{const v=parseFloat(val(id));return isNaN(v)?def:v;};
   // daňové sadzby
-  s.danPrijem=num("set_danPrijem",0.15);
-  s.sadzbaDPH=num("set_sadzbaDPH",0.23);
-  s.zdravSadzba=num("set_zdravSadzba",0.16);
-  s.vzKoef=num("set_vzKoef",0.672948);
-  s.minVZmesZP=num("set_minVZmesZP",762);
-  s.minOdvodZP=num("set_minOdvodZP",121.92);
+  // 🔴 Legislatívne sadzby sa tu ZÁMERNE NEZAPISUJÚ (17. 9. 2026, č. 160).
+  // Do tohto dňa formulár ukazoval natvrdo napísané defaulty — migrácia kľúče
+  // z nastavení maže, takže pole bolo prázdne a zobrazil sa literál. Stlačenie
+  // „Uložiť všetky nastavenia“ tú starú hodnotu zapísalo späť do dát firmy
+  // a natrvalo prebilo tabuľku. Obrazovka teda vracala to, čo migrácia
+  // upratuje. `obNovaFirma` ich nekopírovala už predtým — teraz je to pravidlo
+  // na jednom mieste.
   s.odpisAutoMes=num("set_odpisAutoMes",0);
-  s.nezdanitCast2026=num("set_nczd",5966.73);
   s.nczd3pilier=num("set_3pilier",0);
   // preddavky
   s.preddavokZP=num("set_preddavokZP",0);
@@ -28466,8 +28532,9 @@ function rozpisRiadky(x){
   // vráti riadky rozpisu; ak doklad nemá rozpis, vytvorí jeden z bez/dph
   if(maRozpis(x)) return x.rozpis.map(r=>({sadzba:+r.sadzba||0, bez:r2(+r.bez||0), dph:r2(+r.dph||0)}));
   const bez=r2(+x.bez||0), dph=r2(+x.dph||0);
-  const sadzba = bez!==0 ? Math.round(dph/bez*100) : ((firmaData.settings&&firmaData.settings.sadzbaDPH||0.23)*100);
-  return [{sadzba:[23,19,10,5].includes(sadzba)?sadzba:Math.round((firmaData.settings&&firmaData.settings.sadzbaDPH||0.23)*100), bez, dph}];
+  const zakladna = Math.round(sadzbaDPHzakon(x.datum)*100);
+  const sadzba = bez!==0 ? Math.round(dph/bez*100) : zakladna;
+  return [{sadzba:[23,19,10,5].includes(sadzba)?sadzba:zakladna, bez, dph}];
 }
 // normalizuj: bez/dph/spolu = súčet rozpisu (aby hlavné polia vždy sedeli)
 function normalizujRozpis(x){
@@ -28743,7 +28810,7 @@ function dphOddielVydavok(x, riadok){
 }
 function dphZberMesiac(mk){
   const d=firmaData; const doklady=[];
-  const sadzbaDef=(d.settings&&d.settings.sadzbaDPH)||0.23;
+  const sadzbaDef=sadzbaDPHzakon(mk+"-28");
   // ── VYSTAVENÉ FAKTÚRY ──
   // Kam faktúra patrí, rozhoduje jej druh — nie predpoklad. Dovtedy tu bolo
   // natvrdo „A1", takže vystavený dobropis aj faktúra pre nepodnikateľa
