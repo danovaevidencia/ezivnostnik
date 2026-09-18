@@ -2160,7 +2160,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.18-OY";  // Titulok okna podľa modulu, krátke meno appky v manifeste, logo na prihlásení v nainštalovanej appke nevedie na web
+const APP_VERZIA = "2026.09.18-OZ";  // Firma mimo siete Peppol: SAPI 403 je stav, nie chyba — schránka sa na pozadí nepýta, po ťuknutí povie prečo
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -27782,7 +27782,7 @@ async function postarSynchronizuj(tiche){
   if(_postarBezi===firmaData || !postarDostupny() || !mozemPisat("efaktury")) return 0;
   const beh=behFirmy();
   _postarBezi=beh.data;
-  let vzatych=0;
+  let vzatych=0, zlyhalo=false;
   try{
     // Len NEPOTVRDENÉ doklady (`status=received`) a všetky strany. Zoznam ide od
     // najstaršieho a potvrdenie mení len stav u poštára — do 14. 9. 2026 appka
@@ -27827,10 +27827,44 @@ async function postarSynchronizuj(tiche){
       }
     }
   }catch(e){
-    console.error("schránka poštára:", e);
-    if(!tiche && typeof cloudMsg==="function") cloudMsg("Schránku sa nepodarilo načítať: "+e.message,"warn");
+    zlyhalo=true;
+    if(postarJeMimoSiete(e)){
+      // Nie chyba, ale stav: firma si poskytovateľa ešte nevybrala. Poznačí sa,
+      // aby sa jej na pozadí schránka už nepýtala — a človek pri ťuknutí
+      // dostane vetu, s ktorou vie niečo urobiť, nie kód z hlbín poštára.
+      _postarMimoSiete[beh.koren]=Date.now();
+      console.info("schránka poštára: firma zatiaľ nie je v sieti Peppol cez eživnostník (SAPI 403)");
+      if(!tiche && typeof cloudMsg==="function") cloudMsg("Firma zatiaľ nie je zapojená do siete Peppol cez eživnostník. Schránka sa sprístupní, keď si nás vyberiete na portáli Finančnej správy — návod je v module E-faktúry.","warn");
+    }else{
+      console.error("schránka poštára:", e);
+      if(!tiche && typeof cloudMsg==="function") cloudMsg("Schránku sa nepodarilo načítať: "+e.message,"warn");
+    }
   }finally{ if(_postarBezi===beh.data) _postarBezi=null; }
+  // Úspech znamená, že firma v sieti je — ak bola poznačená, poznámka padá.
+  if(!zlyhalo) delete _postarMimoSiete[beh.koren];
   return vzatych;
+}
+// ── FIRMA, KTORÁ V SIETI CEZ NÁS EŠTE NIE JE (e2e A3, 18. 9. 2026) ───────────
+// Do prepnutia na ostrú sieť (kap. 129.3) odpovedal sandbox každej firme. Ostrý
+// SAPI firme, ktorá nie je pod naším partnerským účtom, vráti 403 — a keďže
+// `postarDostupny` pozerá len na DIČ a zapnutý príjem, appka sa pýtala schránky
+// každej firmy s DIČ pri každom štarte. Na pozadí to končilo chybou v konzole
+// (prvý produkčný beh sady B to zachytil v A3), po ťuknutí hláškou „SAPI 403“.
+// Týkalo sa to všetkých firiem okrem jedinej, ktorá v sieti cez nás je.
+//
+// 403 NIE JE vždy „ešte nie je v sieti“: zlý alebo odvolaný token vráti 403 aj
+// firme, ktorá v sieti je. Keď appka z partnerského portálu vie, že firma je
+// AKTÍVNA, 403 ostáva chybou — inak by sme skutočný výpadok zamaskovali presne
+// tou vetou, ktorá ho má odlíšiť.
+let _postarMimoSiete={};
+function postarJeMimoSiete(e){
+  if(!e || e.stav!==403) return false;
+  try{
+    const S=_peppolSiet;
+    if(S && S.firma===firmaId && S.nacitane && S.odpoved
+       && peppolStavFirmy(S.odpoved, firmaData.settings, Date.now())==="aktivna") return false;
+  }catch(_){}
+  return true;
 }
 
 // ── STAV DORUČENIA ODOSLANÝCH (PLAN §21.3 bod 6) ───────────────────────────
@@ -27970,7 +28004,11 @@ async function postarNaPozadi(len){
   const teraz=Date.now();
   let n=0;
   try{
-    if(len!=="stav" && postarDostupny() && mozemPisat("efaktury") && teraz-_postarNaPozadiKedy>=POSTAR_POZADIE_MS){
+    // Firma, ktorá pri poslednom pokuse v sieti cez nás nebola (403), sa na
+    // pozadí nepýta znova — do reštartu appky alebo do ručného „Skontrolovať
+    // schránku“, ktoré skúša vždy a pri úspechu značku zruší.
+    if(len!=="stav" && postarDostupny() && mozemPisat("efaktury") && !_postarMimoSiete[firmaId]
+       && teraz-_postarNaPozadiKedy>=POSTAR_POZADIE_MS){
       _postarNaPozadiKedy=teraz;
       n+=await postarSynchronizuj(true);
     }
