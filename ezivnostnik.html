@@ -2150,7 +2150,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.17-OU";  // Platba kartou sa číta z notifikácie (štítok „Platba kartou“); nečitateľný mail z banky dvíha odznak a zvonček hlási schránku (č. 159); Nastavenia už nepadajú v režime PHM „Náhrady za km“
+const APP_VERZIA = "2026.09.18-OV";  // Notifikácie z banky sa evidujú a párujú samy; zvonček hlási zaevidované aj nespárované (č. 163)
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -6524,6 +6524,29 @@ function zbierNotifikacie(){
       detail:(caka===1?"1 doklad":caka<5?caka+" doklady":caka+" dokladov")+" zo siete Peppol",
       akcia:()=>otvorApp("efaktury")});
   }catch(e){ console.error("zvonček — prijaté e-faktúry:", e); }
+
+  // ── notifikácie z banky: čo appka zaevidovala sama a čo ostalo (č. 163) ──
+  // Dve správy, nie jedna. „Zaevidovala som" je novinka, ktorá po prečítaní
+  // stratí zmysel, a nesie počet, takže sa pri ďalšej dávke ozve znova.
+  // „Čaká na doklad" je práca — tá zmizne až vtedy, keď je hotová, a počíta
+  // sa zo stavu pohybov, nie z uloženého čísla (kap. 79.4).
+  try{
+    const P=(firmaData.settings||{}).poslednePrevzatieMailov;
+    if(P && P.pridanych>0 && (Date.now()-new Date(P.kedy).getTime())/86400000 < 14){
+      out.push({kluc:"mailAuto:"+P.kedy, ic:"🏦", nal:"info",
+        nazov:"Appka zaevidovala "+P.pridanych+" "+sklonPohyb(P.pridanych)+" z bankových notifikácií",
+        detail:(P.sparenych
+          ? P.sparenych+" z nich rovno priradila k dokladom."
+          : "Priradiť k dokladom sa zatiaľ nepodarilo ani jeden.")
+          +" Prišli e-mailom z banky, nie z výpisu.",
+        akcia:()=>{ bFilter="vsetky"; otvorApp("banka"); }});
+    }
+    const cakaju=notifNesparovane();
+    if(cakaju.length) out.push({kluc:"mailNespar:"+cakaju.length, ic:"🧾", nal:"info",
+      nazov:cakaju.length+" "+sklonPohyb(cakaju.length)+" z banky čaká na doklad",
+      detail:"Appka ich zaevidovala z notifikácií, ale nenašla k nim bloček ani faktúru.",
+      akcia:()=>{ bFilter="nespar"; otvorApp("banka"); }});
+  }catch(e){ console.error("zvonček — prevzaté notifikácie:", e); }
 
   // ── schránka: doklady a pohyby čakajúce na spracovanie ──
   // Jedno pravidlo na celú schránku, nie štyri: `cakajuceVeta` už vie povedať,
@@ -32875,6 +32898,71 @@ async function nacitajCakajuce(tiche){
     console.warn("Čakajúce doklady sa nenačítali:", _cakajuceChyba);
   }
   if(typeof renderHomeStrip==="function") renderHomeStrip();
+  // Prevzatie beží AŽ po načítaní zoznamu a len keď je do čoho písať.
+  try{ await prevezmiNotifikacieAuto(); }catch(e){ console.error("automatické prevzatie notifikácií:", e); }
+}
+
+// ── AUTOMATICKÉ PREVZATIE NOTIFIKÁCIÍ (č. 163) ─────────────────────────────
+//
+// Pohyb z mailu sa dovtedy pridával jedným klikom. Dôvod bol bezpečnostný:
+// kto pozná prijímaciu adresu, vie poslať mail, ktorý vyzerá ako notifikácia
+// z banky. Roman to 18. 9. 2026 vedome prehodnotil — notifikácie majú chodiť
+// samy ako pri importe výpisu, vrátane príjmov, a zvonček má povedať, čo sa
+// zaevidovalo a čo ostáva nespárované.
+//
+// Dve poistky ostávajú, lebo nie sú o pohodlí:
+//  · berie sa len mail, ktorý appka pripísala ZNÁMEJ BANKE (`dovera==="banka"`).
+//    Mail, ktorý len obsahuje zostatok, je naďalej na klik — inak by stačilo
+//    poslať čokoľvek s číslom a slovom „zostatok";
+//  · pohyb, ku ktorému už podobný existuje, sa NEPRIDÁ sám. Banka o jednej
+//    platbe kartou posiela dva maily (použitie karty a obrat na účte) a
+//    rozhodnúť, či ide o jednu platbu alebo dve, appka nevie. Otázka ostáva
+//    človeku v schránke — automatika ju nesmie odkliknúť za neho.
+let _notifAutoBezi = false;
+async function prevezmiNotifikacieAuto(){
+  if(_notifAutoBezi || localMode || demoMode || !sb || !firmaId) return null;
+  if(typeof mozemPisat==="function" && !mozemPisat("banka")) return null;
+  const beh=behFirmy();
+  _notifAutoBezi = true;
+  try{
+    const zoz=cakajuceNotifikacie().filter(x=>x.pohyb && !x.uzMam && x.dovera==="banka"
+                                              && !podobnyPohyb(x.pohyb));
+    if(!zoz.length) return null;
+    if(!Array.isArray(firmaData.vypis)) firmaData.vypis=[];
+    const pohyby=zoz.map(x=>x.pohyb);
+    pohyby.forEach(p=>firmaData.vypis.push(p));
+    let sparene=0;
+    try{ sparene=autoParujPohyby(pohyby); }catch(e){ console.error("párovanie prevzatých notifikácií:", e); }
+    // Stopa pre zvonček. V `settings`, rovnako ako `poslednyImportBanka` —
+    // je to tá istá vec pre druhú cestu dovnútra a zvonček ich číta rovnako.
+    if(!firmaData.settings) firmaData.settings={};
+    firmaData.settings.poslednePrevzatieMailov={
+      kedy:new Date().toISOString(), pridanych:pohyby.length, sparenych:sparene };
+    poZmene();
+    // Mail bez prílohy je vybavený — pohyb z neho je v evidencii. Mail
+    // S prílohou ostáva v schránke ako doklad; jeho pohyb sa už neponúkne,
+    // lebo `id` pohybu je vo výpise.
+    const idsBezPrilohy=zoz.filter(x=>x.z.stav==="bez_prilohy").map(x=>String(x.z.id));
+    if(idsBezPrilohy.length){
+      const { error } = await sb.from("cakajuce_doklady")
+        .update({ stav:"spracovane", spracovane:new Date().toISOString() }).in("id", idsBezPrilohy);
+      if(error) console.error("uzavretie prevzatých notifikácií:", error.message||error);
+      if(!beh.platny()) return null;
+      cakajuceDoklady=(cakajuceDoklady||[]).filter(z=>!idsBezPrilohy.includes(String(z.id)));
+    }
+    if(typeof renderHomeStrip==="function") renderHomeStrip();
+    return { pridanych:pohyby.length, sparenych:sparene };
+  } finally { _notifAutoBezi = false; }
+}
+// Pohyby z mailu, ktoré čakajú na doklad. Počíta sa to zo stavu pohybov, nie
+// z uloženého čísla — hláška tak zmizne sama, keď je práca hotová.
+function notifNesparovane(){
+  return (firmaData.vypis||[]).filter(t=>{
+    if(!t || t.zdroj!=="mail") return false;
+    let s=null; try{ s=pohybStav(t); }catch(e){ return false; }
+    return !!s && s.kod!=="vybaveny" && s.kod!=="klasifikovany"
+        && s.kod!=="skryty" && s.kod!=="ignorovany";
+  });
 }
 
 const cakajuceNove = () => cakajuceDoklady.filter(x=>x.stav==="nove").length;
