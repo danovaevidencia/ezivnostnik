@@ -6504,9 +6504,10 @@ function zbierNotifikacie(){
 
   // ── daňové termíny do 14 dní ──
   try{
-    danoveTerminy(dnes, firmaData.settings||{}, 1)
+    // Splnený termín (zaplatený, vygenerovaný) zvonček nepripomína.
+    terminyStav(danoveTerminy(dnes, firmaData.settings||{}, 1), dnes)
       .map(t=>({...t, d:t.d, dni:dni(t.d)}))
-      .filter(t=>t.dni>=0 && t.dni<=14)
+      .filter(t=>t.dni>=0 && t.dni<=14 && !(t.stav && t.stav.hotovo))
       .sort((a,b)=>a.dni-b.dni)
       .forEach(t=>out.push({kluc:"termin:"+t.nazov+":"+new Date(t.d).toISOString().slice(0,10),
         ic:"📅", nal:t.dni<=3?"warn":"info", nazov:t.nazov,
@@ -6706,9 +6707,9 @@ function heroAkcie(){
   // zozbieraj veci vyžadujúce pozornosť: termíny, meškajúce faktúry, expirácie dokumentov
   const dnes=new Date(), akcie=[];
   // daňové termíny do 10 dní
-  const terminy=danoveTerminy(dnes, firmaData.settings||{}, 1)
+  const terminy=terminyStav(danoveTerminy(dnes, firmaData.settings||{}, 1), dnes)
     .map(t=>({...t, dni:Math.round((t.d-dnes)/86400000)}))
-    .filter(t=>t.dni>=0 && t.dni<=10)
+    .filter(t=>t.dni>=0 && t.dni<=10 && !(t.stav && t.stav.hotovo))
     .sort((a,b)=>a.dni-b.dni);
   terminy.slice(0,2).forEach(t=>akcie.push({
     ic:"📅", app:"kalendar", urgent:t.dni<=3,
@@ -25615,7 +25616,13 @@ function klasifikujPohyb(tx){
   const s=proti+" "+popis;
   const jeFS=/financ|danov[ýy]\s*urad|danovy urad|riaditelstvo sr|financne riaditelstvo|df sr/.test(s)||/8180500/.test(iban);
   if(jeFS || /^1[17]00\d/.test(vs)){
-    if(/^1100/.test(vs)) return {druh:"dph", kategoria:"dphOdvod", istota:"ista", preco:"FS · VS 1100 = DPH"};
+    // VS 1100 má aj DPH, aj preddavok na daň z príjmov — rozlíši ich až účet
+    // (rozpoznajOdvod, DANOVE_PREDCISLIA). Do 18. 9. 2026 bol každý 1100 „DPH“.
+    if(/^1100/.test(vs)){
+      if(DANOVE_PREDCISLIA[predcislieUctu(tx.ibanProti)]==="danFO")
+        return {druh:"danPrijem", kategoria:"danPrijem", istota:"ista", preco:"FS · účet dane z príjmov · VS 1100 = preddavok na daň"};
+      return {druh:"dph", kategoria:"dphOdvod", istota:"ista", preco:"FS · VS 1100 = DPH"};
+    }
     if(/^1700/.test(vs)||/^500/.test(vs)) return {druh:"danPrijem", kategoria:"danPrijem", istota:"ista", preco:"FS · VS 1700 = daň z príjmov"};
     return {druh:"danPrijem", kategoria:"danPrijem", istota:"mozna", preco:"platba finančnej správe"};
   }
@@ -35889,31 +35896,31 @@ function danoveTerminy(dnes, s, mesiacovDopredu){
     const kodMes=(mesiac===0 ? (rok-1)+"-12" : rok+"-"+String(mesiac).padStart(2,"0"));
     if(dphRegistraciaObdobia(kodMes)==="7a"){
       if(dphZberMesiac(kodMes).some(dk=>dk.samozdanenie))
-        list.push({d:dphTermin(kodMes), typ:"dph", nazov:"DPH priznanie (§ 7a)", detail:"za "+MES_SK[((mesiac-1)+12)%12], auto:true});
+        list.push({d:dphTermin(kodMes), typ:"dph", nazov:"DPH priznanie (§ 7a)", detail:"za "+MES_SK[((mesiac-1)+12)%12], auto:true, obd:kodMes, bezKV:true});
     }
     // DPH priznanie + KV — mesačný platiteľ: za predošlý mesiac. Dátum z `dphTermin`,
     // aby kalendár a modul DPH nikdy neukázali iný deň.
     // Mesačný aj štvrťročný po obdobiach — mesiac platiteľa v štvrťroku, v ktorom sa ním stal, je
     // mesačný (dphJeStvrtrocny, ROZHODNUTIA č. 104b).
     if(dphRegistraciaObdobia(kodMes)==="platca" && !dphJeStvrtrocny(kodMes)){
-      list.push({d:dphTermin(kodMes), typ:"dph", nazov:"DPH priznanie + kontrolný výkaz", detail:"za "+MES_SK[((mesiac-1)+12)%12], auto:true});
+      list.push({d:dphTermin(kodMes), typ:"dph", nazov:"DPH priznanie + kontrolný výkaz", detail:"za "+MES_SK[((mesiac-1)+12)%12], auto:true, obd:kodMes});
     }
     // DPH štvrťročne — po skončení štvrťroka (apr/júl/okt/jan)
     if([0,3,6,9].includes(mesiac)){
       const kod=(mesiac===0 ? (rok-1)+"-Q4" : rok+"-Q"+(mesiac/3));
       if(dphJeStvrtrocny(kod))
-        list.push({d:dphTermin(kod), typ:"dph", nazov:"DPH priznanie + KV (štvrťrok)", detail:"za predošlý štvrťrok", auto:true});
+        list.push({d:dphTermin(kod), typ:"dph", nazov:"DPH priznanie + KV (štvrťrok)", detail:"za predošlý štvrťrok", auto:true, obd:kod});
     }
     // Zdravotné odvody — do 8. za predošlý mesiac
-    list.push({d:posunNaPracovnyDen(new Date(rok,mesiac,8)), typ:"zp", nazov:"Zdravotné odvody", detail:(s.preddavokZP?eur(+s.preddavokZP):"preddavok ZP"), auto:true});
+    list.push({d:posunNaPracovnyDen(new Date(rok,mesiac,8)), typ:"zp", nazov:"Zdravotné odvody", detail:(s.preddavokZP?eur(+s.preddavokZP):"preddavok ZP"), auto:true, obd:kodMes, ocakavane:+s.preddavokZP||0});
     // Sociálne odvody — do 8. (ak ich platí)
     if(+s.socOdvodyMes>0){
-      list.push({d:posunNaPracovnyDen(new Date(rok,mesiac,8)), typ:"sp", nazov:"Sociálne odvody", detail:eur(+s.socOdvodyMes), auto:true});
+      list.push({d:posunNaPracovnyDen(new Date(rok,mesiac,8)), typ:"sp", nazov:"Sociálne odvody", detail:eur(+s.socOdvodyMes), auto:true, obd:kodMes, ocakavane:+s.socOdvodyMes||0});
     }
     // Preddavok na daň z príjmov — štvrťročne do konca mesiaca (ak platí preddavky)
     if(+s.preddavokDanQ>0 && [2,5,8,11].includes(mesiac)){
       const posl=new Date(rok,mesiac+1,0);
-      list.push({d:posunNaPracovnyDen(posl), typ:"dan", nazov:"Preddavok na daň z príjmov", detail:eur(+s.preddavokDanQ), auto:true});
+      list.push({d:posunNaPracovnyDen(posl), typ:"dan", nazov:"Preddavok na daň z príjmov", detail:eur(+s.preddavokDanQ), auto:true, obd:rok+"-Q"+((mesiac+1)/3), ocakavane:+s.preddavokDanQ||0});
     }
   }
   // Ročné daňové priznanie FO za predošlý rok — 31. 3., pri odklade neskôr
@@ -35936,7 +35943,7 @@ function danoveTerminy(dnes, s, mesiacovDopredu){
     const detail = D.pocet
       ? "za rok "+danRok+(D.nekompletne?" · doplňte údaje vozidla":" · "+eur(D.spolu))
       : "priznanie za "+danRok+" · doplňte vozidlo pre výpočet";
-    list.push({d:dmvTermin(danRok), typ:"auto", nazov:"Daň z motorových vozidiel", detail, auto:true});
+    list.push({d:dmvTermin(danRok), typ:"auto", nazov:"Daň z motorových vozidiel", detail, auto:true, obd:String(danRok)});
   }
   // E-faktúra míľnik — 1.1.2027 povinná elektronická fakturácia
   if(jePlatitelDPH){
@@ -35959,6 +35966,103 @@ const TERMIN_TYPY={dph:{ic:"%", popis:"DPH"}, zp:{ic:"⚕", popis:"zdravotné"},
   info:{ic:"★", popis:"míľnik"}, vlastne:{ic:"●", popis:"vlastné"}, fs:{ic:"🏛", popis:"termín FS"},
   dokument:{ic:"📄", popis:"platnosť dokumentu"}};
 const TERMIN_IKONA=Object.fromEntries(Object.entries(TERMIN_TYPY).map(([k,v])=>[k,v.ic]));
+// ═══ KALENDÁR VIE, ČO JE UŽ SPLNENÉ (Roman 18. 9. 2026, spec 129.13) ═══════
+//
+// Termín sa zazelená LEN NA DÔKAZ, nikdy z nastavení. Preddavky sa kedysi
+// odpočítavali z parametra a appka tvrdila „máš vybavené“ bez toho, aby to
+// vedela (viď uhradenePovinnosti). Dôkazy:
+//   · DPH + KV — XML za obdobie bolo stiahnuté (dph[obd].export). To je
+//     VYGENEROVANIE, nie podanie, a tak to aj hovorí. Doklady zmenené po
+//     vygenerovaní termín nezazelenajú.
+//   · platby (DPH, preddavok na daň, DzMV) — pohyb na účet FS rozpoznaný podľa
+//     predčíslia a VS, ktorý nesie obdobie (rozpoznajOdvod), alebo výdavok
+//     s tou kategóriou a obdobím.
+//   · zdravotné a sociálne — obdobie z platby nevyčítame (protistrana, nie VS),
+//     preto rozhoduje okno: od toho istého dňa predošlého mesiaca po termín
+//     + 7 dní. Platba sa započíta raz — najskorší termín si ju vezme.
+// Chýbajúca platba sa volá „nevidím“ len vtedy, keď appka výpis za ten čas
+// MÁ (kap. 47.9). Bez výpisu povie, že výpis chýba — nie že nezaplatené.
+const TERMIN_PLATBA_KAT={ zp:["preddavokZP"], sp:["preddavokSP"], dan:["preddavokDan"], dph:["odvodDPH"], auto:["danMotor"] };
+function terminPlatby(){
+  const out=[], zPohybov=new Set();
+  (firmaData.vypis||[]).forEach(t=>{
+    if(!t || t.smer!=="vydaj" || t.skryty) return;
+    let R=null; try{ R=rozpoznajOdvod(t); }catch(e){ console.error("kalendár — rozpoznanie platby:", e); }
+    if(!R) return;
+    out.push({kategoria:R.kategoria, obdobie:R.obdobie, zaRok:R.zaRok,
+      datum:String(t.datum||"").slice(0,10), suma:r2(+t.suma||0), kluc:txId(t)});
+    zPohybov.add(txId(t));
+  });
+  // Výdavok z toho istého pohybu (interný doklad z importu) sa neráta druhýkrát.
+  (firmaData.vydavky||[]).forEach(x=>{
+    if(!x || !Object.values(TERMIN_PLATBA_KAT).some(k=>k.includes(x.kategoria))) return;
+    if(x.zdrojPohyb && zPohybov.has(x.zdrojPohyb)) return;
+    out.push({kategoria:x.kategoria, obdobie:String(x.obdobie||String(x.datum||"").slice(0,7)), zaRok:vydavokZaRok(x),
+      datum:String(x.datum||"").slice(0,10), suma:r2(+x.spolu||+x.bez||0), kluc:"v:"+(x.id||dokladKluc(x))});
+  });
+  return out.sort((a,b)=>a.datum.localeCompare(b.datum));
+}
+function terminIsoDen(d){ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+function terminDenMes(iso){ const c=String(iso).split("-"); return (+c[2])+". "+(+c[1])+"."; }
+// Doplní každému termínu `stav` {hotovo, text, ton} alebo null. Termíny idú
+// chronologicky, lebo okno zdravotných a sociálnych si platbu berie po poradí.
+function terminyStav(list, dnes){
+  let P=[], pokr={mesiace:[], do:null};
+  try{ P=terminPlatby(); }catch(e){ console.error("kalendár — platby:", e); }
+  try{ pokr=vypisPokrytie(); }catch(e){ console.error("kalendár — pokrytie výpisov:", e); }
+  const mam=new Set(pokr.mesiace||[]), pouzite=new Set();
+  const dnesIso=terminIsoDen(dnes||new Date());
+  list.slice().sort((a,b)=>a.d-b.d).forEach(t=>{
+    t.stav=null;
+    if(!t.auto || !t.obd) return;
+    try{ t.stav=terminStavJeden(t, P, pouzite, mam, pokr.do, dnesIso); }
+    catch(e){ console.error("kalendár — stav termínu:", t.nazov, e); }
+  });
+  return list;
+}
+function terminStavJeden(t, P, pouzite, mam, pokrytieDo, dnesIso){
+  const dIso=terminIsoDen(t.d);
+  const kat=TERMIN_PLATBA_KAT[t.typ]||[];
+  const vezmi=(f)=>{ const z=P.filter(p=>kat.includes(p.kategoria) && !pouzite.has(p.kluc) && f(p)); z.forEach(p=>pouzite.add(p.kluc)); return z; };
+  let platby=[];
+  if(t.typ==="zp" || t.typ==="sp"){
+    const od=new Date(t.d); od.setMonth(od.getMonth()-1);
+    const doD=new Date(t.d); doD.setDate(doD.getDate()+7);
+    const odIso=terminIsoDen(od), doIso=terminIsoDen(doD);
+    platby=vezmi(p=>p.datum>odIso && p.datum<=doIso);
+  } else if(t.typ==="dan"){
+    const Q=dphParsujObdobie(t.obd);
+    platby=vezmi(p=>p.obdobie===t.obd || (Q.mesiace||[]).includes(p.obdobie));
+  } else if(t.typ==="auto"){
+    platby=vezmi(p=>String(p.zaRok)===t.obd);
+  } else if(t.typ==="dph"){
+    const Q=dphParsujObdobie(t.obd);
+    platby=vezmi(p=>p.obdobie===t.obd || (!!Q.stvrtrok && (Q.mesiace||[]).includes(p.obdobie)));
+  }
+  const suma=r2(platby.reduce((a,p)=>a+p.suma,0));
+  const zaplatene=platby.length ? "zaplatené "+eur(suma)+" ("+terminDenMes(platby[platby.length-1].datum)+")" : "";
+  const presiel=dIso<=dnesIso;
+  if(t.typ==="dph"){
+    const e=dphExportInfo(t.obd);
+    const gen=e && (t.bezKV ? e.dp : (e.dp && e.kv));
+    if(e && (e.dp||e.kv) && dphZmeneneOdExportu(t.obd))
+      return {hotovo:false, ton:"warn", text:"⚠ doklady sa zmenili po vygenerovaní"};
+    if(gen) return {hotovo:true, ton:"pos", text:"✓ vygenerované"+(zaplatene?" · "+zaplatene:"")};
+    if(e && (e.dp||e.kv)) return {hotovo:false, ton:"warn", text:e.dp?"vygenerované len priznanie, KV chýba":"vygenerovaný len KV, priznanie chýba"};
+    return presiel ? {hotovo:false, ton:"neg", text:"ešte nevygenerované"} : null;
+  }
+  if(platby.length){
+    if(t.ocakavane>0 && suma < r2(t.ocakavane)-0.005)
+      return {hotovo:false, ton:"warn", text:zaplatene+" z "+eur(t.ocakavane)};
+    return {hotovo:true, ton:"pos", text:"✓ "+zaplatene};
+  }
+  if(!presiel) return null;
+  const mes=dIso.slice(0,7);
+  if(mam.has(mes) && pokrytieDo && String(pokrytieDo)>=dIso)
+    return {hotovo:false, ton:"neg", text:"platbu vo výpise nevidím"};
+  return {hotovo:false, ton:"soft", text:"výpis za "+MES_SK[+mes.slice(5)-1]+" ešte nemáte"};
+}
+const TERMIN_TON={pos:"var(--pos)", warn:"var(--warn)", neg:"var(--neg)", soft:"var(--ink-soft)"};
 // widget termíny (najbližšie 4)
 function vypocitajTerminy(dnes, s){
   const auto=danoveTerminy(dnes, s, 3);
@@ -39183,7 +39287,7 @@ function dokZmaz(idx){
 function appKalendar(){
   const c="var(--ink-pos)";
   const dnes=new Date();
-  const auto=danoveTerminy(dnes, firmaData.settings||{}, 6);
+  const auto=terminyStav(danoveTerminy(dnes, firmaData.settings||{}, 6), dnes);
   const vlastne=(firmaData.udalosti||[]).map(u=>({d:new Date(u.datum), typ:"vlastne", nazov:u.nazov, detail:u.detail||"", vlastne:true, id:u.id, pripomienka:u.pripomienka}));
   const fsTerminy=(firmaData.udalostiFS||[]).map(u=>({d:new Date(u.datum), typ:"fs", nazov:u.nazov, detail:"oficiálny FS", fs:true}));
   const vsetky=[...auto, ...vlastne, ...fsTerminy].map(t=>({...t, dni:Math.round((t.d-dnes)/86400000)})).filter(t=>t.dni>=-7).sort((a,b)=>a.d-b.d);
@@ -39285,9 +39389,12 @@ function kalSkupinaHtml(g, c){
     </details></div>`;
 }
 function kalRiadok(t, c){
-  const naliehave=t.dni<=7;
+  const hotovo=!!(t.stav && t.stav.hotovo);
+  const naliehave=t.dni<=7 && !hotovo;
   const poTermine=t.dni<0;
-  const farbaDni=poTermine?'var(--neg)':naliehave?'var(--warn)':'var(--ink-soft)';
+  // Splnený termín po lehote nie je „po termíne“ v červenom — je vybavený.
+  const farbaDni=hotovo?'var(--ink-soft)':poTermine?'var(--neg)':naliehave?'var(--warn)':'var(--ink-soft)';
+  const stavHtml=t.stav?' · <span class="kal-stav" style="color:'+(TERMIN_TON[t.stav.ton]||'inherit')+'">'+esc(t.stav.text)+'</span>':'';
   const zmazBtn=t.vlastne?`<span onclick="event.stopPropagation();kalZmazUdalost('${t.id}')"${zam("kalendar")} style="cursor:pointer;color:var(--neg);margin-left:auto;padding:0 4px">✕</span>`:'';
   return `<div class="arow" style="grid-template-columns:auto 1fr auto;gap:12px;align-items:center;cursor:default">
     <div style="text-align:center;min-width:44px">
@@ -39296,7 +39403,7 @@ function kalRiadok(t, c){
     </div>
     <div style="min-width:0">
       <div class="acol-strong" style="display:flex;align-items:center;gap:6px">${TERMIN_IKONA[t.typ]||'●'} ${esc(t.nazov)}</div>
-      <div class="acol-muted">${t.detail?esc(t.detail)+' · ':''}<span style="color:${farbaDni}">${poTermine?'po termíne':t.dni===0?'dnes':t.dni===1?'zajtra':'o '+t.dni+' dní'}</span>${t.pripomienka?' · 🔔 '+t.pripomienka+' dní vopred':''}</div>
+      <div class="acol-muted">${t.detail?esc(t.detail)+' · ':''}<span style="color:${farbaDni}">${poTermine?(hotovo?'termín prešiel':'po termíne'):t.dni===0?'dnes':t.dni===1?'zajtra':'o '+t.dni+' dní'}</span>${stavHtml}${t.pripomienka?' · 🔔 '+t.pripomienka+' dní vopred':''}</div>
     </div>
     ${zmazBtn}
   </div>`;
