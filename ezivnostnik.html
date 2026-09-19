@@ -927,6 +927,9 @@ h1,h2,h3,h4,.chead,.wbig,.sbox .sn,.sp-title b,.splittitle{text-wrap:balance}
 .prehlad-odloz-go{margin-left:auto;font-size:12px;font-weight:600;color:var(--brand)}
 /* Cieľ posunu po ťuknutí na upozornenie (posunNaPrvok). Na mobile je horná
    lišta pevná (63 px) — bez okraja by pás výberu skončil pod ňou. */
+/* Dáta firmy sa nenačítali (spec 130.1): na ploche len karta „Ste offline“. */
+.nenacitane #homeStrip,.nenacitane #globalHladanie,.nenacitane #launcherTitle,.nenacitane #launcher,
+.nenacitane #heroFixed,.nenacitane #dashEditBar,.nenacitane #rychleAkcie{display:none!important}
 .vyber-pas,#appScreen .atool{scroll-margin-top:calc(env(safe-area-inset-top, 0px) + 76px)}
 /* Zóna VNÚTRI dlaždice: rám, tieň ani vlastné odsadenie už nepotrebuje
    — nesie ich dlaždica. Ostáva len predel k riadku „Odlož si“. */
@@ -2025,6 +2028,9 @@ html[data-jazda] .jazdapruh{display:flex}
           opacity:.75;font-size:17px;cursor:pointer;line-height:1;padding:2px 4px;
           min-width:37px;min-height:37px;display:inline-flex;align-items:center;justify-content:center">×</button>
       </div>
+      <!-- Dáta firmy sa nenačítali (sieť, server). Do 19. 9. 2026 appka v tom
+           prípade otvorila sprievodcu novej firmy (spec 130.1, č. 182). -->
+      <div class="card hidden" id="offlineCard" style="margin-top:16px"><div class="empty" id="offlineTelo"></div></div>
       <div id="homeStrip"></div>
 
       <!-- Globálne hľadanie. Pole je viditeľné rovno, nie pod ikonou: pravidlo
@@ -2049,8 +2055,8 @@ html[data-jazda] .jazdapruh{display:flex}
         <div class="empty">
           <div class="ei">📂</div>
           <b style="color:var(--ink);font-size:16px">Zatiaľ tu nie sú žiadne dáta</b>
-          <p style="margin-top:6px">Otvorte <b>Nastavenia → Dáta</b> a importujte svoj JSON súbor.</p>
-          <button class="abtn pri" style="margin-top:14px" onclick="otvorApp('data')">📥 Importovať dáta</button>
+          <p style="margin-top:6px">Otvorte <b>Firemná agenda → Export a záloha</b> a obnovte dáta zo zálohy.</p>
+          <button class="abtn pri" style="margin-top:14px" onclick="otvorApp('zaloha')">♻ Obnoviť zo zálohy</button>
         </div>
       </div>
     </div>
@@ -2167,7 +2173,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.19-PD";  // Export a záloha vo Firemnej agende; sprievodcovia držia ťuknutý krok na obrazovke
+const APP_VERZIA = "2026.09.19-PE";  // Štart bez siete: karta „Ste offline“ namiesto sprievodcu novej firmy (spec 130.1)
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -3652,6 +3658,9 @@ async function nacitajFirmu(idPoziadavka){
   try {
     const { data:{ user }, error:authErr } = await sb.auth.getUser();
     if(!aktualne()) return;
+    // Bez siete getUser vráti chybu — to NIE JE „používateľ nemá firmu“.
+    // Do 19. 9. 2026 táto vetva otvorila sprievodcu novej firmy (spec 130.1).
+    if(authErr && jeSietovaChyba(authErr)){ zobrazNenacitane(authErr, true); return; }
     if(authErr || !user){ zobrazFirmu(); return; }
 
     // Bez filtra na `user_id` — od fázy 2 sem patria aj firmy, ku ktorým má
@@ -3694,10 +3703,48 @@ async function nacitajFirmu(idPoziadavka){
     zobrazFirmu();
   } catch(e){
     if(!aktualne()){ console.error("načítanie firmy (medzitým začalo novšie):", e); return; }
-    cloudMsg("Nepodarilo sa načítať dáta: "+e.message, "err");
+    // Zlyhané načítanie nie je prázdna firma: bez dát v pamäti by zobrazFirmu
+    // otvorila sprievodcu novej firmy nad existujúcou (spec 130.1). Keď firma
+    // v pamäti je (prepínanie), ostáva a hláška povie, čo sa stalo.
+    if(!firmaData){ zobrazNenacitane(e, jeSietovaChyba(e)); return; }
+    cloudMsg((jeSietovaChyba(e)?"Ste offline — ":"")+"Nepodarilo sa načítať dáta: "+e.message, "err");
     zobrazFirmu();
   }
 }
+// ═══ DÁTA SA NENAČÍTALI (č. 182, spec 130.1) ════════════════════════════
+// Rozlíši sieť od inej chyby len kvôli vete — v oboch prípadoch platí to
+// isté: dáta sú v cloude, zakladať nič netreba. Sprievodca novej firmy sa
+// otvorí len na potvrdenú odpoveď servera, že používateľ firmu nemá.
+function jeSietovaChyba(e){
+  if(typeof navigator!=="undefined" && navigator && navigator.onLine===false) return true;
+  if(e && (e.status===0 || e.name==="AuthRetryableFetchError")) return true;
+  return /failed to fetch|networkerror|network request failed|load failed|fetch failed|err_internet|timed? ?out/i
+    .test(String((e && (e.message||e.name)) || e || ""));
+}
+let _cakaNaSiet=false;
+function zobrazNenacitane(e, offline){
+  console.error("dáta firmy sa nenačítali"+(offline?" (bez siete)":"")+":", e);
+  ["dashboard","dashTitle","obView","emptyCard"].forEach(id=>{ const x=document.getElementById(id); if(x) x.classList.add("hidden"); });
+  const karta=document.getElementById("offlineCard"), telo=document.getElementById("offlineTelo");
+  if(telo) telo.innerHTML=`<div class="ei">${offline?"📡":"⚠"}</div>
+    <b style="color:var(--ink);font-size:16px">${offline?"Ste offline":"Dáta firmy sa nepodarilo načítať"}</b>
+    <p style="margin-top:6px">${offline
+      ? "Zariadenie nie je pripojené k internetu, takže appka dáta firmy nenačítala. Vaše dáta sú v cloude — nič nezakladajte znova."
+      : "Server neodpovedal tak, ako mal ("+esc(String((e&&e.message)||e||""))+"). Vaše dáta sú v cloude — nič nezakladajte znova."}</p>
+    <button class="abtn pri" style="margin-top:14px" onclick="nacitajFirmu()">↻ Skúsiť znova</button>
+    ${offline?'<p style="margin-top:10px;font-size:12px;color:var(--ink-soft)">Keď sa pripojenie vráti, appka sa načíta sama.</p>':''}`;
+  if(karta) karta.classList.remove("hidden");
+  // Dlaždice, čipy a hľadanie bez dát firmy nemajú čo otvoriť — kým karta
+  // svieti, sú skryté (CSS .nenacitane), a karta stojí hneď pod pozdravom.
+  const hv=document.getElementById("homeView"); if(hv) hv.classList.add("nenacitane");
+  _cakaNaSiet=!!offline;
+}
+function skryNenacitane(){
+  const k=document.getElementById("offlineCard"); if(k) k.classList.add("hidden");
+  const hv=document.getElementById("homeView"); if(hv) hv.classList.remove("nenacitane");
+  _cakaNaSiet=false;
+}
+window.addEventListener("online", ()=>{ if(_cakaNaSiet){ _cakaNaSiet=false; nacitajFirmu(); } });
 
 // Doplní chýbajúce id záznamom, ktoré vznikli skôr, než sa id začali prideľovať
 // (staré dáta, import z banky). Bez id sa nedá doklad v kontrolnom výkaze
@@ -3726,6 +3773,7 @@ function opravKluceKategorii(){
 }
 
 function zobrazFirmu(){
+  skryNenacitane();
   firmaDataVerzia++;   // dáta mohli prísť z cloudu/importu bez poZmene — zneplatni cache
   doplnChybajuceId();
   opravKluceKategorii();
