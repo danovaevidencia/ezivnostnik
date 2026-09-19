@@ -925,6 +925,9 @@ h1,h2,h3,h4,.chead,.wbig,.sbox .sn,.sp-title b,.splittitle{text-wrap:balance}
 .prehlad-odloz-suma{font-size:22px;font-weight:800;letter-spacing:-.01em;color:var(--brand)}
 .prehlad-odloz-rozpis{font-size:11px;color:var(--ink-soft);flex:1;min-width:180px}
 .prehlad-odloz-go{margin-left:auto;font-size:12px;font-weight:600;color:var(--brand)}
+/* Cieľ posunu po ťuknutí na upozornenie (posunNaPrvok). Na mobile je horná
+   lišta pevná (63 px) — bez okraja by pás výberu skončil pod ňou. */
+.vyber-pas,#appScreen .atool{scroll-margin-top:calc(env(safe-area-inset-top, 0px) + 76px)}
 /* Zóna VNÚTRI dlaždice: rám, tieň ani vlastné odsadenie už nepotrebuje
    — nesie ich dlaždica. Ostáva len predel k riadku „Odlož si“. */
 .w .pasSumy{background:none;border:0;border-radius:0;padding:0 0 12px;margin:0;
@@ -6327,6 +6330,22 @@ function otvorSVyberom(modul, kluce, popis, celkom){
   // výber. Nový by visel a filtroval modul, keď sa neskôr otvorí inou cestou.
   // Jedno miesto pre všetky dôvody, prečo otvorApp odmietne.
   if(!otvorApp(modul)) vyber=predtym;
+  else if(vyber) posunNaPrvok(".vyber-pas");
+}
+// Upozornenie, ktoré otvorí modul s konkrétnymi záznammi, posunie obrazovku
+// na ne (Roman 19. 9. 2026: „nemohlo by ma to preskrolovať rovno“). Do vtedy
+// sa modul otvoril hore — nad súhrnom, mesačnou tabuľkou a filtrami — a
+// výber bol o obrazovku nižšie. Modul sa vie kresliť až v ďalšom tiku (rámec
+// super apky), preto krátke čakanie ako pri nvOtvorModul. Okamžite, nie
+// plynulo: plynulý posun cez dlhý modul trvá sekundy.
+function posunNaPrvok(selektor){
+  let pokus=0;
+  const ukaz=()=>{
+    const el=document.querySelector(selektor);
+    if(!el){ if(++pokus<20) setTimeout(ukaz,100); return; }
+    if(el.scrollIntoView) el.scrollIntoView({block:"start"});
+  };
+  setTimeout(ukaz,0);
 }
 function vyberAktivny(modul){ return (vyber && vyber.modul===modul) ? vyber : null; }
 // KEDY VÝBER ZANIKNE — jedno pravidlo: výber žije, kým je na obrazovke modul,
@@ -6353,7 +6372,7 @@ function vyberPas(v, najdenych){
   // v množine nebolo, takže nemohli zmiznúť. Zmerané 12. 9. 2026: pás tvrdil
   // „398 odvtedy zmizli" o záznamoch, ktoré sa nikdy nestratili.
   const chyba=v.kluce.length-najdenych;
-  return `<div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;background:var(--brand-lite);
+  return `<div class="vyber-pas" style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;background:var(--brand-lite);
       border:1px solid var(--line);border-radius:9px;padding:9px 12px;margin-bottom:10px">
     <b style="font-size:13px">${najdenych} ${sklon(najdenych,"záznam","záznamy","záznamov")}${v.popis?" "+esc(v.popis):""}</b>
     ${chyba>0?`<span style="font-size:11.5px;color:var(--ink-warn)">z ${v.kluce.length} — ${chyba===1?"jeden odvtedy zmizol":chyba+" odvtedy zmizli"}</span>`:""}
@@ -6424,7 +6443,7 @@ function zbierNotifikacie(){
             detail: "Z výpisu"+mes+": "+V.sparene+" spárovaných · "
                     +V.vybavene+" vybavených bez dokladu · "+V.caka+" čaká."
                     +(I.dokladov?" Appka založila "+I.dokladov+" interných dokladov na odvody a dane.":""),
-            akcia:()=>{ bFilter="nespar"; otvorApp("banka"); }});
+            akcia:()=>{ bFilter="nespar"; if(otvorApp("banka")) posunNaPrvok("#appScreen .atool"); }});
         }
       }
     }catch(e){ console.error("notifikácia po importe výpisu:", e); }
