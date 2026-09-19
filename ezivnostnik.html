@@ -2178,13 +2178,47 @@ async function ensurePdfjs(){
 //  (Project Settings → API)
 // ═══════════════════════════════════════════════════
 const SUPABASE_URL = "https://jriuljhmacgvxyrptbme.supabase.co";
+// ═══ ANONYMNÉ UDALOSTI PRE VLASTNÚ ANALYTIKU (č. 189, spec 131.3) ═══════════
+// Päť udalostí, žiadne údaje firmy ani používateľa, nič sa neukladá do
+// prehliadača (okrem príznaku nepočítať, ktorý si nastaví človek sám). Demo,
+// režim bez účtu, lokálny vývoj (e2e, snímkovač) a „Nesledovať“ sa nepočítajú.
+const ANALYTIKA_URL = SUPABASE_URL + "/functions/v1/navsteva";
+const _analytikaModuly = new Set();
+(function(){ try{
+  const q=new URLSearchParams(location.search);
+  if(q.get("nepocitat")==="1") localStorage.setItem("eziv_nepocitat","1");
+  if(q.get("nepocitat")==="0") localStorage.removeItem("eziv_nepocitat");
+}catch(_){} })();
+function analytikaPovolena(){
+  try{
+    if(demoMode || localMode) return false;
+    if(!/(^|\.)ezivnostnik\.eu$/.test(location.hostname)) return false;
+    if(navigator.doNotTrack==="1" || navigator.globalPrivacyControl) return false;
+    if(localStorage.getItem("eziv_nepocitat")==="1") return false;
+  }catch(_){ return false; }
+  return true;
+}
+function analytikaUdalost(udalost, extra){
+  if(!analytikaPovolena()) return;
+  // Otvorenie modulu raz za reláciu a modul — inak by počet meral prepínanie, nie používanie.
+  if(udalost==="modul"){
+    const m=String((extra||{}).modul||"");
+    if(!m || _analytikaModuly.has(m)) return;
+    _analytikaModuly.add(m);
+  }
+  try{
+    const t=JSON.stringify(Object.assign({typ:"udalost", udalost}, extra||{}));
+    if(navigator.sendBeacon) navigator.sendBeacon(ANALYTIKA_URL, new Blob([t], {type:"text/plain"}));
+    else fetch(ANALYTIKA_URL, {method:"POST", body:t, keepalive:true, headers:{"content-type":"text/plain"}}).catch(()=>{});
+  }catch(_){}
+}
 const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 // ═══════════════════════════════════════════════════
 
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.19-PJ";  // Dlaždice apiek rovnako široké, riadok prijatej e-faktúry bez prekryvu na telefóne
+const APP_VERZIA = "2026.09.19-PK";  // Vlastná analytika bez cookies: udalosti appky, navsteva.js, admin Návštevnosť, zásady 1.8
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -2411,6 +2445,7 @@ async function doPrimary(){
       // nepreukazovalo (ROZHODNUTIA č. 52).
       const { data, error } = await sb.auth.signUp({ email, password: heslo, options:{ data:{ suhlas: suhlasZaznam() } } });
       if(error) throw error;
+      analytikaUdalost("registracia");
       if(data.user && !data.session){
         msg("Účet vytvorený. Skontrolujte e-mail a potvrďte registráciu.","ok");
       } else if(data.session){
@@ -9313,6 +9348,7 @@ function otvorApp(id){
     return false;
   }
   if(modulMimoPlanu(id)) return false;
+  analytikaUdalost("modul", {modul:id});
   // Výber zo zvončeka platí pre JEDEN modul. Odchodom inam stráca zmysel a
   // nechať ho žiť by znamenalo, že sa človek o týždeň vráti do Banky a nájde
   // tam filtrovaný zoznam bez toho, aby vedel prečo.
@@ -20061,7 +20097,7 @@ function dmKopiruj(){
 // sadu zhodí.
 const DOKUMENTY={
   podmienky:{url:"podmienky.html",     n:"Obchodné podmienky",      verzia:"1.3"},
-  sukromie: {url:"sukromie.html",      n:"Ochrana osobných údajov", verzia:"1.7"},
+  sukromie: {url:"sukromie.html",      n:"Ochrana osobných údajov", verzia:"1.8"},
   zmazanie: {url:"zmazanie-uctu.html", n:"Zmazanie účtu a údajov"},
 };
 // Záznam súhlasu k účtu (ROZHODNUTIA č. 52). Zmluva vzniká vytvorením účtu
@@ -24737,6 +24773,7 @@ function exportVsetkoXlsx(){
       const nm=((firmaData.meta&&firmaData.meta.nazov)||"export").replace(/[^\w.-]+/g,"_")+"_kompletny_"+new Date().toISOString().slice(0,10)+".xlsx";
       stiahniBlob(blob,nm);
       if(stav){ stav.textContent="✓ Kompletný export hotový ("+wb.SheetNames.length+" hárkov)."; stav.className="cloudmsg ok"; }
+      analytikaUdalost("export");
     }catch(e){ console.error(e); if(stav){ stav.textContent="Chyba pri exporte: "+e.message; stav.className="cloudmsg err"; } }
   }).catch(()=>{ if(stav){ stav.textContent="Knižnicu na export sa nepodarilo načítať. Skontrolujte pripojenie."; stav.className="cloudmsg err"; } });
 }
@@ -28704,6 +28741,9 @@ async function faktPeppolOdosli(){
     // z faktúry, do ktorej sa zapisuje.
     const zapis=(g)=>{
       const doterajsi=g.efaktura||null;
+      // Prvá e-faktúra firmy odoslaná do OSTREJ siete (č. 189) — nie sandbox, nie odmietnutá.
+      if(!odmietnuta && !(r&&r.sandbox) && !doterajsi && !((firmaData&&firmaData.faktury)||[]).some(x=>x!==g && faktOdoslana(x)))
+        analytikaUdalost("efaktura_prva");
       const predosly = doterajsi ? Object.assign({}, doterajsi) : null;
       if(predosly) delete predosly.historia;
       const historia = doterajsi ? (doterajsi.historia||[]).concat([predosly]) : [];
@@ -40107,6 +40147,7 @@ async function exportZalohaZip(){
   const meno=((data.meta&&data.meta.nazov)||"firma").replace(/[^\w]+/g,"_")+"_uplna_zaloha_"+new Date().toISOString().slice(0,10)+".zip";
   stiahniBlob(new Blob([zip], {type:"application/zip"}), meno);
   zaznacZalohu();
+  analytikaUdalost("export");
   cloudMsg("✓ Úplná záloha stiahnutá: "+(cesty.length-chybajuce.length)+" "+sklon(cesty.length-chybajuce.length,"súbor","súbory","súborov")
     +(chybajuce.length?" · "+chybajuce.length+" sa nepodarilo stiahnuť (zoznam je v manifest.json)":"")
     +(vynechane?" · bez "+vynechane+" "+sklon(vynechane,"výpisu","výpisov","výpisov")+" z účtu":""), chybajuce.length?"err":"ok");
@@ -40312,6 +40353,7 @@ function exportFirmu(){
   if(!firmaData){ cloudMsg("Nie sú žiadne dáta na stiahnutie.","err"); return; }
   stiahniZalohuJson(firmaData, "zaloha");
   zaznacZalohu();
+  analytikaUdalost("export");
   cloudMsg("Záloha stiahnutá.","ok");
 }
 // Čas poslednej zálohy — JSON aj ZIP (pripomienka zálohy ich nerozlišuje).
@@ -41347,6 +41389,7 @@ function obNovaFirma(){
 
 function obDokonci(){
   obUlozAktualne();
+  analytikaUdalost("onboarding");
   // ak importy už vytvorili firmaData, len doplň nastavenia; inak vytvor nové
   if(!firmaData){ firmaData = obNovaFirma(); }
   else {

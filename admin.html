@@ -200,6 +200,15 @@ tr.chce td{background:#fffaf0}
       <div class="kpi w"><div class="n" id="kPlat">–</div><div class="l">Platcov DPH</div></div>
     </div>
 
+    <!-- NÁVŠTEVNOSŤ — vlastná analytika bez cookies (spec kap. 131, ROZHODNUTIA č. 187–190) -->
+    <div class="sec">
+      <div class="head"><h2>Návštevnosť</h2><div class="sp"></div>
+        <select id="navObdobie" onchange="nacitajNavstevnost()" style="background:var(--bg2);color:var(--txt);border:1px solid var(--line);border-radius:7px;padding:5px 9px;font-size:13px">
+          <option value="7">7 dní</option><option value="30" selected>30 dní</option><option value="90">90 dní</option><option value="365">12 mesiacov</option>
+        </select></div>
+      <div class="body" id="navBody"><div class="loading">Načítavam návštevnosť…</div></div>
+    </div>
+
     <!-- SADZBY -->
     <div class="sec">
       <div class="head"><h2>Sadzby a hranice</h2><div class="sp"></div>
@@ -575,6 +584,7 @@ async function overAdmin(user){
   document.getElementById("loginView").classList.add("hidden");
   document.getElementById("adminView").classList.remove("hidden");
   nacitajPrehlad();
+  nacitajNavstevnost();
   vykresliSadzby();
   pripravRokySaas();
   nacitajSaasFaktury();
@@ -594,6 +604,64 @@ async function overAdmin(user){
 //  DPH z predplatného zostaviť nedá.
 // ═══════════════════════════════════════════════════════════════════
 let _saasFakturyAdmin = [];
+
+// ═══ NÁVŠTEVNOSŤ (spec 131.4) ═══════════════════════════════════════════════
+// Čísla počíta databáza (analytika_prehlad, admin_43) — do prehliadača ide len
+// súhrn. Porovnanie s rovnako dlhým predošlým obdobím.
+function navDen(d){ return d.toLocaleDateString("sv-SE", { timeZone: "Europe/Bratislava" }); }
+function navZmena(teraz, predtym){
+  if(!predtym) return teraz ? '<span style="color:var(--accent2)">nové</span>' : "";
+  const p = Math.round((teraz - predtym) / predtym * 100);
+  return '<span style="color:' + (p >= 0 ? "var(--accent2)" : "var(--warn)") + '">' + (p >= 0 ? "+" : "") + p + " %</span>";
+}
+function navTabulka(nadpis, riadky, st){
+  if(!riadky.length) return '<div style="padding:10px 18px;color:var(--soft);font-size:12.5px">' + esc(nadpis) + ": zatiaľ nič</div>";
+  return '<div style="padding:8px 18px 14px"><div style="font-size:12px;color:var(--soft);font-weight:700;margin-bottom:6px">' + esc(nadpis) + "</div>"
+    + '<table style="width:100%"><tbody>' + riadky.map(x => "<tr><td>" + esc(x[0]) + '</td><td class="r amt">' + x[1] + "</td>" + (st ? '<td class="r amt" style="color:var(--soft)">' + (x[2] ?? "") + "</td>" : "") + "</tr>").join("") + "</tbody></table></div>";
+}
+const NAV_UDALOSTI = { registracia:"registrácia", onboarding:"dokončené nastavenie firmy", modul:"otvorenie modulu", export:"export / záloha", efaktura_prva:"prvá odoslaná e-faktúra" };
+async function nacitajNavstevnost(){
+  const body = document.getElementById("navBody");
+  const dni = +document.getElementById("navObdobie").value || 30;
+  const dnes = new Date(), od = new Date(dnes.getTime() - (dni - 1) * 864e5);
+  const predDo = new Date(od.getTime() - 864e5), predOd = new Date(predDo.getTime() - (dni - 1) * 864e5);
+  body.innerHTML = '<div class="loading">Načítavam návštevnosť…</div>';
+  const [A, B] = await Promise.all([
+    sb.rpc("analytika_prehlad", { p_od: navDen(od), p_do: navDen(dnes) }),
+    sb.rpc("analytika_prehlad", { p_od: navDen(predOd), p_do: navDen(predDo) }),
+  ]);
+  if(A.error){ body.innerHTML = '<div class="loading">Chyba načítania: ' + esc(A.error.message) + "</div>"; return; }
+  const v = A.data || {}, k = v.kpi || {}, p = (B.data && B.data.kpi) || {};
+  const odchod = x => x.navstevy ? Math.round(x.odchody / x.navstevy * 100) : 0;
+  const kpi = (n, l, zm) => '<div class="kpi"><div class="n">' + n + '</div><div class="l">' + l + (zm ? " · " + zm : "") + "</div></div>";
+  const dniRad = v.po_dnoch || [];
+  const max = Math.max(1, ...dniRad.map(d => d.navstevnici));
+  const graf = '<div style="display:flex;align-items:flex-end;gap:2px;height:90px;padding:6px 18px 2px">'
+    + dniRad.map(d => '<div title="' + esc(d.den) + ": " + d.navstevnici + " návštevníkov, " + d.zobrazenia + " zobrazení, " + d.registracie + ' registrácií" style="flex:1;min-width:2px;background:var(--accent);opacity:.85;border-radius:2px 2px 0 0;height:' + Math.max(2, Math.round(d.navstevnici / max * 100)) + '%;position:relative">'
+      + (d.registracie ? '<i style="position:absolute;top:-6px;left:50%;width:6px;height:6px;margin-left:-3px;border-radius:50%;background:var(--accent2)"></i>' : "") + "</div>").join("")
+    + '</div><div style="display:flex;justify-content:space-between;padding:0 18px 10px;font-size:11px;color:var(--soft)"><span>' + esc((dniRad[0] || {}).den || "") + "</span><span>● registrácia</span><span>" + esc((dniRad[dniRad.length - 1] || {}).den || "") + "</span></div>";
+  const obj = o => Object.entries(o || {}).sort((a, b) => b[1] - a[1]);
+  body.innerHTML =
+    '<div class="kpis" style="padding:14px 18px 0;margin-bottom:10px">'
+    + kpi(k.navstevnici || 0, "návštevníci", navZmena(k.navstevnici || 0, p.navstevnici || 0))
+    + kpi(k.zobrazenia || 0, "zobrazenia", navZmena(k.zobrazenia || 0, p.zobrazenia || 0))
+    + kpi(odchod(k) + " %", "odchody po 1 stránke")
+    + kpi(k.registracie || 0, "registrácie", navZmena(k.registracie || 0, p.registracie || 0))
+    + "</div>" + graf
+    + '<div style="padding:4px 18px 10px;font-size:12.5px"><b>Lievik:</b> ' + (k.navstevnici || 0) + " návštevníkov → " + (k.registracie || 0) + " registrácií → "
+      + (k.s_firmou || 0) + " s firmou → " + (k.platiaci || 0) + " platiacich · aktívne firmy: " + (k.aktivne7 || 0) + " za 7 dní, " + (k.aktivne30 || 0) + " za 30 dní</div>"
+    + '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))">'
+    + navTabulka("Stránky (zobrazenia / návštevníci)", (v.stranky || []).map(x => [x.cesta, x.zobrazenia, x.navstevnici]), true)
+    + navTabulka("Vstupné stránky", (v.vstupne || []).map(x => [x.cesta, x.n]))
+    + navTabulka("Zdroje", (v.zdroje || []).map(x => [x.zdroj, x.navstevnici]))
+    + navTabulka("Kampane (UTM)", (v.kampane || []).map(x => [x.kampan, x.navstevnici]))
+    + navTabulka("Zariadenia", obj(v.zariadenia))
+    + navTabulka("Systém", obj(v.os))
+    + navTabulka("Prehliadač", obj(v.prehliadace))
+    + navTabulka("Appka — udalosti", obj(v.udalosti).map(x => [NAV_UDALOSTI[x[0]] || x[0], x[1]]))
+    + "</div>"
+    + '<div style="padding:0 18px 12px;font-size:11.5px;color:var(--soft)">Bez cookies a bez uloženia IP — návštevník je jednodňový otlačok (spec 131). Vlastné návštevy vylúčite odkazom s <code>?nepocitat=1</code>.</div>';
+}
 
 function penaz(v){ return (+v||0).toLocaleString("sk-SK",{minimumFractionDigits:2,maximumFractionDigits:2}) + " €"; }
 
