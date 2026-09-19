@@ -6611,7 +6611,8 @@ function zbierNotifikacie(){
         out.push({kluc:"fakt:"+(f.cislo||f.id), ic:"💸", nal:po>14?"warn":"info",
           nazov:"Faktúra "+(f.cislo||"")+" mešká",
           detail:eur0(+f.spolu||0)+" · "+po+" dní po splatnosti",
-          akcia:()=>otvorApp("pohladavky")});
+          // Otvorí práve túto faktúru v Pohľadávkach, nie celý zoznam.
+          akcia:()=>otvorSVyberom("pohladavky", [dokladKluc(f)], "po splatnosti")});
       });
   }catch(_){}
 
@@ -6738,7 +6739,7 @@ function heroAkcie(){
   }).sort((a,b)=>new Date(a.splatnost)-new Date(b.splatnost));
   poSplat.slice(0,2).forEach(f=>{
     const dni=Math.round((dnes-new Date(f.splatnost))/86400000);
-    akcie.push({ic:"💸", app:"pohladavky", urgent:dni>14,
+    akcie.push({ic:"💸", app:"pohladavky", urgent:dni>14, fn:()=>otvorSVyberom("pohladavky", [dokladKluc(f)], "po splatnosti"),
       nazov:"Faktúra "+(f.cislo||"")+" mešká", detail:eur0(+f.spolu||0)+" · "+dni+" dní po splatnosti"});
   });
   // expirujúce dokumenty do 30 dní
@@ -7242,14 +7243,22 @@ function prehladHtml(obd){
 // Nad mriežkou ostávajú UŽ LEN akčné čipy. Odpovedajú na inú otázku než
 // prehľad („čo mám urobiť" verzus „ako to vyzerá") a keby boli v dlaždici,
 // zmizli by spolu s ňou, keď si ju niekto skryje.
+// Čip môže niesť vlastnú akciu (fn) — napr. otvoriť práve meškajúcu faktúru.
+// Uloží sa do poľa, lebo funkcia sa do atribútu onclick zapísať nedá.
+let _heroAkcie=[];
+function heroKlik(i){
+  const a=_heroAkcie[i]; if(!a) return;
+  if(typeof a.fn==="function") a.fn(); else otvorApp(a.app);
+}
 function renderHero(){
   const host=document.getElementById("heroFixed");
   if(!host) return;
   if(!firmaData){ host.innerHTML=""; return; }
   const akcie=heroAkcie();
+  _heroAkcie=akcie;
   host.innerHTML = akcie.length
-    ? `<div class="hero-acts">`+akcie.map(a=>`
-      <div class="hact ${a.urgent?'urgent':''}" onclick="otvorApp('${a.app}')">
+    ? `<div class="hero-acts">`+akcie.map((a,i)=>`
+      <div class="hact ${a.urgent?'urgent':''}" onclick="heroKlik(${i})">
         <div class="hact-ic">${a.ic}</div>
         <div class="hact-tx"><b>${esc(a.nazov)}</b><span>${esc(a.detail)}</span></div>
         <div class="hact-go">›</div>
@@ -20673,12 +20682,13 @@ function appPohladavky(){
   // dal otvoriť, označiť uhradený a upomienkovať (kap. 45.7)
   const _pfIdx=new Map((d.faktury||[]).map((x,i)=>[x,i]));
   const _pvIdx=new Map((d.vydavky||[]).map((x,i)=>[x,i]));
-  const pohl=(d.faktury||[]).filter(f=>!jePrijmovyDoklad(f)
-      && String(f.datum||f.vystavenie||"").slice(0,4)===pzRok).map(f=>{
+  const pohlRiadok=f=>{
     const uhr=faktJeUhradena(f); const dni=uhr?0:dniPoSplatnosti(f.splatnost);
     const partner=(typeof f.odberatel==="string")?f.odberatel:((f.odberatel&&f.odberatel.nazov)||"");
     return {idx:_pfIdx.get(f),kluc:dokladKluc(f),cislo:f.cislo,partner,vznik:f.datum||f.vystavenie,splatnost:f.splatnost,suma:(+f.spolu||+f.bez||0),uhradena:uhr,poSplat:!uhr&&dni>0,dni,neupominat:!!f.neupominat};
-  });
+  };
+  const pohl=(d.faktury||[]).filter(f=>!jePrijmovyDoklad(f)
+      && String(f.datum||f.vystavenie||"").slice(0,4)===pzRok).map(pohlRiadok);
   // záväzky = došlé faktúry roka
   const zav=(d.vydavky||[]).filter(x=>x.druh==="Došlá faktúra"&&String(x.datum||"").slice(0,4)===pzRok).map(x=>{
     const uhr=vydJeUhradeny(x);
@@ -20689,6 +20699,15 @@ function appPohladavky(){
     var pohlZobraz=pohl.filter(p=>hladajZhoda(q, p.partner, p.cislo, p.suma));
     var zavZobraz=zav.filter(z=>hladajZhoda(q, z.partner, z.suma));
   } else { var pohlZobraz=pohl, zavZobraz=zav; }
+  // Výber zo zvončeka („Faktúra X mešká“, Roman 19. 9. 2026): len tie faktúry,
+  // bez ohľadu na zvolený rok — faktúra z minulého roka mešká tiež. Súhrn
+  // nad zoznamom ostáva za rok; výber filtruje len zoznam, ako v Banke.
+  const vybP=vyberAktivny("pohladavky");
+  if(vybP){
+    const chcem=new Set(vybP.kluce);
+    pzTab="pohl";
+    pohlZobraz=(d.faktury||[]).filter(f=>!jePrijmovyDoklad(f) && chcem.has(dokladKluc(f))).map(pohlRiadok);
+  }
   const otvPohl=pohl.filter(p=>!p.uhradena), otvZav=zav.filter(z=>!z.uhradeny);
   const poSplat=otvPohl.filter(p=>p.poSplat);
   const sumaOtvP=r2(otvPohl.reduce((a,p)=>a+p.suma,0)), sumaOtvZ=r2(otvZav.reduce((a,z)=>a+z.suma,0));
@@ -20697,7 +20716,7 @@ function appPohladavky(){
 
   document.getElementById("appScreen").innerHTML=appHlavicka("pohladavky","")+pasIbaCitanie("pohladavky")+`
     <div class="atool">
-      <select onchange="pzRok=this.value;pzKuDnu='';appPohladavky()" style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:13px">
+      <select onchange="vyber=null;pzRok=this.value;pzKuDnu='';appPohladavky()" style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:13px">
         ${roky.map(r=>`<option value="${r}" ${r===pzRok?'selected':''}>${r}</option>`).join('')}
       </select>
     </div>
@@ -20709,10 +20728,11 @@ function appPohladavky(){
       <div class="aminbox"><div class="al">Čisté saldo</div><div class="av ${sumaOtvP-sumaOtvZ>=0?'pos':'neg'}">${eur(sumaOtvP-sumaOtvZ)}</div></div>
     </div>
     <div class="atool" style="align-items:center">
-      <span class="atab ${pzTab==='pohl'?'on':''}" onclick="pzTab='pohl';appPohladavky()">Pohľadávky (${pohl.length})</span>
-      <span class="atab ${pzTab==='zav'?'on':''}" onclick="pzTab='zav';appPohladavky()">Záväzky (${zav.length})</span>
+      <span class="atab ${pzTab==='pohl'?'on':''}" onclick="vyber=null;pzTab='pohl';appPohladavky()">Pohľadávky (${pohl.length})</span>
+      <span class="atab ${pzTab==='zav'?'on':''}" onclick="vyber=null;pzTab='zav';appPohladavky()">Záväzky (${zav.length})</span>
       ${hladatkoHtml('pohladavky','appPohladavky','🔍 Partner, číslo, suma…')}
     </div>
+    ${vyberPas(vybP, pohlZobraz.length)}
     <div class="csub" style="margin:0 2px 12px">${pzTab==='pohl'?'Vystavené faktúry — komu a koľko dlhujú vám. Klik otvorí faktúru; pri faktúre po splatnosti viete vygenerovať PDF upomienku.':'Došlé faktúry — komu dlhujete vy. Klik otvorí výdavok.'}</div>
     <div class="alist">
       ${pzTab==='pohl'
