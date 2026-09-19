@@ -2167,7 +2167,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.19-PB";  // Prehľad: mesiac z faktúr mesiaca (nie z úhrad), počítadlo metriky po zmene katalógu
+const APP_VERZIA = "2026.09.19-PC";  // Platba bez VS sa spáruje sama pri jedinej zhode sumy a dňa
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -38095,11 +38095,19 @@ function autoParujDoklad(typ, kluc){
   if(!firmaData) return null;
   if(dokladZostava(typ, kluc) <= 0.005) return null;
   const {kand}=platbyPreDoklad(typ, kluc);
-  if(!kand.length) return null;
   // Rovnaký prah ako v druhom smere — jedno pravidlo, nie dve podobné.
-  if(kand[0].skore<90) return null;
-  if(kand[1] && kand[0].skore-kand[1].skore<25) return null;
-  const tx=kand[0].t;
+  let tx = (kand.length && kand[0].skore>=90 && !(kand[1] && kand[0].skore-kand[1].skore<25)) ? kand[0].t : null;
+  // A rovnaká záchrana pre platbu bez VS (č. 180): jediná voľná platba s touto
+  // sumou ±1 deň, ku ktorej je tento doklad jediným nezaplateným kandidátom.
+  if(!tx && typ==="vydavok"){
+    const dok=najdiDoklad(typ, kluc);
+    if(dok){
+      const P=parBezVsVolnePlatby(r2(+dok.spolu||+dok.bez||0), dok.datum);
+      const k=P.length===1 ? parBezVsJednoznacny(P[0]) : null;
+      if(k && String(k.kluc)===String(kluc)) tx=P[0];
+    }
+  }
+  if(!tx) return null;
   if(pridajUhradu(tx, typ, String(kluc), null, true) <= 0) return null;
   zapisAutomat("parovanie", [txId(tx)]);
   return tx;
@@ -38466,11 +38474,50 @@ function parJednoznacny(tx){
   // jednoznačná zhoda sa nemá hľadať medzi nesúvisiacimi dokladmi.
   const kand=splitKandidati(tx).rel.map(k=>({...k, ...parSkore(tx,k)}))
                                .sort((a,b)=>b.skore-a.skore);
-  if(!kand.length) return null;
   const prvy=kand[0], druhy=kand[1];
-  if(prvy.skore<90) return null;                 // musí sedieť suma + ešte niečo silné
-  if(druhy && prvy.skore-druhy.skore<25) return null;  // dvaja podobní → nechaj na človeka
-  return prvy;
+  if(prvy && prvy.skore>=90 && !(druhy && prvy.skore-druhy.skore<25)) return prvy;
+  // Skóre nestačí, lebo platba kartou nemá VS a meno obchodníka sa s dokladom
+  // nezhoduje (GARAZ MAMUT × Saba Parking, Shell × Jánošík – NEA). Vtedy
+  // rozhoduje jednoznačnosť sumy a dňa (č. 180).
+  return parBezVsJednoznacny(tx);
+}
+// ═══ PLATBA BEZ VS: JEDNOZNAČNÁ SUMA A DEŇ (Roman 19. 9. 2026, č. 180) ═══
+//
+// Platby kartou za parkovanie a tankovanie ostávali ako „návrh“, hoci bol
+// návrh správny: suma na cent a dátum sedeli, líšilo sa len meno (banka píše
+// prevádzku, doklad firmu). Spáruje sa automaticky, keď je zhoda JEDINÁ
+// v OBOCH smeroch:
+//   · práve jeden NEZAPLATENÝ výdavok s touto sumou a dátumom ±1 deň
+//     (Saba má 14 dokladov po 147,60 € — nezaplatený z nich je len jeden),
+//   · a práve jeden voľný výdaj bez VS s touto sumou ±1 deň od toho dokladu
+//     (dve rovnaké platby v ten istý deň = nevie sa, ktorá patrí dokladu).
+// Len výdaje: príjem bez VS od odberateľa je iný prípad a má svoje pravidlá.
+function parBezVsVolnePlatby(suma, datum){
+  return (firmaData.vypis||[]).filter(t=>t && t.smer==="vydaj" && !String(t.vs||"").trim()
+    && !t.skryty && !t.vratenie && !t._autoNie && !t.odmietnutaZhoda && !(t.uhrady||[]).length
+    && !jePohybIgnorovany(t)
+    && Math.abs(r2(+t.suma||0)-suma)<0.02 && parDniMedzi(t.datum, datum)!=null && parDniMedzi(t.datum, datum)<=1);
+}
+function parBezVsJednoznacny(tx){
+  if(!tx || tx.smer!=="vydaj" || String(tx.vs||"").trim()) return null;
+  if(tx.skryty || tx.vratenie || (tx.uhrady||[]).length) return null;
+  // Ignorovaný pohyb (súkromný účet a pod.) nie je platba za podnikanie —
+  // sonda nad ostrou zálohou ho inak spárovala („Prima sukromny“ 4,50 €).
+  if(jePohybIgnorovany(tx)) return null;
+  const suma=r2(+tx.suma||0);
+  if(suma<=0) return null;
+  const kand=(firmaData.vydavky||[]).filter(d=>{
+    if(Math.abs(r2(+d.spolu||+d.bez||0)-suma)>=0.02) return false;
+    const dni=parDniMedzi(d.datum, tx.datum);
+    if(dni==null || dni>1) return false;
+    return dokladZostava("vydavok", dokladKluc(d))>0.005;
+  });
+  if(kand.length!==1) return null;
+  const d=kand[0];
+  const platby=parBezVsVolnePlatby(suma, d.datum);
+  if(platby.length!==1 || platby[0]!==tx) return null;
+  return {typ:"vydavok", kluc:dokladKluc(d), cislo:d.cislo, z:d, nazov:d.partner||"", suma, skore:90,
+          preco:"platba bez VS: jediný nezaplatený doklad s touto sumou a dňom"};
 }
 
 // spáruje všetky jednoznačné pohyby naraz
