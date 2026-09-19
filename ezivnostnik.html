@@ -2173,7 +2173,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.19-PE";  // Štart bez siete: karta „Ste offline“ namiesto sprievodcu novej firmy (spec 130.1)
+const APP_VERZIA = "2026.09.19-PF";  // Obnova zo zálohy: iné IČO zablokované, rola a beh firmy sa strážia hneď (spec 130.2)
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -39750,9 +39750,28 @@ function eur0(n){ if(n==null||isNaN(n)) return "—"; return Math.round(n).toLoc
 function eurKm(n){ if(n==null||isNaN(n)) return "—";
   return new Intl.NumberFormat("sk-SK",{style:"currency",currency:"EUR",minimumFractionDigits:3,maximumFractionDigits:3}).format(n); }
 
+// IČO na porovnanie zálohy s otvorenou firmou — bez medzier, len číslice.
+function obnovaIco(meta){ return String((meta||{}).ico||"").replace(/\D/g,""); }
+// Smie sa záloha nahrať do otvorenej firmy? (spec 130.2, č. 183, Roman 19. 9. 2026)
+// Iné IČO = nie, úplne: záloha firmy A by ticho prepísala IČO riadku firmy B,
+// alebo by uloženie spadlo na unikátnom indexe firmy_ico_unik (kap. 37.3).
+// Firma bez IČO (nová, prázdna) a demo (nič sa neukladá) áno.
+function obnovaPovolena(obj){
+  if(demoMode || !firmaData) return {ok:true};
+  const moje=obnovaIco(firmaData.meta), zoSuboru=obnovaIco(obj && obj.meta);
+  if(!moje) return {ok:true};
+  if(moje===zoSuboru) return {ok:true};
+  return {ok:false, moje, zoSuboru};
+}
 function importJSON(e){
   const file=e.target.files[0]; if(!file) return;
   e.target.value="";
+  // Rola sa stráži TU, nie až pri uložení: do vtedy by Náhľad nahradil dáta
+  // v pamäti a zastavil ho až ulozFirmuRaz (spec 130.2).
+  if(firmaData && !strazZapis("zaloha")) return;
+  // Firma, do ktorej sa obnovuje, sa zachytí pred čítaním súboru (č. 125) —
+  // prepnutie firmy počas čítania alebo otázok obnovu zruší.
+  const beh=behFirmy();
   // poistka 1: varovanie pred stratou neuložených zmien
   if(firmaData && firmaDirty && !confirm("Máte neuložené zmeny v aktuálnej firme. Načítaním súboru sa prepíšu. Pokračovať?")) return;
   const r=new FileReader();
@@ -39765,6 +39784,16 @@ function importJSON(e){
       cloudMsg("Súbor nevyzerá ako záloha firmy (chýba meta alebo settings). Načítanie zrušené.","err");
       return;
     }
+    if(!beh.platny()){ cloudMsg("Firma sa medzitým prepla — obnova zrušená, nič sa nezmenilo.","err"); return; }
+    // poistka 2b: záloha inej firmy sem nesmie (spec 130.2)
+    const P=obnovaPovolena(obj);
+    if(!P.ok){
+      alert("Táto záloha patrí inej firme.\n\n"+
+        "IČO v zálohe: "+(P.zoSuboru||"(žiadne)")+"\nIČO otvorenej firmy: "+P.moje+"\n\n"+
+        "Obnova do inej firmy nie je dovolená — prepísala by jej dáta aj IČO. "+
+        "Otvorte firmu, ktorej záloha patrí, alebo založte novú firmu a obnovte ju tam.");
+      return;
+    }
     // poistka 3: potvrdenie s názvom firmy zo súboru
     const nazov=(obj.meta&&obj.meta.nazov)?obj.meta.nazov:"(bez názvu)";
     const pocty=`${(obj.faktury||[]).length} faktúr, ${(obj.vydavky||[]).length} výdavkov, ${(obj.jazdy||[]).length} jázd`;
@@ -39775,6 +39804,7 @@ function importJSON(e){
     const zalohovat=!!firmaData && !demoMode;
     if(!confirm(`Načítať firmu „${nazov}“?\n(${pocty})\n\nVšetky dáta v appke sa nahradia obsahom súboru — nič sa nezlučuje.`+
       (zalohovat?`\nPred nahradením sa stiahne záloha terajších dát.`:""))) return;
+    if(!beh.platny()){ cloudMsg("Firma sa medzitým prepla — obnova zrušená, nič sa nezmenilo.","err"); return; }
     const zaloha=zalohovat ? stiahniZalohuJson(firmaData, "pred_importom") : "";
     firmaData=obj; firmaDirty=true; zobrazFirmu();
     // Uloží sa hneď. Polovičný stav „nahradené, ale neuložené“ nebol spoľahlivý:
