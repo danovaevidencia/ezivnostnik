@@ -2076,7 +2076,7 @@ html[data-jazda] .jazdapruh{display:flex}
 </div>
 
 <!-- skryté: file inputy -->
-<input type="file" id="fileInput" accept="application/json,.json" style="display:none" onchange="importJSON(event)">
+<input type="file" id="fileInput" accept="application/json,.json,application/zip,.zip" style="display:none" onchange="importJSON(event)">
 <input type="file" id="vypisInput" accept=".xml,.zip,text/xml,application/xml,application/zip,.pdf,application/pdf" style="display:none" onchange="spracujVypis(event)">
 <input type="file" id="ocrInput" accept="image/*,application/pdf" capture="environment" style="display:none" onchange="spracujOCR(event)">
 <input type="file" id="ocrInputFile" accept="image/*,application/pdf" style="display:none" onchange="spracujOCR(event)">
@@ -2173,7 +2173,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.19-PF";  // Obnova zo zálohy: iné IČO zablokované, rola a beh firmy sa strážia hneď (spec 130.2)
+const APP_VERZIA = "2026.09.19-PG";  // Úplná záloha so súbormi (ZIP) a obnova z nej (spec 130.3)
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -20090,12 +20090,19 @@ function appZaloha(){
     </div>
     <div class="card" style="margin-top:14px">
       <h2 style="font-size:16px;margin-bottom:4px">💾 Záloha dát</h2>
-      <div class="csub" style="margin-bottom:12px">Celá evidencia firmy v jednom súbore JSON — faktúry, výdavky, banka, jazdy, nastavenia. Uložte si ju mimo appky, napríklad do svojho cloudu.${posledna?" Naposledy stiahnutá "+fmtDatum(String(posledna).slice(0,10))+".":""}</div>
-      <button class="abtn pri" onclick="exportFirmu()">⬇ Stiahnuť zálohu</button>
+      <div class="csub" style="margin-bottom:12px">Uložte si ju mimo appky, napríklad do svojho cloudu.${posledna?" Naposledy stiahnutá "+fmtDatum(String(posledna).slice(0,10))+".":""}</div>
+      <div class="actions" style="gap:8px;flex-wrap:wrap">
+        <button class="abtn pri" onclick="exportFirmu()">⬇ Stiahnuť zálohu</button>
+        <button class="abtn" onclick="exportZalohaZip()"${(localMode||demoMode||!sb)?' disabled title="Originály dokladov sú v cloude — úplná záloha potrebuje prihlásenie"':''}>📦 Úplná záloha so súbormi (ZIP)</button>
+      </div>
+      <div class="ocr-hint" style="margin-top:8px"><b>Záloha</b> (JSON) obsahuje všetky záznamy — faktúry, výdavky, banku, jazdy, nastavenia —, ale nie originály dokladov; tie sú len odkazmi do cloudu. <b>Úplná záloha</b> (ZIP) pribalí aj originály (PDF, fotky, XML e-faktúr, podania), takže obnova funguje aj vtedy, keď cloud o súbory príde.</div>
+      <label style="display:flex;align-items:center;gap:9px;font-size:13px;margin-top:9px;cursor:pointer">
+        <input type="checkbox" id="zal_vypisy" style="width:17px;height:17px">
+        <span>Pribaliť aj výpisy z účtu — v ZIP-e budú <b>nezašifrované</b></span></label>
     </div>
     <div class="card" style="margin-top:14px">
       <h2 style="font-size:16px;margin-bottom:4px">♻ Obnoviť zo zálohy</h2>
-      <div class="csub" style="margin-bottom:12px">Nahradí <b>všetky</b> dáta firmy obsahom súboru — nič sa nezlučuje. Pred nahradením appka sama stiahne zálohu terajšieho stavu a spýta sa, či naozaj.</div>
+      <div class="csub" style="margin-bottom:12px">Nahradí <b>všetky</b> dáta firmy obsahom súboru (JSON alebo ZIP) — nič sa nezlučuje. Pred nahradením appka sama stiahne zálohu terajšieho stavu a spýta sa, či naozaj. Zo ZIP-u nahrá aj originály dokladov. Záloha inej firmy (iné IČO) sa nenahrá.</div>
       <button class="abtn" onclick="document.getElementById('fileInput').click()"${zam("zaloha")}>📥 Vybrať súbor zálohy…</button>
     </div>
     <div class="cloudmsg" id="cloudMsg"></div>`;
@@ -39774,11 +39781,23 @@ function importJSON(e){
   const beh=behFirmy();
   // poistka 1: varovanie pred stratou neuložených zmien
   if(firmaData && firmaDirty && !confirm("Máte neuložené zmeny v aktuálnej firme. Načítaním súboru sa prepíšu. Pokračovať?")) return;
+  const jeZip=/\.zip$/i.test(file.name||"") || /zip/i.test(file.type||"");
   const r=new FileReader();
   r.onload=async(ev)=>{
-    let obj;
-    try{ obj=JSON.parse(ev.target.result); }
-    catch(err){ cloudMsg("Súbor sa nepodarilo prečítať — je to platný JSON?","err"); return; }
+    let obj, zipSubory=null;
+    if(jeZip){
+      // Úplná záloha so súbormi (spec 130.3): zaloha.json + subory/<cesta>.
+      try{
+        const fflate=await ensureFflate();
+        const Z=fflate.unzipSync(new Uint8Array(ev.target.result));
+        if(!Z["zaloha.json"]) throw new Error("v ZIP-e chýba zaloha.json");
+        obj=JSON.parse(new TextDecoder().decode(Z["zaloha.json"]));
+        zipSubory={}; Object.keys(Z).forEach(k=>{ if(k.indexOf("subory/")===0 && Z[k].length) zipSubory[k.slice(7)]=Z[k]; });
+      }catch(err){ console.error("obnova zo ZIP:", err); cloudMsg("ZIP sa nepodarilo prečítať ("+err.message+").","err"); return; }
+    } else {
+      try{ obj=JSON.parse(ev.target.result); }
+      catch(err){ cloudMsg("Súbor sa nepodarilo prečítať — je to platný JSON?","err"); return; }
+    }
     // poistka 2: validácia, že je to naozaj firma (nie omylom iný JSON)
     if(!obj || typeof obj!=="object" || !obj.meta || !obj.settings){
       cloudMsg("Súbor nevyzerá ako záloha firmy (chýba meta alebo settings). Načítanie zrušené.","err");
@@ -39802,10 +39821,22 @@ function importJSON(e){
     // nezvratná operácia potrebuje zálohu). Demo sa nezálohuje — ukážkové dáta
     // sa neukladajú a dajú sa otvoriť znova.
     const zalohovat=!!firmaData && !demoMode;
-    if(!confirm(`Načítať firmu „${nazov}“?\n(${pocty})\n\nVšetky dáta v appke sa nahradia obsahom súboru — nič sa nezlučuje.`+
+    const nSub=zipSubory?Object.keys(zipSubory).length:0;
+    if(!confirm(`Načítať firmu „${nazov}“?\n(${pocty}${nSub?", "+nSub+" súborov":""})\n\nVšetky dáta v appke sa nahradia obsahom súboru — nič sa nezlučuje.`+
       (zalohovat?`\nPred nahradením sa stiahne záloha terajších dát.`:""))) return;
     if(!beh.platny()){ cloudMsg("Firma sa medzitým prepla — obnova zrušená, nič sa nezmenilo.","err"); return; }
     const zaloha=zalohovat ? stiahniZalohuJson(firmaData, "pred_importom") : "";
+    // Súbory zo ZIP-u sa nahrajú do priečinka TEJTO firmy a cesty v dátach sa
+    // prepíšu (spec 130.3, kap. 63.1 — staré cesty ukazujú na priečinok firmy,
+    // z ktorej záloha vznikla). Ešte pred nahradením dát: keď sa niečo pokazí,
+    // appka ostáva pri pôvodných dátach.
+    let subVysledok=null;
+    if(zipSubory && nSub && !localMode && !demoMode && sb){
+      subVysledok=await zalohaNahrajSubory(zipSubory, beh);
+      if(!subVysledok) return;   // firma sa prepla — hláška už je
+      zalohaPrepisCesty(obj, subVysledok.mapa);
+    }
+    const bezSuboru=zipSubory ? zalohaCesty(obj).filter(c=>!(subVysledok && Object.values(subVysledok.mapa).includes(c))).length : 0;
     firmaData=obj; firmaDirty=true; zobrazFirmu();
     // Uloží sa hneď. Polovičný stav „nahradené, ale neuložené“ nebol spoľahlivý:
     // `zobrazFirmu` vie uložiť aj sama (poZmene po párovaní), takže hláška
@@ -39821,10 +39852,108 @@ function importJSON(e){
         : "Uložiť sa ich nepodarilo — skúste „☁ Uložiť do cloudu“ v Nastaveniach a dátach. Kým sa neuložia, obnovenie stránky vráti predošlé dáta.";
     // Výsledok ide do okna, nie do #cloudMsg: ten zmaže najbližšie prekreslenie
     // obrazovky (napr. keď dorazia články) skôr, než si ho človek prečíta.
-    alert("Firma „"+nazov+"“ načítaná zo súboru ("+kb+" KB, "+pocty+").\n\n"+stav+
+    const subText = !zipSubory ? ""
+      : subVysledok
+        ? "\n\nSúbory: obnovených "+Object.keys(subVysledok.mapa).length
+          +(subVysledok.zlyhali.length?", nepodarilo sa "+subVysledok.zlyhali.length:"")
+          +(bezSuboru?". "+bezSuboru+" "+sklon(bezSuboru,"odkaz","odkazy","odkazov")+" v dátach nemá súbor v zálohe (napr. výpisy z účtu, ak ste ich nepribalili) — ak cloud o súbory prišiel, tie chýbajú.":".")
+        : "\n\nSúbory zo ZIP-u sa v tomto režime neukladajú — ostávajú len v ZIP-e.";
+    alert("Firma „"+nazov+"“ načítaná zo súboru ("+kb+" KB, "+pocty+").\n\n"+stav+subText+
       (zaloha?"\n\nPredošlé dáta sú v stiahnutom súbore "+zaloha+".":""));
   };
-  r.readAsText(file);
+  if(jeZip) r.readAsArrayBuffer(file); else r.readAsText(file);
+}
+// ═══ ÚPLNÁ ZÁLOHA SO SÚBORMI — ZIP (č. 184, spec 130.3) ═════════════════════
+//
+// Ruší rozhodnutie 43.7 („ZIP by len duplikoval uložené“). Záloha má prežiť aj
+// výpadok cloudu a zrušenie účtu: JSON bez originálov nechal po strate
+// úložiska 61 mŕtvych odkazov (Romanova záloha 19. 9. 2026) bez varovania.
+//
+// Cesty sa nehľadajú podľa zoznamu polí, ale podľa TVARU hodnoty
+// (<uuid>/…): v zálohe ich bolo deväť druhov (doklady, výpisy, podania DPH,
+// e-faktúry, dokumenty…) a pole pridané neskôr by zoznam ticho obišlo.
+const ZALOHA_CESTA_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/\S+$/i;
+function zalohaCesty(data){
+  const out=new Set();
+  (function walk(v){
+    if(Array.isArray(v)) v.forEach(walk);
+    else if(v && typeof v==="object") Object.keys(v).forEach(k=>walk(v[k]));
+    else if(typeof v==="string" && ZALOHA_CESTA_RE.test(v)) out.add(v);
+  })(data);
+  return [...out];
+}
+// Výpisy z účtu sú v úložisku rozšifrované — do ZIP-u len po zaškrtnutí (Roman).
+function zalohaJeVypis(cesta){ return /\/vypisy\//.test(cesta); }
+function zalohaPrepisCesty(data, mapa){
+  let n=0;
+  (function walk(v){
+    if(Array.isArray(v)) v.forEach((x,i)=>{ if(typeof x==="string" && mapa[x]){ v[i]=mapa[x]; n++; } else walk(x); });
+    else if(v && typeof v==="object") Object.keys(v).forEach(k=>{ const x=v[k]; if(typeof x==="string" && mapa[x]){ v[k]=mapa[x]; n++; } else walk(x); });
+  })(data);
+  return n;
+}
+function zalohaTyp(cesta){
+  const p=String(cesta).split(".").pop().toLowerCase();
+  return ({pdf:"application/pdf", jpg:"image/jpeg", jpeg:"image/jpeg", png:"image/png", webp:"image/webp",
+    xml:"application/xml", json:"application/json", txt:"text/plain", csv:"text/csv", zip:"application/zip"})[p]||"application/octet-stream";
+}
+// Nahratie súborov zo ZIP-u do priečinka firmy. Existujúci súbor (obnova tej
+// istej firmy, úložisko nepoškodené) sa neprepisuje a počíta sa ako obnovený.
+async function zalohaNahrajSubory(subory, beh){
+  const koren=beh.koren, mapa={}, zlyhali=[];
+  const kluce=Object.keys(subory);
+  for(let i=0;i<kluce.length;i++){
+    if(!beh.platny()){ cloudMsg("Firma sa medzitým prepla — obnova zrušená, dáta sa nezmenili.","err"); return null; }
+    const stara=kluce[i], nova=koren+stara.slice(stara.indexOf("/"));
+    cloudMsg("Obnovujem súbory "+(i+1)+" / "+kluce.length+"…");
+    try{
+      const res=await nahrajDoUloziska(nova, new Blob([subory[stara]], {type:zalohaTyp(nova)}), {upsert:false, contentType:zalohaTyp(nova)});
+      if(res && !res.error){ mapa[stara]=nova; continue; }
+      // Už tam je? O existencii rozhodne zoznam priečinka, nie text chyby (ako pri dokladUpload).
+      const priecinok=nova.slice(0, nova.lastIndexOf("/")), meno=nova.slice(nova.lastIndexOf("/")+1);
+      const {data:zoz}=await sb.storage.from("dokumenty").list(priecinok, {search:meno, limit:100});
+      if((zoz||[]).some(x=>x.name===meno)) mapa[stara]=nova;
+      else { console.error("obnova — súbor:", stara, res && res.error); zlyhali.push(stara); }
+    }catch(e){ console.error("obnova — súbor:", stara, e); zlyhali.push(stara); }
+  }
+  return {mapa, zlyhali};
+}
+async function exportZalohaZip(){
+  if(!firmaData){ cloudMsg("Nie sú žiadne dáta na stiahnutie.","err"); return; }
+  if(localMode || demoMode || !sb){ cloudMsg("Úplná záloha so súbormi potrebuje prihlásenie do cloudu — originály sú tam. Stiahnite zálohu JSON.","err"); return; }
+  const sVypismi=!!(document.getElementById("zal_vypisy")||{}).checked;
+  const beh=behFirmy();
+  const data=JSON.parse(JSON.stringify(firmaData));
+  const vsetky=zalohaCesty(data);
+  const cesty=vsetky.filter(c=>sVypismi || !zalohaJeVypis(c));
+  const vynechane=vsetky.length-cesty.length;
+  let fflate;
+  try{ fflate=await ensureFflate(); }
+  catch(e){ cloudMsg("Knižnicu na ZIP sa nepodarilo načítať. Skontrolujte pripojenie.","err"); return; }
+  const subory={}, chybajuce=[];
+  for(let i=0;i<cesty.length;i++){
+    if(!beh.platny()){ cloudMsg("Firma sa medzitým prepla — záloha zrušená.","err"); return; }
+    cloudMsg("Sťahujem súbory "+(i+1)+" / "+cesty.length+"…");
+    try{
+      const {data:b, error}=await sb.storage.from("dokumenty").download(cesty[i]);
+      if(error || !b) throw error || new Error("prázdny súbor");
+      subory["subory/"+cesty[i]]=new Uint8Array(await b.arrayBuffer());
+    }catch(e){ console.error("záloha ZIP — súbor:", cesty[i], e); chybajuce.push(cesty[i]); }
+  }
+  if(!beh.platny()){ cloudMsg("Firma sa medzitým prepla — záloha zrušená.","err"); return; }
+  const enc=new TextEncoder();
+  subory["zaloha.json"]=enc.encode(JSON.stringify(data,null,2));
+  subory["manifest.json"]=enc.encode(JSON.stringify({
+    format:"ezivnostnik-zaloha-zip", verzia:1, appVerzia:APP_VERZIA, vytvorene:new Date().toISOString(),
+    firma:{nazov:(data.meta||{}).nazov||"", ico:(data.meta||{}).ico||""},
+    suborov:cesty.length-chybajuce.length, chybajuce, vynechaneVypisy:vynechane }, null, 2));
+  const zip=fflate.zipSync(subory, {level:6});
+  const meno=((data.meta&&data.meta.nazov)||"firma").replace(/[^\w]+/g,"_")+"_uplna_zaloha_"+new Date().toISOString().slice(0,10)+".zip";
+  stiahniBlob(new Blob([zip], {type:"application/zip"}), meno);
+  zaznacZalohu();
+  cloudMsg("✓ Úplná záloha stiahnutá: "+(cesty.length-chybajuce.length)+" "+sklon(cesty.length-chybajuce.length,"súbor","súbory","súborov")
+    +(chybajuce.length?" · "+chybajuce.length+" sa nepodarilo stiahnuť (zoznam je v manifest.json)":"")
+    +(vynechane?" · bez "+vynechane+" "+sklon(vynechane,"výpisu","výpisov","výpisov")+" z účtu":""), chybajuce.length?"err":"ok");
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -40023,14 +40152,17 @@ function stiahniZalohuJson(data, druh){
 function exportFirmu(){
   if(!firmaData){ cloudMsg("Nie sú žiadne dáta na stiahnutie.","err"); return; }
   stiahniZalohuJson(firmaData, "zaloha");
-  // zaznač čas poslednej zálohy
+  zaznacZalohu();
+  cloudMsg("Záloha stiahnutá.","ok");
+}
+// Čas poslednej zálohy — JSON aj ZIP (pripomienka zálohy ich nerozlišuje).
+function zaznacZalohu(){
   if(!firmaData.settings) firmaData.settings={};
   firmaData.settings.poslednaZaloha=new Date().toISOString();
   gpsUloz("eziv_poslednaZaloha", firmaData.settings.poslednaZaloha);   // demo len do pamäti karty
   // Bez tohto zostal čas len v pamäti karty a v `localStorage` — cloud sa oň
   // nedozvedel a po najbližšom načítaní zvíťazila stará hodnota.
   firmaDirty=true; ulozNastavenieDebounced();
-  cloudMsg("Záloha stiahnutá.","ok");
 }
 // upozornenie: dlho nebola stiahnutá záloha (dní od poslednej)
 function backupOverdue(){
