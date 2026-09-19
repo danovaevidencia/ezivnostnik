@@ -927,6 +927,10 @@ h1,h2,h3,h4,.chead,.wbig,.sbox .sn,.sp-title b,.splittitle{text-wrap:balance}
 .prehlad-odloz-go{margin-left:auto;font-size:12px;font-weight:600;color:var(--brand)}
 /* Cieľ posunu po ťuknutí na upozornenie (posunNaPrvok). Na mobile je horná
    lišta pevná (63 px) — bez okraja by pás výberu skončil pod ňou. */
+/* Offline s kópiou v zariadení (spec 130.5) — pás nad spodnou lištou. */
+.offline-pruh{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom, 0px) + 74px);
+  z-index:60;max-width:min(560px,calc(100vw - 32px));background:var(--ink);color:var(--paper);border-radius:12px;
+  padding:9px 14px;font-size:12.5px;line-height:1.45;box-shadow:0 6px 20px rgba(0,0,0,.25)}
 /* Dáta firmy sa nenačítali (spec 130.1): na ploche len karta „Ste offline“. */
 .nenacitane #homeStrip,.nenacitane #globalHladanie,.nenacitane #launcherTitle,.nenacitane #launcher,
 .nenacitane #heroFixed,.nenacitane #dashEditBar,.nenacitane #rychleAkcie{display:none!important}
@@ -2173,7 +2177,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.19-PH";  // XLSX: hárky DPH a Banka, filter roka pre faktúry a jazdy, náhľad = súbor (spec 130.4)
+const APP_VERZIA = "2026.09.19-PI";  // Kópia firmy pri výpadku siete: práca bez internetu, zosúladenie po návrate (spec 130.5)
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -3699,7 +3703,18 @@ async function nacitajFirmu(idPoziadavka){
     // inak by moduly a limity ostali z predošlej firmy
     if(firmaId){ await nacitajFirmaConfig(firmaId); await nacitajPristupy(firmaId); }
     if(!aktualne()) return;
+    _kopiaUser=user.id;
+    // Kópiu zosúlaďuje LEN prvé načítanie relácie alebo návrat z offline režimu.
+    // Pri prepínaní firiem (A → B → A) je „neodoslané“ len uloženie, ktoré ešte
+    // beží, a kópia by prebila čerstvé dáta z cloudu (test_oprava_prepnutie11).
+    const zosuladit = !_kopiaStartHotovy || offlineRezim;
+    _kopiaStartHotovy=true;
+    if(offlineRezim) ukonciOfflineRezim();
     vykresliPrepinacFiriem();
+    // Neodoslané zmeny z výpadku siete (spec 130.5): zosúladiť PRED zobrazením.
+    const K=zosuladit ? kopiaCitaj() : null;
+    if(firmaId && K && K.firmaId===firmaId && K.neodoslane && (!K.userId || K.userId===user.id)){ kopiaZosulad(K); return; }
+    if(firmaId) kopiaZapis(false);
     zobrazFirmu();
   } catch(e){
     if(!aktualne()){ console.error("načítanie firmy (medzitým začalo novšie):", e); return; }
@@ -3724,6 +3739,8 @@ function jeSietovaChyba(e){
 let _cakaNaSiet=false;
 function zobrazNenacitane(e, offline){
   console.error("dáta firmy sa nenačítali"+(offline?" (bez siete)":"")+":", e);
+  // Bez siete a s kópiou firmy v zariadení: appka pracuje s ňou (spec 130.5).
+  if(offline && otvorKopiuOffline()) return;
   ["dashboard","dashTitle","obView","emptyCard"].forEach(id=>{ const x=document.getElementById(id); if(x) x.classList.add("hidden"); });
   const karta=document.getElementById("offlineCard"), telo=document.getElementById("offlineTelo");
   if(telo) telo.innerHTML=`<div class="ei">${offline?"📡":"⚠"}</div>
@@ -3738,6 +3755,79 @@ function zobrazNenacitane(e, offline){
   // svieti, sú skryté (CSS .nenacitane), a karta stojí hneď pod pozdravom.
   const hv=document.getElementById("homeView"); if(hv) hv.classList.add("nenacitane");
   _cakaNaSiet=!!offline;
+}
+// ═══ KÓPIA PRI VÝPADKU SIETE (č. 186, spec 130.5, Roman 19. 9. 2026) ═══════
+//
+// Výnimka z pravidla „dáta firmy nepatria do localStorage“ (CLAUDE.md): kópia
+// otvorenej firmy je ZDROJ PRI VÝPADKU, nie druhý zdroj pravdy. Vyhráva cloud;
+// kópia sa číta len (a) pri štarte bez siete a (b) pri načítaní z cloudu, keď
+// nesie neodoslané zmeny. Nahratie ide cez zámok (firmaVerzia = verzia, z
+// ktorej kópia vyšla); keď firmu medzitým zmenil niekto iný, NEZLUČUJE sa —
+// kópia sa stiahne do súboru a človek vyberie verziu. Patrí jednej firme
+// a jednému používateľovi; odhlásenie ju zmaže.
+const KOPIA_KLUC="eziv_kopia";
+let offlineRezim=false, _kopiaUser=null, _kopiaStartHotovy=false;
+function kopiaCitaj(){
+  try{ const t=localStorage.getItem(KOPIA_KLUC); return t ? JSON.parse(t) : null; }
+  catch(e){ console.error("kópia pri výpadku sa nedá prečítať:", e); return null; }
+}
+function kopiaZapis(neodoslane){
+  if(localMode || demoMode || !firmaId || !firmaData) return;
+  if(typeof mojaRolaVFirme==="function" && mojaRolaVFirme()==="nahlad") return;   // čítanie nemá čo odoslať
+  const f=(firmyZoznam||[]).find(x=>x.id===firmaId)||{};
+  try{
+    localStorage.setItem(KOPIA_KLUC, JSON.stringify({
+      firmaId, verzia:firmaVerzia||null, neodoslane:!!neodoslane, kedy:new Date().toISOString(),
+      userId:_kopiaUser||null, nazov:(firmaData.meta||{}).nazov||f.nazov||"", mojaRola:f.mojaRola||null,
+      firmaConfig:firmaConfig||null, data:firmaData }));
+  }catch(e){ console.error("kópia pri výpadku sa nezapísala (plné úložisko prehliadača?):", e); }
+}
+function kopiaZmaz(){ try{ localStorage.removeItem(KOPIA_KLUC); }catch(_){} }
+// Štart bez siete: otvorí kópiu poslednej firmy. Vráti true, keď ju otvorila.
+function otvorKopiuOffline(){
+  const K=kopiaCitaj();
+  if(!K || !K.firmaId || !K.data) return false;
+  let posledna=""; try{ posledna=localStorage.getItem("eziv_poslednaFirma")||""; }catch(_){}
+  if(posledna && posledna!==K.firmaId) return false;
+  firmaId=K.firmaId; firmaData=K.data; firmaVerzia=K.verzia||null;
+  if(K.firmaConfig) firmaConfig=K.firmaConfig;
+  firmyZoznam=[{id:K.firmaId, nazov:K.nazov||"", mojaRola:K.mojaRola||"vlastnik"}];
+  _kopiaUser=K.userId||null;
+  offlineRezim=true; _cakaNaSiet=true;
+  zobrazFirmu();
+  offlinePruh(K);
+  return true;
+}
+function offlinePruh(K){
+  let p=document.getElementById("offlinePruh");
+  if(!p){ p=document.createElement("div"); p.id="offlinePruh"; p.className="offline-pruh"; document.body.appendChild(p); }
+  p.innerHTML="📡 <b>Offline</b> — pracujete s kópiou v zariadení"+(K&&K.kedy?" ("+fmtDatum(String(K.kedy).slice(0,10))+")":"")
+    +". Zmeny sa uložia sem a odošlú po návrate siete.";
+  p.hidden=false;
+}
+function ukonciOfflineRezim(){
+  offlineRezim=false;
+  const p=document.getElementById("offlinePruh"); if(p) p.hidden=true;
+}
+// Načítanie z cloudu našlo neodoslané zmeny tej istej firmy.
+function kopiaZosulad(K){
+  const kedy=K.kedy ? new Date(K.kedy).toLocaleString("sk-SK") : "";
+  if(K.verzia && K.verzia===firmaVerzia){
+    // Cloud sa odvtedy nezmenil — kópia je len novšia. Nahrá sa cez zámok.
+    firmaData=K.data; firmaDirty=true; zobrazFirmu();
+    cloudMsg("Odosielam zmeny, ktoré ste urobili bez siete…","info");
+    ulozFirmu();
+    return;
+  }
+  // Firmu medzitým zmenil niekto iný (iné zariadenie, účtovník). Nezlučuje sa.
+  const subor=stiahniZalohuJson(K.data, "neodoslane_zo_zariadenia");
+  const moja=confirm("V tomto zariadení sú zmeny firmy „"+(K.nazov||"")+"“ urobené bez siete"+(kedy?" ("+kedy+")":"")
+    +", ktoré sa neodoslali. Firmu medzitým zmenil niekto iný alebo iné zariadenie — zmeny sa nezlučujú.\n\n"
+    +"OK = nahrať verziu z tohto zariadenia (prepíše verziu v cloude)\n"
+    +"Zrušiť = ponechať verziu z cloudu\n\n"
+    +"Verzia zo zariadenia je v každom prípade v stiahnutom súbore "+subor+".");
+  if(moja){ firmaData=K.data; firmaDirty=true; zobrazFirmu(); ulozFirmu(); }
+  else { kopiaZapis(false); zobrazFirmu(); }
 }
 function skryNenacitane(){
   const k=document.getElementById("offlineCard"); if(k) k.classList.add("hidden");
@@ -6052,7 +6142,10 @@ function ulozNastavenieDebounced(){
   // hneď ulož lokálne (rýchle, bez siete). V deme nie: ukážková firma by sa
   // zapísala ako lokálne dáta — „Pokračovať bez účtu" by ju po odchode z dema
   // načítal a skutočné lokálne dáta by prepísala (ROZHODNUTIA č. 50).
-  try{ if(firmaData && !demoMode) localStorage.setItem("eziv_firma",JSON.stringify(firmaData)); }catch(_){}
+  // Len v režime bez účtu. Do 19. 9. 2026 sa zapisovala aj v cloude — bez id
+  // firmy — a „Pokračovať bez účtu“ ju potom otvorilo ako vlastnú firmu:
+  // zastaranú kópiu cloudovej firmy (spec 130.5). Kópia pri výpadku je eziv_kopia.
+  try{ if(firmaData && !demoMode && localMode) localStorage.setItem("eziv_firma",JSON.stringify(firmaData)); }catch(_){}
   clearTimeout(_ulozTimer);
   _ulozTimer=setTimeout(()=>{ if(!localMode && sb) ulozFirmu(); }, 2500);
 }
@@ -19961,7 +20054,7 @@ function dmKopiruj(){
 // sadu zhodí.
 const DOKUMENTY={
   podmienky:{url:"podmienky.html",     n:"Obchodné podmienky",      verzia:"1.3"},
-  sukromie: {url:"sukromie.html",      n:"Ochrana osobných údajov", verzia:"1.6"},
+  sukromie: {url:"sukromie.html",      n:"Ochrana osobných údajov", verzia:"1.7"},
   zmazanie: {url:"zmazanie-uctu.html", n:"Zmazanie účtu a údajov"},
 };
 // Záznam súhlasu k účtu (ROZHODNUTIA č. 52). Zmluva vzniká vytvorením účtu
@@ -25038,7 +25131,7 @@ function val(id){ const e=document.getElementById(id); return e?e.value:""; }
 function chk(id){ const e=document.getElementById(id); return e?!!e.checked:false; }
 function setCrumb(t){ const e=document.getElementById("appCrumb"); if(e) e.textContent=t; }
 
-function poZmene(){ firmaDirty=true; firmaDataVerzia++; ulozFirmu(); renderLauncher(); }
+function poZmene(){ firmaDirty=true; firmaDataVerzia++; kopiaZapis(true); ulozFirmu(); renderLauncher(); }
 
 // ═══ VYHĽADÁVANIE V ZOZNAMOCH A PRIZNANÉ OREZANIE (kap. 45.6) ═══════════════
 // Jedna normalizácia a jedno správanie poľa pre všetky moduly. Bez diakritiky
@@ -40147,6 +40240,7 @@ async function ulozFirmuRaz(){
           // vlastný predošlý zápis. Nič sa nestratilo, len zosúladíme verziu.
           firmaVerzia = akt.updated_at || null;
           firmaDirty = false;
+          kopiaZapis(false);
           setSync("saved");
           return;
         }
@@ -40162,6 +40256,8 @@ async function ulozFirmuRaz(){
     }
     if(res.error) throw res.error;
     firmaId=res.data.id; firmaVerzia=res.data.updated_at||null; firmaDirty=false;
+    kopiaZapis(false);
+    if(offlineRezim) ukonciOfflineRezim();
     // názov sa mohol zmeniť v nastaveniach — prepínač musí ukazovať aktuálny
     const _f=firmyZoznam.find(f=>f.id===firmaId);
     if(_f){ _f.nazov=res.data.nazov; _f.updated_at=firmaVerzia; }
@@ -40676,6 +40772,9 @@ function nahrateUlozene(){
 // niečo nezmenil (č. 86). Len po zlyhaní — bez neho niet čo dohnať a uloženie
 // navyše beží hneď pri zmene.
 function ulozPoNavrateSiete(){
+  // Appka, ktorá štartovala z kópie, nemá overené prihlásenie ani verziu —
+  // načíta sa celá znova a neodoslané zmeny zosúladí kopiaZosulad (spec 130.5).
+  if(offlineRezim) return;
   if(_ulozenieZlyhalo && firmaDirty && firmaData && !demoMode && !localMode) ulozFirmu();
 }
 window.addEventListener("online", ulozPoNavrateSiete);
@@ -40826,6 +40925,9 @@ async function doLogout(){
   // Načítanie nanovo nižšie pamäť zmaže aj samo; výslovne preto, aby to nestálo na ňom. Stratený
   // výsledok nič nepokazí: faktúra bez záznamu sa pred odoslaním pýta poštára (č. 130).
   _peppolOdlozene.clear();
+  // Kópia firmy pri výpadku (spec 130.5) patrí prihlásenému — na zdieľanom
+  // zariadení nesmie ostať ďalšiemu človeku.
+  kopiaZmaz();
   if(sb && !localMode){ await sb.auth.signOut(); }
   location.reload();
 }
