@@ -746,7 +746,7 @@ knihy: {
         { nadpis: "Úhrada označená ručne",
           html: "<p>Keď ste zaplatenie [[navod:faktury/uhrada|označili ručne]], kniha doklad započíta ako uhradený, ale stĺpec <b>Uhradené dňa</b> ostane prázdny — appka deň platby nepozná. Preto ho ako uhradený ukáže aj v knihe k skoršiemu dňu.</p><p>Deň úhrady nesie až platba spárovaná z [[navod:banka/vypis|výpisu z banky]].</p>" },
         { nadpis: "Všetko v jednom súbore",
-          html: "<p>[[navod:data/excel|Kompletný export pre účtovníka]] obsahuje knihu pohľadávok aj záväzkov ako hárky jedného Excelu. Peňažný denník doň pridáte zaškrtnutím.</p>" },
+          html: "<p>[[navod:zaloha/excel|Kompletný export pre účtovníka]] obsahuje knihu pohľadávok aj záväzkov ako hárky jedného Excelu. Peňažný denník doň pridáte zaškrtnutím.</p>" },
       ],
     },
     {
@@ -771,6 +771,52 @@ knihy: {
   ],
 },
 
+zaloha: {
+  vJednejVete: "Excel pre účtovníka, záloha a obnova dát",
+  uvod: "Tu stiahnete kompletný export pre účtovníka v Exceli, zálohu všetkých dát v súbore a v prípade potreby z nej dáta obnovíte. Modul je v každom pláne.",
+  ulohy: [
+    {
+      id: "zaloha",
+      nazov: "Zálohovať si dáta",
+      kedy: "Raz za mesiac — appka vám to pripomenie.",
+      kroky: [
+        { text: "V časti <b>Záloha dát</b> ťuknite na <b>⬇ Stiahnuť zálohu</b>.", tlacidlo: "Stiahnuť zálohu", snimka: "zaloha-zaloha-1" },
+        { text: "Súbor .json sa uloží medzi stiahnuté súbory — presuňte si ho na disk alebo do vlastného úložiska." },
+      ],
+      tip: "Keď zálohu 30 dní nestiahnete, ukáže sa na ploche upozornenie s tlačidlom <b>Stiahnuť zálohu</b> — stačí ťuknúť naň.",
+      podrobnosti: [
+        { nadpis: "Záloha a uloženie do cloudu",
+          html: "<p><b>☁ Uložiť do cloudu</b> v [[app:data|nastaveniach]] uloží dáta na server, aby ste ich mali na každom zariadení. Záloha je vaša vlastná kópia v súbore, ku ktorej sa viete vrátiť — [[navod:zaloha/obnovit|ako obnoviť dáta zo zálohy]].</p>" },
+      ],
+    },
+    {
+      id: "obnovit",
+      nazov: "Obnoviť dáta zo zálohy",
+      kedy: "Potrebujete sa vrátiť k stavu, ktorý máte uložený v zálohe.",
+      kroky: [
+        { text: "V časti <b>Obnoviť zo zálohy</b> ťuknite na <b>📥 Vybrať súbor zálohy…</b> a vyberte súbor.", tlacidlo: "Vybrať súbor zálohy…", snimka: "zaloha-obnovit-1" },
+        { text: "Appka ukáže názov firmy a koľko faktúr, výdavkov a jázd v súbore je — potvrďte. Pred nahradením stiahne zálohu terajších dát." },
+        { text: "Appka načítané dáta hneď uloží a v okne napíše, či sa to podarilo. Keď nie, ťuknite v [[app:data|nastaveniach]] na <b>☁ Uložiť do cloudu</b>." },
+      ],
+      tip: "Import nič nezlučuje — všetko, čo máte v appke teraz, nahradí obsahom súboru. Súbor so zálohou predošlých dát (…_pred_importom_….json) si nechajte, kým si nie ste istí, že je všetko v poriadku.",
+    },
+    {
+      id: "excel",
+      nazov: "Odovzdať dáta účtovníkovi v Exceli",
+      kedy: "Účtovník chce všetko za rok v jednom súbore.",
+      kroky: [
+        { text: "V sprievodcovi exportom ťuknite na <b>Čo exportovať</b> a vyberte rok.", tlacidlo: "Čo exportovať", snimka: "zaloha-excel-1" },
+        { text: "V kroku <b>Kontrola dát</b> si pozrite, čo appka našla.", tlacidlo: "Kontrola dát", snimka: "zaloha-excel-2" },
+        { text: "V kroku <b>Generovať</b> ťuknite na <b>📊 Stiahnuť kompletný export</b>.", tlacidlo: "Stiahnuť kompletný export", snimka: "zaloha-excel-3" },
+      ],
+      tip: "Nálezy kontroly export nezastavia — sú tam, aby ste vedeli, čo je v súbore neisté, skôr než ho odovzdáte.",
+      podrobnosti: [
+        { nadpis: "Čo v súbore je",
+          html: "<p>Jeden formátovaný Excel so záložkami. Koľko hárkov a čo v nich bude, ukáže krok <b>Náhľad</b>. Pribaliť môžete aj peňažný denník a jazdy rozdelené po mesiacoch.</p>" },
+      ],
+    },
+  ],
+},
 majetok: {
   vJednejVete: "Evidovať veci, ktoré firme slúžia roky, a vidieť ich odpisy",
   uvod: "Auto, počítač či stroj sa do výdavkov nedávajú naraz, ale postupne — odpismi. Appka z ceny a odpisovej skupiny zostaví odpisový plán a pri skutočných výdavkoch ročný odpis sama pripočíta k výdavkom.",
@@ -827,7 +873,7 @@ majetok: {
         { nadpis: "Odpisy tento rok daň neznížia",
           html: "<p>Keď je základ dane pod nezdaniteľnou časťou, [[app:priznania|priznania]] ukážu kartu <b>Odpisy vám tento rok daň neznížia</b> s tlačidlom na prerušenie odpisovania. Prerušiť sa dá len celý rok a odpisy sa posunú, nestratia sa.</p>" },
         { nadpis: "Odpisový plán v Exceli",
-          html: "<p>[[navod:data/excel|Kompletný export pre účtovníka]] má hárok <b>Majetok a odpisy</b> s plánom každej veci.</p>" },
+          html: "<p>[[navod:zaloha/excel|Kompletný export pre účtovníka]] má hárok <b>Majetok a odpisy</b> s plánom každej veci.</p>" },
       ],
     },
     {
@@ -1196,8 +1242,8 @@ superdash: {
 },
 
 data: {
-  vJednejVete: "Údaje firmy, predplatné a záloha dát",
-  uvod: "Tu vyplníte údaje, ktoré appka dáva na faktúry a do daňových podaní, nastavíte odvody a preddavky a stiahnete si zálohu dát. Väčšinu stačí vyplniť raz — a uložiť tlačidlom <b>Uložiť všetky nastavenia</b> na konci stránky.",
+  vJednejVete: "Údaje firmy, predplatné a e-faktúry",
+  uvod: "Tu vyplníte údaje, ktoré appka dáva na faktúry a do daňových podaní, a nastavíte odvody a preddavky. Zálohu dát a export pre účtovníka nájdete vo [[navod:zaloha|Firemnej agende → Export a záloha]]. Väčšinu stačí vyplniť raz — a uložiť tlačidlom <b>Uložiť všetky nastavenia</b> na konci stránky.",
   ulohy: [
     {
       id: "firma",
@@ -1249,46 +1295,6 @@ data: {
       podrobnosti: [
         { nadpis: "V ukážkovom režime",
           html: "<p>Plány si pozriete, ale predplatiť ich ide len s vlastným účtom prihláseným v cloude.</p>" },
-      ],
-    },
-    {
-      id: "zaloha",
-      nazov: "Zálohovať si dáta",
-      kedy: "Raz za mesiac — appka vám to pripomenie.",
-      kroky: [
-        { text: "Hore na stránke ťuknite na <b>⬇ Stiahnuť zálohu</b>.", tlacidlo: "Stiahnuť zálohu", snimka: "data-zaloha-1" },
-        { text: "Súbor .json sa uloží medzi stiahnuté súbory — presuňte si ho na disk alebo do vlastného úložiska." },
-      ],
-      tip: "Keď zálohu 30 dní nestiahnete, ukáže sa na ploche upozornenie s tlačidlom <b>Stiahnuť zálohu</b> — stačí ťuknúť naň.",
-      podrobnosti: [
-        { nadpis: "Záloha a uloženie do cloudu",
-          html: "<p><b>☁ Uložiť do cloudu</b> uloží dáta na server, aby ste ich mali na každom zariadení. Záloha je vaša vlastná kópia v súbore, ku ktorej sa viete vrátiť — [[navod:data/obnovit|ako obnoviť dáta zo zálohy]].</p>" },
-      ],
-    },
-    {
-      id: "obnovit",
-      nazov: "Obnoviť dáta zo zálohy",
-      kedy: "Potrebujete sa vrátiť k stavu, ktorý máte uložený v zálohe.",
-      kroky: [
-        { text: "Ťuknite na <b>📥 Importovať JSON</b> a vyberte súbor zálohy.", tlacidlo: "Importovať JSON", snimka: "data-obnovit-1" },
-        { text: "Appka ukáže názov firmy a koľko faktúr, výdavkov a jázd v súbore je — potvrďte. Pred nahradením stiahne zálohu terajších dát." },
-        { text: "Appka načítané dáta hneď uloží a v okne napíše, či sa to podarilo. Keď nie, ťuknite na <b>☁ Uložiť do cloudu</b>.", tlacidlo: "Uložiť do cloudu", snimka: "data-obnovit-2" },
-      ],
-      tip: "Import nič nezlučuje — všetko, čo máte v appke teraz, nahradí obsahom súboru. Súbor so zálohou predošlých dát (…_pred_importom_….json) si nechajte, kým si nie ste istí, že je všetko v poriadku.",
-    },
-    {
-      id: "excel",
-      nazov: "Odovzdať dáta účtovníkovi v Exceli",
-      kedy: "Účtovník chce všetko za rok v jednom súbore.",
-      kroky: [
-        { text: "V sprievodcovi exportom ťuknite na <b>Čo exportovať</b> a vyberte rok.", tlacidlo: "Čo exportovať", snimka: "data-excel-1" },
-        { text: "V kroku <b>Kontrola dát</b> si pozrite, čo appka našla.", tlacidlo: "Kontrola dát", snimka: "data-excel-2" },
-        { text: "V kroku <b>Generovať</b> ťuknite na <b>📊 Stiahnuť kompletný export</b>.", tlacidlo: "Stiahnuť kompletný export", snimka: "data-excel-3" },
-      ],
-      tip: "Nálezy kontroly export nezastavia — sú tam, aby ste vedeli, čo je v súbore neisté, skôr než ho odovzdáte.",
-      podrobnosti: [
-        { nadpis: "Čo v súbore je",
-          html: "<p>Jeden formátovaný Excel so záložkami. Koľko hárkov a čo v nich bude, ukáže krok <b>Náhľad</b>. Pribaliť môžete aj peňažný denník a jazdy rozdelené po mesiacoch.</p>" },
       ],
     },
   ],

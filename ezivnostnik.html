@@ -2167,7 +2167,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.19-PC";  // Platba bez VS sa spáruje sama pri jedinej zhode sumy a dňa
+const APP_VERZIA = "2026.09.19-PD";  // Export a záloha vo Firemnej agende; sprievodcovia držia ťuknutý krok na obrazovke
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -8101,6 +8101,7 @@ const APPS={
   banka:    {n:"Banka",           ic:"🏦",c:"var(--m-banka)", d:"Pohyby na účte, párovanie"},
   pohladavky:{n:"Pohľadávky",     ic:"⇌", c:"var(--m-prijmy)", d:"Neuhradené faktúry, záväzky, po splatnosti"},
   knihy:     {n:"Účtovné knihy", ic:"📚", c:"var(--m-neutral)", d:"Kniha pohľadávok, kniha záväzkov, peňažný denník"},
+  zaloha:    {n:"Export a záloha", ic:"📦", c:"var(--m-neutral)", d:"Excel pre účtovníka, záloha a obnova dát"},
   // `prognoza` tu ZÁMERNE nie je: modul zanikol a jeho obsah je pohľadom
   // „Dane" v Štatistikách (kap. 91). Id ostáva žiť v `MODUL_KATEGORIA`,
   // `WIDGET_APP_MAP` a v presmerovaní v `renderAppModul` — mriežka aj
@@ -8112,7 +8113,7 @@ const APPS={
   jazdy:    {n:"Kniha jázd",      ic:"🚗",c:"var(--m-neutral)", d:"Jazdy, km, kniha jázd"},
   majetok:  {n:"Majetok",         ic:"⌂", c:"var(--m-neutral)", d:"Dlhodobý majetok, odpisy"},
   zdielanie:{n:"Zdieľanie firmy",ic:"👥",c:"var(--m-neutral)", d:"Prístup pre účtovníka, pozvánky"},
-  data:     {n:"Nastavenia a dáta",ic:"⚙",c:"var(--m-neutral)", d:"Firma, import/export, cloud"},
+  data:     {n:"Nastavenia a dáta",ic:"⚙",c:"var(--m-neutral)", d:"Firma, predplatné, e-faktúry, cloud"},
   clanky:   {n:"Články",          ic:"📘",c:"var(--m-neutral)", d:"Odborné články a rady"},
   // Štatistiky boli obrazovka bez modulu: dosiahnuteľné IBA ťuknutím na hero
   // na ploche, mimo APPS (takže ich poistka test_moduly nevidela), mimo
@@ -8135,7 +8136,10 @@ const SKUPINY=[
   // `druhotna` = nepatrí do toku peňazí, takže na ploche stojí v zbalenom
   // riadku, nie medzi hlavnými dlaždicami. Je to vlastnosť skupiny, nie
   // podmienka vo vykresľovaní — inak by sa pri ďalšej skupine zabudla.
-  {id:"agenda",  n:"Firemná agenda",  ic:"🗂", c:"var(--m-neutral)", dd:"knihy, majetok, papiere",       moduly:["knihy","majetok","dokumenty","dovolenka","zdielanie"], druhotna:true},
+  // „Export a záloha“ (č. 181) nemá kategóriu v MODUL_KATEGORIA, takže je v
+  // každom pláne — rovnako ako Zdieľanie. Export dát sľubujú podmienky aj
+  // zásady každému; plán Free agendu inak nemá.
+  {id:"agenda",  n:"Firemná agenda",  ic:"🗂", c:"var(--m-neutral)", dd:"knihy, export, majetok, papiere", moduly:["knihy","zaloha","majetok","dokumenty","dovolenka","zdielanie"], druhotna:true},
 ];
 // samostatné (mimo skupín): kalendar (prierezový), data (nastavenia v hlavičke)
 // Kniha jázd stojí samostatne: zapisuje sa týždenne, kým majetok a papiere
@@ -9471,7 +9475,7 @@ const NAVODY_MODULY=new Set([
   // ·
   "dph","priznania","priznanieB","uzavierka",   // Podania
   // ·
-  "knihy","majetok","dokumenty","dovolenka","zdielanie",   // Firemná agenda
+  "knihy","zaloha","majetok","dokumenty","dovolenka","zdielanie",   // Firemná agenda
   // ·
   "jazdy",   // Kniha jázd
   // ·
@@ -9798,6 +9802,7 @@ function renderAppModul(id){
   if(id==="jazdy") return appJazdy();
   if(id==="majetok") return appMajetok();
   if(id==="zdielanie") return appZdielanie();
+  if(id==="zaloha") return appZaloha();
   if(id==="efaktury") return appEfaktury();
   if(id==="data") return appData();
   if(id==="sadzby") return appSadzby();   // údržbová obrazovka, nie je v navigácii
@@ -20016,6 +20021,38 @@ function dokumentyHtml(){
   </div>`;
 }
 
+// ═══ EXPORT A ZÁLOHA (Firemná agenda, Roman 19. 9. 2026, č. 181) ═══════════
+//
+// Do vtedy v Nastaveniach: tri tlačidlá (import JSON, cloud, záloha) a pod
+// nimi sprievodca kompletným exportom. Nastavenia sú o firme; export pre
+// účtovníka a záloha sú práca s dátami — patria k Účtovným knihám.
+// Obnova zo zálohy je najnebezpečnejšia akcia v appke (nahradí VŠETKY dáta
+// firmy), preto má vlastný nadpis a vetu, čo urobí, nie len tlačidlo
+// „Importovať JSON“. Poistky importJSON (potvrdenie s názvom firmy, záloha
+// terajších dát pred nahradením) ostávajú, kde boli.
+function appZaloha(){
+  if(prekresliVRamci("zaloha")) return;
+  const d=firmaData||{};
+  const posledna=(d.settings||{}).poslednaZaloha;
+  document.getElementById("appScreen").innerHTML=appHlavicka("zaloha","")+pasIbaCitanie("zaloha")+`
+    <div class="card">
+      <h2 style="font-size:16px;margin-bottom:4px">📊 Kompletný export pre účtovníka</h2>
+      <div class="csub" style="margin-bottom:12px">Všetky dáta v jednom formátovanom Exceli so záložkami. Toto je súbor, ktorý odovzdávate účtovníkovi.</div>
+      <div id="xkBox">${xkSprievodcaHtml()}</div>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <h2 style="font-size:16px;margin-bottom:4px">💾 Záloha dát</h2>
+      <div class="csub" style="margin-bottom:12px">Celá evidencia firmy v jednom súbore JSON — faktúry, výdavky, banka, jazdy, nastavenia. Uložte si ju mimo appky, napríklad do svojho cloudu.${posledna?" Naposledy stiahnutá "+fmtDatum(String(posledna).slice(0,10))+".":""}</div>
+      <button class="abtn pri" onclick="exportFirmu()">⬇ Stiahnuť zálohu</button>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <h2 style="font-size:16px;margin-bottom:4px">♻ Obnoviť zo zálohy</h2>
+      <div class="csub" style="margin-bottom:12px">Nahradí <b>všetky</b> dáta firmy obsahom súboru — nič sa nezlučuje. Pred nahradením appka sama stiahne zálohu terajšieho stavu a spýta sa, či naozaj.</div>
+      <button class="abtn" onclick="document.getElementById('fileInput').click()"${zam("zaloha")}>📥 Vybrať súbor zálohy…</button>
+    </div>
+    <div class="cloudmsg" id="cloudMsg"></div>`;
+  setCrumb("export a záloha");
+}
 function appData(){
   const d=firmaData||{};
   const fak=(d.faktury||[]).length, vyd=(d.vydavky||[]).length, jaz=(d.jazdy||[]).length, poh=(d.vypis||[]).length;
@@ -20029,14 +20066,14 @@ function appData(){
         <div class="sbox"><div class="sn">${jaz}</div><div class="sl">jázd</div></div>
         <div class="sbox"><div class="sn">${poh}</div><div class="sl">pohybov</div></div>
       </div>
+      <!-- Export pre účtovníka, záloha a obnova sú od 19. 9. 2026 vo Firemnej
+           agende → Export a záloha (Roman, č. 181). „Uložiť do cloudu“ ostáva
+           tu: je to záchrana, keď automatické ukladanie zlyhá, a hlášky
+           appky naň posielajú práve sem. -->
       <div class="actions" style="margin-top:16px">
-        <button class="abtn pri" onclick="document.getElementById('fileInput').click()"${zam("data")}>📥 Importovať JSON</button>
         <button class="abtn" onclick="ulozFirmu()"${zam("data")}>☁ Uložiť do cloudu</button>
-        <button class="abtn" onclick="exportFirmu()">⬇ Stiahnuť zálohu</button>
+        <button class="abtn" onclick="otvorApp('zaloha')">📦 Export a záloha →</button>
       </div>
-      <div style="border-top:1px solid var(--line-soft);margin:14px 0 12px"></div>
-      <div class="csub" style="margin-bottom:10px">Kompletný prehľad všetkých dát do jedného formátovaného Excelu so záložkami. Toto je súbor, ktorý odovzdávate účtovníkovi.</div>
-      <div id="xkBox">${xkSprievodcaHtml()}</div>
       <div class="cloudmsg" id="cloudMsg"></div>
 
       ${localMode?'':`<div style="border-top:1px solid var(--line);margin-top:16px;padding-top:14px">
@@ -36784,15 +36821,34 @@ function pokladnaPrvyMinus(){
 //  zobrazenia, nie údaj firmy.
 // ═══════════════════════════════════════════════════════════════
 function zostavaKrok(kluc, n){
+  // Ťuknutá hlavička ostane na obrazovke tam, kde bola (Roman 19. 9. 2026,
+  // export: „nesprávne sa roluje obrazovka“). Prekreslenie zavrie krok nad ňou
+  // — pri kontrole dát aj stovky pixelov — a pri nezmenenom posune hlavička
+  // uskočila hore mimo obrazovky. Posun sa dorovná o to, o koľko sa pohla.
+  const sel='[data-zkrok="'+kluc+':'+n+'"]';
+  const pred=document.querySelector(sel);
+  const hore=pred && pred.getBoundingClientRect ? pred.getBoundingClientRect().top : null;
   _zostavaKrok[kluc] = (_zostavaKrok[kluc]===n) ? 0 : n;
   if(typeof _zostavaPrekresli[kluc]==="function") _zostavaPrekresli[kluc]();
+  if(hore==null) return;
+  const po=document.querySelector(sel);
+  if(!po || !po.getBoundingClientRect) return;
+  const posun=po.getBoundingClientRect().top-hore;
+  if(Math.abs(posun)>1) window.scrollBy(0, posun);
+  // Otvorený krok, ktorý sa nezmestí pod hlavičku, sa posunie hore (pod pevnú
+  // lištu) — inak jeho obsah začína pod okrajom obrazovky a treba ho hľadať.
+  const telo=po.nextElementSibling;
+  if(_zostavaKrok[kluc]===n && telo && telo.getBoundingClientRect){
+    const H=window.innerHeight||0, lista=76, hlav=po.getBoundingClientRect().top;
+    if(telo.getBoundingClientRect().bottom>H && hlav>lista) window.scrollBy(0, hlav-lista);
+  }
 }
 function zostavaSprievodcaHtml(kluc, def){
   const otv=_zostavaKrok[kluc]!==undefined ? _zostavaKrok[kluc] : 1;
   const krok=(i,nazov,stav,telo)=>{
     const on=otv===i+1;
     return `<div class="zkrok ${on?'on':''}">
-      <div class="zhlav" onclick="zostavaKrok('${kluc}',${i+1})">
+      <div class="zhlav" data-zkrok="${kluc}:${i+1}" onclick="zostavaKrok('${kluc}',${i+1})">
         <span class="zcislo">${i+1}</span><b>${esc(nazov)}</b>
         <span class="zstav ${(stav&&stav.cls)||''}">${(stav&&stav.text)||''}</span>
       </div>

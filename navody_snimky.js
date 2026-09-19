@@ -338,78 +338,6 @@ window.NAVODY_SNIMKY = {
    }
   }
  },
- "data-excel-1": {
-  "m": {
-   "subor": "navody/data-excel-1.m.c7462d3d.webp",
-   "w": 390,
-   "h": 600,
-   "ciel": {
-    "x": 42,
-    "y": 278,
-    "w": 306,
-    "h": 44
-   }
-  },
-  "d": {
-   "subor": "navody/data-excel-1.d.933b1605.webp",
-   "w": 1024,
-   "h": 600,
-   "ciel": {
-    "x": 278,
-    "y": 278,
-    "w": 704,
-    "h": 44
-   }
-  }
- },
- "data-excel-2": {
-  "m": {
-   "subor": "navody/data-excel-2.m.74403633.webp",
-   "w": 390,
-   "h": 600,
-   "ciel": {
-    "x": 42,
-    "y": 278,
-    "w": 306,
-    "h": 44
-   }
-  },
-  "d": {
-   "subor": "navody/data-excel-2.d.f26f972c.webp",
-   "w": 1024,
-   "h": 600,
-   "ciel": {
-    "x": 278,
-    "y": 278,
-    "w": 704,
-    "h": 44
-   }
-  }
- },
- "data-excel-3": {
-  "m": {
-   "subor": "navody/data-excel-3.m.e9de0bd3.webp",
-   "w": 390,
-   "h": 600,
-   "ciel": {
-    "x": 55,
-    "y": 279,
-    "w": 280,
-    "h": 42
-   }
-  },
-  "d": {
-   "subor": "navody/data-excel-3.d.ea0afdc1.webp",
-   "w": 1024,
-   "h": 600,
-   "ciel": {
-    "x": 291,
-    "y": 279,
-    "w": 678,
-    "h": 42
-   }
-  }
- },
  "data-firma-1": {
   "m": {
    "subor": "navody/data-firma-1.m.3878e3fe.webp",
@@ -530,54 +458,6 @@ window.NAVODY_SNIMKY = {
    }
   }
  },
- "data-obnovit-1": {
-  "m": {
-   "subor": "navody/data-obnovit-1.m.6b53cf56.webp",
-   "w": 390,
-   "h": 600,
-   "ciel": {
-    "x": 41,
-    "y": 279,
-    "w": 169,
-    "h": 42
-   }
-  },
-  "d": {
-   "subor": "navody/data-obnovit-1.d.527e55ea.webp",
-   "w": 1024,
-   "h": 600,
-   "ciel": {
-    "x": 277,
-    "y": 247,
-    "w": 169,
-    "h": 42
-   }
-  }
- },
- "data-obnovit-2": {
-  "m": {
-   "subor": "navody/data-obnovit-2.m.97d4dc99.webp",
-   "w": 390,
-   "h": 600,
-   "ciel": {
-    "x": 41,
-    "y": 279,
-    "w": 156,
-    "h": 42
-   }
-  },
-  "d": {
-   "subor": "navody/data-obnovit-2.d.527e55ea.webp",
-   "w": 1024,
-   "h": 600,
-   "ciel": {
-    "x": 456,
-    "y": 247,
-    "w": 156,
-    "h": 42
-   }
-  }
- },
  "data-predplatne-1": {
   "m": {
    "subor": "navody/data-predplatne-1.m.5b693d5e.webp",
@@ -623,30 +503,6 @@ window.NAVODY_SNIMKY = {
     "y": 280,
     "w": 232,
     "h": 40
-   }
-  }
- },
- "data-zaloha-1": {
-  "m": {
-   "subor": "navody/data-zaloha-1.m.1a19c222.webp",
-   "w": 390,
-   "h": 600,
-   "ciel": {
-    "x": 41,
-    "y": 279,
-    "w": 148,
-    "h": 42
-   }
-  },
-  "d": {
-   "subor": "navody/data-zaloha-1.d.527e55ea.webp",
-   "w": 1024,
-   "h": 600,
-   "ciel": {
-    "x": 622,
-    "y": 247,
-    "w": 148,
-    "h": 42
    }
   }
  },
@@ -1383,7 +1239,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/faktury-zaloha-1.d.e92c2a07.webp",
+   "subor": "navody/faktury-zaloha-1.d.15e2cb4e.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1396,13 +1252,13 @@ window.NAVODY_SNIMKY = {
  },
  "faktury-zaloha-2": {
   "m": {
-   "subor": "navody/faktury-zaloha-2.m.fb41b056.webp",
+   "subor": "navody/faktury-zaloha-2.m.318eb4a4.webp",
    "w": 390,
    "h": 600,
    "ciel": null
   },
   "d": {
-   "subor": "navody/faktury-zaloha-2.d.f5c0d426.webp",
+   "subor": "navody/faktury-zaloha-2.d.4ae7f5ac.webp",
    "w": 1024,
    "h": 600,
    "ciel": null
@@ -3277,6 +3133,126 @@ window.NAVODY_SNIMKY = {
     "y": 431,
     "w": 816,
     "h": 37
+   }
+  }
+ },
+ "zaloha-excel-1": {
+  "m": {
+   "subor": "navody/zaloha-excel-1.m.ed71f70b.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 42,
+    "y": 278,
+    "w": 306,
+    "h": 44
+   }
+  },
+  "d": {
+   "subor": "navody/zaloha-excel-1.d.86a47317.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 278,
+    "y": 228,
+    "w": 704,
+    "h": 44
+   }
+  }
+ },
+ "zaloha-excel-2": {
+  "m": {
+   "subor": "navody/zaloha-excel-2.m.9a563a9a.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 42,
+    "y": 278,
+    "w": 306,
+    "h": 44
+   }
+  },
+  "d": {
+   "subor": "navody/zaloha-excel-2.d.a91a931d.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 278,
+    "y": 278,
+    "w": 704,
+    "h": 44
+   }
+  }
+ },
+ "zaloha-excel-3": {
+  "m": {
+   "subor": "navody/zaloha-excel-3.m.76a3fad8.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 55,
+    "y": 279,
+    "w": 280,
+    "h": 42
+   }
+  },
+  "d": {
+   "subor": "navody/zaloha-excel-3.d.ff125651.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 291,
+    "y": 279,
+    "w": 678,
+    "h": 42
+   }
+  }
+ },
+ "zaloha-obnovit-1": {
+  "m": {
+   "subor": "navody/zaloha-obnovit-1.m.2910e781.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 41,
+    "y": 441,
+    "w": 201,
+    "h": 42
+   }
+  },
+  "d": {
+   "subor": "navody/zaloha-obnovit-1.d.45a18a9c.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 277,
+    "y": 494,
+    "w": 201,
+    "h": 42
+   }
+  }
+ },
+ "zaloha-zaloha-1": {
+  "m": {
+   "subor": "navody/zaloha-zaloha-1.m.46457207.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 41,
+    "y": 279,
+    "w": 148,
+    "h": 42
+   }
+  },
+  "d": {
+   "subor": "navody/zaloha-zaloha-1.d.45a18a9c.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 277,
+    "y": 321,
+    "w": 148,
+    "h": 42
    }
   }
  }
