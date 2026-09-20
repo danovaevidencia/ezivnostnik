@@ -2218,7 +2218,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.20-PM";  // Zvonček: nové hore, prečítané zbalené; e-faktúry bez poskakovania
+const APP_VERZIA = "2026.09.20-PN";  // Pás s článkom sa doloží, keď clanky.js dorazí neskôr
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -10037,7 +10037,13 @@ function clankyZCache(){
 function clankyNacitaj(){
   CLANKY=clankyZCache();
   if(CLANKY.length) clankyPrekresli();
-  clankyModul().catch(e=>console.error("clanky.js sa nenačítal:", e.message||e));
+  // `clanky.js` sa načítava lenivo a bez neho `clankyPreModul` nevyberie nič.
+  // Keď dorazil až po tom, čo si používateľ otvoril modul, pás s článkom sa
+  // v ňom neukázal — a objavil sa až pri ďalšom otvorení toho istého modulu
+  // (Roman, 20. 9. 2026, E-faktúry). Pás sa preto doloží do otvorenej
+  // obrazovky; prekresľovať celý modul netreba a nesmie sa tým nič posunúť.
+  clankyModul().then(()=>{ try{ clankyPasDoloz(); }catch(_){} })
+    .catch(e=>console.error("clanky.js sa nenačítal:", e.message||e));
   if(!sb) return Promise.resolve();
   return sb.from("clanky")
     .select("id,slug,nazov,perex,telo,moduly,obrazok,zdroj_nazov,zdroj_url,publikovane,zmenene")
@@ -10083,6 +10089,16 @@ function clankySkry(id, natrvalo){
   });
   if(!ulozene) CL_DOCASNE.add(id);
   clankyPrekresli();
+}
+
+// Doloženie pásu do už vykreslenej obrazovky. Volá sa, keď články alebo
+// `clanky.js` dorazia neskôr než modul. Dvakrát sa pás nevloží.
+function clankyPasDoloz(){
+  const modul=modulNaObrazovke();
+  if(!modul || modul==="split") return;
+  const box=document.getElementById("appScreen");
+  if(!box || box.querySelector(".clPas")) return;
+  clankyPasVloz(modul);
 }
 
 // ── kontextový pás v module ──
