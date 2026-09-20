@@ -1863,6 +1863,31 @@ html[data-jazda] .jazdapruh{display:flex}
   <div style="text-align:center"><div class="spin"></div>Načítavam…</div>
 </div>
 
+<!-- ══ ÚVOD (len v natívnej appke, len prvýkrát) ══
+     Kto príde z webu, prečíta si na landing page, čo appka je. Kto ju
+     nainštaluje z Google Play, landing page nikdy neuvidí a prvé, čo dostane,
+     je prihlasovací formulár bez vysvetlenia (Roman, 20. 9. 2026). Toto je
+     jedna obrazovka navyše — nie sprievodca — a ukáže sa raz. -->
+<div class="auth hidden" id="uvodView">
+  <div class="authcard">
+    <div class="authlogo" style="cursor:default">
+      <div class="mk"><svg viewBox="0 0 48 48" fill="none"><path d="M13 26 H34 C34 17.5 29 12.5 23.5 12.5 C16.5 12.5 12 18 12 25.5 C12 33 17 38 23.5 38 C28 38 31.5 36 33.5 32.5" stroke="#f4f8fd" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round"/><rect x="31" y="9" width="4.5" height="4.5" rx="1.3" fill="#f08a24"/><rect x="36.5" y="9" width="4.5" height="4.5" rx="1.3" fill="#9db8d8"/><rect x="31" y="14.5" width="4.5" height="4.5" rx="1.3" fill="#9db8d8"/></svg></div>
+      <b>e<i>živnostník</i></b>
+    </div>
+    <div class="authsub">Daňová evidencia pre živnostníkov.<br>Bez účtovníckeho žargónu, na mobile.</div>
+    <ul style="list-style:none;padding:0;margin:18px 0 22px;font-size:14px;line-height:1.55;color:var(--ink)">
+      <li style="display:flex;gap:10px;margin-bottom:12px"><span>🧾</span><span><b>Faktúry a e-faktúry Peppol</b><br><span style="color:var(--ink-soft)">Od 1. 1. 2027 ich musí prijímať každý podnikateľ.</span></span></li>
+      <li style="display:flex;gap:10px;margin-bottom:12px"><span>📷</span><span><b>Bločky odfotením, banka a DPH</b><br><span style="color:var(--ink-soft)">Sumy sa prepíšu samy, platby sa spárujú s dokladmi.</span></span></li>
+      <li style="display:flex;gap:10px"><span>📴</span><span><b>Funguje aj bez signálu</b><br><span style="color:var(--ink-soft)">Údaje sú na serveroch v EÚ, bez reklám.</span></span></li>
+    </ul>
+    <button class="btn" onclick="uvodPokracuj('demo')">Vyskúšať s ukážkovými dátami</button>
+    <button class="btn ghost" style="margin-top:8px" onclick="uvodPokracuj('register')">Vytvoriť účet zadarmo</button>
+    <div style="text-align:center;margin-top:14px;font-size:13.5px">
+      Už mám účet — <a href="#" onclick="uvodPokracuj('login');return false">prihlásiť sa</a>
+    </div>
+  </div>
+</div>
+
 <!-- ══ PRIHLÁSENIE ══ -->
 <div class="auth hidden" id="authView">
   <div class="authcard">
@@ -2218,7 +2243,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.20-PO";  // Pútač na konci článku, pás s článkom sa doloží
+const APP_VERZIA = "2026.09.21-PP";  // Úvod pri prvom spustení appky, skener bez rozmazaného pokynu
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -2410,8 +2435,26 @@ async function boot(){
   const { data:{ session } } = await sb.auth.getSession();
   if(session){ enterApp(session.user); spracujPozvanku(); return; }
 
+  if(uvodTreba()){ show("uvodView"); return; }
   show("authView");
   if(vstup==="register") nastavMode("register");
+}
+
+// Úvod je vec PRVÉHO SPUSTENIA V APPKE, nie vec účtu — príznak preto ostáva
+// v zariadení. Na webe sa neukáže: tam má túto úlohu landing page a úvod by
+// bol len prekážka medzi odkazom „Prihlásiť sa“ a formulárom.
+function uvodTreba(){
+  try{
+    if(!jeNativnyObal()) return false;
+    return localStorage.getItem("eziv_uvod")!=="1";
+  }catch(_){ return false; }
+}
+function uvodPokracuj(kam){
+  try{ localStorage.setItem("eziv_uvod","1"); }catch(_){}
+  hide("uvodView");
+  if(kam==="demo"){ spustiDemo(); return; }
+  show("authView");
+  nastavMode(kam==="register" ? "register" : "login");
 }
 
 function switchMode(){
@@ -35592,16 +35635,22 @@ async function odfotDoklad(){
   box.style.cssText="position:fixed;inset:0;z-index:99999;background:#000;display:flex;flex-direction:column";
   box.innerHTML=
     '<video id="qrVideo" playsinline muted style="flex:1;width:100%;object-fit:cover;background:#000"></video>'
+   // Kým kamera nabieha (a kým sa človek rozhoduje o povolení), nemá zmysel
+   // ukazovať pokyn k miereniu — vyzeralo to ako pokazená obrazovka s rozmazaným
+   // obrazom a textom o QR kóde (Roman, 20. 9. 2026, prvé spustenie z Play).
+   // Namiesto neho je tu jedna veta o tom, čo sa práve deje.
    +'<div id="qrPokyn" style="position:absolute;top:0;left:0;right:0;padding:14px 16px;background:linear-gradient(#000c,#0000);color:#fff;font-size:13px;line-height:1.5">'
-   +'<b>Najprv choďte bližšie k QR kódu</b> na bločku a chvíľu ním pohybujte — hľadáme ho priebežne. Potom zamierte na celý doklad a odfoťte.'
+   +'Zapínam fotoaparát…'
    +'</div>'
    // Stav ide NAD tlačidlá, nie pod pokyn — pokyn má tri riadky a prekrývali
    // sa. Na 390 px je hore miesta málo a text nesmie zakryť doklad v zábere.
    +'<div id="qrSkenStav" style="position:absolute;bottom:118px;left:16px;right:16px;text-align:center;color:#fff;font-size:12.5px;text-shadow:0 1px 3px #000"></div>'
    +'<div style="position:absolute;bottom:0;left:0;right:0;padding:18px 16px 26px;display:flex;gap:14px;align-items:center;justify-content:space-between;background:linear-gradient(#0000,#000c)">'
    +'<button type="button" id="qrZrus" data-okno-zavri style="padding:11px 18px;font-size:14px;border-radius:10px;border:0;background:#ffffff33;color:#fff">Zrušiť</button>'
-   +'<button type="button" id="qrSpust" aria-label="Odfotiť" style="width:74px;height:74px;border-radius:50%;border:5px solid #ffffff66;background:#fff"></button>'
-   +'<button type="button" id="qrSvetlo" style="padding:11px 18px;font-size:14px;border-radius:10px;border:0;background:#ffffff33;color:#fff">💡</button>'
+   // Spúšť a svetlo sa ukážu až s obrazom. Tlačidlo, ktoré nemá čo odfotiť,
+   // je len ponuka na klepnutie naprázdno; Zrušiť naopak musí byť od začiatku (č. 135).
+   +'<button type="button" id="qrSpust" aria-label="Odfotiť" style="width:74px;height:74px;border-radius:50%;border:5px solid #ffffff66;background:#fff;visibility:hidden"></button>'
+   +'<button type="button" id="qrSvetlo" style="padding:11px 18px;font-size:14px;border-radius:10px;border:0;background:#ffffff33;color:#fff;visibility:hidden">💡</button>'
    +'</div>';
   document.body.appendChild(box);
   const zrusenie=skenerZrusenie(box.querySelector("#qrZrus"));   // Zrušiť hneď, aj kým kamera nabieha (č. 135)
@@ -35646,6 +35695,12 @@ async function odfotDoklad(){
   };
 
   const pokyn=box.querySelector("#qrPokyn");
+  // Obraz beží — až teraz má pokyn a spúšť zmysel. Svetlo len tam, kde ho
+  // kamera vie zapnúť (vyššie sa preto `visibility` nastavuje podľa `torch`).
+  pokyn.innerHTML='<b>Najprv choďte bližšie k QR kódu</b> na bločku a chvíľu ním pohybujte'
+    +' — hľadáme ho priebežne. Potom zamierte na celý doklad a odfoťte.';
+  box.querySelector("#qrSpust").style.visibility="visible";
+  if("torch" in cap) tlSvetlo.style.visibility="visible";
   let qrNajdeny=null, bezi=true, snimok=0;
   const koniec=()=>{ bezi=false; pustiKameru(stream); zavriSkener(); };
   _skenStop=()=>{ bezi=false; pustiKameru(stream); };
