@@ -209,6 +209,13 @@ tr.chce td{background:#fffaf0}
       <div class="body" id="navBody"><div class="loading">Načítavam návštevnosť…</div></div>
     </div>
 
+    <!-- KAMPANE — oslovenie zivnostnikov (spec kap. 132, ROZHODNUTIA c. 191-196) -->
+    <div class="sec">
+      <div class="head"><h2>Kampane</h2><div class="sp"></div>
+        <button class="btn" onclick="kampanNova()">+ Nová kampaň</button></div>
+      <div class="body" id="kampBody"><div class="loading">Načítavam kampane…</div></div>
+    </div>
+
     <!-- SADZBY -->
     <div class="sec">
       <div class="head"><h2>Sadzby a hranice</h2><div class="sp"></div>
@@ -585,6 +592,7 @@ async function overAdmin(user){
   document.getElementById("adminView").classList.remove("hidden");
   nacitajPrehlad();
   nacitajNavstevnost();
+  nacitajKampane();
   vykresliSadzby();
   pripravRokySaas();
   nacitajSaasFaktury();
@@ -604,6 +612,122 @@ async function overAdmin(user){
 //  DPH z predplatného zostaviť nedá.
 // ═══════════════════════════════════════════════════════════════════
 let _saasFakturyAdmin = [];
+
+// ═══ KAMPANE (spec kap. 132) ═══════════════════════════════════════════════
+// Studená pošta ide cez samostatnú doménu a účet (č. 191); o každej dávke
+// rozhoduje človek, kým nie je doména zahriata. Odhlásenia sú trvalé a
+// kontrolujú sa aj pri importe, aj tesne pred odoslaním.
+let _kampane = [], _kampanOtvorena = null;
+const KAMP_STAVY = { rozpisana:"rozpísaná", bezi:"beží", pozastavena:"pozastavená", dokoncena:"dokončená" };
+async function nacitajKampane(){
+  const body = document.getElementById("kampBody");
+  const { data, error } = await sb.rpc("kampan_prehlad");
+  if(error){ body.innerHTML = '<div class="loading">Chyba načítania: ' + esc(error.message) + "</div>"; return; }
+  _kampane = (data && data.kampane) || [];
+  const log = (data && data.log) || [];
+  body.innerHTML = (_kampane.length ? _kampane.map(kampanRiadok).join("")
+      : '<div style="padding:14px 18px;color:var(--soft);font-size:13px">Zatiaľ žiadna kampaň.</div>')
+    + '<div style="padding:10px 18px;border-top:1px solid var(--line);font-size:12px;color:var(--soft)">Trvalých odhlásení celkovo: <b>'
+      + ((data && data.odhlasenia) || 0) + "</b>"
+    + (log.length ? "<br>" + log.slice(0, 5).map(l => esc(new Date(l.cas).toLocaleString("sk-SK")) + " — " + esc(l.akcia) + " " + esc(JSON.stringify(l.podrobnosti || {}))).join("<br>") : "")
+    + "</div>";
+}
+function kampanRiadok(k){
+  const otvorena = _kampanOtvorena === k.id;
+  const st = '<span style="font-size:11.5px;color:var(--soft)">' + esc(KAMP_STAVY[k.stav] || k.stav) + "</span>";
+  const cisla = '<div style="font-size:12.5px;color:var(--soft);margin-top:4px">čaká <b>' + k.caka + "</b> · odoslané <b>" + k.odoslane
+    + "</b> · dnes " + k.dnes + "/" + k.denny_limit + " · otvorili najviac " + k.otvorili + " · klikli " + k.klikli
+    + " · bounce " + k.bounce + " · odhlásení " + k.odhlaseni + (k.chyby ? " · chyby " + k.chyby : "") + "</div>";
+  return '<div style="padding:12px 18px;border-bottom:1px solid var(--line)">'
+    + '<div style="display:flex;align-items:center;gap:10px"><b>' + esc(k.nazov) + "</b> " + st + '<div class="sp"></div>'
+    + '<button class="btn" onclick="kampanOtvor(' + k.id + ')">' + (otvorena ? "Zavrieť" : "Upraviť") + "</button></div>"
+    + cisla + (otvorena ? kampanFormular(k) : "") + "</div>";
+}
+function kampanFormular(k){
+  const p = (id, popis, hodnota, typ) => '<div class="field"><label>' + popis + '</label><input id="' + id + '" type="' + (typ || "text") + '" value="' + esc(hodnota) + '"></div>';
+  return '<div style="margin-top:12px;display:grid;gap:10px">'
+    + p("kampNazov", "Názov", k.nazov) + p("kampPredmet", "Predmet e-mailu", k.predmet)
+    + '<div class="field"><label>Telo (HTML; polia {meno}, {source_url}, {odhlasenie} — bez {odhlasenie} sa poslať nedá)</label>'
+      + '<textarea id="kampTelo" rows="8">' + esc(k.telo) + "</textarea></div>"
+    + p("kampUtm", "utm_campaign (podľa toho sa kampaň nájde v Návštevnosti)", k.utm_campaign)
+    + p("kampLimit", "Denný limit", k.denny_limit, "number")
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
+      + '<button class="btn" onclick="kampanUloz(' + k.id + ')">Uložiť</button>'
+      + '<button class="btn" onclick="kampanSkuska(' + k.id + ')">Poslať skúšku sebe</button>'
+      + '<button class="btn" onclick="kampanStav(' + k.id + ',\'' + (k.stav === "bezi" ? "pozastavena" : "bezi") + '\')">' + (k.stav === "bezi" ? "Pozastaviť" : "Spustiť") + "</button>"
+      + '<button class="btn" onclick="kampanDavka(' + k.id + ')"' + (k.stav === "bezi" ? "" : " disabled") + ">Poslať dávku</button>"
+      + "</div>"
+    + '<div class="field"><label>Import adresátov — CSV s hlavičkou email,meno,ico,source_url,source_seen_at</label>'
+      + '<textarea id="kampCsv" rows="4" placeholder="email,meno,ico,source_url"></textarea></div>'
+    + '<button class="btn" onclick="kampanImport(' + k.id + ')">Importovať</button>'
+    + '<div id="kampSprava" style="font-size:13px;min-height:18px"></div></div>';
+}
+function kampanOtvor(id){ _kampanOtvorena = (_kampanOtvorena === id ? null : id); nacitajKampane(); }
+function kampanSprava(text, zle){
+  const el = document.getElementById("kampSprava");
+  if(el){ el.textContent = text; el.style.color = zle ? "var(--neg)" : "var(--accent2)"; }
+}
+async function kampanNova(){
+  const nazov = prompt("Názov kampane:");
+  if(!nazov) return;
+  const { error } = await sb.rpc("kampan_uloz", { p: { nazov } });
+  if(error) alert("Chyba: " + error.message); else nacitajKampane();
+}
+async function kampanUloz(id){
+  const p = { id, nazov: document.getElementById("kampNazov").value, predmet: document.getElementById("kampPredmet").value,
+    telo: document.getElementById("kampTelo").value, utm_campaign: document.getElementById("kampUtm").value,
+    denny_limit: document.getElementById("kampLimit").value };
+  const { error } = await sb.rpc("kampan_uloz", { p });
+  if(error) kampanSprava("Chyba: " + error.message, true); else { kampanSprava("Uložené."); nacitajKampane(); }
+}
+async function kampanStav(id, stav){
+  const { error } = await sb.rpc("kampan_uloz", { p: { id, stav } });
+  if(error) alert("Chyba: " + error.message); else nacitajKampane();
+}
+// CSV bez závislostí: hlavička určuje stĺpce, úvodzovky sa rešpektujú.
+function kampanCsv(text){
+  const riadky = String(text || "").split(/\r?\n/).filter(x => x.trim());
+  if(!riadky.length) return [];
+  const rozdel = (r) => {
+    const out = []; let a = "", v = false;
+    for(let i = 0; i < r.length; i++){
+      const z = r[i];
+      if(z === '"'){ if(v && r[i+1] === '"'){ a += '"'; i++; } else v = !v; }
+      else if((z === "," || z === ";") && !v){ out.push(a); a = ""; }
+      else a += z;
+    }
+    out.push(a); return out.map(x => x.trim());
+  };
+  const hlavicka = rozdel(riadky[0]).map(x => x.toLowerCase());
+  return riadky.slice(1).map(r => { const c = rozdel(r), o = {}; hlavicka.forEach((h, i) => o[h] = c[i] || null); return o; });
+}
+async function kampanImport(id){
+  const riadky = kampanCsv(document.getElementById("kampCsv").value);
+  if(!riadky.length){ kampanSprava("CSV je prázdne.", true); return; }
+  const { data, error } = await sb.rpc("kampan_import", { p_kampan: id, p_riadky: riadky });
+  if(error){ kampanSprava("Chyba: " + error.message, true); return; }
+  kampanSprava("Pridaných " + data.pridane + " · odhlásených " + data.odhlasene + " · bez zdroja " + data.bez_zdroja
+    + " · duplicita " + data.duplicita + " · chybný e-mail " + data.zle);
+  document.getElementById("kampCsv").value = "";
+  nacitajKampane();
+}
+async function kampanSkuska(id){
+  const komu = prompt("Skúšobný e-mail poslať na adresu:");
+  if(!komu) return;
+  const { data, error } = await sb.functions.invoke("kampan-posli", { body: { kampan: id, skuska: komu } });
+  if(error || (data && data.chyba)) kampanSprava("Chyba: " + ((data && data.chyba) || error.message), true);
+  else kampanSprava("Skúška odoslaná na " + komu + ".");
+}
+async function kampanDavka(id){
+  const k = _kampane.find(x => x.id === id) || {};
+  const pocet = prompt("Koľko e-mailov poslať teraz? (čaká " + (k.caka || 0) + ", denný limit " + (k.denny_limit || 0) + ")", "50");
+  if(!pocet) return;
+  if(!confirm("Naozaj odoslať " + pocet + " e-mailov kampane „" + (k.nazov || "") + "“? Odoslané sa nedá vziať späť.")) return;
+  const { data, error } = await sb.functions.invoke("kampan-posli", { body: { kampan: id, pocet: +pocet } });
+  if(error || (data && data.chyba)) kampanSprava("Chyba: " + ((data && data.chyba) || error.message), true);
+  else kampanSprava("Odoslané " + data.odoslane + (data.chyby ? ", chyby " + data.chyby : "") + " · dnes spolu " + data.dnes + "/" + data.limit + (data.dovod ? " (" + data.dovod + ")" : ""));
+  nacitajKampane();
+}
 
 // ═══ NÁVŠTEVNOSŤ (spec 131.4) ═══════════════════════════════════════════════
 // Čísla počíta databáza (analytika_prehlad, admin_43) — do prehliadača ide len
