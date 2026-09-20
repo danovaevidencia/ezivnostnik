@@ -2218,7 +2218,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.20-PL";  // Kampaňový nástroj v admine, zásady 1.9
+const APP_VERZIA = "2026.09.20-PM";  // Zvonček: nové hore, prečítané zbalené; e-faktúry bez poskakovania
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -6888,7 +6888,7 @@ function otvorNotifikacie(){
       Nič nové. Všetko máte vybavené.</div>`, null);
     renderNotifBadge(); return;
   }
-  const riadky=zoz.map((n,i)=>{
+  const riadok=(n,i)=>{
     const pr=notifJePrecitana(n.kluc);
     return `<div class="notifrow ${pr?'pr':''} ${n.nal==='warn'?'warn':''}">
       <div class="notific">${n.ic}</div>
@@ -6899,13 +6899,23 @@ function otvorNotifikacie(){
       ${pr?'':`<button class="notifx" title="Označiť ako prečítané"
         onclick="event.stopPropagation();notifPrecitaj('${esc(n.kluc).replace(/'/g,"\\'")}')">×</button>`}
     </div>`;
-  }).join("");
+  };
+  // Nové idú hore a prečítané sa zbalia. Predtým si držali svoje miesto medzi
+  // nimi, takže pri dvadsiatich riadkoch sa k jedinej novej muselo doskrolovať
+  // (Roman, 20. 9. 2026) — a to je presne návod, ako sa notifikácie naučiť
+  // preskakovať. Poradie vnútri oboch skupín ostáva pôvodné (zbierNotifikacie).
+  const nove=[], stare=[];
+  zoz.forEach((n,i)=>(notifJePrecitana(n.kluc)?stare:nove).push(riadok(n,i)));
   openModal("Notifikácie", `
     ${nepr?`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
       <div class="csub">${nepr} ${nepr===1?'nová':nepr<5?'nové':'nových'}</div>
       <button class="aabtn" style="padding:5px 10px;font-size:12px" onclick="notifPrecitajVsetko()">Označiť všetko</button>
     </div>`:'<div class="csub" style="margin-bottom:10px">Všetko prečítané.</div>'}
-    <div class="alist">${riadky}</div>`, null);
+    ${nove.length?`<div class="alist">${nove.join("")}</div>`:''}
+    ${stare.length?`<details style="margin-top:${nove.length?12:0}px"${nove.length?'':' open'}>
+      <summary class="csub" style="cursor:pointer;padding:6px 0">Prečítané (${stare.length})</summary>
+      <div class="alist">${stare.join("")}</div>
+    </details>`:''}`, null);
   renderNotifBadge();
 }
 
@@ -27881,7 +27891,12 @@ function peppolKartaHtml(){
   const S=_peppolSiet, m=firmaData.meta||{};
   const dic=String(m.dic||m.icdph||"").replace(/[^0-9]/g,"");
   const karta=(obsah, farba)=>`<div class="card" style="margin-bottom:14px${farba?";border-left:3px solid "+farba:""}">${obsah}</div>`;
-  if(S.firma!==firmaId || (!S.nacitane && !S.chyba)) return "";
+  // Kým sa stav siete načíta, drží miesto riadok rovnakej výšky. Bez neho sa
+  // modul vykreslil dvakrát a po odpovedi servera oznam odtlačil obsah nadol —
+  // vyzeralo to, že prijatá faktúra zmizla a o chvíľu sa vrátila
+  // (Roman, 20. 9. 2026).
+  if(S.firma!==firmaId || (!S.nacitane && !S.chyba))
+    return `<div class="csub" style="margin:0 0 12px;opacity:.6">Zisťujem stav firmy v sieti Peppol…</div>`;
   if(!S.nacitane) return karta(`<b>Firma v sieti Peppol</b>
       <div class="csub" style="margin-top:5px">Stav sa nepodarilo zistiť: ${esc(S.chyba)}</div>
       <button class="aabtn" style="margin-top:8px" onclick="_peppolSiet.chyba='';peppolNacitajSiet()">Skúsiť znova</button>`);
