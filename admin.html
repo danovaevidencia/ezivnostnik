@@ -225,6 +225,31 @@ tr.chce td{background:#fffaf0}
       <div class="body" id="zalBody"><div class="loading">Načítavam históriu záloh…</div></div>
     </div>
 
+    <!-- ZÁZNAMY O ODOSLANÍ E-FAKTÚR — výzva poskytovateľa podľa OP Verteco čl. 4.1 h) (admin_49) -->
+    <div class="sec">
+      <div class="head"><h2>Záznamy o odoslaní e-faktúr</h2><div class="sp"></div></div>
+      <div class="body">
+        <div class="hint">Na výzvu poskytovateľa (Verteco), Finančnej správy alebo autority Peppol vydávame do
+          <b>10 pracovných dní</b>, kto ktorý doklad odoslal. Každé vydanie sa zapíše — kto, kedy, komu a čo.</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin:10px 0">
+          <div class="field" style="margin:0"><label>Od</label><input id="pzOd" type="date" style="width:auto"></div>
+          <div class="field" style="margin:0"><label>Do</label><input id="pzDo" type="date" style="width:auto"></div>
+          <div class="field" style="margin:0"><label>DIČ firmy</label><input id="pzDic" style="width:130px" placeholder="1122334455"></div>
+          <div class="field" style="margin:0"><label>Číslo dokladu</label><input id="pzCislo" style="width:130px"></div>
+          <div class="field" style="margin:0"><label>E-mail odosielateľa</label><input id="pzEmail" style="width:170px"></div>
+          <button class="rowbtn" onclick="pzHladaj()">Hľadať</button>
+        </div>
+        <div id="pzVysledok"><div class="empty">Zadaj filter a stlač Hľadať.</div></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-top:12px">
+          <div class="field" style="margin:0;flex:1;min-width:220px"><label>Komu a na základe čoho (povinné)</label>
+            <input id="pzKomu" placeholder="Verteco, výzva e-mailom z 3. 10. 2026"></div>
+          <button class="btn" style="width:auto;padding:9px 14px" onclick="pzVydaj()">Vydať ako CSV</button>
+        </div>
+        <div class="err" id="pzErr"></div>
+        <div id="pzVydania"></div>
+      </div>
+    </div>
+
     <!-- SADZBY -->
     <div class="sec">
       <div class="head"><h2>Sadzby a hranice</h2><div class="sp"></div>
@@ -1882,6 +1907,65 @@ async function zalSpust(){
     tlacidlo.disabled = false;
     nacitajZalohy();
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  ZÁZNAMY O ODOSLANÍ E-FAKTÚR — výzva podľa OP Verteco čl. 4.1 h) (admin_49)
+// ═══════════════════════════════════════════════════════════════════
+// Prezeranie ide cez peppol_odoslania_hladaj (bez zápisu). Vydanie mimo nás
+// ide VÝHRADNE cez peppol_odoslania_vydaj, ktorá každé vydanie zapíše do
+// peppol_vydania — CSV sa skladá z toho, čo vrátila ona, nie z tabuľky na obrazovke.
+function pzFilter(){
+  const v = id => document.getElementById(id).value.trim();
+  return { od: v("pzOd"), do: v("pzDo"), dic: v("pzDic"), cislo: v("pzCislo"), email: v("pzEmail") };
+}
+const PZ_STLPCE = [
+  ["odoslane_kedy", "Odoslané"], ["firma_dic", "DIČ firmy"], ["firma_nazov", "Firma"], ["doklad_cislo", "Číslo dokladu"],
+  ["prijemca", "Príjemca"], ["pouzivatel_email", "Odoslal (e-mail)"], ["user_id", "Odoslal (ID účtu)"],
+  ["stav", "Stav doručenia"], ["dorucene_kedy", "Doručené"], ["fs_nahlasene_kedy", "Nahlásené FS"],
+  ["peppol_message_id", "Peppol message ID"], ["xml_sha256", "SHA-256 dokladu"], ["siet", "Sieť"], ["document_id", "ID u poskytovateľa"],
+];
+async function pzHladaj(){
+  const el = document.getElementById("pzVysledok");
+  el.innerHTML = '<div class="loading">Hľadám…</div>';
+  const { data, error } = await sb.rpc("peppol_odoslania_hladaj", { p: pzFilter() });
+  if(error){ el.innerHTML = '<div class="err">Chyba: ' + esc(error.message) + '</div>'; return; }
+  const r = data.riadky || [];
+  const cas = x => x ? new Date(x).toLocaleString("sk-SK") : "–";
+  el.innerHTML = !r.length ? '<div class="empty">Žiadny záznam pre tento filter.</div>'
+    : '<div style="font-size:13px;margin-bottom:6px">' + r.length + ' záznamov' + (r.length >= 5000 ? ' (zobrazených prvých 5 000 — zúž filter)' : '') + '</div>'
+      + '<div style="overflow-x:auto"><table><thead><tr><th>Odoslané</th><th>Firma</th><th>Doklad</th><th>Príjemca</th><th>Odoslal</th><th>Stav</th></tr></thead><tbody>'
+      + r.map(x => '<tr><td>' + esc(cas(x.odoslane_kedy)) + '</td><td>' + esc(x.firma_nazov || "") + ' <span style="color:var(--soft)">' + esc(x.firma_dic || "") + '</span></td>'
+        + '<td>' + esc(x.doklad_cislo || "–") + '</td><td>' + esc(x.prijemca || "") + '</td>'
+        + '<td>' + (x.pouzivatel_email ? esc(x.pouzivatel_email) : '<span style="color:var(--warn)">neznámy (pred 21. 9. 2026)</span>') + '</td>'
+        + '<td>' + esc(x.stav || "") + '</td></tr>').join("") + '</tbody></table></div>';
+  document.getElementById("pzVydania").innerHTML = pzVydaniaHtml(data.vydania || []);
+}
+function pzVydaniaHtml(v){
+  if(!v.length) return "";
+  return '<div style="margin-top:14px;font-size:13px;color:var(--soft)">Doterajšie vydania</div><div style="overflow-x:auto"><table><thead><tr><th>Kedy</th><th>Kto</th><th>Komu</th><th class="r">Záznamov</th></tr></thead><tbody>'
+    + v.map(x => '<tr><td>' + esc(new Date(x.kedy).toLocaleString("sk-SK")) + '</td><td>' + esc(x.admin_email || "") + '</td><td>' + esc(x.komu) + '</td><td class="r">' + esc(x.pocet) + '</td></tr>').join("")
+    + '</tbody></table></div>';
+}
+function pzCsv(riadky){
+  const bunka = x => '"' + String(x == null ? "" : x).replace(/"/g, '""') + '"';
+  return [PZ_STLPCE.map(s => bunka(s[1])).join(";")]
+    .concat(riadky.map(r => PZ_STLPCE.map(s => bunka(r[s[0]])).join(";"))).join("\r\n");
+}
+async function pzVydaj(){
+  const err = document.getElementById("pzErr"); err.textContent = "";
+  const komu = document.getElementById("pzKomu").value.trim();
+  if(komu.length < 5){ err.textContent = "Uveď, komu a na základe čoho záznamy vydávaš — zapíše sa to."; return; }
+  const { data, error } = await sb.rpc("peppol_odoslania_vydaj", { p: pzFilter(), p_komu: komu });
+  if(error){ err.textContent = "Vydanie zlyhalo: " + error.message; return; }
+  const blob = new Blob(["﻿" + pzCsv(data || [])], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "peppol_zaznamy_" + new Date().toISOString().slice(0, 10) + ".csv";
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  err.textContent = "";
+  pzHladaj();
 }
 
 function eur(v){ return (+v||0).toLocaleString("sk-SK",{minimumFractionDigits:0,maximumFractionDigits:0}) + " €"; }
