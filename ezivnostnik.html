@@ -7266,7 +7266,13 @@ function renderHomeStrip(){
   // Keď sa schránku nepodarilo načítať, používateľ to musí vedieť. Inak appka
   // vyzerá presne tak, ako keby nič nečakalo — a doklady medzitým ležia
   // v databáze.
-  if(_cakajuceChyba){
+  // Výpadok siete: jedna tichá veta, žiadne varovanie ani surová chyba.
+  if(_cakajuceChyba && _cakajuceOffline){
+    html += `<div style="grid-column:1/-1;border-left:3px solid var(--line);padding:6px 12px;margin-top:10px;
+        font-size:12.5px;line-height:1.5;color:var(--ink-soft)">
+      Ste bez signálu — doklady prijaté e-mailom sa načítajú, keď budete online.
+    </div>`;
+  } else if(_cakajuceChyba){
     html += `<div style="grid-column:1/-1;background:var(--sfc-warn);border-left:3px solid var(--warn);
         border-radius:0 9px 9px 0;padding:10px 13px;margin-top:10px;font-size:12.5px;line-height:1.5">
       ⚠ <b>Doklady prijaté e-mailom sa nepodarilo načítať.</b>
@@ -33483,6 +33489,7 @@ let _ocrArchiv=null;
 let cakajuceDoklady = [];
 let _cakajuceNacitane = false;
 let _cakajuceChyba = null;
+let _cakajuceOffline = false;   // chyba je len výpadok siete, nie porucha schránky
 
 // SCHRÁNKA PATRÍ FIRME — po prepnutí sa vyprázdni CELÁ (16. 9. 2026, dev/opravy/cakajuce16.md).
 // Do tohto dňa ju `resetStavuModulov` nemazal a zmeraná následnosť bola takáto:
@@ -33498,7 +33505,7 @@ let _cakajuceChyba = null;
 // to je bezpečné, lebo `resetStavuModulov` sa volá výhradne z obsluhy (prepnutie firmy,
 // odchod z dema), teda dávno po vyhodnotení skriptu — nikdy nie počas neho.
 function cakajuceVyprazdni(){
-  cakajuceDoklady=[]; _cakajuceNacitane=false; _cakajuceChyba=null;
+  cakajuceDoklady=[]; _cakajuceNacitane=false; _cakajuceChyba=null; _cakajuceOffline=false;
   _cakajucePosledne=0;       // brzda 20 s patrila predošlej firme — nová sa smie spýtať hneď
   _adresaChyba=null;         // hláška o prijímacej adrese predošlej firmy
   _cakajuciNahradeny=null;   // cesta k originálu v úložisku predošlej firmy (dvojica k `_cakajuciSpracovavany`)
@@ -33537,11 +33544,16 @@ async function nacitajCakajuce(tiche){
     cakajuceDoklady = data || [];
     _cakajuceNacitane = true;
     _cakajuceChyba = null;
+    _cakajuceOffline = false;
   }catch(e){
     if(!beh.platny()){ console.error("čakajúce doklady predošlej firmy:", e); return; }
     // Tabuľka nemusí existovať v staršom prostredí — appka kvôli tomu nespadne.
     cakajuceDoklady = [];
     _cakajuceChyba = e && (e.message || String(e)) || "neznáma chyba";
+    // Výpadok siete nie je porucha schránky. Surové „TypeError: Failed to
+    // fetch“ s varovaním vyzeralo, že sa niečo pokazilo (Roman, 21. 9. 2026,
+    // letový režim). Pri výpadku sa povie len to, že sa načíta neskôr.
+    _cakajuceOffline = jeSietovaChyba(e);
     // Chybu si zapamätáme. Pôvodne sa len zapísala do konzoly a appka sa
     // navonok tvárila, že jednoducho nič nečaká — doklady pritom v databáze
     // ležali a chýbal len grant pre `authenticated`. Ticho zhltnutá chyba
@@ -40524,8 +40536,13 @@ async function dokladUpload(file, prefix, nazov, beh, stav){
   };
   const prihlasenie=await doStropu(sb.auth.getUser());
   if(prihlasenie===STROP) return poStrope("overenie prihlásenia");
-  const { data:{ user } }=prihlasenie;
+  const { data:{ user }, error:chybaPrihlasenia }=prihlasenie;
   if(!beh.platny()){ S.chyba=DOKLAD_DOVOD.prepnutie.text; console.error("upload dokladu: medzitým sa otvorila iná firma — súbor "+(file.name||"")+" sa nenahrá"); return null; }
+  // Bez siete vráti getUser sieťovú chybu a PRÁZDNEHO používateľa. Appka to
+  // čítala ako odhlásenie a radila „prihláste sa znova“ človeku, ktorý prihlásený
+  // bol — len v letovom režime (Roman, 21. 9. 2026, test appky z Play). Výpadok
+  // sa preto rozlišuje skôr než odhlásenie.
+  if(!user && jeSietovaChyba(chybaPrihlasenia)){ S.chyba=DOKLAD_DOVOD.offline.text; console.error("upload dokladu: bez siete — súbor "+(file.name||"")+" sa nenahrá", chybaPrihlasenia); return null; }
   // Do 15. 9. 2026 tu bol null bez slova a hláška tvrdila „úložisko súbor neprijalo“ (č. 120).
   if(!user){ S.chyba=DOKLAD_DOVOD.neprihlaseny.text; console.error("upload dokladu: nie ste prihlásený — súbor "+(file.name||"")+" sa nenahrá"); return null; }
   const F=await fotkaPreUlozisko(file);
