@@ -2243,7 +2243,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.21-PP";  // Úvod pri prvom spustení appky, skener bez rozmazaného pokynu
+const APP_VERZIA = "2026.09.21-PR";  // Názvy začiatku a cieľa jazdy predvolene, výpadok siete pri doklade
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -19474,23 +19474,28 @@ function mapaSuhlas(){
   gpsUloz("ez_mapa_suhlas","1"); _mapaVysvetlena=true;
   return true;
 }
-// Automatické dopĺňanie názvov je VYPNUTÉ, kým ho človek sám nezapne — a nie je
-// to opatrnosť pre opatrnosť. `sukromie.html` sľubuje, že appka polohu nikam
-// neposiela sama od seba a že pri názvoch miest odídu súradnice „len na to jedno
-// stlačenie". Zapnutím sa ten sľub mení, takže to musí byť vedomé rozhodnutie
-// a zásady to musia popisovať ako VOĽBU, nie ako správanie appky. Obidva smery
-// stráži `test_pravne.js`.
+// Automatické dopĺňanie názvov je od 21. 9. 2026 PREDVOLENE ZAPNUTÉ (Roman:
+// „nový používateľ má pri prvej jazde hneď vidieť, odkiaľ kam išiel, bez
+// nastavovania“). Do vtedy bolo vypnuté, kým ho človek nezapol — a nový
+// používateľ ho nezapol nikdy, takže prvá jazda mala prázdne Odkiaľ a Kam.
+// Pri prvej jazde je register miest v telefóne prázdny a iný zdroj názvu nie je.
+//
+// Čo to vyvažuje (a zásady 1.10 to hovoria): súradnice idú ZAOKRÚHLENÉ na
+// ~100 m, len za začiatok a koniec, len keď miesto ešte nie je pomenované
+// v telefóne, a vypnúť sa to dá jedným prepínačom v okne jazdy. Vypnutie sa
+// pamätá ako "0" — chýbajúci kľúč znamená predvolené, teda zapnuté.
+//
+// V deme nie: demo nemá čo vedieť o polohe telefónu človeka, ktorý si ho skúša.
 //
 // Voľba je na zariadení (`localStorage`), nie vo `firmaData`: je to rozhodnutie
 // o tomto telefóne a o jeho polohe, nie údaj firmy.
-function mapaAutoZapnute(){ return gpsCitaj(GPS_AUTONAZVY)==="1"; }
+function mapaAutoZapnute(){
+  if(demoMode) return false;
+  return gpsCitaj(GPS_AUTONAZVY)!=="0";
+}
 function mapaAutoPrepni(el){
   const chce=!!(el&&el.checked);
-  // Zapnutie prejde cez to isté vysvetlenie ako jednorazové stlačenie. Keď ho
-  // človek odmietne, prepínač sa vráti späť — inak by tvrdil, že je zapnuté
-  // niečo, čo sa nikdy nespustí.
-  if(chce && !mapaSuhlas()){ if(el) el.checked=false; return; }
-  gpsUloz(GPS_AUTONAZVY, chce?"1":null);
+  gpsUloz(GPS_AUTONAZVY, chce?null:"0");
 }
 // Trasa „Trnava – Bratislava – Trnava" → ["Trnava","Bratislava","Trnava"].
 // Delí sa na pomlčkách aj spojovníku; ľudia píšu oboje.
@@ -19546,13 +19551,20 @@ async function mapaVzdialenost(prvok){
 //  Doplní „Odkiaľ" a „Kam" z bodov meranej jazdy. Je to DRUHÁ cesta polohy
 //  von a líši sa od `mapaVzdialenost` v jednej podstatnej veci: tam sú
 //  súradnice vstupom do výpočtu vzdialenosti, tu odchádza poloha sama o sebe.
-//  Preto to `sukromie.html` menuje zvlášť a preto sa to deje len na stlačenie.
+//  Preto to `sukromie.html` menuje zvlášť.
+//
+//  Bez potvrdzovacieho okna (21. 9. 2026): názov začiatku a cieľa je súčasť
+//  knihy jázd, nie služba navyše, a nový používateľ ho má vidieť hneď.
+//  Namiesto súhlasu odchádza MENEJ: súradnice zaokrúhlené na tri desatinné
+//  miesta (~100 m — na „obec, ulica“ to stačí, presné miesto nie) a len bod,
+//  ktorý ešte nie je pomenovaný v telefóne. Do 21. 9. sa pýtalo na oba body,
+//  aj na známy — výsledok sa zahodil, ale súradnice odišli, hoci zásady
+//  sľubovali opak.
 //
 //  Výsledok sa VYPÍŠE DO POLÍ, neuloží. Človek ho vidí, môže prepísať a až
 //  uložením jazdy sa názov zapamätá do registra miest v zariadení.
 async function mapaNazvyMiest(prvok){
   if(!_jazda || !_jazda.prvy){ return; }
-  if(!mapaSuhlas()) return;
   const stav=document.getElementById("m_mapaStav");
   const povedz=(t)=>{ if(stav) stav.innerHTML=t; };
   if(!sb || !SUPABASE_URL){ povedz("Názvy z mapy potrebujú cloudový účet."); return; }
@@ -19560,18 +19572,22 @@ async function mapaNazvyMiest(prvok){
   if(!token){ povedz(esc(CHYBA_SESSION)); return; }
   if(prvok) prvok.disabled=true;
   povedz("Hľadám názvy miest…");
+  const zaokr=x=>Math.round(x*1000)/1000;
   const pytaj=async(bod)=>{
     const res=await fetch(SUPABASE_URL+"/functions/v1/proxy",{
       method:"POST",
       headers:{"Content-Type":"application/json", Authorization:"Bearer "+token},
-      body:JSON.stringify({akcia:"miesto", lat:bod[0], lon:bod[1]})});
+      body:JSON.stringify({akcia:"miesto", lat:zaokr(bod[0]), lon:zaokr(bod[1])})});
     if(!res.ok) return null;
     const d=await res.json();
     return d.ok ? d : null;
   };
+  // Pole „Odkiaľ“/„Kam“ existuje len pre miesto, ktoré telefón ešte nepozná —
+  // známe miesto sa preto na mapu vôbec neposiela.
+  const neznamy=id=>!!document.getElementById(id);
   try{
-    const z=await pytaj(_jazda.prvy);
-    const c=_jazda.posl ? await pytaj(_jazda.posl) : null;
+    const z=neznamy("m_miestoZ") ? await pytaj(_jazda.prvy) : null;
+    const c=_jazda.posl && neznamy("m_miestoC") ? await pytaj(_jazda.posl) : null;
     // Doplní sa len do PRÁZDNEHO poľa — čo si človek napísal sám, sa
     // neprepisuje. Pole existuje len vtedy, keď miesto ešte nie je známe.
     const nasad=(id,d)=>{ const p=document.getElementById(id);
@@ -19672,8 +19688,8 @@ function jazdaZaver(){
     ${(!zn||!cn)?`<div style="margin:-4px 0 12px">
       <button type="button" class="aabtn" onclick="mapaNazvyMiest(this)">📍 Doplniť názvy z mapy</button>
       <div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;line-height:1.5">
-        Súradnice začiatku a konca sa jednorazovo pošlú mapovej službe, ktorá vráti názov.
-        Návrh môžete prepísať.</div>
+        Mapová služba dostane len približnú polohu (±100 m) nepomenovaného miesta
+        a vráti obec a ulicu. Návrh môžete prepísať.</div>
       <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12px;cursor:pointer">
         <input type="checkbox" id="m_mapaAuto" style="width:auto"${mapaAutoZapnute()?" checked":""}
                onchange="mapaAutoPrepni(this)">
@@ -20172,7 +20188,7 @@ function dmKopiruj(){
 // sadu zhodí.
 const DOKUMENTY={
   podmienky:{url:"podmienky.html",     n:"Obchodné podmienky",      verzia:"1.3"},
-  sukromie: {url:"sukromie.html",      n:"Ochrana osobných údajov", verzia:"1.9"},
+  sukromie: {url:"sukromie.html",      n:"Ochrana osobných údajov", verzia:"1.10"},
   zmazanie: {url:"zmazanie-uctu.html", n:"Zmazanie účtu a údajov"},
 };
 // Záznam súhlasu k účtu (ROZHODNUTIA č. 52). Zmluva vzniká vytvorením účtu
