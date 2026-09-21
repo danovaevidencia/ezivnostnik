@@ -216,6 +216,13 @@ tr.chce td{background:#fffaf0}
       <div class="body" id="kampBody"><div class="loading">Načítavam kampane…</div></div>
     </div>
 
+    <!-- ZÁLOHY — šifrovaná záloha všetkých dát na lokálny disk, história a dohľad (admin_48) -->
+    <div class="sec">
+      <div class="head"><h2>Zálohy</h2><div class="sp"></div>
+        <button class="btn" style="width:auto;padding:8px 14px" onclick="zalOtvor()">Stiahnuť zálohu</button></div>
+      <div class="body" id="zalBody"><div class="loading">Načítavam históriu záloh…</div></div>
+    </div>
+
     <!-- SADZBY -->
     <div class="sec">
       <div class="head"><h2>Sadzby a hranice</h2><div class="sp"></div>
@@ -295,6 +302,29 @@ tr.chce td{background:#fffaf0}
 </div>
 
 <!-- MODAL: detail zákazníka (read-only) -->
+<!-- MODAL: stiahnutie zálohy — nové overenie druhým faktorom a heslo zálohy -->
+<div class="modal" id="zalModal">
+  <div class="box" style="max-width:500px">
+    <div class="mh"><h3>Stiahnuť zálohu všetkých dát</h3><button class="x" onclick="zalZavri()">×</button></div>
+    <div class="mb">
+      <div class="hint">Záloha obsahuje dáta <b>všetkých zákazníkov</b> — tabuľky, účty a všetky uložené doklady.
+        Zašifruje sa v tomto prehliadači heslom zálohy; server heslo nevidí. Bez hesla sa záloha nedá otvoriť ani nami.</div>
+      <div class="field"><label>Kód z overovacej aplikácie</label>
+        <input id="zalKod" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456"></div>
+      <div class="field"><label>Heslo zálohy (aspoň 16 znakov, zo správcu hesiel)</label>
+        <input id="zalHeslo" type="password" autocomplete="new-password"></div>
+      <div class="field"><label>Heslo zálohy znova</label>
+        <input id="zalHeslo2" type="password" autocomplete="new-password"></div>
+      <div class="hint">Po stlačení vyberieš priečinok na disku. Uložia sa doň dva súbory: úplná záloha
+        (drží sa 12 mesiacov) a originály e-faktúr (10 rokov). Potom ich skopíruj aj na externý disk a do cloudu.</div>
+      <div id="zalPriebeh" style="font-size:13px;line-height:1.6;white-space:pre-line"></div>
+      <div class="err" id="zalErr"></div>
+    </div>
+    <div class="mf"><button class="rowbtn" onclick="zalZavri()">Zavrieť</button>
+      <button class="btn" id="zalSpust" style="width:auto;padding:9px 16px" onclick="zalSpust()">Overiť a zálohovať</button></div>
+  </div>
+</div>
+
 <div class="modal" id="detailModal">
   <div class="box" style="max-width:560px">
     <div class="mh"><h3 id="detailTitle">Detail zákazníka</h3><button class="x" onclick="zavriDetail()">×</button></div>
@@ -603,6 +633,7 @@ async function overAdmin(user){
   nacitajPrehlad();
   nacitajNavstevnost();
   nacitajKampane();
+  nacitajZalohy();
   vykresliSadzby();
   pripravRokySaas();
   nacitajSaasFaktury();
@@ -1660,6 +1691,195 @@ async function clZmazZWebu(){
             + "Kto má odkaz uložený, narazí na chybu 404. Článok v databáze ostane "
             + "a dá sa zverejniť znova.")) return;
   await clPublikuj(clEditId, "zmaz");
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  ZÁLOHY — stiahnutie šifrovanej zálohy, história a dohľad (admin_48)
+// ═══════════════════════════════════════════════════════════════════
+// Roman 21. 9. 2026: záloha z adminu, pred stiahnutím NOVÉ overenie druhým
+// faktorom, uloženie na lokálny disk. Server (edge funkcia `zaloha`) pustí
+// zálohu len s kódom zadaným najviac pred 5 minútami — čas berie z tokenu,
+// nie z tohto okna. Šifruje sa tu, heslo zálohy server nevidí; formát je
+// v /zaloha_format.js, ten istý číta dev/zaloha/zaloha.js pri obnove.
+const ZAL_DNI_UPOZORNENIE = 35;   // mesačná záloha + týždeň rezervy
+let ZF = null;
+async function zalFormat(){ if(!ZF) ZF = await import("/zaloha_format.js"); return ZF; }
+
+async function nacitajZalohy(){
+  const el = document.getElementById("zalBody");
+  const { data, error } = await sb.rpc("zalohy_prehlad");
+  if(error){ el.innerHTML = '<div class="err">Chyba načítania: ' + esc(error.message) + '</div>'; return; }
+  el.innerHTML = zalPrehladHtml(data || [], new Date());
+}
+
+// Dohľad: kedy bola posledná hotová záloha a či medzi dvoma hotovými
+// nezmizli súbory alebo riadky — strata dát sa musí ukázať skôr, než ju
+// prekryje ďalšia záloha.
+function zalDohlad(zoznam, teraz){
+  const hotove = zoznam.filter(z => z.stav === "hotova");
+  const posl = hotove[0], pred = hotove[1];
+  const dni = posl ? Math.floor((teraz - new Date(posl.dokoncena || posl.zacata)) / 86400000) : null;
+  const upozornenia = [];
+  if(!posl) upozornenia.push("Zatiaľ žiadna hotová záloha.");
+  else if(dni > ZAL_DNI_UPOZORNENIE) upozornenia.push("Posledná záloha je stará " + dni + " dní — je čas na novú.");
+  if(posl && pred && posl.suborov < pred.suborov)
+    upozornenia.push("V poslednej zálohe je o " + (pred.suborov - posl.suborov) + " súborov menej než v predošlej — over, či ide o zmazanie, nie stratu.");
+  if(posl && pred && posl.riadkov < pred.riadkov)
+    upozornenia.push("V poslednej zálohe je o " + (pred.riadkov - posl.riadkov) + " riadkov menej než v predošlej.");
+  if(posl && posl.ulozene !== true)
+    upozornenia.push("Pri poslednej zálohe prehliadač nepotvrdil zápis na disk — skontroluj, či súbor naozaj máš.");
+  return { posl, dni, upozornenia };
+}
+
+function zalPrehladHtml(zoznam, teraz){
+  const D = zalDohlad(zoznam, teraz);
+  const mb = b => b == null ? "–" : (b / 1048576).toFixed(1) + " MB";
+  const stav = z => z.stav === "hotova" ? '<span class="pill" style="color:var(--accent2)">hotová</span>'
+    : z.stav === "zlyhala" ? '<span class="pill" style="color:var(--neg)">zlyhala</span>'
+    : (teraz - new Date(z.zacata) > 3600000 ? '<span class="pill" style="color:var(--warn)">neukončená</span>' : '<span class="pill">prebieha</span>');
+  const hlavicka = D.posl
+    ? '<div style="margin-bottom:10px">Posledná záloha: <b>' + esc(new Date(D.posl.dokoncena || D.posl.zacata).toLocaleString("sk-SK")) + '</b> (pred ' + D.dni + ' dňami), '
+      + esc(D.posl.tabuliek) + ' tabuliek, ' + esc(D.posl.riadkov) + ' riadkov, ' + esc(D.posl.uctov) + ' účtov, ' + esc(D.posl.suborov) + ' súborov.</div>'
+    : "";
+  const upoz = D.upozornenia.map(u => '<div class="hint warn">⚠ ' + esc(u) + '</div>').join("");
+  if(!zoznam.length) return hlavicka + upoz + '<div class="empty">Zatiaľ žiadna záloha.</div>';
+  return hlavicka + upoz + '<div style="overflow-x:auto"><table><thead><tr><th>Začatá</th><th>Kto</th><th>Stav</th>'
+    + '<th class="r">Tabuľky / riadky</th><th class="r">Účty</th><th class="r">Súbory (e-faktúry)</th><th class="r">Veľkosť</th><th>SHA-256</th><th>Na disku</th></tr></thead><tbody>'
+    + zoznam.map(z => '<tr><td>' + esc(new Date(z.zacata).toLocaleString("sk-SK")) + '</td><td>' + esc(z.admin_email || "") + '</td><td>' + stav(z)
+      + (z.chyba ? '<div style="font-size:12px;color:var(--neg)">' + esc(z.chyba) + '</div>' : '') + '</td>'
+      + '<td class="r">' + esc(z.tabuliek ?? "–") + ' / ' + esc(z.riadkov ?? "–") + '</td><td class="r">' + esc(z.uctov ?? "–") + '</td>'
+      + '<td class="r">' + esc(z.suborov ?? "–") + ' (' + esc(z.efaktur ?? "–") + ')</td><td class="r">' + mb(z.bajtov) + '</td>'
+      + '<td style="font-family:\'IBM Plex Mono\',monospace;font-size:11px" title="' + esc(z.sha256 || "") + '">' + esc((z.sha256 || "").slice(0, 12)) + '</td>'
+      + '<td>' + (z.ulozene === true ? "áno" : z.stav === "hotova" ? "nepotvrdené" : "–") + '</td></tr>').join("")
+    + '</tbody></table></div>';
+}
+
+function zalOtvor(){
+  ["zalKod", "zalHeslo", "zalHeslo2"].forEach(i => document.getElementById(i).value = "");
+  document.getElementById("zalPriebeh").textContent = "";
+  document.getElementById("zalErr").textContent = "";
+  document.getElementById("zalSpust").disabled = false;
+  document.getElementById("zalModal").classList.add("on");
+  document.getElementById("zalKod").focus();
+}
+function zalZavri(){
+  ["zalKod", "zalHeslo", "zalHeslo2"].forEach(i => document.getElementById(i).value = "");
+  document.getElementById("zalModal").classList.remove("on");
+}
+
+async function zalVolaj(telo){
+  const _tok = await ziskajToken();
+  if(!_tok) throw new Error(CHYBA_SESSION);
+  const res = await fetch(SUPABASE_URL + "/functions/v1/zaloha", {
+    method:"POST", headers:{ "Content-Type":"application/json", "Authorization":"Bearer "+_tok }, body: JSON.stringify(telo) });
+  const d = await res.json().catch(() => ({}));
+  if(!res.ok) throw new Error(d.chyba || ("server vrátil " + res.status));
+  return d;
+}
+
+// Nové overenie druhým faktorom — vždy, aj keď je relácia už aal2. Server
+// z nového tokenu prečíta čas zadania kódu.
+async function zalOverKod(kod){
+  const { data, error } = await sb.auth.mfa.listFactors();
+  if(error) throw new Error("zoznam faktorov: " + error.message);
+  const f = ((data && data.totp) || []).find(x => x.status === "verified");
+  if(!f) throw new Error("účet nemá overený druhý faktor");
+  const { error: e2 } = await sb.auth.mfa.challengeAndVerify({ factorId: f.id, code: kod });
+  if(e2) throw new Error("kód nesedí alebo vypršal — zadaj aktuálny");
+}
+
+async function zalUloz(priecinok, meno, data){
+  if(priecinok){
+    const h = await priecinok.getFileHandle(meno, { create: true });
+    const w = await h.createWritable();
+    await w.write(data); await w.close();
+    return true;
+  }
+  // Prehliadač bez výberu priečinka: súbor ide do Stiahnutých, zápis nepotvrdí.
+  const url = URL.createObjectURL(new Blob([data], { type: "application/octet-stream" }));
+  const a = document.createElement("a"); a.href = url; a.download = meno; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  return false;
+}
+
+async function zalSpust(){
+  const priebeh = document.getElementById("zalPriebeh"), err = document.getElementById("zalErr");
+  const kod = document.getElementById("zalKod").value.trim();
+  const heslo = document.getElementById("zalHeslo").value, heslo2 = document.getElementById("zalHeslo2").value;
+  err.textContent = "";
+  if(!/^\d{6}$/.test(kod)){ err.textContent = "Zadaj 6-miestny kód z overovacej aplikácie."; return; }
+  if(heslo.length < 16){ err.textContent = "Heslo zálohy musí mať aspoň 16 znakov."; return; }
+  if(heslo !== heslo2){ err.textContent = "Heslá zálohy sa nezhodujú."; return; }
+  const tlacidlo = document.getElementById("zalSpust"); tlacidlo.disabled = true;
+  const krok = t => { priebeh.textContent += (priebeh.textContent ? "\n" : "") + t; };
+  let id = null;
+  try{
+    // Výber priečinka ako PRVÝ krok: prehliadač ho dovolí len hneď po kliknutí,
+    // nie po minútach sťahovania.
+    let priecinok = null;
+    if(window.showDirectoryPicker){
+      try{ priecinok = await window.showDirectoryPicker({ id: "ezivnostnik-zalohy", mode: "readwrite" }); }
+      catch(e){ if(e && e.name === "AbortError"){ err.textContent = "Priečinok nevybraný — záloha nezačala."; tlacidlo.disabled = false; return; } throw e; }
+    }
+    const F = await zalFormat();
+    krok("Overujem kód druhého faktora…");
+    await zalOverKod(kod);
+    document.getElementById("zalKod").value = "";
+    const plan = await zalVolaj({ akcia: "zacni" });
+    id = plan.id;
+    const tx = new TextEncoder(), polozky = [];
+    let riadkov = 0;
+    for(const t of plan.tabulky){
+      const r = await zalVolaj({ akcia: "tabulka", id, nazov: t.nazov });
+      polozky.push({ typ: "tabulka", nazov: "db/" + t.nazov + ".json", data: tx.encode(JSON.stringify(r.riadky)), extra: { riadkov: r.riadky.length } });
+      riadkov += r.riadky.length;
+    }
+    krok("✓ databáza: " + plan.tabulky.length + " tabuliek, " + riadkov + " riadkov");
+    const u = await zalVolaj({ akcia: "ucty", id });
+    polozky.push({ typ: "pouzivatelia", nazov: "auth/pouzivatelia.json", data: tx.encode(JSON.stringify(u.ucty)), extra: { pocet: u.ucty.length } });
+    krok("✓ účty: " + u.ucty.length);
+    const subory = plan.subory;
+    for(let i = 0; i < subory.length; i += 100){
+      const davka = subory.slice(i, i + 100);
+      const p = await zalVolaj({ akcia: "podpis", id, subory: davka.map(s => ({ bucket: s.bucket, cesta: s.cesta })) });
+      for(let j = 0; j < davka.length; j++){
+        const s = davka[j];
+        const res = await fetch(p.url[j]);
+        if(!res.ok) throw new Error("súbor " + s.bucket + "/" + s.cesta + ": " + res.status);
+        const data = new Uint8Array(await res.arrayBuffer());
+        if(s.velkost >= 0 && data.length !== +s.velkost) throw new Error("súbor " + s.bucket + "/" + s.cesta + ": stiahnutých " + data.length + " B, úložisko hlási " + s.velkost);
+        polozky.push({ typ: "subor", nazov: "subory/" + s.bucket + "/" + s.cesta, data, extra: { bucket: s.bucket, cesta: s.cesta } });
+      }
+      priebeh.textContent = priebeh.textContent.replace(/\n?… súbory.*$/, "") + "\n… súbory " + Math.min(i + 100, subory.length) + " / " + subory.length;
+    }
+    priebeh.textContent = priebeh.textContent.replace(/\n?… súbory.*$/, "");
+    krok("✓ súbory: " + subory.length);
+    const efaktury = polozky.filter(x => x.typ === "subor" && F.JE_EFAKTURA.test(x.extra.cesta));
+    const teraz = new Date(), info = { vytvorena: teraz.toISOString(), projekt: SUPABASE_URL, zdroj: "admin", zaloha_id: id };
+    krok("Šifrujem…");
+    const hlavna = await F.zasifruj(await F.zabal(polozky, { ...info, druh: "uplna" }), heslo);
+    const ef = await F.zasifruj(await F.zabal(efaktury, { ...info, druh: "efaktury" }), heslo);
+    // Záloha, ktorá sa nedá otvoriť, je horšia než žiadna — overí sa ešte pred uložením.
+    for(const [meno, s, n] of [["úplná", hlavna, polozky.length], ["e-faktúry", ef, efaktury.length]]){
+      const v = await F.over(s, heslo);
+      if(v.chyby.length || v.polozky.length !== n) throw new Error("záloha (" + meno + ") neprešla overením: " + v.chyby.join("; "));
+    }
+    krok("✓ zašifrované a overené");
+    const ulozHlavna = await zalUloz(priecinok, F.menoZalohy("zaloha", teraz), hlavna);
+    const ulozEf = await zalUloz(priecinok, F.menoZalohy("efaktury", teraz), ef);
+    krok((ulozHlavna && ulozEf ? "✓ uložené do priečinka " : "↓ stiahnuté do priečinka Stiahnuté súbory ") + "(" + (hlavna.length / 1048576).toFixed(1) + " MB + " + (ef.length / 1048576).toFixed(1) + " MB)");
+    await zalVolaj({ akcia: "dokonci", id, stav: "hotova", tabuliek: plan.tabulky.length, riadkov, uctov: u.ucty.length,
+      suborov: subory.length, efaktur: efaktury.length, bajtov: hlavna.length, bajtov_efaktury: ef.length,
+      sha256: await F.sha256(hlavna), sha256_efaktury: await F.sha256(ef), ulozene: ulozHlavna && ulozEf });
+    krok("✓ zapísané do histórie. Skopíruj oba súbory aj na externý disk a do cloudu.");
+  }catch(e){
+    err.textContent = "Záloha zlyhala: " + e.message;
+    if(id != null){ try{ await zalVolaj({ akcia: "dokonci", id, stav: "zlyhala", chyba: e.message }); }catch(e2){ console.error("zápis zlyhanej zálohy:", e2); } }
+  }finally{
+    ["zalKod", "zalHeslo", "zalHeslo2"].forEach(i => document.getElementById(i).value = "");
+    tlacidlo.disabled = false;
+    nacitajZalohy();
+  }
 }
 
 function eur(v){ return (+v||0).toLocaleString("sk-SK",{minimumFractionDigits:0,maximumFractionDigits:0}) + " €"; }
