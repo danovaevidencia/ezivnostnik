@@ -2247,7 +2247,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.22-PY";  // Import výpisov iných bánk: zostatok bez úverového rámca, všetky účty, symboly SBA, kódovanie; dôvera notifikácie len z odosielateľa
+const APP_VERZIA = "2026.09.22-PZ";  // Názvy miest z mapy: obec nie je okres, stav dopĺňania pod poľami, dôvod chyby zo servera
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -19570,22 +19570,37 @@ async function mapaVzdialenost(prvok){
 //  uložením jazdy sa názov zapamätá do registra miest v zariadení.
 async function mapaNazvyMiest(prvok){
   if(!_jazda || !_jazda.prvy){ return; }
-  const stav=document.getElementById("m_mapaStav");
+  // Stav sa píše POD polia Odkiaľ/Kam (`m_miestaStav`), nie do bloku
+  // kilometrov o kus nižšie: po jazde človek pozerá na prázdne polia a bez
+  // správy pri nich nevie, že appka práve niečo robí — vyzeralo to, že
+  // dopĺňanie vôbec nebeží (Roman, 22. 9. 2026). Kým beží, polia to hovoria
+  // aj samy (placeholder) a tlačidlo je vypnuté, aby sa nespustilo dvakrát.
+  const stav=document.getElementById("m_miestaStav")||document.getElementById("m_mapaStav");
   const povedz=(t)=>{ if(stav) stav.innerHTML=t; };
+  const tlacidlo=prvok||document.getElementById("m_mapaDoplnit");
   if(!sb || !SUPABASE_URL){ povedz("Názvy z mapy potrebujú cloudový účet."); return; }
   const token=await ziskajToken();
   if(!token){ povedz(esc(CHYBA_SESSION)); return; }
-  if(prvok) prvok.disabled=true;
-  povedz("Hľadám názvy miest…");
+  if(tlacidlo) tlacidlo.disabled=true;
+  const polia=["m_miestoZ","m_miestoC"].map(id=>document.getElementById(id)).filter(Boolean);
+  const povodne=polia.map(p=>p.placeholder);
+  polia.forEach(p=>{ if(!String(p.value||"").trim()) p.placeholder="hľadám názov na mape…"; });
+  povedz('<span class="spin" style="width:12px;height:12px;border-width:2px;display:inline-block;vertical-align:-2px;margin:0 6px 0 0"></span>Hľadám názvy miest na mape…');
   const zaokr=x=>Math.round(x*1000)/1000;
+  // Chyba sa vracia S DÔVODOM, nie ako null: server ho pomenúva („nie sú na
+  // tomto serveri nastavené", „mapa názov nevrátila") a človek ho má vidieť,
+  // inak ostane pri generickej vete a chyba sa nedá nájsť.
   const pytaj=async(bod)=>{
     const res=await fetch(SUPABASE_URL+"/functions/v1/proxy",{
       method:"POST",
       headers:{"Content-Type":"application/json", Authorization:"Bearer "+token},
       body:JSON.stringify({akcia:"miesto", lat:zaokr(bod[0]), lon:zaokr(bod[1])})});
-    if(!res.ok) return null;
+    if(!res.ok) return {chyba:"Mapová služba neodpovedala (HTTP "+res.status+")."};
     const d=await res.json();
-    return d.ok ? d : null;
+    if(!d.ok) return {chyba:d.sprava||"Pre toto miesto mapa názov nevrátila."};
+    // Stopa pre ladenie: keď mapa pomenuje obec zle, má byť vidieť, čo vrátila.
+    if(d.hierarchia) console.log("názov z mapy:", d.nazov, d.hierarchia);
+    return d;
   };
   // Pole „Odkiaľ“/„Kam“ existuje len pre miesto, ktoré telefón ešte nepozná —
   // známe miesto sa preto na mapu vôbec neposiela.
@@ -19593,21 +19608,30 @@ async function mapaNazvyMiest(prvok){
   try{
     const z=neznamy("m_miestoZ") ? await pytaj(_jazda.prvy) : null;
     const c=_jazda.posl && neznamy("m_miestoC") ? await pytaj(_jazda.posl) : null;
+    const dobre=[z,c].filter(d=>d&&!d.chyba), zle=[z,c].filter(d=>d&&d.chyba);
     // Doplní sa len do PRÁZDNEHO poľa — čo si človek napísal sám, sa
     // neprepisuje. Pole existuje len vtedy, keď miesto ešte nie je známe.
     const nasad=(id,d)=>{ const p=document.getElementById(id);
       if(p && d && !String(p.value||"").trim()) p.value=d.nazov; };
-    nasad("m_miestoZ", z); nasad("m_miestoC", c);
+    nasad("m_miestoZ", z&&!z.chyba?z:null); nasad("m_miestoC", c&&!c.chyba?c:null);
     jazdaTrasaAktualizuj();
-    if(!z && !c){ povedz("Mapa pre tieto body názov nevrátila. Napíšte ich ručne."); return; }
-    povedz((z?"Odkiaľ: <b>"+esc(z.nazov)+"</b>":"")
-      +(z&&c?"<br>":"")+(c?"Kam: <b>"+esc(c.nazov)+"</b>":"")
+    if(!dobre.length){
+      povedz("⚠ "+esc((zle[0]&&zle[0].chyba)||"Mapa pre tieto body názov nevrátila.")+" Napíšte názvy ručne.");
+      return;
+    }
+    const zOk=z&&!z.chyba, cOk=c&&!c.chyba;
+    povedz("Doplnené z mapy: "+(zOk?"<b>"+esc(z.nazov)+"</b>":"")+(zOk&&cOk?" → ":"")+(cOk?"<b>"+esc(c.nazov)+"</b>":"")
+      +(zle.length?"<br>⚠ "+esc(zle[0].chyba):"")
+      +(dobre.some(d=>d.obecChyba)?"<br>⚠ Obec sa z mapy nezistila — doplňte ju k ulici.":"")
       +"<br><span style=\"color:var(--ink-soft);font-size:11px\">"
-      +esc((z||c).uvedenie||"")+" · názvy môžete prepísať</span>");
+      +esc(dobre[0].uvedenie||"")+" · názvy môžete prepísať</span>");
   }catch(e){
     console.error("názvy miest z mapy:", e);
-    povedz("Spojenie s mapovou službou zlyhalo.");
-  }finally{ if(prvok) prvok.disabled=false; }
+    povedz("⚠ Spojenie s mapovou službou zlyhalo. Napíšte názvy ručne.");
+  }finally{
+    if(tlacidlo) tlacidlo.disabled=false;
+    polia.forEach((p,i)=>{ p.placeholder=povodne[i]; });
+  }
 }
 
 // Blok tlačidla do editora jazdy aj do záveru merania — jeden tvar na oboch
@@ -19691,7 +19715,8 @@ function jazdaZaver(){
     ${poleMiesta("m_miestoZ","Odkiaľ",zn)}
     ${poleMiesta("m_miestoC","Kam",cn)}
     ${(!zn||!cn)?`<div style="margin:-4px 0 12px">
-      <button type="button" class="aabtn" onclick="mapaNazvyMiest(this)">📍 Doplniť názvy z mapy</button>
+      <div id="m_miestaStav" style="font-size:12px;margin:0 0 8px;line-height:1.5;min-height:18px"></div>
+      <button type="button" class="aabtn" id="m_mapaDoplnit" onclick="mapaNazvyMiest(this)">📍 Doplniť názvy z mapy</button>
       <div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;line-height:1.5">
         Mapová služba dostane len približnú polohu (±100 m) nepomenovaného miesta
         a vráti obec a ulicu. Návrh môžete prepísať.</div>
