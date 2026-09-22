@@ -2247,7 +2247,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.22-QA";  // Pás jazdy v obale: displej môžete zhasnúť (GPS a displej hrejú, meranie beží ďalej)
+const APP_VERZIA = "2026.09.22-QB";  // Kategória pohybu z výpisu (kód SBA, KS, Tatra); transakčná daň, poplatky a úroky ako interné doklady
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -26064,6 +26064,159 @@ const priameDeti=(el,tag)=>{
 const prveDieta=(el,tag)=>priameDeti(el,tag)[0]||null;
 const textPrvku=el=>el?String(el.textContent||"").trim():"";
 
+// ── KATEGÓRIA POHYBU Z VÝPISU (dev/banky, spec 02) ──────────────────────────
+// Tabuľky sú GENEROVANÉ z dev/banky/data/sba_transakcne_kody.json
+// a tatra_ntryinf_ctg.json (dev/banky/nastroje aj test_banky_fixtures ich
+// prepisujú tým istým pravidlom a porovnávajú) — neupravovať ručne. Riadok:
+// [kód (11 číslic, alebo 8 + "*" = predpona), kategória, typický smer,
+// kategória pri opačnom smere].
+const SBA_KODY=[
+  ["10000101*","odoslana_platba","DBIT","prijata_platba"],["10000102*","odoslana_platba","DBIT","prijata_platba"],["10000103*","inkaso_sepa","CRDT","inkaso_sepa"],
+  ["10000104*","inkaso_sepa","DBIT","inkaso_sepa"],["10000105*","odoslana_platba","DBIT","prijata_platba"],["10000107*","prijata_platba","CRDT","odoslana_platba"],
+  ["10000201*","odoslana_platba","DBIT","prijata_platba"],["10000202*","prijata_platba","CRDT","odoslana_platba"],["10000203*","odoslana_platba","DBIT","prijata_platba"],
+  ["10000301*","prijata_platba","±","odoslana_platba"],["10000401*","odoslana_platba","DBIT","prijata_platba"],["10000402*","odoslana_platba","DBIT","prijata_platba"],
+  ["10000403*","prijata_platba","CRDT","odoslana_platba"],["10000404*","okamzita_platba","DBIT","okamzita_platba"],["10000405*","okamzita_platba","CRDT","okamzita_platba"],
+  ["10000501*","inkaso_sepa","CRDT","inkaso_sepa"],["10000502*","inkaso_sepa","DBIT","inkaso_sepa"],["10000503*","inkaso_sepa","CRDT","inkaso_sepa"],
+  ["10000504*","inkaso_sepa","DBIT","inkaso_sepa"],["20000101*","vklad","CRDT","vklad"],["20000104*","vklad","CRDT","vklad"],
+  ["20000201*","vyber_hotovosti","DBIT","vyber_hotovosti"],["20000302*","ine","±","ine"],["30000101*","vyber_hotovosti","DBIT","vyber_hotovosti"],
+  ["30000103000","vklad","CRDT","vklad"],["30000201000","platba_kartou","DBIT","refund"],["30000202000","platba_kartou","DBIT","refund"],
+  ["30000203000","vyber_hotovosti","DBIT","vyber_hotovosti"],["30000301000","ine","±","ine"],["40000101000","poplatok_banky","DBIT","poplatok_banky"],
+  ["40000102000","poplatok_banky","DBIT","poplatok_banky"],["40000103000","poplatok_banky","DBIT","poplatok_banky"],["40000104000","poplatok_banky","DBIT","poplatok_banky"],
+  ["40000201000","poplatok_banky","DBIT","poplatok_banky"],["40000202000","poplatok_banky","DBIT","poplatok_banky"],["40000203000","poplatok_banky","DBIT","poplatok_banky"],
+  ["40000301000","poplatok_banky","DBIT","poplatok_banky"],["40000302000","poplatok_banky","DBIT","poplatok_banky"],["40000303000","poplatok_banky","DBIT","poplatok_banky"],
+  ["40000304000","poplatok_banky","DBIT","poplatok_banky"],["40000305000","poplatok_banky","DBIT","poplatok_banky"],["40000306000","poplatok_banky","DBIT","poplatok_banky"],
+  ["40000307000","poplatok_banky","DBIT","poplatok_banky"],["40000308000","poplatok_banky","DBIT","poplatok_banky"],["40000401000","poplatok_banky","DBIT","poplatok_banky"],
+  ["40000402000","poplatok_banky","DBIT","poplatok_banky"],["40000403000","poplatok_banky","DBIT","poplatok_banky"],["40000501000","poplatok_banky","DBIT","poplatok_banky"],
+  ["40000502000","poplatok_banky","DBIT","poplatok_banky"],["40000503000","poplatok_banky","DBIT","poplatok_banky"],["40000601000","poplatok_banky","DBIT","poplatok_banky"],
+  ["40000602000","poplatok_banky","DBIT","poplatok_banky"],["40000603000","poplatok_banky","DBIT","poplatok_banky"],["40000604000","poplatok_banky","DBIT","poplatok_banky"],
+  ["40000605000","poplatok_banky","DBIT","poplatok_banky"],["40000606000","poplatok_banky","DBIT","poplatok_banky"],["50000201000","refund","DBIT","refund"],
+  ["50000202000","refund","CRDT","refund"],["90000101000","ine","±","ine"],["90000201101","urok_kreditny","CRDT","urok_kreditny"],
+  ["90000201102","dan_z_uroku","DBIT","dan_z_uroku"],["90000201103","urok_debetny","DBIT","urok_debetny"],["90000201001","urok_kreditny","CRDT","urok_kreditny"],
+  ["90000201002","dan_z_uroku","DBIT","dan_z_uroku"],["90000201003","urok_debetny","DBIT","urok_debetny"],["90000201098","urok_kreditny","±","urok_debetny"],
+  ["90000201099","urok_debetny","DBIT","urok_debetny"],["90000301000","ine","±","ine"],["90000401000","ine","±","ine"],
+  ["90000501000","ine","±","ine"],["90000601000","ine","±","ine"],["90000701000","ine","±","ine"],
+  ["90000801101","transakcna_dan","DBIT","transakcna_dan"],["90000801102","transakcna_dan","DBIT","transakcna_dan"],["90000801103","transakcna_dan","DBIT","transakcna_dan"],
+  ["90000801104","transakcna_dan","DBIT","transakcna_dan"],["90000801098","transakcna_dan","±","transakcna_dan"],["90000801199","transakcna_dan","±","transakcna_dan"],
+];
+const TATRA_CTG_KAT={
+  "Sbj000":"poplatok_banky","Sbj001":"poplatok_banky","Sbj031":"poplatok_banky","Sbj041":"poplatok_banky","Sbj051":"poplatok_banky","Sbj061":"poplatok_banky","Sbj071":"poplatok_banky","Sbj081":"poplatok_banky",
+  "Sbj701":"poplatok_banky","Sbj711":"poplatok_banky","EKM030":"poplatok_banky","EKM040":"poplatok_banky","EKM041":"poplatok_banky","EKM051":"poplatok_banky","EKM101":"poplatok_banky","Csh041":"poplatok_banky",
+  "Csh051":"poplatok_banky","Csh310":"vklad","Csh320":"vyber_hotovosti","Csh410":"poplatok_banky","Csh420":"poplatok_banky","Csh430":"poplatok_banky","Csh440":"poplatok_banky","Csh450":"poplatok_banky",
+  "Csh460":"poplatok_banky","Csh470":"poplatok_banky","Csh910":"ine","Xch300":"ine","Xch400":"ine","Pay390":"odoslana_platba","Pay410":"poplatok_banky","Pay420":"poplatok_banky",
+  "Pay430":"poplatok_banky","Pay701":"poplatok_banky","Pay711":"poplatok_banky","Pay800":"poplatok_banky","Pay801":"poplatok_banky","Pay802":"poplatok_banky","Pay803":"poplatok_banky","Pay804":"poplatok_banky",
+  "Pay823":"poplatok_banky","Pay831":"poplatok_banky","Pay850":"poplatok_banky","Pay851":"poplatok_banky","Pay870":"poplatok_banky","Pay871":"poplatok_banky","Pay880":"poplatok_banky","Crd000":"poplatok_banky",
+  "Crd001":"poplatok_banky","Crd014":"poplatok_banky","Crd020":"poplatok_banky","Crd021":"poplatok_banky","Crd031":"poplatok_banky","Crd034":"poplatok_banky","Crd040":"poplatok_banky","Crd041":"poplatok_banky",
+  "Crd051":"poplatok_banky","Crd060":"poplatok_banky","Crd061":"poplatok_banky","Crd070":"poplatok_banky","Crd081":"poplatok_banky","Crd091":"poplatok_banky","Crd092":"poplatok_banky","Crd101":"poplatok_banky",
+  "Crd102":"poplatok_banky","Crd301":"vyber_hotovosti","Crd302":"vyber_hotovosti","Crd303":"vyber_hotovosti","Crd304":"vyber_hotovosti","Crd305":"vyber_hotovosti","Crd401":"vyber_hotovosti","Crd402":"vyber_hotovosti",
+  "Crd403":"vyber_hotovosti","Crd404":"vyber_hotovosti","Crd405":"vyber_hotovosti","Crd410":"platba_kartou","Crd420":"refund","Crd531":"poplatok_banky","Crd532":"poplatok_banky","Crd533":"poplatok_banky",
+  "Crd541":"poplatok_banky","Crd542":"poplatok_banky","Crd543":"poplatok_banky","Crd651":"poplatok_banky","Crd662":"poplatok_banky","Crd701":"poplatok_banky","Crd811":"poplatok_banky","Crd812":"poplatok_banky",
+  "Crd830":"poplatok_banky","CA_000":"poplatok_banky","CA_020":"poplatok_banky","CA_021":"poplatok_banky","CA_040":"poplatok_banky","CA_051":"poplatok_banky","CA_061":"poplatok_banky","CA_100":"poplatok_banky",
+  "CA_101":"poplatok_banky","CA_102":"poplatok_banky","CA_103":"poplatok_banky","CA_104":"poplatok_banky","CA_105":"poplatok_banky","CA_210":"urok_kreditny","CA_215":"dan_z_uroku","CA_230":"urok_kreditny",
+  "CA_235":"dan_z_uroku","CA_240":"urok_kreditny","CA_245":"dan_z_uroku","CA_641":"poplatok_banky","CA_651":"poplatok_banky","CA_661":"poplatok_banky","CA_701":"poplatok_banky","CA_711":"poplatok_banky",
+  "CA_721":"poplatok_banky","CA_731":"poplatok_banky","CA_741":"poplatok_banky","CA_751":"poplatok_banky","CA_811":"poplatok_banky","CA_812":"poplatok_banky","CA_813":"poplatok_banky","CA_910":"ine",
+  "CA_915":"ine","CA_916":"ine","CA_920":"ine","CA_930":"ine","CA_935":"ine","CA_936":"ine","CA_940":"ine","CA_945":"ine",
+  "CA_946":"ine","CaS000":"poplatok_banky","CaS040":"poplatok_banky","CaS051":"poplatok_banky","CaS641":"poplatok_banky","CaS651":"poplatok_banky","CaS701":"poplatok_banky","CaS711":"poplatok_banky",
+  "CaS721":"poplatok_banky","CaS731":"poplatok_banky","CaS741":"poplatok_banky","IDD021":"poplatok_banky","IDD310":"inkaso_sepa","SDD021":"poplatok_banky","SDD310":"inkaso_sepa","SDD410":"inkaso_sepa",
+  "SDD501":"poplatok_banky","SDD502":"poplatok_banky","SOr021":"poplatok_banky","SOr031":"poplatok_banky","SOr310":"odoslana_platba","TA_000":"poplatok_banky","TA_020":"poplatok_banky","TA_041":"poplatok_banky",
+  "TA_051":"poplatok_banky","TA_061":"poplatok_banky","TA_071":"poplatok_banky","TA_210":"urok_kreditny","TA_215":"dan_z_uroku","TA_220":"urok_kreditny","TA_225":"dan_z_uroku","TA_230":"urok_kreditny",
+  "TA_235":"dan_z_uroku","TA_301":"ine","TA_302":"ine","TA_401":"ine","TA_402":"ine","TA_411":"ine","TA_412":"ine","TA_421":"ine",
+  "TA_422":"ine","TA_431":"ine","TA_432":"ine","TA_510":"ine","TA_521":"ine","TA_522":"ine","TA_523":"ine","TA_530":"ine",
+  "TA_641":"poplatok_banky","TA_701":"poplatok_banky","TA_711":"poplatok_banky","TA_721":"poplatok_banky","TA_731":"poplatok_banky","TA_741":"poplatok_banky","TA_831":"poplatok_banky","TA_832":"poplatok_banky",
+  "TA_840":"poplatok_banky","TA_850":"poplatok_banky","TA_900":"ine","TA_910":"ine","TA_915":"ine","TA_916":"ine","TA_920":"ine","TA_925":"ine",
+  "TA_926":"ine","TA_930":"ine","TA_935":"ine","TA_936":"ine","CaR041":"poplatok_banky","CaR051":"poplatok_banky","GCd312":"poplatok_banky","DNT041":"poplatok_banky",
+  "DNT051":"poplatok_banky","Shr230":"ine","Shr240":"ine","Shr310":"ine","Shr320":"ine","Shr410":"ine","Shr420":"ine","CsP101":"poplatok_banky",
+  "CsP210":"urok_kreditny","CsP215":"dan_z_uroku","CsP310":"ine","CsP320":"ine","CsP910":"ine","CsP915":"ine","CsP916":"ine","HZL310":"ine",
+  "Loa001":"poplatok_banky","Loa010":"poplatok_banky","Loa011":"poplatok_banky","Loa030":"poplatok_banky","Loa031":"poplatok_banky","Loa041":"poplatok_banky","Loa050":"poplatok_banky","Loa060":"poplatok_banky",
+  "Loa070":"poplatok_banky","Loa071":"poplatok_banky","Loa080":"poplatok_banky","Loa101":"poplatok_banky","Loa300":"ine","Loa310":"ine","Loa311":"ine","Loa320":"ine",
+  "Loa400":"ine","Loa410":"ine","Loa411":"ine","Loa420":"ine","Loa430":"ine","Loa431":"ine","Loa432":"ine","Loa433":"ine",
+  "Loa434":"ine","Loa435":"ine","Loa510":"ine","Loa511":"ine","Loa550":"ine","Loa701":"poplatok_banky","Loa711":"poplatok_banky","Loa721":"poplatok_banky",
+  "Loa731":"poplatok_banky","Loa741":"poplatok_banky","Loa751":"poplatok_banky","Loa761":"poplatok_banky","Loa811":"poplatok_banky","Loa812":"poplatok_banky","Loa813":"poplatok_banky","Loa830":"poplatok_banky",
+  "Loa840":"poplatok_banky","Loa850":"ine","Loa910":"ine","Acr400":"poplatok_banky","Saf011":"poplatok_banky","Saf041":"poplatok_banky","Saf051":"poplatok_banky","Saf310":"poplatok_banky",
+  "Saf832":"poplatok_banky","Dea300":"ine","Dea310":"ine","Dea910":"ine","Dea915":"ine","Dea916":"ine","Dea920":"ine","Dea925":"ine",
+  "Dea926":"ine","Exe310":"ine","Atg310":"ine",
+};
+// Riadky tabuľky bez hviezdičky (neočakávaný smer NIE JE nezvyčajný): vrátený
+// poplatok, vrátenie kartou, refund, korekcia dane (spec 02 §4.2).
+const SBA_BEZ_HVIEZDICKY=["400","30000201","30000202","500002","900008"];
+// Index: presný kód, 8-miestna predpona, a kratšie predpony (6 a 3 číslice)
+// len tam, kde všetky riadky s predponou majú tú istú kategóriu (spec 02 §4.3 bod 5).
+const _sbaIndex=(()=>{
+  const presny={}, prefix8={}, kratsi={};
+  SBA_KODY.forEach(r=>{ if(r[0].endsWith("*")) prefix8[r[0].slice(0,8)]=r; else presny[r[0]]=r; });
+  [6,3].forEach(n=>{
+    const skup={};
+    SBA_KODY.forEach(r=>{ const p=r[0].slice(0,n); (skup[p]=skup[p]||new Set()).add(r[1]+"|"+r[3]+"|"+r[2]); });
+    Object.keys(skup).forEach(p=>{
+      if(skup[p].size!==1) return;
+      const [kat,opa,smer]=[...skup[p]][0].split("|");
+      kratsi[p]=[p,kat,smer,opa];
+    });
+  });
+  return {presny, prefix8, kratsi};
+})();
+function _sbaZRiadku(r, ind){
+  if(r[2]==="±" || r[2]===ind) return {kat:r[1], hv:false};
+  const kat=r[3]||r[1];
+  const hv=!SBA_BEZ_HVIEZDICKY.some(p=>r[0].startsWith(p)) && !["inkaso_sepa","okamzita_platba","ine"].includes(kat);
+  return {kat, hv};
+}
+// Kategória podľa 11-miestneho kódu SBA a smeru („CRDT"/„DBIT"); null = neznámy kód.
+function sbaKategoriaKodu(kod, ind){
+  if(!/^\d{11}$/.test(kod||"")) return null;
+  const r=_sbaIndex.presny[kod]||_sbaIndex.prefix8[kod.slice(0,8)];
+  if(r) return _sbaZRiadku(r, ind);
+  if(kod.startsWith("90000201")) return {kat: ind==="CRDT"?"urok_kreditny":"urok_debetny", hv:false};
+  for(const n of [6,3]){ const q=_sbaIndex.kratsi[kod.slice(0,n)]; if(q) return _sbaZRiadku(q, ind); }
+  return null;
+}
+// ISO doména BkTxCd/Domn (Cd/Fmly/SubFmly) — záloha, keď kód SBA chýba.
+function kategoriaDomeny(domn, ind){
+  if(!domn) return null;
+  const p=String(domn).split("/").concat(["","",""]).slice(0,3);
+  if(p[0]==="PMNT" && p[1]==="RCDT") return "prijata_platba";
+  if(p[0]==="PMNT" && p[1]==="ICDT") return "odoslana_platba";
+  if(p[0]==="PMNT" && p[1].endsWith("DDT")) return "inkaso_sepa";
+  if(p[0]==="PMNT" && p[1]==="CCRD" && p[2]==="POSD") return "platba_kartou";
+  if(p[0]==="PMNT" && (p[1]==="CCRD"||p[1]==="CNTR") && p[2]==="CWDL") return "vyber_hotovosti";
+  if(p[0]==="PMNT" && p[1]==="CNTR" && p[2]==="CDPT") return "vklad";
+  if(p[0]==="ACMT" && p[1]==="MDOP" && p[2]==="CHRG") return "poplatok_banky";
+  if(p[0]==="ACMT" && p[1]==="MCOP" && p[2]==="INTR") return ind==="CRDT"?"urok_kreditny":"urok_debetny";
+  return null;
+}
+// Banka z kódu v IBAN — len tie, ktoré majú vlastné pravidlo kategórie.
+function bankaZIbanu(iban){
+  return {"0900":"slsp","1100":"tatra","5600":"prima","6500":"365bank"}[String(iban||"").slice(4,8)]||"";
+}
+// Poradie (spec 02 §4.3): R-transakcia → storno → bankové pravidlá (SLSP KS,
+// 365.bank OT67x, Tatra Ctg, Prima SEPA-INST) → kód SBA → ISO doména → ine.
+function vypisKategoria(o){
+  const ind=o.smer==="prijem"?"CRDT":"DBIT", opac=ind==="CRDT"?"DBIT":"CRDT";
+  const kod=String(o.kod||"");
+  const okamzita=o.instrId==="SEPA-INST" || ["10000404","10000405"].includes(kod.slice(0,8));
+  if(o.rTransakcia){
+    const pk=o.rtrKod ? sbaKategoriaKodu(o.rtrKod, opac) : null;
+    return {kat:"refund", hv:false, povodna:pk?pk.kat:"", okamzita};
+  }
+  if(o.storno){
+    const k=sbaKategoriaKodu(kod, opac);
+    return {kat:(k&&k.kat)||kategoriaDomeny(o.domn, opac)||"ine", hv:false, okamzita};
+  }
+  if(o.banka==="slsp" && o.ksE2E==="0960") return {kat:"transakcna_dan", hv:false, okamzita};
+  if(o.banka==="slsp" && o.ksE2E==="0898") return {kat:"poplatok_banky", hv:false, okamzita};
+  if(o.banka==="365bank" && (o.texty||[]).some(t=>/\/OT67[0134]\//.test(t||""))) return {kat:"transakcna_dan", hv:false, okamzita};
+  if(o.banka==="tatra" && o.tatraCtg && TATRA_CTG_KAT[o.tatraCtg] && !kod.startsWith("900008"))
+    return {kat:TATRA_CTG_KAT[o.tatraCtg], hv:false, okamzita};
+  if(o.banka==="prima" && o.instrId==="SEPA-INST") return {kat:"okamzita_platba", hv:false, okamzita};
+  if(kod.startsWith("10000301") && o.mndtId) return {kat:"inkaso_sepa", hv:false, okamzita};
+  const k=sbaKategoriaKodu(kod, ind);
+  if(k){
+    if(k.hv && ["10000101","10000102","10000105"].includes(kod.slice(0,8)) && ind==="CRDT") return {kat:"ine", hv:true, okamzita};
+    return {kat:k.kat, hv:k.hv, okamzita};
+  }
+  const d=kategoriaDomeny(o.domn, ind);
+  return {kat:d||"ine", hv:false, okamzita};
+}
+
 // ── SYMBOLY VS/ŠS/KS PODĽA SBA ─────────────────────────────────────────────
 // Pravidlo „most liberal" zo štandardu SBA (Cash Account XML Statement SK
 // v3.1, kap. 3.3.5.3.1.1, pole EndToEndId): symbol sa pozná podľa návestia
@@ -26178,7 +26331,8 @@ function vypisPolozkaTx(tx, n, smer, mojIban, kod){
   priameDeti(rmt,"Strd").forEach(st=>{ if(!ref){ const c=prveDieta(st,"CdtrRefInf"); ref=textPrvku(c&&prveDieta(c,"Ref")); } });
   const addtlTx=textPrvku(tx&&prveDieta(tx,"AddtlTxInf"));
   const addtlNtry=textPrvku(n&&prveDieta(n,"AddtlNtryInf"));
-  let sym=sbaSymboly(e2e), odvodene=false;
+  const symE2E=sbaSymboly(e2e);
+  let sym=symE2E, odvodene=false;
   const danAleboPoplatok=/^900008/.test(kod) || /^400/.test(kod)
     || (String(mojIban).slice(4,8)==="0900" && (sym.ks==="0960"||sym.ks==="0898"));
   if(!sym.vs && !danAleboPoplatok){
@@ -26194,7 +26348,9 @@ function vypisPolozkaTx(tx, n, smer, mojIban, kod){
     }
   }
   const popis=ustrd || ref || popisVypisuText(addtlTx) || popisVypisuText(addtlNtry);
-  return {proti:s.nazov, ibanProti:s.iban, ucetProti:s.ucet, vs:sym.vs||"", ss:sym.ss||"", ks:sym.ks||"", popis, e2e, odvodene};
+  return {proti:s.nazov, ibanProti:s.iban, ucetProti:s.ucet, vs:sym.vs||"", ss:sym.ss||"", ks:sym.ks||"", popis, e2e, odvodene,
+          // pre kategóriu: KS priamo z EndToEndId (SLSP 0960/0898), texty banky
+          ksE2E:symE2E.ks||"", addtlTx, addtlNtry};
 }
 function parseVypis(xmlText){
   let doc;
@@ -26242,15 +26398,32 @@ function parseVypisStmt(stmt, odIndexu){
     // Hromadná položka (n × TxDtls) je na účte JEDEN pohyb — zostatok sedí len
     // s ňou. Jednotlivé platby idú do `rozpis`; symboly ani protistrana na
     // úrovni pohybu nemajú zmysel (ktorá z troch?).
-    const P=davka ? {proti:"", ibanProti:"", vs:"", ss:"", ks:"", popis:"", odvodene:false}
+    const P=davka ? {proti:"", ibanProti:"", vs:"", ss:"", ks:"", popis:"", odvodene:false, ksE2E:"",
+                     addtlTx:textPrvku(tx&&prveDieta(tx,"AddtlTxInf")), addtlNtry:textPrvku(prveDieta(n,"AddtlNtryInf"))}
                   : vypisPolozkaTx(tx, n, smer, mojIban, kod);
     let proti=P.proti;
     if(vypisJeKarta(n, tx, kod, domn)){ const o=vypisObchodnik(n, tx, smer, kod); if(o) proti=o; }
+    // Kategória pohybu (dev/banky spec 02): R-transakcia, storno, bankové
+    // pravidlá, kód SBA, ISO doména. Z nej vie appka, že 0,40 € od SLSP je
+    // transakčná daň a nie platba dodávateľovi — a založí interný doklad.
+    const refs=tx?prveDieta(tx,"Refs"):null;
+    const rtr=tx?prvyPrvok(tx,"RtrInf"):null;
+    const rtrBk=rtr?prvyPrvok(rtr,"OrgnlBkTxCd"):null, rtrPr=rtrBk?prveDieta(rtrBk,"Prtry"):null;
+    const ctgM=/^\s*</.test(P.addtlNtry||"") ? String(P.addtlNtry).match(/<(?:\w+:)?NtryInf[^>]*\sCtg="([^"]+)"/) : null;
+    const K=vypisKategoria({
+      smer, kod, domn, storno, banka:bankaZIbanu(mojIban), ksE2E:P.ksE2E,
+      rTransakcia:!!rtr, rtrKod:rtrPr?textPrvku(prveDieta(rtrPr,"Cd")):"",
+      texty:[P.addtlTx, P.addtlNtry], tatraCtg:ctgM?ctgM[1]:"",
+      instrId:textPrvku(refs&&prveDieta(refs,"InstrId")), mndtId:textPrvku(refs&&prveDieta(refs,"MndtId")),
+    });
     const t={id:"tx"+datum+"_"+idx+"_"+Math.round(suma*100), datum, suma:r2(suma), smer, proti,
              ibanProti:P.ibanProti, vs:P.vs, popis:P.popis, mesiac:(datum||"").slice(0,7),
-             ss:P.ss, ks:P.ks, ucet:mojIban, typ:kod||domn};
+             ss:P.ss, ks:P.ks, ucet:mojIban, typ:kod||domn, kategoria:K.kat};
     if(storno) t.storno=1;
     if(P.odvodene) t.symbolyOdvodene=1;
+    if(K.hv) t.neobvyklySmer=1;
+    if(K.povodna) t.povodnaKategoria=K.povodna;
+    if(K.okamzita) t.okamzita=1;
     if(davka){
       t.rozpis=txd.map(x=>{
         const a=prveDieta(x,"Amt"), ad=prveDieta(x,"AmtDtls"), ta=ad&&prveDieta(ad,"TxAmt");
@@ -26311,7 +26484,23 @@ function parseVypisStmt(stmt, odIndexu){
     prijem:kr.suma, vydaj:de.suma, pocetPrijem:kr.pocet, pocetVydaj:de.pocet }};
 }
 
+// Náklady, ktoré banka vo výpise sama pomenuje kategóriou (kód SBA, KS,
+// kategória Tatry): daň z finančných transakcií, poplatky, úroky. Niet čo
+// rozhodovať — kategóriu určil zákon alebo banka, DPH je nula. SLSP účtuje
+// daň po každej položke, takže bez tohto by mal používateľ SLSP v Banke
+// desiatky „nespárovaných výdavkov" po 0,40 € (dev/banky, spec 02 §4.5).
+const BANKA_NAKLADY={
+  transakcna_dan:{druh:"transakcnaDan", kategoria:"prevadzka", popis:"Transakčná daň",       preco:"výpis: daň z finančných transakcií"},
+  poplatok_banky:{druh:"poplatokBanky", kategoria:"prevadzka", popis:"Bankový poplatok",     preco:"výpis: poplatok banky"},
+  urok_debetny:  {druh:"urokDebetny",   kategoria:"prevadzka", popis:"Debetný úrok",         preco:"výpis: debetný úrok"},
+  dan_z_uroku:   {druh:"danZUroku",     kategoria:"neovplyv",  popis:"Daň z úroku (zrážková)", preco:"výpis: daň z kreditného úroku"},
+};
+function bankovyNaklad(tx){
+  return (tx && tx.smer==="vydaj" && BANKA_NAKLADY[tx.kategoria]) || null;
+}
 function klasifikujPohyb(tx){
+  const BN=bankovyNaklad(tx);
+  if(BN) return {druh:BN.druh, kategoria:BN.kategoria, istota:"ista", preco:BN.preco};
   const proti=(tx.proti||"").toLowerCase();
   const popis=(tx.popis||"").toLowerCase();
   const vs=String(tx.vs||"");
@@ -26903,13 +27092,13 @@ function zalozDokladZPohybu(tx, kategoriaVynutena, prepisZaRok){
       if(prepisZaRok>2000) n.zaRok=prepisZaRok; else delete n.zaRok;
     }
   } else {
-    if(!DOKLAD_BEZ_ROZHODOVANIA.has(n.kategoria)) return null;
+    if(!DOKLAD_BEZ_ROZHODOVANIA.has(n.kategoria) && !n._zVypisu) return null;
     // Keď appka o zaradení sama pochybuje (suma sedí skôr na nedoplatok než na
     // preddavok), doklad nezakladá. Otázku sa v dávke položiť nedá a tichá
     // odpoveď na spornú otázku je horšia než ponechanie človeku.
     if(n._pochybnost) return null;
   }
-  delete n._pochybnost;
+  delete n._pochybnost; delete n._zVypisu;
   n.id="v"+Date.now()+Math.random().toString(36).slice(2,6);
   n.zalozeneAutomaticky=!kategoriaVynutena;        // musí byť rozoznateľné
   firmaData.vydavky=(firmaData.vydavky||[]);
@@ -26956,7 +27145,7 @@ function odvodyBezDokladu(){
     if(!tx || tx.smer!=="vydaj" || tx.skryty) return;
     if(pohybMaVydavok(tx)) return;
     let n=null; try{ n=vydavokZPohybuNavrh(tx); }catch(e){ return; }
-    if(!n || !DOKLAD_BEZ_ROZHODOVANIA.has(n.kategoria)) return;
+    if(!n || !(DOKLAD_BEZ_ROZHODOVANIA.has(n.kategoria) || n._zVypisu)) return;
     const p={tx, kategoria:n.kategoria, datum:tx.datum||"", suma:r2(+tx.suma||0)};
     // Pochybnosť sa v DÁVKE rozhodnúť nedá — ale appka vie, medzi čím váha,
     // a to sa nesmie zahodiť. Bez toho zostane človeku veta „čaká v Banke",
@@ -37007,7 +37196,9 @@ function stavStitok(o, styl){
 // Názvy klasifikácií boli natvrdo na dvoch miestach (Banka, Cashflow) —
 // tá istá mapa dvakrát je presne to, čo sa vždy rozíde.
 const KLAS_NAZVY={dph:"DPH", danPrijem:"daň", odvodZP:"odvody ZP",
-                  odvodSP:"odvody SP", poistenie:"poistenie"};
+                  odvodSP:"odvody SP", poistenie:"poistenie",
+                  transakcnaDan:"transakčná daň", poplatokBanky:"poplatok banky",
+                  urokDebetny:"debetný úrok", danZUroku:"daň z úroku"};
 function pohybStav(tx){
   const stav=(kod,extra)=>Object.assign({kod}, POHYB_STAVY[kod], extra||{});
   if(tx.skryty)   return stav("skryty",   {skryty:true});
@@ -39102,6 +39293,9 @@ function parUzSparovany(k, okremTxId){
 // odvody za 256 € len preto, že bol vo výpise najbližšie. Falošný poplach je
 // drahší než žiadny: naučí preskakovať aj pravé nálezy (kap. 16).
 function parRelevantny(tx, k){
+  // Náklad pomenovaný bankou (daň z transakcií, poplatok, úrok) má vlastný
+  // interný doklad; s cudzím dokladom rovnakej sumy sa páruje nesmie.
+  if(bankovyNaklad(tx)) return false;
   const suma=Math.abs(+tx.suma||0);
   if(Math.abs(k.suma-suma)<0.05) return true;                 // rovnaká suma (v tolerancii 47.8)
   const vsTx=String(tx.vs||"").replace(/\D/g,"");
@@ -39734,18 +39928,32 @@ function splitSparuj(txIdVal, typ, cislo){
 function vydavokZPohybuNavrh(tx){
   if(!tx || tx.smer!=="vydaj") return null;
   const R_=rozpoznajOdvod(tx);
+  // Náklad, ktorý pomenovala banka (daň z transakcií, poplatok, úrok):
+  // kategória a popis z výpisu, nie z protistrany — tá je tu prázdna alebo
+  // vlastná banka. Popis banky („Transakčná daň za bezhotovostný prevod")
+  // ostáva, keď je; inak názov nákladu.
+  const BN=bankovyNaklad(tx);
+  // Doklad k dani má hovoriť, že je to daň — SLSP dáva do textu položky
+  // referenciu PÔVODNEJ platby („REFERENCIA PLATITELA 12.05.2026 321,78 EUR")
+  // a taký popis by na doklade vyzeral ako cudzia platba.
+  const popisBanky = !R_ && BN
+    ? (/transak|poplat|urok|úrok|da[nň]/i.test(tx.popis||"") ? tx.popis : BN.popis+(tx.popis?" · "+tx.popis:""))
+    : "";
   return {
     datum: String(tx.datum||"").slice(0,10),
     partner: tx.proti||"",
-    popis: tx.popis || (R_ ? (KATEGORIE_VYDAVKOV[R_.kategoria]||{}).n : "") || "Platba z bankového výpisu",
+    popis: popisBanky || tx.popis || (R_ ? (KATEGORIE_VYDAVKOV[R_.kategoria]||{}).n : "") || "Platba z bankového výpisu",
     druh: "Interný doklad",
     cislo: "BV-"+String(tx.datum||"").slice(0,10)+(tx.vs?("-"+tx.vs):""),
     bez: r2(+tx.suma||0), dph: 0, spolu: r2(+tx.suma||0),
-    kategoria: R_ ? R_.kategoria : "",
+    kategoria: R_ ? R_.kategoria : (BN ? BN.kategoria : ""),
     zaRok: R_ ? R_.zaRok : null,
     obdobie: R_ ? R_.obdobie : "",
     zdrojPohyb: txId(tx),
-    rozpoznane: R_ ? R_.preco : null,
+    rozpoznane: R_ ? R_.preco : (BN ? BN.preco : null),
+    // Brána `zalozDokladZPohybu` je podľa kategórie VÝDAVKU — a „prevádzka"
+    // sa sama zakladať nesmie. Náklad z výpisu preto nesie vlastný príznak.
+    _zVypisu: !R_ && !!BN,
     // Podozrenie sa NESIE V NÁVRHU, nie sa rieši až po uložení. Otázka položená
     // po tom, ako doklad vznikol, je oprava, nie rozhodnutie.
     _pochybnost: R_ ? odvodPochybnost(R_.kategoria, tx.suma, tx.datum) : null
