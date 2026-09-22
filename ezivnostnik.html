@@ -2247,7 +2247,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.22-PX";  // Pútač článku aj v appke
+const APP_VERZIA = "2026.09.22-PY";  // Import výpisov iných bánk: zostatok bez úverového rámca, všetky účty, symboly SBA, kódovanie; dôvera notifikácie len z odosielateľa
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -25570,12 +25570,16 @@ function notifOdosielatel(telo, odKoho){
        || String(telo||"").match(/^[ \t>]*(?:od|from|odosielatel)[ \t]*:[ \t]*([^\s<]+@[^\s>]+)/im);
   return (m ? m[1] : String(odKoho||"")).toLowerCase().trim();
 }
+// Banka sa uzná LEN podľa domény odosielateľa. Dovtedy stačilo, aby sa doména
+// banky vyskytla v texte — a keďže `notifDovera` z toho robí dôveru „banka"
+// a `prevezmiNotifikacieAuto` takú notifikáciu pridá bez kliku, každý mail
+// s odkazom na web banky a štítkami v tvare Prima banky by sa stal pohybom
+// na účte a spároval faktúru ako uhradenú (overené sondou 22. 9. 2026,
+// dev/banky spec 04 §4). Text môže neskôr vyberať parser banky, dôveru nie.
 function notifBanka(email, text){
   const dom=String(email||"").split("@")[1]||"";
-  const t=normTxt(text);
   for(const b of NOTIF_BANKY){
     if(b.domeny.some(d=>dom===d || dom.endsWith("."+d))) return b;
-    if(b.domeny.some(d=>t.includes(d))) return b;
   }
   return null;
 }
@@ -25938,13 +25942,16 @@ function overVypisPdf(P){
   const bezDatumu=((P&&P.txns)||[]).filter(t=>!String(t.datum||"").trim()).length;
   if(!P || !P.txns || !P.txns.length) return {ok:false, sprava:"Vo výpise sa nenašla ani jedna transakcia.", bezDatumu:0};
   const K=P.kontrola||{};
-  const s=(smer)=>r2(P.txns.filter(t=>t.smer===smer).reduce((a,t)=>a+(+t.suma||0),0));
+  // Súbor s viacerými účtami: kontrolné čísla sú z prvého výpisu, do rovnice
+  // idú len jeho pohyby — inak by pohyby druhého účtu vyzerali ako nesúlad.
+  const T=(P.ucty&&P.ucty.length>1) ? P.txns.filter(t=>!t.ucet || t.ucet===P.mojIban) : P.txns;
+  const s=(smer)=>r2(T.filter(t=>t.smer===smer).reduce((a,t)=>a+(+t.suma||0),0));
   const naseP=s("prijem"), naseV=s("vydaj");
   const chyby=[];
-  if(K.pocetPrijem!=null && K.pocetPrijem!==P.txns.filter(t=>t.smer==="prijem").length)
-    chyby.push("počet príjmov: výpis hlási "+K.pocetPrijem+", prečítali sme "+P.txns.filter(t=>t.smer==="prijem").length);
-  if(K.pocetVydaj!=null && K.pocetVydaj!==P.txns.filter(t=>t.smer==="vydaj").length)
-    chyby.push("počet výdavkov: výpis hlási "+K.pocetVydaj+", prečítali sme "+P.txns.filter(t=>t.smer==="vydaj").length);
+  if(K.pocetPrijem!=null && K.pocetPrijem!==T.filter(t=>t.smer==="prijem").length)
+    chyby.push("počet príjmov: výpis hlási "+K.pocetPrijem+", prečítali sme "+T.filter(t=>t.smer==="prijem").length);
+  if(K.pocetVydaj!=null && K.pocetVydaj!==T.filter(t=>t.smer==="vydaj").length)
+    chyby.push("počet výdavkov: výpis hlási "+K.pocetVydaj+", prečítali sme "+T.filter(t=>t.smer==="vydaj").length);
   if(K.prijem!=null && Math.abs(K.prijem-naseP)>0.005)
     chyby.push("príjmy: výpis hlási "+eur(K.prijem)+", prečítali sme "+eur(naseP));
   if(K.vydaj!=null && Math.abs(K.vydaj-naseV)>0.005)
@@ -26010,35 +26017,221 @@ const datumPrvku=el=>{
   const t=el ? String(el.textContent||"").trim().slice(0,10) : "";
   return /^\d{4}-\d{2}-\d{2}$/.test(t) ? t : "";
 };
+// Priame deti podľa lokálneho mena. `prvkyVypisu` hľadá do hĺbky a pri
+// zostatku je to pasca: <Bal> nesie PRED vlastným <Amt> aj <CdtLine><Amt>
+// (povolené prečerpanie), takže prvý nájdený Amt bol úverový rámec, nie
+// zostatok — oficiálna vzorka SBA v3.1 tak dávala 2 000 namiesto 10 456,35
+// a peňažný denník by dostal falošnú kotvu (dev/banky, spec 01 §5.1).
+const priameDeti=(el,tag)=>{
+  if(!el || !el.childNodes) return [];
+  const out=[];
+  for(let i=0;i<el.childNodes.length;i++){
+    const d=el.childNodes[i];
+    if(d.nodeType===1 && (d.localName||String(d.nodeName||"").replace(/^.*:/,""))===tag) out.push(d);
+  }
+  return out;
+};
+const prveDieta=(el,tag)=>priameDeti(el,tag)[0]||null;
+const textPrvku=el=>el?String(el.textContent||"").trim():"";
+
+// ── SYMBOLY VS/ŠS/KS PODĽA SBA ─────────────────────────────────────────────
+// Pravidlo „most liberal" zo štandardu SBA (Cash Account XML Statement SK
+// v3.1, kap. 3.3.5.3.1.1, pole EndToEndId): symbol sa pozná podľa návestia
+// /VS, /SS, /KS (veľké písmená), začína prvou číslicou za ním a končí prvou
+// nečíslicou alebo najväčšou dĺžkou (10, 10, 4). Návestie, ktoré chýba alebo
+// je v referencii dvakrát, znamená „symbol neexistuje". Dovtedy sa bral prvý
+// /VS(číslice) z celého textu položky — a pri SLSP si tak transakčná daň
+// 0,40 € odniesla VS faktúry z pôvodnej platby, ktorú banka opisuje v Ustrd.
+// Jediné miesto pravidla: používa ho položka aj rozpis hromadnej položky.
+const SBA_SYMBOLY_STRIKTNE=/^\/VS[0-9]{0,10}\/SS[0-9]{0,10}\/KS[0-9]{0,4}$/;
+function sbaSymboly(ref){
+  const out={vs:"", ss:"", ks:"", striktne:false};
+  const s=String(ref==null?"":ref).trim();
+  if(!s || s.toUpperCase()==="NOTPROVIDED") return out;
+  out.striktne=SBA_SYMBOLY_STRIKTNE.test(s);
+  [["vs","/VS",10],["ss","/SS",10],["ks","/KS",4]].forEach(([kluc,navestie,max])=>{
+    const p=s.indexOf(navestie);
+    if(p<0 || s.indexOf(navestie,p+1)>=0) return;
+    const m=s.slice(p+navestie.length).match(new RegExp("^[0-9]{1,"+max+"}"));
+    if(m) out[kluc]=m[0];
+  });
+  return out;
+}
+// Popis pre človeka. 365.bank píše do AddtlTxInf „/PV/KO/OT247/COPríkaz na
+// úhradu/NI" a Tatra banka do AddtlNtryInf celý escapovaný XML
+// <NtryInf …><Nrtv>text</Nrtv></NtryInf>; surový tvar v Banke nikomu nič nepovie.
+function popisVypisuText(s){
+  const t=String(s||"").trim();
+  if(!t) return "";
+  if(t.startsWith("/PV")){ const m=t.match(/\/CO(.*?)(?:\/NI|$)/); if(m) return m[1].trim(); }
+  if(t.startsWith("<")){ const m=t.match(/<(?:\w+:)?Nrtv>([^<]*)<\//); if(m) return m[1].trim(); }
+  return t;
+}
+// 11-miestny kód SBA (BkTxCd/Prtry/Cd) a ISO doména (BkTxCd/Domn) položky
+// alebo jej TxDtls — priame deti, lebo TxDtls má vlastný BkTxCd.
+function vypisKodSba(el){
+  const bk=el?prveDieta(el,"BkTxCd"):null; const pr=bk?prveDieta(bk,"Prtry"):null;
+  return textPrvku(pr?prveDieta(pr,"Cd"):null);
+}
+function vypisDomena(el){
+  const bk=el?prveDieta(el,"BkTxCd"):null; const d=bk?prveDieta(bk,"Domn"):null;
+  if(!d) return "";
+  const f=prveDieta(d,"Fmly");
+  return [textPrvku(prveDieta(d,"Cd")), textPrvku(f&&prveDieta(f,"Cd")), textPrvku(f&&prveDieta(f,"SubFmlyCd"))].filter(Boolean).join("/");
+}
+// Protistrana podľa SMERU, nie „prvé meno, ktoré nie je moje": pri príjme je
+// to platiteľ (Dbtr), pri výdaji príjemca (Cdtr). Predtým to stálo na
+// `jeMojeMeno` ↔ `meta.nazov` — keď sa meno v nastaveniach líšilo od toho, čo
+// banka píše k vlastnému účtu, vlastné meno vyzeralo ako protistrana. Strana
+// sa prehodí, keď ide o SEPA R-transakciu (RtrInf drží roly PÔVODNEJ platby),
+// keď zvolená strana chýba, alebo keď je to vlastný účet. 001.08 balí stranu
+// do <Pty>, 001.02 nie — `prveDieta(el,"Pty")||el` berie oboje.
+function vypisProtistrana(tx, smer, mojIban){
+  const rp=tx?prvyPrvok(tx,"RltdPties"):null;
+  const nic={nazov:"", iban:"", ucet:""};
+  if(!rp) return nic;
+  const strana=k=>{
+    const el=prveDieta(rp,k), acct=prveDieta(rp,k+"Acct");
+    if(!el && !acct) return null;
+    const p=(el && prveDieta(el,"Pty"))||el;
+    const id=acct?prveDieta(acct,"Id"):null, othr=id?prveDieta(id,"Othr"):null;
+    return { nazov: textPrvku(p&&prveDieta(p,"Nm")) || textPrvku(acct&&prveDieta(acct,"Nm")),
+             iban: textPrvku(id&&prveDieta(id,"IBAN")).replace(/\s/g,"").toUpperCase(),
+             ucet: textPrvku(othr&&prveDieta(othr,"Id")) };
+  };
+  const prazdna=s=>!s || !(s.nazov||s.iban||s.ucet);
+  const moja=s=>!!(s && s.iban && mojIban && s.iban===mojIban);
+  const k=smer==="prijem"?"Dbtr":"Cdtr";
+  let s=strana(k); const d=strana(k==="Dbtr"?"Cdtr":"Dbtr");
+  if((prvyPrvok(tx,"RtrInf") || prazdna(s) || moja(s)) && !prazdna(d) && !moja(d)) s=d;
+  return (!s || moja(s)) ? nic : s;
+}
+// Kartová položka a obchodník (SBA kap. 3.3.5.3.1.11; spec 01 §9). Obchodník
+// NIE JE automaticky Cdtr: v SBA vzorke je Cdtr acquirer a obchodník je
+// v POI/ShrtNm, pri výbere z bankomatu je Cdtr držiteľ karty. Prima naopak
+// dáva obchodníka do Cdtr — to rieši posledná vetva (kód 300002xx, výdaj).
+function vypisJeKarta(n, tx, kod, domn){
+  if(/^300/.test(kod)) return true;
+  if(domn && ("/"+domn+"/").includes("/CCRD/")) return true;
+  if(prvyPrvok(n,"CardTx")) return true;
+  const refs=tx?prveDieta(tx,"Refs"):null;
+  if(/\*{2,}.*\d{4}/.test(textPrvku(refs&&prveDieta(refs,"ChqNb")))) return true;
+  return priameDeti(refs,"Prtry").some(p=>textPrvku(prveDieta(p,"Tp")).toLowerCase()==="cardnumber");
+}
+function vypisObchodnik(n, tx, smer, kod){
+  const rp=tx?prvyPrvok(tx,"RltdPties"):null;
+  const tp=rp?prveDieta(rp,"TradgPty"):null;
+  let m=textPrvku(tp && prveDieta(prveDieta(tp,"Pty")||tp,"Nm"));
+  if(!m){ const c=(tx&&prvyPrvok(tx,"CardTx"))||prvyPrvok(n,"CardTx"); const poi=c&&prvyPrvok(c,"POI"); m=textPrvku(poi&&prvyPrvok(poi,"ShrtNm")); }
+  if(!m && tx){
+    priameDeti(prveDieta(tx,"RltdAgts"),"Prtry").forEach(p=>{
+      if(!m && /acqui/i.test(textPrvku(prveDieta(p,"Tp")))){ const b=prvyPrvok(p,"BrnchId"); m=textPrvku(b&&prveDieta(b,"Nm")); }
+    });
+  }
+  if(!m && rp && /^300002/.test(kod) && smer==="vydaj"){ const c=prveDieta(rp,"Cdtr"); m=textPrvku(c&&prveDieta(prveDieta(c,"Pty")||c,"Nm")); }
+  return m;
+}
+// Údaje jednej transakcie (TxDtls): protistrana, symboly, popis. Symboly idú
+// z EndToEndId; keď tam VS nie je, skúsi sa text správy (Ustrd, štruktúrovaná
+// referencia, AddtlTxInf, AddtlNtryInf) a nakoniec čisté číslo v správe —
+// výsledok nesie `odvodene`, párovanie ho nemá brať za istú zhodu. Fallback
+// je ZAKÁZANÝ pri dani z finančných transakcií a poplatkoch (kódy SBA
+// 900008…, 400…, u SLSP KS 0960/0898): tam banka v Ustrd opisuje CUDZIU
+// položku a jej VS by sa stal VS dane.
+function vypisPolozkaTx(tx, n, smer, mojIban, kod){
+  const s=vypisProtistrana(tx, smer, mojIban);
+  const refs=tx?prveDieta(tx,"Refs"):null;
+  const e2e=textPrvku(refs&&prveDieta(refs,"EndToEndId"));
+  const rmt=tx?prveDieta(tx,"RmtInf"):null;
+  const ustrd=priameDeti(rmt,"Ustrd").map(textPrvku).filter(Boolean).join(" ");
+  let ref="";
+  priameDeti(rmt,"Strd").forEach(st=>{ if(!ref){ const c=prveDieta(st,"CdtrRefInf"); ref=textPrvku(c&&prveDieta(c,"Ref")); } });
+  const addtlTx=textPrvku(tx&&prveDieta(tx,"AddtlTxInf"));
+  const addtlNtry=textPrvku(n&&prveDieta(n,"AddtlNtryInf"));
+  let sym=sbaSymboly(e2e), odvodene=false;
+  const danAleboPoplatok=/^900008/.test(kod) || /^400/.test(kod)
+    || (String(mojIban).slice(4,8)==="0900" && (sym.ks==="0960"||sym.ks==="0898"));
+  if(!sym.vs && !danAleboPoplatok){
+    for(const txt of [ustrd, ref, addtlTx, addtlNtry]){
+      if(!txt) continue;
+      const s2=sbaSymboly(txt);
+      if(s2.vs){ sym={vs:s2.vs, ss:sym.ss||s2.ss, ks:sym.ks||s2.ks}; odvodene=true; break; }
+    }
+    if(!sym.vs){
+      for(const kand of [ustrd, ref]){
+        if(kand && /^\d{1,10}$/.test(kand.trim())){ sym.vs=kand.trim(); odvodene=true; break; }
+      }
+    }
+  }
+  const popis=ustrd || ref || popisVypisuText(addtlTx) || popisVypisuText(addtlNtry);
+  return {proti:s.nazov, ibanProti:s.iban, ucetProti:s.ucet, vs:sym.vs||"", ss:sym.ss||"", ks:sym.ks||"", popis, e2e, odvodene};
+}
 function parseVypis(xmlText){
   let doc;
   try{ doc=new DOMParser().parseFromString(xmlText,"text/xml"); }catch(_){ return null; }
   if(!doc || (doc.getElementsByTagName && doc.getElementsByTagName("parsererror").length)) return null;
-  const stmt=prvyPrvok(doc,"Stmt"); if(!stmt) return null;
+  const stmts=prvkyVypisu(doc,"Stmt"); if(!stmts.length) return null;
+  // Jeden súbor môže niesť viac výpisov (viac účtov — SBA kap. 3.1). Dosiaľ sa
+  // čítal len prvý a zvyšok ticho zmizol. Index položky beží cez celý súbor,
+  // aby id pohybov v prvom výpise ostali presne také ako doteraz.
+  let od=0; const casti=[];
+  stmts.forEach(s=>{ const c=parseVypisStmt(s, od); od+=c.pocetNtry; casti.push(c); });
+  const out={mojIban:casti[0].mojIban, txns:[].concat.apply([], casti.map(c=>c.txns)),
+    kontrola:casti[0].kontrola, preskocene:casti.reduce((a,c)=>a+c.preskocene,0)};
+  if(casti.length>1) out.ucty=casti.map(c=>c.mojIban);
+  return out;
+}
+function parseVypisStmt(stmt, odIndexu){
   const acct=prvyPrvok(stmt,"Acct");
-  const mojIban=acct? ((prvyPrvok(acct,"IBAN")||{}).textContent||"") : "";
+  const mojIban=(acct? ((prvyPrvok(acct,"IBAN")||{}).textContent||"") : "").replace(/\s/g,"").toUpperCase();
   const ntrys=prvkyVypisu(stmt,"Ntry");
-  const txns=[];
+  const txns=[]; let preskocene=0;
   for(let i=0;i<ntrys.length;i++){
-    const n=ntrys[i];
-    const g=(el,tag)=>{ const x=prvyPrvok(el,tag); return x?x.textContent.trim():""; };
-    const suma=parseFloat(g(n,"Amt"))||0;
-    const smer=g(n,"CdtDbtInd")==="CRDT"?"prijem":"vydaj";
+    const n=ntrys[i], idx=odIndexu+i;
+    // Stav položky: SBA hovorí vždy BOOK, Tatra banka dovoľuje aj PDNG a INFO
+    // (rezervácia, informácia). Tie na účte nie sú — v zostatku ich niet
+    // a v ďalšom výpise prídu znova ako BOOK, takže by boli dvakrát. 001.02
+    // píše <Sts>BOOK</Sts>, 001.08 <Sts><Cd>BOOK</Cd></Sts>; textContent dá
+    // „BOOK" v oboch. Chýbajúci Sts znamená zaúčtované.
+    const sts=textPrvku(prveDieta(n,"Sts")).toUpperCase();
+    if(sts && sts!=="BOOK"){ preskocene++; continue; }
+    // Suma a smer položky sú jej PRIAME deti; hlbšie sú sumy rozpisu a poplatkov.
+    const suma=parseFloat(textPrvku(prveDieta(n,"Amt")||prvyPrvok(n,"Amt")))||0;
+    const smer=textPrvku(prveDieta(n,"CdtDbtInd")||prvyPrvok(n,"CdtDbtInd"))==="CRDT"?"prijem":"vydaj";
     // Dátum zaúčtovania; keď ho výpis nenesie, platí dátum valuty (ValDt).
     // Pohyb bez dátumu sa dosiaľ uložil TICHO s prázdnym mesiacom: nespároval
     // sa s faktúrou, v peňažnom denníku nepatril do žiadneho mesiaca a výpis
     // sa tváril, že nepokrýva nič — pritom hláška hlásila úspešný import.
     const datum=datumPrvku(prvyPrvok(n,"BookgDt")) || datumPrvku(prvyPrvok(n,"ValDt"));
-    const mena=prvkyVypisu(n,"Nm").map(x=>x.textContent.trim());
-    const ibany=prvkyVypisu(n,"IBAN").map(x=>x.textContent.trim()).filter(ib=>ib!==mojIban);
-    const proti=mena.find(m=>!jeMojeMeno(m)) || mena[mena.length-1] || "";
-    const ibanProti=ibany[0]||"";
-    const ustrd=prvkyVypisu(n,"Ustrd").map(x=>x.textContent.trim()).join(" ");
-    const addtl=g(n,"AddtlNtryInf");
-    const popis=ustrd||addtl||"";
-    const vsM=(n.textContent||"").match(/\/VS(\d+)/);
-    const vs=vsM?vsM[1]:"";
-    txns.push({id:"tx"+datum+"_"+i+"_"+Math.round(suma*100), datum, suma:r2(suma), smer, proti, ibanProti, vs, popis, mesiac:(datum||"").slice(0,7)});
+    const storno=textPrvku(prveDieta(n,"RvslInd")).toLowerCase()==="true";
+    const txd=prvkyVypisu(n,"TxDtls");
+    const tx=txd[0]||null;
+    let kod=vypisKodSba(tx); if(!/^\d{11}$/.test(kod)) kod=vypisKodSba(n)||kod;
+    const domn=vypisDomena(tx)||vypisDomena(n);
+    const davka=txd.length>1;
+    // Hromadná položka (n × TxDtls) je na účte JEDEN pohyb — zostatok sedí len
+    // s ňou. Jednotlivé platby idú do `rozpis`; symboly ani protistrana na
+    // úrovni pohybu nemajú zmysel (ktorá z troch?).
+    const P=davka ? {proti:"", ibanProti:"", vs:"", ss:"", ks:"", popis:"", odvodene:false}
+                  : vypisPolozkaTx(tx, n, smer, mojIban, kod);
+    let proti=P.proti;
+    if(vypisJeKarta(n, tx, kod, domn)){ const o=vypisObchodnik(n, tx, smer, kod); if(o) proti=o; }
+    const t={id:"tx"+datum+"_"+idx+"_"+Math.round(suma*100), datum, suma:r2(suma), smer, proti,
+             ibanProti:P.ibanProti, vs:P.vs, popis:P.popis, mesiac:(datum||"").slice(0,7),
+             ss:P.ss, ks:P.ks, ucet:mojIban, typ:kod||domn};
+    if(storno) t.storno=1;
+    if(P.odvodene) t.symbolyOdvodene=1;
+    if(davka){
+      t.rozpis=txd.map(x=>{
+        const a=prveDieta(x,"Amt"), ad=prveDieta(x,"AmtDtls"), ta=ad&&prveDieta(ad,"TxAmt");
+        const cast=parseFloat(textPrvku(a||(ta&&prveDieta(ta,"Amt"))))||0;
+        const ind=textPrvku(prveDieta(x,"CdtDbtInd"));
+        const sm=ind ? (ind==="CRDT"?"prijem":"vydaj") : smer;
+        const q=vypisPolozkaTx(x, null, sm, mojIban, kod);
+        return {suma:r2(cast), smer:sm, proti:q.proti, ibanProti:q.ibanProti, vs:q.vs, ss:q.ss, ks:q.ks, popis:q.popis};
+      });
+    }
+    txns.push(t);
   }
   // ── ZOSTATKY A SÚČTY Z camt.053 (kap. 85.2) ──────────────────────────────
   // Výpis ich nesie: `Bal` s kódom OPBD (počiatočný) a CLBD (konečný), plus
@@ -26050,7 +26243,8 @@ function parseVypis(xmlText){
   // PRCD je konečný stav predošlého výpisu — to isté číslo z druhej strany,
   // preto sa berie ako počiatočný, keď OPBD chýba.
   const balSuma=b=>{
-    const a=prvyPrvok(b,"Amt"); if(!a) return null;
+    // PRIAME dieťa: pred <Amt> býva <CdtLine><Amt> s úverovým rámcom.
+    const a=prveDieta(b,"Amt"); if(!a) return null;
     const v=parseFloat(a.textContent); if(isNaN(v)) return null;
     // Záporný zostatok je v camt kladná suma so smerom DBIT.
     const smer=((prvyPrvok(b,"CdtDbtInd")||{}).textContent||"").trim();
@@ -26083,7 +26277,7 @@ function parseVypis(xmlText){
     return {pocet:isNaN(p)?null:p, suma:isNaN(s)?null:r2(s)};
   };
   const kr=sumBlok("TtlCdtNtries"), de=sumBlok("TtlDbtNtries");
-  return {mojIban, txns, kontrola:{ zaciatok, koniec, zaciatokDatum, koniecDatum,
+  return {mojIban, txns, preskocene, pocetNtry:ntrys.length, kontrola:{ zaciatok, koniec, zaciatokDatum, koniecDatum,
     prijem:kr.suma, vydaj:de.suma, pocetPrijem:kr.pocet, pocetVydaj:de.pocet }};
 }
 
@@ -26345,7 +26539,7 @@ async function zipVytiahniXml(subor, heslo){
     const polozky=(await rd.getEntries()).filter(x=>!x.directory);
     const xml=polozky.find(x=>/\.xml$/i.test(x.filename)) || polozky[0];
     if(!xml) throw new Error("Archív je prázdny.");
-    return await xml.getData(new zip.TextWriter("utf-8"));
+    return dekodujTextVypisu(await xml.getData(new zip.Uint8ArrayWriter()));
   } finally { try{ await rd.close(); }catch(_){} }
 }
 
@@ -26412,9 +26606,26 @@ function zipHesloUloz(heslo, pamataj){
 
 // Vráti text XML výpisu zo súboru, ktorý môže byť XML aj (zaheslovaný) ZIP.
 // Vracia null, keď to používateľ zruší — volajúci vtedy nemá čo hlásiť.
+// Text z bajtov výpisu. `subor.text()` číta natvrdo UTF-8 — výpis vo
+// windows-1250 (deklarované v XML hlavičke) tak stratil diakritiku v menách
+// a popisoch a mená protistrán prestali sedieť s partnermi. BOM sa odstráni,
+// UTF-16 sa pozná podľa značky, inak platí `encoding` z deklarácie; keď sa
+// deklarované UTF-8 nedá prečítať, skúsi sa windows-1250 (najčastejšie
+// kódovanie bánk mimo UTF-8). Tá istá funkcia dekóduje aj obsah archívu.
+function dekodujTextVypisu(u8){
+  const dek=(enc,fatal)=>new TextDecoder(enc,{fatal:!!fatal}).decode(u8);
+  if(u8.length>=3 && u8[0]===0xEF && u8[1]===0xBB && u8[2]===0xBF) return new TextDecoder("utf-8").decode(u8.subarray(3));
+  if(u8.length>=2 && u8[0]===0xFF && u8[1]===0xFE) return new TextDecoder("utf-16le").decode(u8.subarray(2));
+  if(u8.length>=2 && u8[0]===0xFE && u8[1]===0xFF) return new TextDecoder("utf-16be").decode(u8.subarray(2));
+  let hlava=""; for(let i=0;i<Math.min(u8.length,200);i++) hlava+=String.fromCharCode(u8[i]);
+  const m=hlava.match(/encoding\s*=\s*["']([\w.-]+)["']/i);
+  const enc=(m?m[1]:"utf-8").toLowerCase();
+  try{ return dek(enc,true); }catch(_){ /* bajty nesedia na deklarované kódovanie — skúsi sa záloha nižšie */ }
+  try{ return dek(enc==="utf-8"?"windows-1250":"utf-8",false); }catch(_){ return dek("utf-8",false); }
+}
 async function textVypisu(subor){
   const bajty=new Uint8Array(await subor.slice(0,8).arrayBuffer());
-  if(!jeZipBajty(bajty)) return await subor.text();
+  if(!jeZipBajty(bajty)) return dekodujTextVypisu(new Uint8Array(await subor.arrayBuffer()));
 
   let obsah=[];
   try{ obsah=await zipObsah(subor); }
@@ -26816,8 +27027,17 @@ function bankaVedra(){
 // rozišli a pohyby z PDF by sa časom začali správať inak než z XML.
 function importujVypisText(text, nazovSuboru, parsedVopred){
   const parsed=parsedVopred || parseVypis(String(text));
-  if(!parsed || !parsed.txns.length){
+  if(!parsed){
     alert("Súbor sa nepodarilo prečítať. Podporovaný je bankový výpis vo formáte SEPA XML (ISO 20022, camt.053).");
+    return 0;
+  }
+  if(!parsed.txns.length){
+    // Výpis bez zaúčtovaného pohybu je platný výpis (SBA: 0 položiek), nie
+    // nečitateľný súbor — hláška to má povedať, inak človek hľadá chybu v súbore.
+    alert("Výpis neobsahuje žiadny zaúčtovaný pohyb"
+      +(parsed.preskocene ? " — "+parsed.preskocene+" "+sklonPohyb(parsed.preskocene)
+          +" v ňom banka vedie len ako nezaúčtované (rezervácia), zaúčtované prídu v ďalšom výpise" : "")
+      +". Nič sa nepridalo.");
     return 0;
   }
   if(!firmaData.vypis) firmaData.vypis=[];
@@ -26878,6 +27098,14 @@ function importujVypisText(text, nazovSuboru, parsedVopred){
       +(O.bezDatumu===1?"nepatrí":"nepatria")+" do žiadneho mesiaca. Nájdete "
       +(O.bezDatumu===1?"ho":"ich")+" v Banke.");
   const nesuladTxt=nesuladCasti.join("\n\n");
+  // Informácie, ktoré NIE SÚ nesúlad: nezaúčtované položky a viac účtov v súbore.
+  const infoCasti=[];
+  if(parsed.preskocene)
+    infoCasti.push("ℹ "+parsed.preskocene+" "+sklonPohyb(parsed.preskocene)
+      +" výpis vedie ako nezaúčtované (rezervácia) — neimportovali sa, zaúčtované prídu v ďalšom výpise.");
+  if(parsed.ucty && parsed.ucty.length>1)
+    infoCasti.push("ℹ Súbor obsahuje "+parsed.ucty.length+" účty: "+parsed.ucty.join(", ")
+      +". Pohyby sa importovali zo všetkých, kontrolné súčty a kotvy denníka platia pre prvý.");
   // Stopa mimo hlášky: `alert` zmizne zavretím a s ním aj jediná zmienka o tom,
   // že sa niečo nezhodovalo. Chyba, ktorá po sebe nenechá riadok, sa nedá
   // nájsť (spec kap. 101.2). Trvalá stopa je na zázname výpisu a v zvončeku.
@@ -26937,7 +27165,8 @@ function importujVypisText(text, nazovSuboru, parsedVopred){
     + (osirene.length ? "\n\n⚠ "+osirene.length+" pohybov z notifikácií výpis neobsahuje, hoci to obdobie pokrýva.\n"
         + "Buď ich banka stornovala, alebo sa nespojili s tými správnymi. Nájdete ich v Banke označené."
       : "")
-    + chybaTxt);
+    + chybaTxt
+    + (infoCasti.length ? "\n\n"+infoCasti.join("\n") : ""));
   return nove.length;
 }
 
@@ -34338,8 +34567,11 @@ function jeVypisSubor(z){
   const t=String(z && z.subor_typ || "").toLowerCase();
   if(/\.zip$/.test(n) || t.includes("zip")) return true;
   // XML býva aj e-faktúra (ISDOC/UBL). Názov od banky obsahuje číslo účtu
-  // a dátum — dlhé číslo je teda rozumný tip.
+  // a dátum — dlhé číslo je teda rozumný tip. Nie každá banka ho tam dáva:
+  // Prima „xml_vypis_2026_14.xml", Tatra „…vypis_xml_camt053.xml", SLSP
+  // „EXVYP_…" — tie sa poznajú podľa slova.
   if(/\.xml$/.test(n) && /\d{6,}/.test(n)) return true;
+  if(/\.xml$/.test(n) && /vypis|statement|camt|exvyp/.test(n)) return true;
   return false;
 }
 // Modul, DO KTORÉHO zapisuje akcia nad riadkom schránky (ROZHODNUTIA č. 70,
