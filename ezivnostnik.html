@@ -2247,7 +2247,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.23-QG";  // Avízo ČSOB s viacerými transakciami; brána overenia: úroveň dôkazu na zázname, výpis bez súčtov len po potvrdení
+const APP_VERZIA = "2026.09.23-QH";  // Kniha jázd: pôvod kilometrov (namerané / z mapy / ručne) v editore aj zozname; meraná jazda bez odhadu z mapy
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -17720,7 +17720,7 @@ function appJazdy(){
         const _jIdx=new Map((d.jazdy||[]).map((x,i)=>[x,i]));   // index riadku bez O(n²) indexOf (45.8)
         return list.length?list.map(j=>{const idx=_jIdx.get(j)??-1;const klik=idx>=0?`onclick="editJazda(${idx})"`:'';const sukrPill = jazdaSukromna(j) ? ' <span class="apill" style="background:#f2e6cf;color:var(--accent-deep)">súkromná</span>'
                  : ((j._zluceny && +j._sukrKm>0) ? ' <span class="apill" style="background:#f2e6cf;color:var(--accent-deep)">'+Math.round(j._sukrKm)+' km súkr.</span>' : '');
-return `<div class="arow" style="grid-template-columns:2fr 1.4fr 1fr" ${klik}><div><div class="acol-strong"${jazdaSukromna(j)?' style="color:var(--ink-soft)"':''}>${esc(j.cesta||j.trasa||"—")}${j._zluceny?' <span class="apill" style="background:var(--brand-lite);color:var(--brand)">'+j._pocet+' jázd</span>':''}${sukrPill}</div><div class="acol-muted">${esc(j.ucel||"")}</div></div><div class="acol-muted">${esc(j.datum||"")}</div><div class="acol-sum"${jazdaSukromna(j)?' style="color:var(--ink-soft)"':''}>${(+j.km||0)}</div></div>`;}).join(''):prazdnyAleboFilter(!(d.jazdy||[]).length,
+return `<div class="arow" style="grid-template-columns:2fr 1.4fr 1fr" ${klik}><div><div class="acol-strong"${jazdaSukromna(j)?' style="color:var(--ink-soft)"':''}>${esc(j.cesta||j.trasa||"—")}${j._zluceny?' <span class="apill" style="background:var(--brand-lite);color:var(--brand)">'+j._pocet+' jázd</span>':''}${sukrPill}</div><div class="acol-muted">${esc(j.ucel||"")}</div></div><div class="acol-muted">${esc(j.datum||"")}</div><div class="acol-sum"${jazdaSukromna(j)?' style="color:var(--ink-soft)"':''}>${(!j._zluceny && jazdaPovodKm(j).ikona) ? '<span title="'+esc(jazdaPovodKm(j).text)+'" style="font-size:11px;margin-right:3px">'+jazdaPovodKm(j).ikona+'</span>' : ''}${(+j.km||0)}</div></div>`;}).join(''):prazdnyAleboFilter(!(d.jazdy||[]).length,
         "Zatiaľ tu nie je žiadna jazda. Zadajte prvú ručne alebo naimportujte históriu z vozidla.",
         {popis:"＋ Nová jazda", kod:"editJazda()", modul:"jazdy"},
         "kjMesiac='';_hladaj.jazdy='';appJazdy()");
@@ -18931,12 +18931,19 @@ function editJazda(idx){
   // ručné „↻ Prepočítať“ — spojitosť `kon` → `poc` je pritom prvá vec,
   // ktorú pri kontrole niekto overí.
   const pocNavrh = nova ? jazdaPoslednyStav() : (+j.poc||0);
+  // Pôvod kilometrov (č. 227): meraná jazda nedostane odhad z mapy — po
+  // uložení už appka jej body nemá, odhad by šiel z názvov a nahradil by
+  // namerané číslo. Kto chce prepísať ručne, môže, ale s varovaním.
+  const povod=nova ? {kod:"rucne", text:""} : jazdaPovodKm(j);
+  const povodVeta=nova ? "" : jazdaPovodVeta(j);
   openModal(nova?"Nová jazda":"Upraviť jazdu",`
     <div class="mfield"><label>Trasa</label><input id="m_cesta" value="${esc(j.cesta||j.trasa||'')}" placeholder="napr. Trnava – Bratislava – Trnava"></div>
     <div class="mfield"><label>Účel</label><input id="m_ucel" value="${esc(j.ucel)}"></div>
     <div class="mfield"><label>Dátum</label><input id="m_datum" value="${esc(j.datum)}" placeholder="6. 6. 2026"></div>
-    <div class="mfield"><label>Kilometre</label><input id="m_km" type="number" value="${esc(j.km)}"></div>
-    ${mapaBlokHtml()}
+    <div class="mfield"><label>Kilometre</label><input id="m_km" type="number" value="${esc(j.km)}" oninput="jazdaKmPovodUpozorni()">
+      ${povodVeta?`<div id="m_kmPovod" style="font-size:11.5px;color:var(--ink-soft);margin-top:5px;line-height:1.5">${esc(povodVeta)}</div>`:""}
+      <input type="hidden" id="m_kmPovodKod" value="${esc(povod.kod)}"><input type="hidden" id="m_kmPovodne" value="${esc(j.km)}"><input type="hidden" id="m_kmPovodVeta" value="${esc(povodVeta)}"></div>
+    ${povod.kod==="gps" ? "" : mapaBlokHtml()}
     <div class="mfield"><label>Stav tachometra na začiatku</label>
       <input id="m_poc" type="number" value="${pocNavrh||''}" placeholder="napr. 48210">
       <div style="font-size:11.5px;color:var(--ink-soft);margin-top:5px">${nova&&pocNavrh
@@ -18956,8 +18963,10 @@ function editJazda(idx){
       tlačidlom „Merať jazdu“ v hlavičke pred vyrazením.</div>`:''}`,
   ()=>{const obj={cesta:val("m_cesta"),ucel:val("m_ucel"),datum:val("m_datum"),km:parseFloat(val("m_km"))||0,sukromna:chk("m_sukromna")};
     // Odkiaľ číslo je, sa zapisuje do jazdy. Pri kontrole je rozdiel medzi
-    // „namerané" a „z mapy" podstatný a appka ho nemá zamlčať.
+    // „namerané" a „z mapy" podstatný a appka ho nemá zamlčať. Ručne
+    // prepísané namerané alebo odhadnuté km sú od uloženia „ručne“ (č. 227).
     if(val("m_kmZdroj")==="mapa") obj.zdrojKm="mapa";
+    else if(!nova && jazdaPovodKm(j).kod!=="rucne" && Math.abs(obj.km-(+j.km||0))>0.004) obj.zdrojKm="rucne";
     jazdaDoplnTacho(obj, parseFloat(val("m_poc")));
     // Pri úprave sa `jazdaDokonci` púšťa na ZLÚČENÝ záznam, takže starej jazde
     // bez mesiaca ho pri prvej úprave doplní — a existujúce `id` neprepíše.
@@ -19703,6 +19712,41 @@ function jazdaDoplnTacho(obj, pocStav){
   if(p>0){ obj.poc=p; obj.kon=tachoCele(p+(+obj.km||0)); }
   return obj;
 }
+// ── PÔVOD KILOMETROV (č. 227, 23. 9. 2026) ─────────────────────────────────
+// Jazda niesla dve polia, ktoré si vedeli protirečiť: `zdroj:"gps"` (jazda
+// vznikla meraním) a `zdrojKm:"mapa"` (číslo je odhad z mapy). Po stlačení
+// „Zistiť z mapy“ v úprave meranej jazdy mala jazda obe naraz a namerané
+// číslo bolo preč bez varovania. Pôvod čísla je odteraz JEDNA hodnota:
+// `zdrojKm` má prednosť (mapa / rucne), inak rozhoduje `zdroj:"gps"`.
+// Pri kontrole je rozdiel medzi nameraným a odhadnutým podstatný (kap. 74.3),
+// preto ho vidno v editore aj v zozname.
+function jazdaPovodKm(j){
+  if(!j) return {kod:"rucne", ikona:"", text:""};
+  if(j.zdrojKm==="mapa") return {kod:"mapa", ikona:"🗺️", text:"odhad z mapy"};
+  if(j.zdrojKm==="rucne") return {kod:"rucne", ikona:"", text:j.zdroj==="gps" ? "zadané ručne (meranie prepísané)" : ""};
+  if(j.zdroj==="gps") return {kod:"gps", ikona:"📍", text:"namerané po trase"};
+  return {kod:"rucne", ikona:"", text:""};
+}
+// Veta pod poľom Kilometre v editore: pôvod čísla a pri meraní aj čas štartu.
+function jazdaPovodVeta(j){
+  const p=jazdaPovodKm(j);
+  if(!p.text) return "";
+  let cas="";
+  if(p.kod==="gps" && j.dt){ const d=new Date(j.dt); if(!isNaN(d)) cas=" · štart "+d.toLocaleTimeString("sk",{hour:"2-digit",minute:"2-digit"}); }
+  return (p.ikona?p.ikona+" ":"")+p.text.charAt(0).toUpperCase()+p.text.slice(1)+cas;
+}
+// Po prepísaní čísla v editore: namerané alebo odhadnuté km ručným zápisom
+// prestávajú byť tým, čím boli — človek to má vidieť skôr, než uloží.
+function jazdaKmPovodUpozorni(){
+  const p=document.getElementById("m_kmPovod"); if(!p) return;
+  const kod=val("m_kmPovodKod"), povodne=parseFloat(val("m_kmPovodne"));
+  const teraz=parseFloat(val("m_km"));
+  const zmenene=isFinite(povodne) && isFinite(teraz) && Math.abs(teraz-povodne)>0.004;
+  if(!zmenene){ p.innerHTML=esc(val("m_kmPovodVeta")); return; }
+  p.innerHTML = kod==="gps"
+    ? "⚠ Prepíšete namerané kilometre ("+esc(String(povodne).replace(".",","))+"). Po uložení bude jazda vedená ako zadaná ručne."
+    : "Po uložení bude jazda vedená ako zadaná ručne, nie ako odhad z mapy.";
+}
 function jazdaZaver(){
   if(!_jazda) return;
   const S=firmaData.settings||{};
@@ -19763,7 +19807,10 @@ function jazdaZaver(){
     miestoUloz(val("m_miestoC"), _jazda.posl);
     const obj={cesta:val("m_cesta"), ucel:val("m_ucel"), datum:val("m_datum"),
       km:r2(parseFloat(val("m_km"))||0), sukromna:chk("m_sukromna"),
-      ...(val("m_kmZdroj")==="mapa" ? {zdrojKm:"mapa"} : {}),
+      // Číslo z mapy je odhad, prepísané rukou je ručné — namerané ostáva bez
+      // príznaku (č. 227). Zaokrúhlenie ako pri predvyplnení poľa.
+      ...(val("m_kmZdroj")==="mapa" ? {zdrojKm:"mapa"}
+          : (Math.abs(r2(parseFloat(val("m_km"))||0)-r2(_jazda.km||0))>0.004 ? {zdrojKm:"rucne"} : {})),
       zdroj:"gps", dt:new Date(_jazda.zac).toISOString()};
     // Príznak nesie len jazda, ktorá účel z výkazu naozaj DOSTALA a človek ho
     // nechal tak — sprievodca podľa neho pozná, čo už dopĺňať netreba.
