@@ -2247,7 +2247,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.22-QB";  // Kategória pohybu z výpisu (kód SBA, KS, Tatra); transakčná daň, poplatky a úroky ako interné doklady
+const APP_VERZIA = "2026.09.23-QC";  // Stabilné id pohybu z referencie banky; už evidované pohyby sa pri importe nezdvoja, len doplnia
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -26047,6 +26047,14 @@ const datumPrvku=el=>{
   const t=el ? String(el.textContent||"").trim().slice(0,10) : "";
   return /^\d{4}-\d{2}-\d{2}$/.test(t) ? t : "";
 };
+// Krátky odtlačok pre id pohybu (FNV-1a, 8 hex znakov). `textHash` sa
+// nepoužíva zámerne: nesie dĺžku textu a slúži odtlačku celého súboru.
+function hashKratky(s){
+  let h=0x811c9dc5;
+  const t=String(s||"");
+  for(let i=0;i<t.length;i++){ h^=t.charCodeAt(i); h=Math.imul(h,0x01000193)>>>0; }
+  return h.toString(16).padStart(8,"0");
+}
 // Priame deti podľa lokálneho mena. `prvkyVypisu` hľadá do hĺbky a pri
 // zostatku je to pasca: <Bal> nesie PRED vlastným <Amt> aj <CdtLine><Amt>
 // (povolené prečerpanie), takže prvý nájdený Amt bol úverový rámec, nie
@@ -26362,7 +26370,13 @@ function parseVypis(xmlText){
   // aby id pohybov v prvom výpise ostali presne také ako doteraz.
   let od=0; const casti=[];
   stmts.forEach(s=>{ const c=parseVypisStmt(s, od); od+=c.pocetNtry; casti.push(c); });
-  const out={mojIban:casti[0].mojIban, txns:[].concat.apply([], casti.map(c=>c.txns)),
+  const txns=[].concat.apply([], casti.map(c=>c.txns));
+  // Dve položky s rovnakým id v jednom súbore (dve rovnaké platby kartou
+  // v ten istý deň u toho istého obchodníka) sa rozlíšia poradím V RÁMCI
+  // zrážky — nie v súbore, aby prípona nezávisela od ostatných položiek.
+  const videne={};
+  txns.forEach(t=>{ const n=(videne[t.id]||0)+1; videne[t.id]=n; if(n>1) t.id+="#"+n; });
+  const out={mojIban:casti[0].mojIban, txns,
     kontrola:casti[0].kontrola, preskocene:casti.reduce((a,c)=>a+c.preskocene,0)};
   if(casti.length>1) out.ucty=casti.map(c=>c.mojIban);
   return out;
@@ -26416,9 +26430,25 @@ function parseVypisStmt(stmt, odIndexu){
       texty:[P.addtlTx, P.addtlNtry], tatraCtg:ctgM?ctgM[1]:"",
       instrId:textPrvku(refs&&prveDieta(refs,"InstrId")), mndtId:textPrvku(refs&&prveDieta(refs,"MndtId")),
     });
-    const t={id:"tx"+datum+"_"+idx+"_"+Math.round(suma*100), datum, suma:r2(suma), smer, proti,
+    // STABILNÉ ID (spec 01 §10, č. 217). Do 22. 9. 2026 bolo id
+    // "tx"+dátum+"_"+poradie v súbore+"_"+centy — ten istý pohyb v dennom
+    // a mesačnom výpise dostal iné id a zdvojil sa; dva rôzne pohyby v dvoch
+    // súboroch s rovnakým dátumom, poradím a sumou naopak splynuli. Nové id
+    // stojí na referencii banky (AcctSvcrRef → NtryRef) a na tom, čo pohyb
+    // určuje; pri krátkej referencii (Prima karty: 4 číslice, opakujú sa) aj
+    // na popise a protistrane. Zrážka v jednom súbore dostane príponu #2
+    // v `parseVypis`. Staré id sa neprepisujú — `vypisNovePohyby` spozná
+    // už evidovaný pohyb podľa dátumu, smeru, sumy a VS.
+    const refBanky=textPrvku(refs&&prveDieta(refs,"AcctSvcrRef")) || textPrvku(prveDieta(n,"AcctSvcrRef")) || textPrvku(prveDieta(n,"NtryRef"));
+    const chq=textPrvku(refs&&prveDieta(refs,"ChqNb"));
+    const pan4=(chq.match(/(\d{4})\D*$/)||[])[1]||"";
+    let zakladId=refBanky+"|"+kod+"|"+(P.e2e||"")+"|"+P.ibanProti+"|"+pan4;
+    if(refBanky.length<6) zakladId+="|"+P.popis+"|"+proti;
+    const id="sba:"+mojIban+":"+datum+":"+(smer==="prijem"?"p":"v")+Math.round(suma*100)+":"+(storno?"s":"")+":"+hashKratky(zakladId);
+    const t={id, datum, suma:r2(suma), smer, proti,
              ibanProti:P.ibanProti, vs:P.vs, popis:P.popis, mesiac:(datum||"").slice(0,7),
              ss:P.ss, ks:P.ks, ucet:mojIban, typ:kod||domn, kategoria:K.kat};
+    if(refBanky) t.ref=refBanky;
     if(storno) t.storno=1;
     if(P.odvodene) t.symbolyOdvodene=1;
     if(K.hv) t.neobvyklySmer=1;
@@ -27244,6 +27274,37 @@ function bankaVedra(){
 // `parsedVopred` je výsledok, ktorý už niekto prečítal inou cestou — dnes
 // PDF výpis. Zvyšok importu je pre obe cesty ten istý; dve kópie by sa
 // rozišli a pohyby z PDF by sa časom začali správať inak než z XML.
+// Ktoré prichádzajúce pohyby sú naozaj nové (č. 217). Zhoda podľa id je
+// istá. Pohyb uložený so STARÝM id ("tx…" podľa poradia v súbore, "pdf…"
+// z PDF) sa spozná podľa kľúča dátum + smer + suma + VS a spotrebuje sa
+// najviac raz — dve rovnaké platby kartou v jeden deň sú dva kľúče, ale aj
+// dva staré pohyby. Pohyby z notifikácií (`zdroj:"mail"`) sem nepatria:
+// tie zlučuje `zlucNotifikacie` s oknom ±4 dni. Bez tejto cesty by prvý
+// import po zmene id zdvojil celú históriu — a mesačný výpis po denných
+// SLSP by ju zdvojil aj bez zmeny id.
+function vypisNovePohyby(existujuce, prichadzajuce){
+  const E=existujuce||[];
+  const existId=new Set(E.map(t=>t.id));
+  const kluc=t=>String(t.datum||"").slice(0,10)+"|"+t.smer+"|"+Math.round((+t.suma||0)*100)+"|"+String(t.vs||"").replace(/\D/g,"");
+  const podlaKluca={};
+  E.forEach(t=>{ if(t.zdroj==="mail") return; (podlaKluca[kluc(t)]=podlaKluca[kluc(t)]||[]).push(t); });
+  const nove=[]; let doplnene=0;
+  // Polia, ktoré starý parser nedával. Existujúce hodnoty (proti, popis,
+  // uhrady, skryty…) sa nedotknú — o tie mohol medzitým rozhodnúť človek.
+  const DOPLN=["ss","ks","ucet","typ","kategoria","storno","okamzita","neobvyklySmer","povodnaKategoria","rozpis","symbolyOdvodene","ref"];
+  (prichadzajuce||[]).forEach(t=>{
+    if(existId.has(t.id)) return;
+    const kand=(podlaKluca[kluc(t)]||[]).find(x=>!x._spotrebovany);
+    if(!kand){ nove.push(t); return; }
+    kand._spotrebovany=true;
+    DOPLN.forEach(k=>{ if(kand[k]===undefined && t[k]!==undefined && t[k]!=="") kand[k]=t[k]; });
+    if(!kand.ibanProti && t.ibanProti) kand.ibanProti=t.ibanProti;
+    if(!kand.popis && t.popis) kand.popis=t.popis;
+    doplnene++;
+  });
+  E.forEach(t=>{ delete t._spotrebovany; });
+  return {nove, doplnene};
+}
 function importujVypisText(text, nazovSuboru, parsedVopred){
   const parsed=parsedVopred || parseVypis(String(text));
   if(!parsed){
@@ -27262,9 +27323,11 @@ function importujVypisText(text, nazovSuboru, parsedVopred){
   if(!firmaData.vypis) firmaData.vypis=[];
   if(!firmaData.settings) firmaData.settings={};
 
-  // pridaj len nové (podľa id)
-  const existId=new Set(firmaData.vypis.map(t=>t.id));
-  const nove=parsed.txns.filter(t=>!existId.has(t.id));
+  // Pridajú sa len nové: podľa id, a pri starom id (pred č. 217) podľa
+  // dátumu, smeru, sumy a VS — už evidovaný pohyb sa neprepíše, len dostane
+  // polia, ktoré starý parser nedával (kategória, účet, symboly).
+  const D=vypisNovePohyby(firmaData.vypis, parsed.txns);
+  const nove=D.nove;
 
   // Počítadlo pre limit plánu sa zvyšuje LEN keď import naozaj niečo pridal.
   // Predtým sa zvyšovalo pri každom volaní — kto omylom nahral ten istý výpis
@@ -27325,6 +27388,9 @@ function importujVypisText(text, nazovSuboru, parsedVopred){
   if(parsed.ucty && parsed.ucty.length>1)
     infoCasti.push("ℹ Súbor obsahuje "+parsed.ucty.length+" účty: "+parsed.ucty.join(", ")
       +". Pohyby sa importovali zo všetkých, kontrolné súčty a kotvy denníka platia pre prvý.");
+  if(D.doplnene)
+    infoCasti.push("ℹ "+D.doplnene+" "+sklonPohyb(D.doplnene)+" už "+(D.doplnene===1?"bol evidovaný":"bolo evidovaných")
+      +" — nepridali sa druhýkrát, len dostali údaje z výpisu (kategória, účet, symboly).");
   // Stopa mimo hlášky: `alert` zmizne zavretím a s ním aj jediná zmienka o tom,
   // že sa niečo nezhodovalo. Chyba, ktorá po sebe nenechá riadok, sa nedá
   // nájsť (spec kap. 101.2). Trvalá stopa je na zázname výpisu a v zvončeku.
