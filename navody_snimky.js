@@ -1266,7 +1266,7 @@ window.NAVODY_SNIMKY = {
  },
  "jazdy-import-1": {
   "m": {
-   "subor": "navody/jazdy-import-1.m.4de98fd3.webp",
+   "subor": "navody/jazdy-import-1.m.321eb90b.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -1277,7 +1277,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/jazdy-import-1.d.bf278632.webp",
+   "subor": "navody/jazdy-import-1.d.34983a99.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1290,7 +1290,7 @@ window.NAVODY_SNIMKY = {
  },
  "jazdy-merat-1": {
   "m": {
-   "subor": "navody/jazdy-merat-1.m.4de98fd3.webp",
+   "subor": "navody/jazdy-merat-1.m.321eb90b.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -1301,7 +1301,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/jazdy-merat-1.d.bf278632.webp",
+   "subor": "navody/jazdy-merat-1.d.34983a99.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1325,7 +1325,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/jazdy-merat-2.d.a9efedb1.webp",
+   "subor": "navody/jazdy-merat-2.d.7d3bb1ed.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1349,7 +1349,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/jazdy-miesto-1.d.741038bf.webp",
+   "subor": "navody/jazdy-miesto-1.d.7822f007.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1373,7 +1373,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/jazdy-miesto-2.d.6bb732ce.webp",
+   "subor": "navody/jazdy-miesto-2.d.b0671e49.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1397,7 +1397,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/jazdy-miesto-3.d.88855993.webp",
+   "subor": "navody/jazdy-miesto-3.d.5fdbbeaf.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1410,7 +1410,7 @@ window.NAVODY_SNIMKY = {
  },
  "jazdy-nabijanie-1": {
   "m": {
-   "subor": "navody/jazdy-nabijanie-1.m.4de98fd3.webp",
+   "subor": "navody/jazdy-nabijanie-1.m.321eb90b.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -1421,7 +1421,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/jazdy-nabijanie-1.d.bf278632.webp",
+   "subor": "navody/jazdy-nabijanie-1.d.34983a99.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1445,7 +1445,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/jazdy-nabijanie-2.d.38868922.webp",
+   "subor": "navody/jazdy-nabijanie-2.d.30d76e6b.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1469,7 +1469,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/jazdy-sprievodca-1.d.d94473df.webp",
+   "subor": "navody/jazdy-sprievodca-1.d.8d0a32f3.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1482,7 +1482,7 @@ window.NAVODY_SNIMKY = {
  },
  "jazdy-sprievodca-2": {
   "m": {
-   "subor": "navody/jazdy-sprievodca-2.m.f541c4a6.webp",
+   "subor": "navody/jazdy-sprievodca-2.m.403bfed5.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -1493,7 +1493,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/jazdy-sprievodca-2.d.bd4bf823.webp",
+   "subor": "navody/jazdy-sprievodca-2.d.dfb6c1a5.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1517,7 +1517,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/jazdy-sprievodca-3.d.31b394d8.webp",
+   "subor": "navody/jazdy-sprievodca-3.d.4bbd5f8b.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1541,7 +1541,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/jazdy-sprievodca-4.d.c76db0b0.webp",
+   "subor": "navody/jazdy-sprievodca-4.d.a99baee1.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1554,7 +1554,7 @@ window.NAVODY_SNIMKY = {
  },
  "jazdy-sprievodca-5": {
   "m": {
-   "subor": "navody/jazdy-sprievodca-5.m.518501ef.webp",
+   "subor": "navody/jazdy-sprievodca-5.m.6b8d76e7.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -1565,7 +1565,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/jazdy-sprievodca-5.d.a5e0300f.webp",
+   "subor": "navody/jazdy-sprievodca-5.d.9f5187a8.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1578,7 +1578,7 @@ window.NAVODY_SNIMKY = {
  },
  "jazdy-zapisat-1": {
   "m": {
-   "subor": "navody/jazdy-zapisat-1.m.4de98fd3.webp",
+   "subor": "navody/jazdy-zapisat-1.m.321eb90b.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -1589,7 +1589,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/jazdy-zapisat-1.d.bf278632.webp",
+   "subor": "navody/jazdy-zapisat-1.d.34983a99.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1602,7 +1602,7 @@ window.NAVODY_SNIMKY = {
  },
  "jazdy-zapisat-2": {
   "m": {
-   "subor": "navody/jazdy-zapisat-2.m.0d102b70.webp",
+   "subor": "navody/jazdy-zapisat-2.m.60eff7c1.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -1613,7 +1613,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/jazdy-zapisat-2.d.e94f7b95.webp",
+   "subor": "navody/jazdy-zapisat-2.d.5f2e5fe8.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1626,7 +1626,7 @@ window.NAVODY_SNIMKY = {
  },
  "jazdy-zapisat-3": {
   "m": {
-   "subor": "navody/jazdy-zapisat-3.m.8d2e3deb.webp",
+   "subor": "navody/jazdy-zapisat-3.m.7667779f.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -1637,7 +1637,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/jazdy-zapisat-3.d.535e1904.webp",
+   "subor": "navody/jazdy-zapisat-3.d.cf2a98d4.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1650,18 +1650,18 @@ window.NAVODY_SNIMKY = {
  },
  "jazdy-zapisat-4": {
   "m": {
-   "subor": "navody/jazdy-zapisat-4.m.619c1167.webp",
+   "subor": "navody/jazdy-zapisat-4.m.80feb4cd.webp",
    "w": 390,
    "h": 600,
    "ciel": {
     "x": 42,
-    "y": 316,
+    "y": 317,
     "w": 306,
     "h": 56
    }
   },
   "d": {
-   "subor": "navody/jazdy-zapisat-4.d.482682cf.webp",
+   "subor": "navody/jazdy-zapisat-4.d.e7f8abb0.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1674,7 +1674,7 @@ window.NAVODY_SNIMKY = {
  },
  "jazdy-zapisat-5": {
   "m": {
-   "subor": "navody/jazdy-zapisat-5.m.619c1167.webp",
+   "subor": "navody/jazdy-zapisat-5.m.80feb4cd.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -1685,12 +1685,12 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/jazdy-zapisat-5.d.482682cf.webp",
+   "subor": "navody/jazdy-zapisat-5.d.e7f8abb0.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
     "x": 517,
-    "y": 506,
+    "y": 505,
     "w": 213,
     "h": 40
    }
