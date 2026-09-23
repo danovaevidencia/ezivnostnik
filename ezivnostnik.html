@@ -2247,7 +2247,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.23-QF";  // Notifikácie Tatra B-mail a ČSOB Avízo; výpisy MT940 (SLSP, ČSOB), VÚB GPC/CDF, CSV Fio, Revolut, Wise, mBank
+const APP_VERZIA = "2026.09.23-QG";  // Avízo ČSOB s viacerými transakciami; brána overenia: úroveň dôkazu na zázname, výpis bez súčtov len po potvrdení
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -25727,8 +25727,8 @@ function notifTatraBmail(text){
     zostatok: uct ? notifCislo(uct[1]) : null, zostatokPole: uct ? "uctovny zostatok" : null,
     symbolyOdvodene:odvodene};
 }
-function notifCsobAvizo(text){
-  const t=notifBezCitacie(text);
+// Jedna transakcia avíza ČSOB (blok od „dňa … bola na účte" po ďalší taký blok).
+function notifCsobTransakcia(t){
   // IBAN v skupinách po štyroch; za kódom banky len číslice, inak by sa
   // k účtu prilepilo prvé štvorpísmenové slovo z názvu majiteľa („VZOR").
   const m=t.match(/d[ňn]a (\d{1,2})\.(\d{1,2})\.(\d{4}) bola na [úu][čc]te ([A-Z]{2}\d{2}(?: ?\d{4}){4,7})\s*(.*?)\s*za[úu][čc]tovan[áa] suma/i);
@@ -25740,17 +25740,24 @@ function notifCsobAvizo(text){
   const sym=sbaSymboly(ref);
   const z=t.match(/Zostatok na [úu][čc]te po za[úu][čc]tovan[íi] sumy platobnej oper[áa]cie:\s*([+-])?\s*([0-9 ]+,\d{2})\s*([A-Z]{3})/i);
   const zost=z ? notifCislo(z[2]) : null;
-  return {banka:"csob", smer:s[1]==="-"?"vydaj":"prijem", suma:notifCislo(s[2]), mena:s[3].toUpperCase(),
+  return {smer:s[1]==="-"?"vydaj":"prijem", suma:r2(notifCislo(s[2])), mena:s[3].toUpperCase(),
     datum:m[3]+"-"+notifD2(m[2])+"-"+notifD2(m[1]), cas:"",
     mojUcet:m[4].replace(/\s/g,"").toUpperCase(),
     ibanProti:riadok(/^z [úu][čc]tu:\s*([A-Z]{2}[\d ]+)$/mi).replace(/\s/g,"").toUpperCase(),
     bicProti:riadok(/^banka:\s*([A-Z0-9]{8,11})/mi), proti:riadok(/^n[áa]zov proti[úu][čc]tu:\s*(.*)$/mi),
     ucetProti:"", vs:sym.vs||"", ss:sym.ss||"", ks:sym.ks||"", popis:riadok(/^inform[áa]cia pre pr[íi]jemcu:\s*(.*)$/mi), typ:"",
-    zostatok: zost!=null ? (z[1]==="-"?-zost:zost) : null, zostatokPole: zost!=null ? "zostatok po zauctovani" : null,
-    // Jeden mail vie niesť viac transakcií (vzor 2012: 2 debety) — tu sa
-    // číta prvá; ďalšie sa zatiaľ len spočítajú, aby to bolo vidieť.
-    dalsie: Math.max(0, (t.match(/d[ňn]a \d{1,2}\.\d{1,2}\.\d{4} bola na [úu][čc]te/gi)||[]).length-1),
+    zostatok: zost!=null ? r2(z[1]==="-"?-zost:zost) : null, zostatokPole: zost!=null ? "zostatok po zauctovani" : null,
     symbolyOdvodene:false};
+}
+function notifCsobAvizo(text){
+  const t=notifBezCitacie(text);
+  // Jeden mail vie niesť viac transakcií (vzor 2012: 2 debety, spec 04 §5.2):
+  // text sa rozdelí pred každým „dňa … bola na účte". Prvá je hlavný pohyb,
+  // ostatné idú v `dalsiePohyby` a schránka z nich spraví ďalšie riadky (č. 224).
+  const bloky=t.split(/(?=d[ňn]a \d{1,2}\.\d{1,2}\.\d{4} bola na [úu][čc]te)/i).map(notifCsobTransakcia).filter(Boolean);
+  if(!bloky.length) return null;
+  const prvy=bloky[0];
+  return Object.assign({banka:"csob"}, prvy, {dalsiePohyby:bloky.slice(1), dalsie:bloky.length-1});
 }
 function notifPlugin(text){ return notifTatraBmail(text) || notifCsobAvizo(text); }
 
@@ -26084,6 +26091,18 @@ function overVypisPdf(P){
       sprava:"Vo výpise sa nenašli kontrolné súčty, takže sa nedá overiť, či sme ho prečítali celý."};
   }
   return chyby.length ? {ok:false, sprava:chyby.join("\n· "), bezDatumu} : {ok:true, sprava:"", bezDatumu};
+}
+// Úroveň dôkazu výpisu (dev/banky spec 03 §5, č. 225) zapísaná do `kontrola`,
+// ktorá ostáva na zázname výpisu: 1 = začiatočný a konečný zostatok,
+// 3 = počty a obraty, 4 = nič. Stav podľa výsledku `overVypisPdf`; „potvrdené
+// používateľom" dopĺňa import po náhľade. Vedľa overenia, aby pravidlo o tom,
+// čo je dôkaz, bolo na jednom mieste. Vracia objekt kontroly.
+function vypisUrovenDokazu(P, O){
+  const K=P.kontrola=P.kontrola||{};
+  K.uroven = (K.zaciatok!=null && K.koniec!=null) ? 1
+           : (K.prijem!=null || K.vydaj!=null || K.pocetPrijem!=null || K.pocetVydaj!=null) ? 3 : 4;
+  K.stav = O.ok ? "ok" : (O.neoveritelne ? "neoveritelne" : "nesedi");
+  return K;
 }
 
 async function parseVypisPdf(arrbuf){
@@ -27854,6 +27873,29 @@ function importujVypisText(text, nazovSuboru, parsedVopred, volby){
           +" v ňom banka vedie len ako nezaúčtované (rezervácia), zaúčtované prídu v ďalšom výpise" : "")
       +". Nič sa nepridalo.");
     return 0;
+  }
+  // ── BRÁNA OVERENIA (dev/banky spec 03 §5, č. 225) ─────────────────────────
+  // Úroveň dôkazu sa zapíše do `kontrola` (uroven 1 = zostatky, 3 = počty
+  // a obraty, 4 = nič) a ostáva na zázname výpisu. Formát BEZ kontrolných
+  // čísel (VÚB CDF, cudzí CSV) sa pri camt.053 nevyskytuje — tam ide import
+  // vždy (XML je strojový zápis). Pri textovom formáte úrovne 4 sa import
+  // urobí až po náhľade a potvrdení: sumy nemá čím overiť ani banka, len človek
+  // proti internet bankingu. Odmietnuť taký výpis úplne (spec bod 5) by
+  // znamenalo, že VÚB CDF sa nedá použiť vôbec.
+  {
+    const O0=overVypisPdf(parsed);
+    const K=vypisUrovenDokazu(parsed, O0);
+    if(O0.neoveritelne && parsed.zdrojFormat && !(volby&&volby.bezPotvrdenia)){
+      const T=parsed.txns, s=smer=>r2(T.filter(t=>t.smer===smer).reduce((a,t)=>a+(+t.suma||0),0));
+      const r=t=>fmtDatum(t.datum)+" · "+(t.smer==="prijem"?"+":"−")+eur(+t.suma||0)+" · "+(t.proti||t.popis||"bez názvu").slice(0,40);
+      const ukazka=T.length<=4 ? T.map(r) : [...T.slice(0,2).map(r), "…", ...T.slice(-2).map(r)];
+      const okTxt="Výpis"+(nazovSuboru?" „"+nazovSuboru+"“":"")+" nenesie zostatky ani kontrolné súčty, takže appka nevie overiť, či ho prečítala celý.\n\n"
+        +T.length+" "+sklonPohyb(T.length)+", "+fmtDatum(K.zaciatokDatum||"")+" – "+fmtDatum(K.koniecDatum||"")+"\n"
+        +"príjmy "+eur(s("prijem"))+" · výdavky "+eur(s("vydaj"))+"\n\n"+ukazka.join("\n")+"\n\n"
+        +"Sedia počty a súčty s internet bankingom? Importovať?";
+      if(!confirm(okTxt)){ povedz("Import sa neurobil — výpis bez kontrolných súčtov nebol potvrdený. Nič sa nepridalo."); return 0; }
+      K.stav="potvrdene-pouzivatelom";
+    }
   }
   if(!firmaData.vypis) firmaData.vypis=[];
   if(!firmaData.settings) firmaData.settings={};
@@ -34698,7 +34740,9 @@ async function prevezmiNotifikacieAuto(){
     // Mail bez prílohy je vybavený — pohyb z neho je v evidencii. Mail
     // S prílohou ostáva v schránke ako doklad; jeho pohyb sa už neponúkne,
     // lebo `id` pohybu je vo výpise.
-    const idsBezPrilohy=zoz.filter(x=>x.z.stav==="bez_prilohy").map(x=>String(x.z.id));
+    // Mail s dvoma transakciami, z ktorých jedna má podobný pohyb (ostáva na
+    // klik), sa neuzavrie — inak by tá druhá zmizla zo schránky bez stopy.
+    const idsBezPrilohy=[...new Set(zoz.filter(x=>x.z.stav==="bez_prilohy" && notifMailVybaveny(x.z.id)).map(x=>String(x.z.id)))];
     if(idsBezPrilohy.length){
       const { error } = await sb.from("cakajuce_doklady")
         .update({ stav:"spracovane", spracovane:new Date().toISOString() }).in("id", idsBezPrilohy);
@@ -34902,9 +34946,29 @@ function cakajuceNotifikacie(){
     if(!ucet.ok){ out.push({z, n, pohyb:null, chyba:ucet.dovod, uzMam:false}); return; }
     const pohyb=notifNaPohyb(n, z.id);
     if(!pohyb) return;
-    out.push({z, n, pohyb, dovera, uzMam:(firmaData.vypis||[]).some(t=>t.id===pohyb.id)});
+    out.push({z, n, pohyb, dovera, kluc:String(z.id), uzMam:(firmaData.vypis||[]).some(t=>t.id===pohyb.id)});
+    // Mail s viacerými transakciami (avízo ČSOB, č. 224): každá ďalšia je
+    // vlastný riadok schránky s vlastným kľúčom `id#k`; riadok mailu sa uzavrie,
+    // až keď je v evidencii posledná (`notifMailVybaveny`).
+    (n.dalsiePohyby||[]).forEach((d,k)=>{
+      const e=Object.assign({}, n, d, {dalsiePohyby:[], dalsie:0});
+      const u=notifUcetFirmy(e);
+      if(!u.ok){ out.push({z, n:e, pohyb:null, chyba:u.dovod, uzMam:false}); return; }
+      const p=notifNaPohyb(e, z.id);
+      if(!p) return;
+      // Dve rovnaké sumy bez zostatku v jednom maile by mali rovnaké id.
+      if(out.some(x=>x.z===z && x.pohyb && x.pohyb.id===p.id)) p.id+="#"+(k+2);
+      out.push({z, n:e, pohyb:p, dovera, kluc:String(z.id)+"#"+(k+2), uzMam:(firmaData.vypis||[]).some(t=>t.id===p.id)});
+    });
   });
   return out;
+}
+// Mail bez prílohy je vybavený, keď z neho v schránke neostáva ani jeden
+// pohyb, ktorý ešte nie je v evidencii. Pri jednej transakcii je to hneď po
+// jej pridaní; pri avíze s dvoma až po druhej — uzavrieť ho skôr by tú druhú
+// skrylo bez stopy.
+function notifMailVybaveny(zId, zoznam){
+  return !(zoznam||cakajuceNotifikacie()).some(x=>String(x.z.id)===String(zId) && x.pohyb && !x.uzMam);
 }
 
 // Pohyb, ktorý vyzerá ako tá istá platba. O jednej transakcii môže prísť viac
@@ -34934,7 +34998,8 @@ function podobnyPohyb(p){
 // Nie je to prehliadnutie — nedopĺňať.
 function prijmiNotifikaciu(id){
   if(!strazZapis("banka")) return;
-  const p=cakajuceNotifikacie().find(x=>String(x.z.id)===String(id));
+  // Kľúč je id mailu, pri ďalšej transakcii toho istého mailu `id#k` (č. 224).
+  const p=cakajuceNotifikacie().find(x=>String(x.kluc||x.z.id)===String(id));
   if(!p || !p.pohyb){ alert("Túto notifikáciu sa nepodarilo prečítať."); return; }
   if(p.uzMam){ cloudMsg("Tento pohyb už v evidencii je.","ok"); otvorCakajuce(); return; }
   if(!Array.isArray(firmaData.vypis)) firmaData.vypis=[];
@@ -34955,8 +35020,8 @@ function prijmiNotifikaciu(id){
   poZmene();
   // Riadok sa uzavrie len vtedy, keď v maile nič iné nebolo. Mail s prílohou
   // ostáva v schránke ako doklad — pohyb sa už znova neponúkne, lebo jeho `id`
-  // je v evidencii.
-  if(p.z.stav==="bez_prilohy" && sb && !localMode){
+  // je v evidencii. Mail s ďalšou transakciou ostáva, kým nie je v evidencii aj tá.
+  if(p.z.stav==="bez_prilohy" && sb && !localMode && notifMailVybaveny(p.z.id)){
     sb.from("cakajuce_doklady")
       .update({ stav:"spracovane", spracovane:new Date().toISOString() }).eq("id", p.z.id)
       .then(({error})=>{ if(error) console.error("uzavretie notifikácie:", error.message||error);
@@ -34988,7 +35053,7 @@ function prijmiVsetkyNotifikacie(){
   let sparene=0;
   try{ sparene=autoParujPohyby(nove.map(p=>p.pohyb)); }catch(e){ console.error("párovanie notifikácií:", e); }
   poZmene();
-  const idcka=nove.filter(p=>p.z.stav==="bez_prilohy").map(p=>p.z.id);
+  const idcka=[...new Set(nove.filter(p=>p.z.stav==="bez_prilohy" && notifMailVybaveny(p.z.id)).map(p=>p.z.id))];
   const hotovo=()=>{ nacitajCakajuce(true).then(()=>otvorCakajuce()); };
   if(idcka.length && sb && !localMode){
     sb.from("cakajuce_doklady")
@@ -35267,7 +35332,7 @@ async function otvorCakajuce(){
             ${p.n.banka && !p.n.banka.overena ? ' · <span title="Formát tejto banky sme ešte nevideli — skontrolujte sumu a dátum">formát neoverený</span>' : ""}</div>
         </div>
         <div style="display:flex;gap:8px;align-items:center">
-          <button class="aabtn" style="padding:4px 10px;font-size:11.5px" onclick="prijmiNotifikaciu('${esc(p.z.id)}')"${zam("banka")}>Pridať</button>
+          <button class="aabtn" style="padding:4px 10px;font-size:11.5px" onclick="prijmiNotifikaciu('${esc(p.kluc||p.z.id)}')"${zam("banka")}>Pridať</button>
           <span onclick="event.stopPropagation();odmietniCakajuci('${esc(p.z.id)}')"${zam(modulCakajuceho(p.z.id, true))}
                 title="Nepotrebujem — odstrániť zo schránky"
                 style="cursor:pointer;color:var(--ink-soft);font-size:15px;padding:0 2px;line-height:1">✕</span>
