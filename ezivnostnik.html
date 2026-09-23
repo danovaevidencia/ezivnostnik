@@ -2247,7 +2247,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.23-QC";  // Stabilné id pohybu z referencie banky; už evidované pohyby sa pri importe nezdvoja, len doplnia
+const APP_VERZIA = "2026.09.23-QD";  // ZIP so všetkými výpismi, hláška pomenuje cudzí formát a banku PDF, notifikácia z iného účtu sa neponúkne
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -26017,7 +26017,16 @@ async function parseVypisPdf(arrbuf){
       return P;
     }
   }
-  return null;
+  // Nepoznaný layout: aspoň banku z textu, nech hláška vie povedať, ktorá
+  // (firemný výpis Tatra banky má iný layout než osobný a končil tu tiež).
+  const b=pdfBankaZTextu(riadky.join("\n"));
+  return b ? {neznama:true, banka:b} : null;
+}
+// Meno banky z textu (PDF alebo cudzí súbor) — aj bez diakritiky, banky ju
+// v exportoch často vynechávajú.
+function pdfBankaZTextu(text){
+  const m=String(text||"").match(/Tatra banka|Slovensk[áa] sporite[ľl][ňn]?a|VÚB|VUB|ČSOB|CSOB|365\.bank|Prima banka|Fio banka|mBank|UniCredit|Revolut|Wise/i);
+  return m ? m[0] : "";
 }
 // ── ČÍTANIE camt.053: MENNÉ PRIESTORY A DÁTUMY (ROZHODNUTIA č. 144) ────────
 // `getElementsByTagName` porovnáva KVALIFIKOVANÉ meno aj s prefixom, takže
@@ -26779,16 +26788,23 @@ async function zipObsah(subor){
   } finally { try{ await rd.close(); }catch(_){} }
 }
 
-// Vytiahne prvý XML zo archívu ako text. Heslo môže byť prázdne — nezaheslovaný
-// archív sa rozbalí bez neho.
+// Vytiahne VŠETKY XML z archívu ako [{nazov, text}]. Do 23. 9. 2026 sa bral
+// prvý .xml a zvyšok ticho zmizol — VÚB posiela pravidelné exporty a SLSP
+// denné výpisy aj po viacerých v jednom archíve (dev/banky, č. 218). Archív
+// bez XML dá prvú položku (starší formát pošle výpis bez prípony). Heslo môže
+// byť prázdne — nezaheslovaný archív sa rozbalí bez neho.
 async function zipVytiahniXml(subor, heslo){
   const zip=await nacitajZipLib();
   const rd=new zip.ZipReader(new zip.BlobReader(subor), heslo ? { password:heslo } : {});
   try{
     const polozky=(await rd.getEntries()).filter(x=>!x.directory);
-    const xml=polozky.find(x=>/\.xml$/i.test(x.filename)) || polozky[0];
-    if(!xml) throw new Error("Archív je prázdny.");
-    return dekodujTextVypisu(await xml.getData(new zip.Uint8ArrayWriter()));
+    if(!polozky.length) throw new Error("Archív je prázdny.");
+    // Všetky položky, nie len .xml: o tom, čo je výpis, rozhodne `parseVypis`
+    // v `importujVypisSubory`, a čo výpis nie je, sa v hláške vymenuje.
+    polozky.sort((a,b)=>String(a.filename).localeCompare(String(b.filename)));
+    const out=[];
+    for(const x of polozky) out.push({nazov:x.filename, text:dekodujTextVypisu(await x.getData(new zip.Uint8ArrayWriter()))});
+    return out;
   } finally { try{ await rd.close(); }catch(_){} }
 }
 
@@ -26932,10 +26948,13 @@ async function spracujVypis(e){
     let P=null;
     try{ P=await parseVypisPdf(await file.arrayBuffer()); }
     catch(err){ console.error("PDF výpis:", err); }
-    if(!P){
-      alert("Tento PDF výpis appka zatiaľ nepozná.\n\n"
-        +"Rozpoznáva Prima banku a Tatra banku. Z inej banky použite výpis vo formáte "
-        +"SEPA XML (camt.053) — býva v internet bankingu vedľa PDF.");
+    if(!P || P.neznama){
+      // Menovať banku, keď sa z PDF dá prečítať — „appka nepozná" bez mena
+      // posielalo človeka skúšať znova ten istý súbor (dev/banky/tatra.md §6.2).
+      const b=P&&P.banka ? P.banka : "";
+      alert((b ? "PDF výpis z banky "+b+" appka zatiaľ nečíta." : "Tento PDF výpis appka zatiaľ nepozná.")+"\n\n"
+        +"Z PDF číta výpisy Prima banky a osobného účtu Tatra banky. "
+        +"Použite výpis vo formáte SEPA XML (camt.053) — v internet bankingu"+(b?" "+b:"")+" býva vedľa PDF.");
       return;
     }
     const O=overVypisPdf(P);
@@ -26953,7 +26972,58 @@ async function spracujVypis(e){
   }
   const text=await textVypisu(file);
   if(text===null) return;          // používateľ zrušil alebo sa nepodarilo
-  importujVypisText(text, file.name);
+  importujVypisSubory(text, file.name);
+}
+
+// Jeden súbor alebo celý archív — jediná cesta pre ručný výber aj schránku.
+// `texty` je reťazec (XML) alebo pole [{nazov, text}] z archívu. Každý výpis
+// ide cez `importujVypisText`; pri archíve sa hlášky zoberú do jednej, aby
+// človek neodklikával päť okien. Čo výpisom nie je, sa vymenuje, nie zamlčí.
+// Vracia počet súborov, ktoré boli výpisom (0 = nič sa neimportovalo).
+function importujVypisSubory(texty, nazov, volby){
+  const zoznam=Array.isArray(texty) ? texty : [{nazov:nazov, text:String(texty)}];
+  const vypisy=zoznam.filter(x=>{ try{ return !!parseVypis(String(x.text)); }catch(_){ return false; } });
+  if(!vypisy.length){
+    if(!(volby&&volby.tichoAkNieVypis)) alert(vypisFormatHlaska(zoznam[0]?zoznam[0].text:"", nazov));
+    return 0;
+  }
+  if(!Array.isArray(texty)){ importujVypisText(zoznam[0].text, nazov); return 1; }
+  const hlasky=[];
+  vypisy.forEach(x=>importujVypisText(x.text, nazov+" › "+x.nazov, null, {hlasky}));
+  const preskocene=zoznam.filter(x=>vypisy.indexOf(x)<0).map(x=>x.nazov);
+  alert("Archív "+nazov+": "+vypisy.length+" "+sklon(vypisy.length,"výpis","výpisy","výpisov")+".\n\n"
+    +hlasky.map((h,i)=>"── "+vypisy[i].nazov+" ──\n"+h).join("\n\n")
+    +(preskocene.length ? "\n\nPreskočené (nie sú výpis): "+preskocene.join(", ") : ""));
+  return vypisy.length;
+}
+
+// Čo je to za súbor, keď to nie je výpis camt.053. Generická veta „nepodarilo
+// sa prečítať" posielala človeka hľadať chybu v súbore, ktorý bol v poriadku —
+// len iného druhu (denný report, avízo, e-faktúra, CSV export). Hláška má
+// pomenovať formát a povedať, čo si z banky stiahnuť namiesto neho.
+function vypisFormatHlaska(text, nazov){
+  const t=String(text||"").slice(0,4000);
+  const n=String(nazov||"");
+  const co=(()=>{
+    if(/^%PDF/.test(t)) return "PDF";
+    if(/<BkToCstmrAcctRpt/.test(t)) return "denný report (camt.052)";
+    if(/<BkToCstmrDbtCdtNtfctn/.test(t)) return "avízo o pohybe (camt.054)";
+    if(/<CstmrCdtTrfInitn|<pain\.001/.test(t)) return "hromadný platobný príkaz (pain.001)";
+    if(/<Invoice[\s>]|<CreditNote[\s>]|<Faktura[\s>]|ISDOC/i.test(t)) return "e-faktúra (UBL/ISDOC), nie výpis";
+    if(/^:20:|\n:61:|\n:86:/.test(t)) return "MT940";
+    if(/^07[45]\d{16}/.test(t)) return "GPC (ABO)";
+    if(/^<!DOCTYPE html|^<html/i.test(t)) return "HTML";
+    const riadky=t.split(/\r?\n/).filter(Boolean).slice(0,8);
+    if(riadky.length>=2 && riadky.every(r=>(r.match(/[;,\t]/g)||[]).length>=3)) return "CSV";
+    if(/^\s*<\?xml|^\s*<[A-Za-z]/.test(t)) return "XML iného druhu";
+    return "";
+  })();
+  const banka=pdfBankaZTextu(t);
+  return "Súbor"+(n?" „"+n+"“":"")+" nie je bankový výpis, ktorý appka číta."
+    +(co ? "\n\nVyzerá to na: "+co+(banka?" ("+banka+")":"")+"." : "")
+    +"\n\nPodporovaný je výpis vo formáte SEPA XML (ISO 20022, camt.053)"
+    +" — v internet bankingu býva pri výpisoch vedľa PDF, prípadne ZIP s ním."
+    +(co==="CSV"||co==="MT940"||co==="GPC (ABO)" ? " Formát "+co+" appka zatiaľ nečíta." : "");
 }
 
 // ── ZLÚČENIE NOTIFIKÁCIÍ S VÝPISOM (kap. 49) ────────────────────────────
@@ -27305,16 +27375,19 @@ function vypisNovePohyby(existujuce, prichadzajuce){
   E.forEach(t=>{ delete t._spotrebovany; });
   return {nove, doplnene};
 }
-function importujVypisText(text, nazovSuboru, parsedVopred){
+function importujVypisText(text, nazovSuboru, parsedVopred, volby){
+  // Pri archíve s viacerými výpismi sa hlášky zbierajú (`volby.hlasky`),
+  // aby ich `importujVypisSubory` ukázal naraz; inak `alert` ako doteraz.
+  const povedz=s=>{ if(volby&&volby.hlasky) volby.hlasky.push(s); else alert(s); };
   const parsed=parsedVopred || parseVypis(String(text));
   if(!parsed){
-    alert("Súbor sa nepodarilo prečítať. Podporovaný je bankový výpis vo formáte SEPA XML (ISO 20022, camt.053).");
+    povedz(vypisFormatHlaska(text, nazovSuboru));
     return 0;
   }
   if(!parsed.txns.length){
     // Výpis bez zaúčtovaného pohybu je platný výpis (SBA: 0 položiek), nie
     // nečitateľný súbor — hláška to má povedať, inak človek hľadá chybu v súbore.
-    alert("Výpis neobsahuje žiadny zaúčtovaný pohyb"
+    povedz("Výpis neobsahuje žiadny zaúčtovaný pohyb"
       +(parsed.preskocene ? " — "+parsed.preskocene+" "+sklonPohyb(parsed.preskocene)
           +" v ňom banka vedie len ako nezaúčtované (rezervácia), zaúčtované prídu v ďalšom výpise" : "")
       +". Nič sa nepridalo.");
@@ -27435,7 +27508,7 @@ function importujVypisText(text, nazovSuboru, parsedVopred){
       + medzery.slice(0,6).map(mesiacLabel).join(", ")+(medzery.length>6?" a ďalšie":"")
       + ".\nDokým chýbajú, appka nevie o platbách z toho obdobia."
     : "";
-  alert((nove.length
+  const hlaskaImportu=((nove.length
     ? "Import hotový: pridaných "+nove.length+" pohybov"+
       (nove.length<parsed.txns.length?" ("+(parsed.txns.length-nove.length)+" už existovalo)":"")+"."+
       (sparene?"\n\nRovno sa priradilo "+sparene+" platieb podľa sumy, symbolu a partnera.":"")+
@@ -27452,6 +27525,7 @@ function importujVypisText(text, nazovSuboru, parsedVopred){
       : "")
     + chybaTxt
     + (infoCasti.length ? "\n\n"+infoCasti.join("\n") : ""));
+  povedz(hlaskaImportu);
   return nove.length;
 }
 
@@ -34321,6 +34395,22 @@ const DOKLADY_DOMENA = "tolapnal.resend.app";
 // Ponúkne sa len to, o čom sa dá tvrdiť, že je to naozaj pohyb na účte.
 // Bez tejto podmienky by každá faktúra v tele mailu („Suma: 120 EUR",
 // „Dátum: …") vyzerala ako platba — a falošný poplach je drahší než žiadny.
+// Je účet z notifikácie účtom firmy? Účty firmy = IBAN z nastavení, IBAN
+// nahratých výpisov a účty pohybov. Kým appka žiadny nepozná, nekontroluje sa
+// (nový používateľ začína notifikáciami, výpis príde neskôr). Maskovaný účet
+// („SK*5600*76001*001") porovnáva `notifIbanSedi`.
+function notifUcetFirmy(n){
+  const m=String((n&&n.mojUcet)||"").trim();
+  if(!m) return {ok:true};
+  const ucty=new Set();
+  const pridaj=x=>{ const s=String(x||"").replace(/\s/g,"").toUpperCase(); if(s) ucty.add(s); };
+  pridaj(firmaData.meta&&firmaData.meta.iban);
+  (firmaData.vypisy||[]).forEach(v=>pridaj(v.iban));
+  (firmaData.vypis||[]).forEach(t=>{ pridaj(t.ucet); pridaj(t.mojUcet); });
+  if(!ucty.size) return {ok:true};
+  for(const u of ucty) if(notifIbanSedi(m,u)||notifIbanSedi(u,m)) return {ok:true};
+  return {ok:false, dovod:"pohyb na inom účte ("+m+") — nie je to účet firmy, ktorý appka pozná"};
+}
 function notifDovera(n){
   if(!n || n.chyba || n.nieJePohyb) return null;
   if(n.banka) return "banka";                 // známa doména odosielateľa
@@ -34341,6 +34431,10 @@ function cakajuceNotifikacie(){
       if(n && n.chyba && n.banka) out.push({z, n, pohyb:null, chyba:n.chyba, uzMam:false});
       return;
     }
+    // Pohyb na INOM účte než firemnom (súkromný účet tej istej osoby) sa
+    // neponúkne — ukáže sa ako nález s dôvodom (spec 04 §4 bod 5, č. 219).
+    const ucet=notifUcetFirmy(n);
+    if(!ucet.ok){ out.push({z, n, pohyb:null, chyba:ucet.dovod, uzMam:false}); return; }
     const pohyb=notifNaPohyb(n, z.id);
     if(!pohyb) return;
     out.push({z, n, pohyb, dovera, uzMam:(firmaData.vypis||[]).some(t=>t.id===pohyb.id)});
@@ -34894,8 +34988,8 @@ async function importujCakajuciVypis(id){
     const text=await textVypisu(subor);
     if(!beh.platny()){ console.error("výpis z e-mailu: iná firma — neimportuje sa"); alert(VYPIS_INA_FIRMA); return true; }
     if(text===null) return false;                 // zrušené alebo zlé heslo
-    if(!parseVypis(String(text))) return false;   // nie je to výpis — nech to skúsi ako doklad
-    importujVypisText(text, z.subor_nazov||"výpis z e-mailu");
+    // Nie je to výpis (ani jeden v archíve) — nech to skúsi ako doklad, bez hlášky.
+    if(!importujVypisSubory(text, z.subor_nazov||"výpis z e-mailu", {tichoAkNieVypis:true})) return false;
     // Zaheslovaný archív z e-mailu sa po importe maže. Od GT si appka uchováva
     // vlastnú kópiu výpisu (`ulozOriginalVypisu`) — držať vedľa nej aj archív
     // by bola tá istá vec dvakrát. Pozor na rozdiel: naša kópia je XML, teda
