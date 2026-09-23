@@ -2117,7 +2117,7 @@ html[data-jazda] .jazdapruh{display:flex}
 
 <!-- skryté: file inputy -->
 <input type="file" id="fileInput" accept="application/json,.json,application/zip,.zip" style="display:none" onchange="importJSON(event)">
-<input type="file" id="vypisInput" accept=".xml,.zip,text/xml,application/xml,application/zip,.pdf,application/pdf" style="display:none" onchange="spracujVypis(event)">
+<input type="file" id="vypisInput" accept=".xml,.zip,text/xml,application/xml,application/zip,.pdf,application/pdf,.sta,.gpc,.cdf,.csv,.txt,text/csv,text/plain" style="display:none" onchange="spracujVypis(event)">
 <input type="file" id="ocrInput" accept="image/*,application/pdf" capture="environment" style="display:none" onchange="spracujOCR(event)">
 <input type="file" id="ocrInputFile" accept="image/*,application/pdf" style="display:none" onchange="spracujOCR(event)">
 <input type="file" id="faktPdfInput" accept="application/pdf,application/xml,text/xml,.xml,.isdoc,.zip,application/zip" multiple style="display:none" onchange="faktPdfSpracuj(event)">
@@ -2247,7 +2247,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.23-QD";  // ZIP so všetkými výpismi, hláška pomenuje cudzí formát a banku PDF, notifikácia z iného účtu sa neponúkne
+const APP_VERZIA = "2026.09.23-QF";  // Notifikácie Tatra B-mail a ČSOB Avízo; výpisy MT940 (SLSP, ČSOB), VÚB GPC/CDF, CSV Fio, Revolut, Wise, mBank
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -16333,6 +16333,7 @@ function zapisVypisDoEvidencie(text, parsed, novych, nazov){
     kedy:new Date().toISOString(), hash:textHash(text), nazov:String(nazov||"").slice(0,80),
     iban:parsed.mojIban||"", od:dni[0]||"", do:dni[dni.length-1]||"", mesiace,
     pohybov:(parsed.txns||[]).length, novych:novych, velkost:String(text||"").length,
+    format: parsed.zdrojFormat || (/^\s*\{/.test(String(text||"")) ? "pdf" : "camt.053"),
     // Počiatočný a konečný stav z výpisu. Dosiaľ sa pri PDF prečítali, overili
     // a ZAHODILI — pritom sú to jediné čísla o stave účtu, ktoré appka má
     // z nezávislého zdroja. Peňažný denník sa nemá o čo iné oprieť (kap. 85.2).
@@ -16391,9 +16392,13 @@ async function ulozOriginalVypisu(text, zaznam){
     if(!user){ zaznam.bezOriginalu="bez prihlásenia"; return; }
     const koren=beh.koren;
     if(!koren){ zaznam.bezOriginalu="nie je otvorená firma"; return; }
-    const cesta=`${koren}/vypisy/vypis_${Date.now()}.xml`;
-    const blob=new Blob([text],{type:"application/xml"});
-    const { error }=await nahrajDoUloziska(cesta, blob, {upsert:false, contentType:"application/xml"});
+    // Textový výpis (MT940, GPC, CSV…, č. 223) nie je XML — prípona a typ podľa obsahu,
+    // aby sa originál dal po stiahnutí otvoriť tým, čím ho banka vydala.
+    const jeXml=/^\s*(?:﻿)?</.test(String(text||""));
+    const cesta=`${koren}/vypisy/vypis_${Date.now()}.${jeXml?"xml":"txt"}`;
+    const typ=jeXml?"application/xml":"text/plain; charset=utf-8";
+    const blob=new Blob([text],{type:typ});
+    const { error }=await nahrajDoUloziska(cesta, blob, {upsert:false, contentType:typ});
     if(!beh.platny()){
       console.error("originál výpisu: medzitým sa otvorila iná firma — záznam sa nezapísal");
       if(!error) await dokladZmazNahraty(cesta, "originál výpisu, medzitým iná firma");
@@ -25688,6 +25693,67 @@ function notifPolia(text){
   return {polia, stitky};
 }
 
+// ── VETNÉ FORMÁTY BÁNK (dev/banky spec 04 §5.1, č. 221) ────────────────────
+// Prima píše štítok: hodnota — to číta `notifPolia`. Tatra banka (B-mail)
+// a ČSOB (Info 24 Avízo) píšu VETU („16.3.2026 12:51 bol zostatok Vasho
+// uctu … zvyseny o 350,00 EUR"), z ktorej štítkový parser nevytiahne sumu
+// ani smer. Vzory sú z verejných testov (tomaj/bank-mails-parser, 2015–2026),
+// nie z reálneho mailu — preto `overena:false` a plugin vracia len to, čo
+// vo vzore naozaj je. Riadky preposlaného mailu majú „> " — odstraňujú sa.
+function notifBezCitacie(text){ return String(text||"").replace(/^[ \t]*>[ ]?/gm,"").replace(/\u00A0/g," "); }
+const notifD2=x=>String(+x).padStart(2,"0");
+function notifTatraBmail(text){
+  const t=notifBezCitacie(text);
+  const m=t.match(/(\d{1,2})\.\s?(\d{1,2})\.\s?(\d{4})\s+(\d{1,2}):(\d{2})\s+bol zostatok Vasho uctu\s+([A-Z]{2}[0-9A-Z]+)\s+(zvyseny|znizeny)\s+o\s+([0-9 ]+(?:,\d{1,2})?)\s+([A-Z]{3})/i);
+  if(!m) return null;
+  const riadok=re=>((t.match(re)||[])[1]||"").trim();
+  const popisT=riadok(/^Popis transakcie:\s*(.*)$/mi);
+  const ref=riadok(/^Referencia platitela:\s*(.*)$/mi);
+  const info=riadok(/^Informacia pre prijemcu:\s*(.*)$/mi);
+  const uct=t.match(/^uctovny zostatok:\s*([0-9 ]+,\d{2})\s*([A-Z]{3})/mi);
+  const sym=sbaSymboly(ref); let odvodene=false;
+  // VS bez návestia: holé číslo v referencii, alebo SCOR referencia
+  // v informácii pre príjemcu „(Ref)2026017(/Ref)" (vzor tomaj).
+  if(!sym.vs){
+    const r=info.match(/\(Ref\)(\d{1,10})\(\/Ref\)/);
+    if(r){ sym.vs=r[1]; odvodene=true; }
+    else if(/^\d{1,10}$/.test(ref)){ sym.vs=ref; odvodene=true; }
+  }
+  return {banka:"tatra", smer:/zvys/i.test(m[7])?"prijem":"vydaj", suma:notifCislo(m[8]), mena:m[9].toUpperCase(),
+    datum:m[3]+"-"+notifD2(m[2])+"-"+notifD2(m[1]), cas:notifD2(m[4])+":"+m[5],
+    mojUcet:m[6].toUpperCase(), ibanProti:"", proti:"",
+    ucetProti:(popisT.match(/(\d{4}\/\d{6}-\d{2,10})/)||[])[1]||"",
+    vs:sym.vs||"", ss:sym.ss||"", ks:sym.ks||"", popis:info||popisT, typ:"",
+    zostatok: uct ? notifCislo(uct[1]) : null, zostatokPole: uct ? "uctovny zostatok" : null,
+    symbolyOdvodene:odvodene};
+}
+function notifCsobAvizo(text){
+  const t=notifBezCitacie(text);
+  // IBAN v skupinách po štyroch; za kódom banky len číslice, inak by sa
+  // k účtu prilepilo prvé štvorpísmenové slovo z názvu majiteľa („VZOR").
+  const m=t.match(/d[ňn]a (\d{1,2})\.(\d{1,2})\.(\d{4}) bola na [úu][čc]te ([A-Z]{2}\d{2}(?: ?\d{4}){4,7})\s*(.*?)\s*za[úu][čc]tovan[áa] suma/i);
+  if(!m) return null;
+  const riadok=re=>((t.match(re)||[])[1]||"").trim();
+  const s=t.match(/^suma:\s*([+-])\s*([0-9 ]+,\d{2})\s*([A-Z]{3})/mi);
+  if(!s) return null;
+  const ref=riadok(/^referencia platite[ľl]a:\s*(.*)$/mi);
+  const sym=sbaSymboly(ref);
+  const z=t.match(/Zostatok na [úu][čc]te po za[úu][čc]tovan[íi] sumy platobnej oper[áa]cie:\s*([+-])?\s*([0-9 ]+,\d{2})\s*([A-Z]{3})/i);
+  const zost=z ? notifCislo(z[2]) : null;
+  return {banka:"csob", smer:s[1]==="-"?"vydaj":"prijem", suma:notifCislo(s[2]), mena:s[3].toUpperCase(),
+    datum:m[3]+"-"+notifD2(m[2])+"-"+notifD2(m[1]), cas:"",
+    mojUcet:m[4].replace(/\s/g,"").toUpperCase(),
+    ibanProti:riadok(/^z [úu][čc]tu:\s*([A-Z]{2}[\d ]+)$/mi).replace(/\s/g,"").toUpperCase(),
+    bicProti:riadok(/^banka:\s*([A-Z0-9]{8,11})/mi), proti:riadok(/^n[áa]zov proti[úu][čc]tu:\s*(.*)$/mi),
+    ucetProti:"", vs:sym.vs||"", ss:sym.ss||"", ks:sym.ks||"", popis:riadok(/^inform[áa]cia pre pr[íi]jemcu:\s*(.*)$/mi), typ:"",
+    zostatok: zost!=null ? (z[1]==="-"?-zost:zost) : null, zostatokPole: zost!=null ? "zostatok po zauctovani" : null,
+    // Jeden mail vie niesť viac transakcií (vzor 2012: 2 debety) — tu sa
+    // číta prvá; ďalšie sa zatiaľ len spočítajú, aby to bolo vidieť.
+    dalsie: Math.max(0, (t.match(/d[ňn]a \d{1,2}\.\d{1,2}\.\d{4} bola na [úu][čc]te/gi)||[]).length-1),
+    symbolyOdvodene:false};
+}
+function notifPlugin(text){ return notifTatraBmail(text) || notifCsobAvizo(text); }
+
 // Rozoberie notifikáciu. Vracia buď údaje o pohybe, alebo `{chyba:"…"}` —
 // nikdy nevyhadzuje a nikdy nevracia prázdno bez dôvodu: mail, ktorý sa
 // nepodarilo prečítať, musí byť vidieť aj s tým, čo mu chýbalo.
@@ -25697,6 +25763,20 @@ function parseNotifikaciu(telo, odKoho, predmet){
 
   const odosielatel=notifOdosielatel(text, odKoho);
   const banka=notifBanka(odosielatel, text);
+  // Vetný formát banky má prednosť pred štítkami. Formát a odosielateľ sa
+  // musia ZHODOVAŤ: text v tvare B-mailu z cudzej domény je typický podvrh
+  // („overte účet do 24 hodín") — taký mail sa neponúkne, ale ukáže sa
+  // s dôvodom, nie ticho zahodí (spec 04 §4 bod 9).
+  const plug=notifPlugin(text);
+  if(plug){
+    const bankaPluginu=NOTIF_BANKY.find(b=>b.id===plug.banka)||null;
+    if(!banka || banka.id!==plug.banka)
+      return {chyba:"vyzerá ako notifikácia "+(bankaPluginu?bankaPluginu.nazov:plug.banka)
+        +", ale odosielateľ "+(odosielatel||"?")+" nie je jej doména — možný podvrh, pohyb sa neponúka",
+        banka:bankaPluginu, odosielatel, podvrh:true};
+    if(!(plug.suma>0)) return {chyba:"nenašla sa suma", banka, odosielatel};
+    return Object.assign({banka, odosielatel}, plug, {suma:r2(plug.suma), zostatok:plug.zostatok!=null?r2(plug.zostatok):null});
+  }
   const {polia, stitky}=notifPolia(text);
   const daj=(kluc)=>polia[kluc]||"";
 
@@ -25776,6 +25856,11 @@ function notifNaPohyb(n, emailId){
     zdroj:"mail", zostatok:n.zostatok, zostatokPole:n.zostatokPole||"",
     mojUcet:n.mojUcet||"", banka:(n.banka&&n.banka.id)||"",
     emailId:String(emailId||""),
+    // ŠS a KS sa dosiaľ zahadzovali; mena len keď nie je EUR (B-mail vie
+    // hlásiť pohyb v USD na EUR účte — suma sa potom nesmie sčítať s EUR).
+    ...(n.ss ? {ss:String(n.ss)} : {}), ...(n.ks ? {ks:String(n.ks)} : {}),
+    ...(n.mena && n.mena!=="EUR" ? {mena:n.mena} : {}),
+    ...(n.ucetProti ? {ucetProti:n.ucetProti} : {}),
   };
 }
 
@@ -25789,7 +25874,9 @@ function notifNaPohyb(n, emailId){
 // pohyb so zostatkom, z ktorého tento mohol vzniknúť.
 function notifRetaz(pohyby){
   const M=(pohyby || (typeof firmaData==="object" && firmaData && firmaData.vypis) || [])
-    .filter(t=>t && t.zdroj==="mail" && t.zostatok!=null && !t.skryty)
+    // Pohyb v cudzej mene do reťaze EUR zostatkov nepatrí — zostatok je
+    // v mene účtu, suma v mene transakcie, a ich rozdiel by bol falošná diera.
+    .filter(t=>t && t.zdroj==="mail" && t.zostatok!=null && !t.skryty && !(t.mena && t.mena!=="EUR"))
     .slice().sort((a,b)=>String(a.datum||"").localeCompare(String(b.datum||"")));
   const out={useky:[], diery:[], mesiace:[]};
   if(!M.length) return out;
@@ -26370,6 +26457,9 @@ function vypisPolozkaTx(tx, n, smer, mojIban, kod){
           ksE2E:symE2E.ks||"", addtlTx, addtlNtry};
 }
 function parseVypis(xmlText){
+  // Textové formáty (MT940, GPC, CDF, CSV) nezačínajú znakom „<" — idú vlastným
+  // dispečerom a vracajú ten istý tvar. XML iného druhu (UBL) dá null nižšie.
+  if(!/^\s*(?:﻿)?</.test(String(xmlText||""))) return parseVypisText(xmlText);
   let doc;
   try{ doc=new DOMParser().parseFromString(xmlText,"text/xml"); }catch(_){ return null; }
   if(!doc || (doc.getElementsByTagName && doc.getElementsByTagName("parsererror").length)) return null;
@@ -26521,6 +26611,377 @@ function parseVypisStmt(stmt, odIndexu){
   const kr=sumBlok("TtlCdtNtries"), de=sumBlok("TtlDbtNtries");
   return {mojIban, txns, preskocene, pocetNtry:ntrys.length, kontrola:{ zaciatok, koniec, zaciatokDatum, koniecDatum,
     prijem:kr.suma, vydaj:de.suma, pocetPrijem:kr.pocet, pocetVydaj:de.pocet }};
+}
+
+// ══ TEXTOVÉ FORMÁTY VÝPISOV: MT940, GPC, CDF, CSV (dev/banky spec 03, č. 223) ══
+// Banky bez camt.053 v rukách živnostníka: VÚB dáva GPC/CDF, SLSP a ČSOB
+// MT940, Fio CSV z API, Revolut a Wise CSV, mBank CSV. Každý parser vracia
+// ten istý tvar ako camt.053 ({mojIban, txns, kontrola, …}) a ide cez jediný
+// lievik `importujVypisText`. Pravidlá sú z verejných dokumentov bánk a
+// vzoriek balíka (`dev/banky/fixtures/synteticke/ne_xml`), nie z reálnych
+// súborov — mBank je odhad (2017), preto `varovania`. Sumy sa počítajú
+// v centoch; kategória z textu (spec 02 §4.3 bod 7).
+function sumaSk(s){
+  let t=String(s==null?"":s).replace(/[   ]/g,"").replace(/[A-Z]{3}$/i,"");
+  if(t.includes(",") && t.includes(".")) t=t.replace(/\./g,"").replace(",",".");
+  else t=t.replace(",",".");
+  const v=parseFloat(t);
+  return isFinite(v) ? v : null;
+}
+const centy=v=>Math.round((+v||0)*100);
+function datumDmy(s, odd){
+  const c=String(s||"").trim().split(odd||".");
+  if(c.length<3) return "";
+  let [d,m,y]=c; y=y.slice(0,4); if(y.length===2) y="20"+y;
+  if(!(+m>=1&&+m<=12&&+d>=1&&+d<=31)) return "";
+  return y+"-"+String(+m).padStart(2,"0")+"-"+String(+d).padStart(2,"0");
+}
+// Kategória z textu (spec 02 §4.3 bod 7); null = nič nesedí.
+function textKategoria(text, cr){
+  const t=normTxt(text);
+  if(/transakcn\w* dan/.test(t)) return "transakcna_dan";
+  if(/kartou|card|pos nakup/.test(t)) return cr?"refund":"platba_kartou";
+  if(/bankomat|\batm\b|vyber hotovost/.test(t)) return "vyber_hotovosti";
+  if(/vklad/.test(t)) return "vklad";
+  if(/dan z urok/.test(t)) return "dan_z_uroku";
+  if(/urok/.test(t)) return cr?"urok_kreditny":"urok_debetny";
+  if(/poplat|charges|\bfee\b/.test(t)) return "poplatok_banky";
+  if(/inkaso|direct debit/.test(t)) return "inkaso_sepa";
+  return null;
+}
+function katTxt(text, cr, prevod){
+  const k=textKategoria(text, cr);
+  if(k) return k;
+  if(prevod==null) prevod=/platb|prevod|prijem|payment|transfer|received money|sent money|prichadzajuca|odchadzajuca/.test(normTxt(text));
+  return prevod ? (cr?"prijata_platba":"odoslana_platba") : "ine";
+}
+// Riadky CSV (RFC 4180: úvodzovky, zdvojená úvodzovka, zalomenie v úvodzovkách).
+function csvRiadky(text, odd){
+  const out=[]; let r=[], b="", vU=false;
+  const t=String(text||"");
+  for(let i=0;i<t.length;i++){
+    const ch=t[i];
+    if(vU){ if(ch==='"'){ if(t[i+1]==='"'){ b+='"'; i++; } else vU=false; } else b+=ch; }
+    else if(ch==='"') vU=true;
+    else if(ch===odd){ r.push(b); b=""; }
+    else if(ch==="\n"||ch==="\r"){ if(ch==="\r"&&t[i+1]==="\n") i++; r.push(b); out.push(r); r=[]; b=""; }
+    else b+=ch;
+  }
+  if(b!==""||r.length){ r.push(b); out.push(r); }
+  return out.filter(x=>x.length>1 || (x.length===1 && x[0].trim()!==""));
+}
+function csvObjekty(riadky){
+  const hl=riadky[0].map(h=>String(h||"").trim());
+  return riadky.slice(1).map(r=>{ const o={}; hl.forEach((h,i)=>{ o[h]=(r[i]==null?"":String(r[i])).trim(); }); return o; });
+}
+// Jeden pohyb v tvare appky z údajov textového formátu.
+function textPohyb(o){
+  const cr=o.suma>=0;
+  const t={ id:"", datum:o.datum||"", suma:r2(Math.abs(o.suma||0)), smer:cr?"prijem":"vydaj",
+    proti:o.proti||"", ibanProti:String(o.ibanProti||"").replace(/\s/g,"").toUpperCase(), vs:o.vs||"", popis:o.popis||"",
+    mesiac:String(o.datum||"").slice(0,7), ss:o.ss||"", ks:o.ks||"", ucet:o.ucet||"", typ:o.typ||"", kategoria:o.kategoria||"ine" };
+  if(o.valuta) t.valuta=o.valuta;
+  if(o.ref) t.ref=o.ref;
+  if(o.storno) t.storno=1;
+  if(o.mena && o.mena!=="EUR") t.mena=o.mena;
+  if(o.poplatok) t.poplatokInfo=r2(o.poplatok);
+  if(o.karta) t.karta=o.karta;
+  if(o.ucetProti) t.ucetProti=o.ucetProti;
+  if(o.bicProti) t.bicProti=o.bicProti;
+  if(o.e2e) t.e2e=o.e2e;
+  // Id: stabilné id banky, keď ho formát má (Fio, Wise), inak odtlačok (spec 03 §2.10).
+  t.id = o.idBanky ? "csv:"+t.ucet+":"+o.idBanky
+       : "csv:"+t.ucet+":"+t.datum+":"+(cr?"p":"v")+centy(t.suma)+":"+hashKratky([t.ibanProti,t.vs,t.popis,o.zostatok==null?"":o.zostatok,t.ref||""].join("|"));
+  return t;
+}
+function textVypis(banka, format, ucet, txns, o){
+  const dny=txns.map(x=>x.datum).filter(Boolean).sort();
+  return { mojIban:ucet||"", txns, banka, zdrojFormat:format, varovania:o.varovania||[], preskocene:o.preskocene||0,
+    kontrola:{ zaciatok:o.zaciatok==null?null:r2(o.zaciatok), koniec:o.koniec==null?null:r2(o.koniec),
+      zaciatokDatum:o.od||dny[0]||null, koniecDatum:o.do||dny[dny.length-1]||null,
+      prijem:null, vydaj:null, pocetPrijem:null, pocetVydaj:null } };
+}
+// ── Fio banka: CSV z API (blok účtu, prázdny riadok, hlavička s „ID pohybu") ──
+function vypisFioCsv(text){
+  const riadky=String(text).split(/\r?\n/);
+  const info={}; let i=0;
+  for(;i<riadky.length && riadky[i].trim();i++){ const p=riadky[i].indexOf(";"); if(p>0) info[riadky[i].slice(0,p).trim()]=riadky[i].slice(p+1).trim(); }
+  while(i<riadky.length && !riadky[i].trim()) i++;
+  const tab=csvRiadky(riadky.slice(i).join("\n"), ";");
+  if(!tab.length) return null;
+  const hl=tab[0].map(h=>h.trim());
+  const idx=(...mena)=>{ for(const m of mena){ const k=hl.indexOf(m); if(k>=0) return k; } return -1; };
+  const C={ id:idx("ID pohybu"), datum:idx("Datum","Dátum"), objem:idx("Objem","Suma"), mena:idx("Měna","Mena"),
+    proti:idx("Protiúčet","Protiúčet"), nazov:idx("Název protiúčtu","Názov protiúčtu"), banka:idx("Kód banky"), ks:idx("KS"), vs:idx("VS"), ss:idx("SS"),
+    uziv:idx("Uživatelská identifikace","Užívateľská identifikácia"), sprava:idx("Zpráva pro příjemce","Správa pre príjemcu"),
+    typ:idx("Typ"), upres:idx("Upřesnění","Upresnenie"), bic:idx("BIC") };
+  if(C.datum<0||C.objem<0) return null;
+  const ucet=String(info.iban||"").replace(/\s/g,"").toUpperCase();
+  const txns=[];
+  tab.slice(1).forEach(r=>{
+    if(!r[0]||!String(r[0]).trim()) return;
+    const g=k=>C[k]>=0 && r[C[k]]!=null && String(r[C[k]]).trim() ? String(r[C[k]]).trim() : "";
+    const a=sumaSk(g("objem")); if(a==null) return;
+    const cr=a>=0, typ=g("typ"), acc=g("proti");
+    const kat=katTxt(typ, cr);
+    let karta=null;
+    if((kat==="platba_kartou"||kat==="refund") && /kartou/.test(normTxt(typ))){
+      const m=g("uziv").match(/N[áa]kup: (.*?), dne/); const m2=g("upres").match(/^([\d ,.]+) ([A-Z]{3})$/);
+      karta={obchodnik:m?m[1]:"", povodnaSuma:m2?sumaSk(m2[1]):null, povodnaMena:m2?m2[2]:""};
+    }
+    txns.push(textPohyb({ datum:datumDmy(g("datum")), suma:a, mena:g("mena"), proti:g("nazov")||(karta&&karta.obchodnik)||"",
+      ibanProti:/^[A-Z]{2}\d{2}/.test(acc)?acc:"", ucetProti:acc ? (g("banka")?acc+"/"+g("banka"):acc) : "", bicProti:g("bic"),
+      vs:g("vs"), ss:g("ss"), ks:g("ks"), popis:g("sprava")||g("uziv")||typ, idBanky:g("id"), ref:g("id"), typ, kategoria:kat, karta, ucet }));
+  });
+  return textVypis("fio", "fio-csv", ucet, txns, { zaciatok:sumaSk(info.openingBalance), koniec:sumaSk(info.closingBalance),
+    od:datumDmy(info.dateStart), do:datumDmy(info.dateEnd) });
+}
+// ── Revolut, osobný účet: CSV (Type,Product,Started Date,…) ──
+function vypisRevolutCsv(text){
+  const rows=csvObjekty(csvRiadky(text, ","));
+  const skupiny={};
+  rows.forEach(r=>{ const k=(r.Product||"")+"|"+(r.Currency||""); (skupiny[k]=skupiny[k]||[]).push(r); });
+  const kluce=Object.keys(skupiny); if(!kluce.length) return null;
+  const vsetky=[]; const varovania=[]; let preskocene=0; let prvy=null; const ucty=[];
+  kluce.forEach(k=>{
+    const [prod,cur]=k.split("|"); const ucet="revolut:"+prod+":"+cur; ucty.push(ucet);
+    const retaz=[]; const txns=[];
+    skupiny[k].forEach(r=>{
+      const a=parseFloat(r.Amount)||0, fee=parseFloat(r.Fee||"0")||0, net=r2(a-fee);
+      const typ=r.Type||"", desc=r.Description||"", cr=net>=0;
+      const datum=(r["Completed Date"]||r["Started Date"]||"").slice(0,10);
+      if((r.State||"COMPLETED")!=="COMPLETED"){ preskocene++; varovania.push("Riadok so stavom "+r.State+" sa neimportuje ("+datum+")"); return; }
+      const kat={CARD_PAYMENT:"platba_kartou",CARD_REFUND:"refund",ATM:"vyber_hotovosti",FEE:"poplatok_banky",EXCHANGE:"ine",TOPUP:"prijata_platba"}[typ]
+        || (typ==="TRANSFER" ? katTxt(typ, cr, true) : "ine");
+      txns.push(textPohyb({ datum, valuta:(r["Started Date"]||"").slice(0,10), suma:net, mena:cur,
+        proti:/^(TRANSFER|CARD_PAYMENT|CARD_REFUND)$/.test(typ) ? desc.replace(/^(To|From) /,"") : "",
+        popis:desc, typ, kategoria:kat, poplatok:fee, karta:typ.startsWith("CARD")?{obchodnik:desc}:null, ucet, zostatok:r.Balance }));
+      retaz.push([net, parseFloat(r.Balance)]);
+    });
+    const ok=retaz.every((x,i)=>i===0 || centy(x[1])===centy(retaz[i-1][1])+centy(x[0]));
+    const P=textVypis("revolut", "revolut-csv", ucet, txns, { zaciatok: retaz.length?r2(retaz[0][1]-retaz[0][0]):null, koniec: retaz.length?retaz[retaz.length-1][1]:null });
+    if(!ok) P.varovania.push("Reťaz zostatkov (Balance) nesedí — poradie riadkov alebo poplatky");
+    if(!prvy) prvy=P; else prvy.txns=prvy.txns.concat(txns);
+  });
+  prvy.varovania=prvy.varovania.concat(varovania); prvy.preskocene=preskocene;
+  if(ucty.length>1) prvy.ucty=ucty;
+  return prvy;
+}
+// ── Wise: „Statement" CSV s Running Balance (od najnovšieho) ──
+function vypisWiseCsv(text){
+  let rows=csvObjekty(csvRiadky(text, ","));
+  if(!rows.length) return null;
+  const cur=rows[0].Currency||"", ucet="wise:"+cur, varovania=[];
+  const retazOk=seq=>seq.every((r,i)=>i===0 || centy(r["Running Balance"])===centy(seq[i-1]["Running Balance"])+centy(r.Amount));
+  if(!retazOk(rows) && retazOk(rows.slice().reverse())){ rows=rows.slice().reverse(); varovania.push("Súbor je zoradený od najnovšieho – reťaz Running Balance overená v opačnom poradí"); }
+  if(!retazOk(rows)) varovania.push("Reťaz zostatkov (Running Balance) nesedí");
+  const txns=rows.map(r=>{
+    const a=parseFloat(r.Amount)||0, cr=a>=0, desc=r.Description||"";
+    const sym=sbaSymboly(r["Payment Reference"]||"");
+    let kat;
+    if(r.Merchant) kat=cr?"refund":"platba_kartou";
+    else if(/^(Wise|TransferWise) Charges/.test(desc)) kat="poplatok_banky";
+    else if(/^Converted/.test(desc) || r["Transaction Type"]==="NEUTRAL") kat="ine";
+    else kat=katTxt(desc, cr);
+    const karta=r.Merchant ? {obchodnik:r.Merchant, povodnaSuma:r["Exchange To Amount"]?parseFloat(r["Exchange To Amount"]):null, povodnaMena:r["Exchange To"]||"", pan4:r["Card Last Four Digits"]||"", drzitel:r["Card Holder Full Name"]||""} : null;
+    const ibanP=(r["Payee Account Number"]||"").replace(/\s/g,"");
+    return textPohyb({ datum:datumDmy(r.Date,"-"), suma:a, mena:r.Currency, proti:r["Payer Name"]||r["Payee Name"]||(karta&&karta.obchodnik)||"",
+      ibanProti:/^[A-Z]{2}\d{2}/.test(ibanP)?ibanP:"", vs:sym.vs, ss:sym.ss, ks:sym.ks, e2e:r["Payment Reference"]||"", popis:desc,
+      // Jedno ID Wise nesie prevod aj jeho poplatok — do id ide ešte suma a čas.
+      ref:r["TransferWise ID"], idBanky:(r["TransferWise ID"]||"")+":"+hashKratky(r.Amount+"|"+(r["Date Time"]||r.Date)),
+      typ:(r["Transaction Type"]||"")+(r["Transaction Details Type"]?"/"+r["Transaction Details Type"]:""), kategoria:kat, karta, ucet });
+  });
+  const prvy=rows[0], posl=rows[rows.length-1];
+  return textVypis("wise", "wise-csv", ucet, txns, { zaciatok:r2(parseFloat(prvy["Running Balance"])-parseFloat(prvy.Amount)), koniec:parseFloat(posl["Running Balance"]), varovania });
+}
+// ── VÚB CDF: bez hlavičky, 12 polí, suma so znamienkom v úvodzovkách, bez zostatkov ──
+function vypisCdf(text){
+  const rows=csvRiadky(String(text).replace(/\n\r/g,"\n"), ",");
+  if(!rows.length) return null;
+  let ucet="", mena="";
+  const txns=[];
+  rows.forEach(r=>{
+    if(r.length<7) return;
+    const a=sumaSk(r[5]); if(a==null) return;
+    const cr=a>=0, acc=r[3]||"", bank=r[4]||"";
+    const kat=katTxt(r[2], cr, acc?true:null);
+    mena=r[6]||mena; ucet=r[1]||ucet;
+    txns.push(textPohyb({ datum:datumDmy(r[0]), suma:a, mena:r[6], ucetProti:acc?(bank?acc+"/"+bank:acc):"", vs:r[7]||"", ks:r[8]||"", ss:r[9]||"",
+      popis:r[2], ref:r[11]||"", typ:"", kategoria:kat, karta:(kat==="platba_kartou"||kat==="refund")?{obchodnik:""}:null, ucet:r[1] }));
+  });
+  if(!txns.length) return null;
+  return textVypis("vub", "vub-cdf", ucet, txns, { varovania:["CDF neobsahuje zostatky – kontrola nie je možná"] });
+}
+// ── VÚB GPC (ABO): vety 074/075 po 128 znakov, sumy v centoch, transformované čísla účtov ──
+function gpcUcetSpat(t){ return t.slice(10,15)+t[15]+t.slice(4,9)+t[3]+t[9]+t[1]+t[2]+t[0]; }
+function gpcUcetTvar(a16){ const pre=a16.slice(0,6), cis=a16.slice(6); return /[1-9]/.test(pre) ? pre.replace(/^0+/,"")+"-"+cis.replace(/^0+/,"") : cis.replace(/^0+/,""); }
+function vypisGpc(text){
+  const varovania=[]; let ucet="", mena="", zaciatok=null, koniec=null, od="", do_="";
+  const txns=[];
+  String(text).split(/\r?\n/).forEach(line=>{
+    if(!line.trim()) return;
+    if(line.length!==128) varovania.push("Riadok nemá 128 znakov ("+line.length+")");
+    const ddmmyy=s=>datumDmy(s.slice(0,2)+"."+s.slice(2,4)+"."+s.slice(4,6));
+    if(line.startsWith("074")){
+      ucet=gpcUcetTvar(gpcUcetSpat(line.slice(3,19)));
+      zaciatok=(parseInt(line.slice(45,59),10)/100)*(line[59]==="-"?-1:1);
+      koniec=(parseInt(line.slice(60,74),10)/100)*(line[74]==="-"?-1:1);
+      mena=line.slice(114,117); od=ddmmyy(line.slice(39,45)); do_=ddmmyy(line.slice(108,114));
+    } else if(line.startsWith("075")){
+      const cp=line.slice(19,35), cpUn=/[1-9]/.test(cp)?gpcUcetSpat(cp):"";
+      const a=parseInt(line.slice(48,60),10)/100, cr=line[60]==="2";
+      const vs=line.slice(61,71).replace(/^0+/,""), ksRaw=line.slice(71,81), ss=line.slice(81,91).replace(/^0+/,"");
+      const ks=/[1-9]/.test(ksRaw)?ksRaw.slice(-4):"";
+      const dop=line.slice(97,117); const bank=/^\d{4}$/.test(dop.slice(0,4))&&cpUn ? dop.slice(0,4) : "";
+      const desc=(bank?dop.slice(4):dop).trim();
+      const kat=katTxt(desc, cr, cpUn?true:null);
+      txns.push(textPohyb({ datum:ddmmyy(line.slice(91,97)), valuta:ddmmyy(line.slice(122,128)), suma:cr?a:-a, mena,
+        ucetProti:cpUn ? (bank?gpcUcetTvar(cpUn)+"/"+bank:gpcUcetTvar(cpUn)) : "", vs, ks, ss, popis:desc,
+        ref:line.slice(35,48).replace(/^0+/,""), typ:"", kategoria:kat, karta:(kat==="platba_kartou"||kat==="refund")?{obchodnik:""}:null, ucet }));
+    }
+  });
+  if(!txns.length && zaciatok==null) return null;
+  return textVypis("vub", "vub-gpc", ucet, txns, { zaciatok, koniec, od, do:do_, varovania });
+}
+// ── mBank SK: CSV s preambulou „#…" (odhad z pluginu 2017 — vzorka nutná) ──
+function vypisMbankCsv(text){
+  const rows=csvRiadky(text, ";");
+  let ucet="", mena="", zaciatok=null, koniec=null, od="", do_="", posl="";
+  const txns=[]; const retaz=[];
+  rows.forEach(r=>{
+    const c0=String(r[0]||"").trim();
+    if(/^#Mena/.test(posl)) mena=c0;
+    if(/^#..slo ..tu/.test(posl)) ucet=c0.replace(/[ ']/g,"");
+    if(/^#Za obdobie/.test(posl)){ od=datumDmy(r[0]); do_=datumDmy(r[1]); }
+    if(r.length>7 && /^#Po.iato.n. zostatok/.test(r[6]||"")) zaciatok=sumaSk(r[7]);
+    if(r.length>7 && /^#Kone.n. zostatok/.test(r[6]||"")) koniec=sumaSk(r[7]);
+    posl=c0;
+    if(r.length>10 && /^\d{2}-\d{2}-\d{4}$/.test(c0) && /^\d{2}-\d{2}-\d{4}$/.test(String(r[1]).trim())){
+      const a=sumaSk(r[9]); if(a==null) return;
+      const cr=a>=0, typ=String(r[2]).trim(), memo=String(r[3]).trim();
+      let karta=null, proti=String(r[4]).trim(), kat;
+      if(typ==="PLATBA KARTOU"){ karta={obchodnik:memo.split("/")[0].trim()}; proti=karta.obchodnik; kat=cr?"refund":"platba_kartou"; }
+      else if(/^VÝBER V BANKOMATE/.test(typ)){ kat="vyber_hotovosti"; karta={obchodnik:memo.split("/")[0].trim()}; proti=karta.obchodnik; }
+      else if(typ==="INKASO") kat="inkaso_sepa";
+      else kat=katTxt(typ, cr);
+      const md=memo.match(/DÁTUM VYKONANIA TRANSAKCIE: (\d+)-(\d+)-(\d+)/);
+      const acc=String(r[5]||"").replace(/[ ']/g,"");
+      txns.push(textPohyb({ datum:datumDmy(r[1],"-"), valuta: md ? datumDmy(md[1]+"-"+md[2]+"-"+md[3],"-") : datumDmy(r[0],"-"), suma:a, mena,
+        proti, ibanProti:/^[A-Z]{2}\d{2}/.test(acc)?acc:"", ks:String(r[6]||"").trim(), vs:String(r[7]||"").trim(), ss:String(r[8]||"").trim(),
+        popis:memo, typ, kategoria:kat, karta, ucet, zostatok:r[10] }));
+      if(String(r[10]||"").trim()) retaz.push([a, sumaSk(r[10])]);
+    }
+  });
+  if(!txns.length) return null;
+  const varovania=["mBank CSV: rozloženie stĺpcov je odhad z roku 2017 — skontrolujte sumy a dátumy"];
+  if(retaz.length && !retaz.every((x,i)=>i===0 || centy(x[1])===centy(retaz[i-1][1])+centy(x[0]))) varovania.push("Reťaz účtovných zostatkov nesedí");
+  return textVypis("mbank", "mbank-csv", ucet, txns, { zaciatok, koniec, od, do:do_, varovania });
+}
+// ── MT940: SLSP (holý .STA, podpolia ?NN na riadkoch) a ČSOB (SWIFT obálka {1:…{4:) ──
+function mt940Polia(txt){
+  const out=[];
+  String(txt).split(/\r?\n/).forEach(line=>{
+    const m=line.match(/^:(\d{2}[A-Z]?):(.*)$/);
+    if(m) out.push([m[1], m[2]]);
+    else if(out.length && !line.startsWith("-") && !line.startsWith("{")) out[out.length-1][1]+="\n"+line;
+  });
+  return out;
+}
+function mt940Sub86(s){
+  const flat=String(s).replace(/[\r\n]/g,"");
+  const kod=(flat.match(/^(\d{3})/)||[])[1]||"";
+  const sub={}; flat.replace(/\?(\d{2})([^?]*)/g,(m,k,v)=>{ sub[k]=v; return m; });
+  return {kod, sub};
+}
+const mt940Suma=s=>{ const t=String(s).endsWith(",")?String(s).slice(0,-1):String(s).replace(",","."); return parseFloat(t)||0; };
+const mt940Datum=s=>datumDmy(s.slice(4,6)+"."+s.slice(2,4)+"."+s.slice(0,2));
+function vypisMt940(text){
+  const txt=String(text);
+  const csob=/^\s*\{1:/.test(txt) || /CEKOSKBX/.test(txt.slice(0,200));
+  const banka=csob?"csob":"slsp";
+  const polia=mt940Polia(txt);
+  let ucet="", mena="", zaciatok=null, koniec=null, od="", do_="", cislo="";
+  const txns=[]; let cakajuci=null;
+  const cist=(sub,k)=>{ const v=String(sub[k]||"").trim(); return (v===""||v===".")?"":v; };
+  polia.forEach(([tag,val])=>{
+    if(tag==="25") ucet=val.trim().replace(/\s/g,"").toUpperCase();
+    else if(tag==="28C") cislo=val.trim();
+    else if(tag==="60F"||tag==="60M"){ const m=val.trim().match(/^([CD])(\d{6})([A-Z]{3})([\d,]+)/); if(m){ mena=m[3]; zaciatok=mt940Suma(m[4])*(m[1]==="C"?1:-1); od=mt940Datum(m[2]); } }
+    else if(tag==="61"){
+      const prvy=val.split("\n")[0];
+      const m=prvy.match(/^(\d{6})(\d{4})?(RC|RD|C|D)([A-Z])?([\d,]+)([NFS][A-Z0-9]{3})(.*)$/);
+      if(!m) return;
+      const valuta=mt940Datum(m[1]);
+      const datum=m[2] ? datumDmy(m[2].slice(2,4)+"."+m[2].slice(0,2)+"."+m[1].slice(0,2)) : valuta;
+      const kredit=m[3]==="C"||m[3]==="RD";
+      const a=mt940Suma(m[5]);
+      const ref=m[7]||""; const bankRef=ref.includes("//")?ref.split("//")[1]:""; const custRef=ref.split("//")[0];
+      cakajuci={ datum, valuta, suma:kredit?a:-a, mena, storno:m[3]==="RC"||m[3]==="RD", typ:m[6], ref:bankRef||(custRef&&custRef!=="NONREF"?custRef:""),
+        proti:"", ibanProti:"", bicProti:"", ucetProti:"", vs:"", ss:"", ks:"", e2e:"", popis:"", kategoria:"" };
+      txns.push(cakajuci);
+    }
+    else if(tag==="86" && cakajuci){
+      const {kod, sub}=mt940Sub86(val); const p=cakajuci; cakajuci=null;
+      const c=k=>cist(sub,k);
+      p.typ=kod+(p.typ?"/"+p.typ:"");
+      const cr=p.suma>=0, crk=p.storno?!cr:cr, prevod=crk?"prijata_platba":"odoslana_platba";
+      const cisl=s=>s.replace(/\D/g,"");
+      if(banka==="slsp"){
+        if(kod==="020"||kod==="021"||kod==="040"){
+          const ks=cisl(c("20")), vs=cisl(c("21")), ss=cisl(c("22"));
+          p.ks=ks?ks.padStart(4,"0"):""; p.vs=vs; p.ss=ss;
+          p.proti=[c("32"),c("33")].filter(Boolean).join(" "); p.ibanProti=c("38"); p.ucetProti=c("27"); p.e2e=c("29");
+          p.popis=[c("23"),c("24"),c("25"),c("26")].filter(Boolean).join(" ")||c("00");
+          p.kategoria = p.ks==="0898" ? "poplatok_banky" : p.ks==="0960" ? "transakcna_dan" : ({"020":prevod,"021":"inkaso_sepa","040":"refund"})[kod];
+        } else if(kod==="030"){
+          p.proti=[c("32"),c("33")].filter(Boolean).join(" "); p.ucetProti=c("31");
+          p.bicProti=((c("30")).match(/([A-Z]{6}[A-Z0-9]{2}(?:[A-Z0-9]{3})?)$/)||[])[1]||"";
+          p.popis=[c("23"),c("24"),c("25"),c("26")].filter(Boolean).join(" ")||c("00"); p.kategoria=prevod;
+        }
+      } else {
+        if(kod==="115"||kod==="105"){
+          const casti=(kod==="115"?["21","22"]:["60","61"]).map(k=>sub[k]).filter(x=>x&&x.trim()!==".");
+          const e2e=casti.join("").trim(); const sym=sbaSymboly(e2e);
+          p.vs=sym.vs; p.ss=sym.ss; p.ks=sym.ks; p.e2e=e2e; p.proti=c("23"); p.ibanProti=c("30"); p.bicProti=c("32"); p.ucetProti=c("20");
+          p.popis=[c("24"),c("25"),c("26"),c("27"),c("28")].filter(Boolean).join("");
+          p.kategoria = kod==="115" ? prevod : "inkaso_sepa";
+          const typ00=c("00");
+          if(/^SEPA (RETURN|REJECT|RECALL)$/.test(typ00)){ p.povodnaKategoria=p.kategoria; p.kategoria="refund"; }
+        } else if(kod==="040"||kod==="111"){
+          const vs=cisl(kod==="040"?c("20"):c("21")), ss=cisl(kod==="040"?c("25"):c("22")), ks=cisl(kod==="040"?c("26"):c("23"));
+          p.vs=vs; p.ss=ss; p.ks=ks?ks.padStart(4,"0"):""; p.popis=c("00"); p.kategoria=katTxt(c("00"), crk, kod==="111"?true:null);
+        } else if(kod==="030"){
+          p.proti=c("20"); p.bicProti=c("30"); p.ucetProti=c("31"); p.popis=[c("22"),c("23")].filter(Boolean).join(" "); p.kategoria=prevod;
+        }
+      }
+      if(!p.kategoria) p.kategoria="ine";
+    }
+    else if(tag==="62F"||tag==="62M"){ const m=val.trim().split("\n")[0].match(/^([CD])(\d{6})([A-Z]{3})([\d,]+)/); if(m){ koniec=mt940Suma(m[4])*(m[1]==="C"?1:-1); do_=mt940Datum(m[2]); } cakajuci=null; }
+  });
+  if(!ucet && zaciatok==null) return null;
+  const hotove=txns.map(p=>textPohyb(Object.assign({ucet}, p, {kategoria:p.kategoria||"ine"})));
+  hotove.forEach((t,i)=>{ if(txns[i].povodnaKategoria) t.povodnaKategoria=txns[i].povodnaKategoria; });
+  return textVypis(banka, "mt940-"+banka, ucet, hotove, { zaciatok, koniec, od, do:do_, varovania:[] });
+}
+// Dispečer textových formátov (podľa obsahu, nie prípony). `null` = nie je výpis.
+function parseVypisText(text){
+  const t=String(text||"").replace(/^﻿/,"");
+  const hlava=t.slice(0,4096).replace(/^\s+/,"");
+  let P=null;
+  try{
+    if(/^accountId;/.test(hlava)) P=vypisFioCsv(t);
+    else if(/^Type,Product,Started Date/.test(hlava)) P=vypisRevolutCsv(t);
+    else if(/^"?TransferWise ID"?,/.test(hlava)) P=vypisWiseCsv(t);
+    else if(/^074/.test(hlava) && hlava.split(/\r?\n/)[0].length===128) P=vypisGpc(t);
+    else if(/^\{1:/.test(hlava) || /^:20:/.test(hlava)) P=vypisMt940(t);
+    else if(/^#/.test(hlava) && /;/.test(hlava.split(/\r?\n/)[0])) P=vypisMbankCsv(t);
+    else if(/^\d{2}\.\d{2}\.\d{2,4},\d{6}-\d{10},/.test(hlava)) P=vypisCdf(t);
+  }catch(e){ console.error("výpis (textový formát):", e); return null; }
+  if(!P) return null;
+  // Zrážka id v jednom súbore → #2 (ako pri camt.053).
+  const videne={};
+  P.txns.forEach(x=>{ const n=(videne[x.id]||0)+1; videne[x.id]=n; if(n>1) x.id+="#"+n; });
+  return P;
 }
 
 // Náklady, ktoré banka vo výpise sama pomenuje kategóriou (kód SBA, KS,
@@ -27023,7 +27484,8 @@ function vypisFormatHlaska(text, nazov){
     +(co ? "\n\nVyzerá to na: "+co+(banka?" ("+banka+")":"")+"." : "")
     +"\n\nPodporovaný je výpis vo formáte SEPA XML (ISO 20022, camt.053)"
     +" — v internet bankingu býva pri výpisoch vedľa PDF, prípadne ZIP s ním."
-    +(co==="CSV"||co==="MT940"||co==="GPC (ABO)" ? " Formát "+co+" appka zatiaľ nečíta." : "");
+    +" Appka číta aj MT940 (SLSP, ČSOB), VÚB GPC a CDF a CSV z Fio, Revolutu, Wise a mBank"
+    +(co==="CSV" ? "; tento CSV ale nemá známu hlavičku." : ".");
 }
 
 // ── ZLÚČENIE NOTIFIKÁCIÍ S VÝPISOM (kap. 49) ────────────────────────────
@@ -27464,6 +27926,9 @@ function importujVypisText(text, nazovSuboru, parsedVopred, volby){
   if(D.doplnene)
     infoCasti.push("ℹ "+D.doplnene+" "+sklonPohyb(D.doplnene)+" už "+(D.doplnene===1?"bol evidovaný":"bolo evidovaných")
       +" — nepridali sa druhýkrát, len dostali údaje z výpisu (kategória, účet, symboly).");
+  // Textové formáty (č. 223) nesú vlastné varovania: odhadnuté rozloženie (mBank),
+  // reťaz zostatkov overená v opačnom poradí (Wise), formát bez zostatkov (CDF).
+  (parsed.varovania||[]).forEach(v=>infoCasti.push("ℹ "+v));
   // Stopa mimo hlášky: `alert` zmizne zavretím a s ním aj jediná zmienka o tom,
   // že sa niečo nezhodovalo. Chyba, ktorá po sebe nenechá riadok, sa nedá
   // nájsť (spec kap. 101.2). Trvalá stopa je na zázname výpisu a v zvončeku.
@@ -34951,6 +35416,10 @@ function jeVypisSubor(z){
   // „EXVYP_…" — tie sa poznajú podľa slova.
   if(/\.xml$/.test(n) && /\d{6,}/.test(n)) return true;
   if(/\.xml$/.test(n) && /vypis|statement|camt|exvyp/.test(n)) return true;
+  // Textové výpisy (č. 223): MT940 (.sta), VÚB GPC/CDF; CSV len s bankovým
+  // slovom v názve — obyčajný CSV v schránke je skôr doklad než výpis.
+  if(/\.(sta|gpc|cdf)$/.test(n)) return true;
+  if(/\.csv$/.test(n) && /vypis|statement|pohyb|export|transactions|history/.test(n)) return true;
   return false;
 }
 // Modul, DO KTORÉHO zapisuje akcia nad riadkom schránky (ROZHODNUTIA č. 70,
