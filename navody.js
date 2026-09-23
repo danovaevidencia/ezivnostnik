@@ -1030,7 +1030,7 @@ jazdy: {
       tip: "Jazdíte často tú istú trasu? Zapíšte si ju ako [[app:data#set_kjTrasa|predvolenú trasu]] — každá nová jazda ju predvyplní.",
       podrobnosti: [
         { nadpis: "Kilometre z mapy",
-          html: "<p>Tlačidlo <b>🗺️ Zistiť z mapy</b> vypočíta dĺžku cesty podľa miest v poli Trasa (aspoň dve, napríklad „Trnava – Bratislava“). Potrebuje cloudový účet a miesta sa mapovej službe pošlú až po stlačení.</p>" },
+          html: "<p>Tlačidlo <b>🗺️ Odhadnúť km z trasy</b> vypočíta dĺžku cesty podľa miest v poli Trasa (aspoň dve, napríklad „Trnava – Bratislava“). Potrebuje cloudový účet a miesta sa mapovej službe pošlú až po stlačení. Pri jazde, ktorú ste už raz zapísali s rovnakou trasou, appka ponúkne kilometre z nej — bez mapy.</p><p>Pri <b>meranej</b> jazde tlačidlo <b>🗺️ Porovnať s mapou</b> namerané kilometre nemení, len ukáže, čo by vyšlo z mapy. V zozname jázd vidno pri kilometroch, odkiaľ sú: 📍 namerané, 🗺️ odhad z mapy, bez značky zapísané ručne.</p>" },
         { nadpis: "Opraviť alebo zmazať jazdu",
           html: "<p>Ťuknite na jazdu v zozname — otvorí sa na úpravu. Tlačidlo <b>Zmazať</b> ju po potvrdení odstráni.</p>" },
         { nadpis: "Musím knihu jázd viesť?",

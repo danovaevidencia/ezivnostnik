@@ -2247,7 +2247,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.23-QH";  // Kniha jázd: pôvod kilometrov (namerané / z mapy / ručne) v editore aj zozname; meraná jazda bez odhadu z mapy
+const APP_VERZIA = "2026.09.23-QI";  // Kniha jázd: záver merania porovnáva s mapou bez prepisu, ručná jazda „Odhadnúť km z trasy“, „naposledy na tejto trase“
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -18937,11 +18937,12 @@ function editJazda(idx){
   const povod=nova ? {kod:"rucne", text:""} : jazdaPovodKm(j);
   const povodVeta=nova ? "" : jazdaPovodVeta(j);
   openModal(nova?"Nová jazda":"Upraviť jazdu",`
-    <div class="mfield"><label>Trasa</label><input id="m_cesta" value="${esc(j.cesta||j.trasa||'')}" placeholder="napr. Trnava – Bratislava – Trnava"></div>
+    <div class="mfield"><label>Trasa</label><input id="m_cesta" value="${esc(j.cesta||j.trasa||'')}" placeholder="napr. Trnava – Bratislava – Trnava"${nova?' oninput="jazdaTrasaNaposledy()"':''}></div>
     <div class="mfield"><label>Účel</label><input id="m_ucel" value="${esc(j.ucel)}"></div>
     <div class="mfield"><label>Dátum</label><input id="m_datum" value="${esc(j.datum)}" placeholder="6. 6. 2026"></div>
     <div class="mfield"><label>Kilometre</label><input id="m_km" type="number" value="${esc(j.km)}" oninput="jazdaKmPovodUpozorni()">
       ${povodVeta?`<div id="m_kmPovod" style="font-size:11.5px;color:var(--ink-soft);margin-top:5px;line-height:1.5">${esc(povodVeta)}</div>`:""}
+      ${nova?`<div id="m_kmNaposledy" style="font-size:11.5px;color:var(--ink-soft);margin-top:5px;line-height:1.5"></div>`:""}
       <input type="hidden" id="m_kmPovodKod" value="${esc(povod.kod)}"><input type="hidden" id="m_kmPovodne" value="${esc(j.km)}"><input type="hidden" id="m_kmPovodVeta" value="${esc(povodVeta)}"></div>
     ${povod.kod==="gps" ? "" : mapaBlokHtml()}
     <div class="mfield"><label>Stav tachometra na začiatku</label>
@@ -18976,6 +18977,30 @@ function editJazda(idx){
     poZmene(); appJazdy();},
   nova?null:()=>{ d.jazdy.splice(idx,1); poZmene(); appJazdy(); });
   zamOkno("jazdy");
+  if(nova) jazdaTrasaNaposledy();
+}
+// ── NAPOSLEDY NA TEJTO TRASE (č. 228) ──────────────────────────────────────
+// Pomôcka bez mapovej služby: rovnaká trasa v knihe jázd = rovnaké kilometre.
+// Ponúka sa len pri novej jazde s prázdnym poľom km; kópia je ručný zápis,
+// nie odhad z mapy ani meranie.
+function jazdaTrasaKluc(s){ return normTxt(s).replace(/\s*[–—-]\s*/g," – ").replace(/\s+/g," ").trim(); }
+function jazdaTrasaNaposledy(){
+  const p=document.getElementById("m_kmNaposledy"); if(!p) return;
+  const kluc=jazdaTrasaKluc(val("m_cesta"));
+  if(!kluc || String(val("m_km")||"").trim()){ p.innerHTML=""; return; }
+  const zoz=(firmaData.jazdy||[]);
+  let j=null;
+  for(let i=zoz.length-1;i>=0;i--){ const x=zoz[i]; if(x && +x.km>0 && jazdaTrasaKluc(x.cesta||x.trasa)===kluc){ j=x; break; } }
+  if(!j){ p.innerHTML=""; return; }
+  const km=r2(+j.km||0);
+  p.innerHTML="Naposledy na tejto trase "+esc(j.datum||"")+": <b>"+esc(String(km).replace(".",","))+" km</b> · "
+    +"<a href=\"#\" onclick=\"jazdaNaposledyPouzi("+km+");return false\">Použiť</a>";
+}
+function jazdaNaposledyPouzi(km){
+  const pole=document.getElementById("m_km"); if(!pole) return;
+  pole.value=km;
+  const z=document.getElementById("m_kmZdroj"); if(z) z.value="";
+  const p=document.getElementById("m_kmNaposledy"); if(p) p.innerHTML="Prevzaté z predchádzajúcej jazdy na tejto trase.";
 }
 // Odpoveď na otázku, či auto slúži aj na súkromné cesty. Ukladá sa, aby sa
 // kontrola nepýtala donekonečna — a dá sa zmeniť, lebo sa to časom mení.
@@ -19560,8 +19585,19 @@ async function mapaVzdialenost(prvok){
     // nula kilometrov a to je horšie než chyba.
     if(!d.ok){ povedz(esc(d.sprava || "Vzdialenosť sa nepodarilo zistiť.")); return; }
     const pole=document.getElementById("m_km");
+    if(val("m_mapaRezim")==="porovnat"){
+      // Záver meranej jazdy: číslo v poli ostáva, ukáže sa rozdiel (č. 228).
+      const namerane=parseFloat(pole&&pole.value)||r2(_jazda&&_jazda.km||0);
+      const rozdiel=r2((+d.km||0)-namerane);
+      povedz("Mapa: <b>"+String(d.km).replace(".",",")+" km</b> po ceste"+(d.minuty?" · približne "+d.minuty+" min":"")
+        +"<br>Namerané: <b>"+String(namerane).replace(".",",")+" km</b> · rozdiel "+(rozdiel>0?"+":"")+String(rozdiel).replace(".",",")+" km"
+        +"<br><button type=\"button\" class=\"aabtn\" style=\"margin-top:6px;font-size:12px\" onclick=\"mapaPouziOdhad("+(+d.km||0)+")\">Použiť odhad z mapy</button>"
+        +"<br><span style=\"color:var(--ink-soft);font-size:11px\">"+esc(d.uvedenie||"")+"</span>");
+      return;
+    }
     if(pole) pole.value=d.km;
     const kmField=document.getElementById("m_kmZdroj"); if(kmField) kmField.value="mapa";
+    const kmHodnota=document.getElementById("m_kmZdrojHodnota"); if(kmHodnota) kmHodnota.value=String(d.km);
     povedz("<b>"+String(d.km).replace(".",",")+" km</b> po ceste"
       +(d.minuty?" · približne "+d.minuty+" min":"")
       +(d.miesta&&d.miesta.length?"<br><span style=\"color:var(--ink-soft)\">"+esc(d.miesta.join(" → "))+"</span>":"")
@@ -19655,15 +19691,34 @@ async function mapaNazvyMiest(prvok){
 
 // Blok tlačidla do editora jazdy aj do záveru merania — jeden tvar na oboch
 // miestach, nech sa texty nerozídu.
-function mapaBlokHtml(){
+// Dva režimy (č. 228): ručná jazda ODHADUJE km z názvov v poli Trasa a číslo
+// zapíše; záver meranej jazdy len POROVNÁ namerané číslo s mapou a nemení ho —
+// prepísať ho môže až samostatné „Použiť odhad“. Režim nesie skryté pole,
+// tlačidlo ostáva jediným miestom volania (`test_trasa_mapa`).
+function mapaBlokHtml(rezim){
+  const porovnat = rezim==="porovnat";
   return `<div style="background:var(--bg);border-radius:9px;padding:10px 13px;margin-top:2px">
     <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap">
-      <button type="button" class="aabtn" onclick="mapaVzdialenost(this)">🗺️ Zistiť z mapy</button>
-      <span style="font-size:11.5px;color:var(--ink-soft);flex:1;min-width:140px">Dĺžku cesty vypočíta mapová služba. Miesta sa jej pošlú len na toto stlačenie.</span>
+      <button type="button" class="aabtn" onclick="mapaVzdialenost(this)">${porovnat ? "🗺️ Porovnať s mapou" : "🗺️ Odhadnúť km z trasy"}</button>
+      <span style="font-size:11.5px;color:var(--ink-soft);flex:1;min-width:140px">${porovnat
+        ? "Dĺžka tej istej cesty podľa mapy. Namerané kilometre sa nemenia."
+        : "Dĺžku cesty vypočíta mapa z miest v poli Trasa."}</span>
     </div>
+    <div style="font-size:10.5px;color:var(--ink-soft);margin-top:5px">${porovnat ? "Body jazdy" : "Miesta"} sa mapovej službe pošlú len na toto stlačenie.</div>
     <div id="m_mapaStav" style="font-size:12px;margin-top:8px;line-height:1.5"></div>
-    <input type="hidden" id="m_kmZdroj" value="">
+    <input type="hidden" id="m_kmZdroj" value=""><input type="hidden" id="m_kmZdrojHodnota" value=""><input type="hidden" id="m_mapaRezim" value="${porovnat?"porovnat":"odhad"}">
   </div>`;
+}
+// Odhad z porovnania sa použije len na výslovné stlačenie (č. 228).
+function mapaPouziOdhad(km){
+  const pole=document.getElementById("m_km"); if(!pole) return;
+  const povodne=parseFloat(pole.value);
+  pole.value=km;
+  const z=document.getElementById("m_kmZdroj"); if(z) z.value="mapa";
+  const zh=document.getElementById("m_kmZdrojHodnota"); if(zh) zh.value=String(km);
+  const stav=document.getElementById("m_mapaStav");
+  if(stav) stav.innerHTML="Použitý odhad z mapy <b>"+esc(String(km).replace(".",","))+" km</b>"
+    +(isFinite(povodne)?" namiesto nameraných "+esc(String(povodne).replace(".",","))+" km":"")+". Jazda sa uloží ako odhad z mapy.";
 }
 
 // Doplnenie tachometra do jazdy. Je to jedna funkcia, hoci volajúce miesta sú
@@ -19738,6 +19793,14 @@ function jazdaPovodVeta(j){
 // Po prepísaní čísla v editore: namerané alebo odhadnuté km ručným zápisom
 // prestávajú byť tým, čím boli — človek to má vidieť skôr, než uloží.
 function jazdaKmPovodUpozorni(){
+  // Číslo z mapy prepísané rukou už nie je odhad z mapy (č. 228): príznak sa
+  // zruší hneď, nie až pri uložení, a stav pod tlačidlom to povie.
+  const zdroj=document.getElementById("m_kmZdroj"), hodnota=parseFloat(val("m_kmZdrojHodnota"));
+  if(zdroj && zdroj.value==="mapa" && isFinite(hodnota) && Math.abs((parseFloat(val("m_km"))||0)-hodnota)>0.004){
+    zdroj.value="";
+    const stav=document.getElementById("m_mapaStav");
+    if(stav) stav.innerHTML="Číslo ste prepísali — jazda sa uloží ako zadaná ručne, nie ako odhad z mapy.";
+  }
   const p=document.getElementById("m_kmPovod"); if(!p) return;
   const kod=val("m_kmPovodKod"), povodne=parseFloat(val("m_kmPovodne"));
   const teraz=parseFloat(val("m_km"));
@@ -19783,8 +19846,8 @@ function jazdaZaver(){
     <div class="mfield"><label>Účel</label><input id="m_ucel" value="${esc(U.ucel)}" placeholder="napr. stretnutie s klientom">
       ${U.zVykazu?`<div style="font-size:11.5px;color:var(--ink-soft);margin-top:5px">Prevzaté z výkazu prác na tento deň.</div>`:""}</div>
     <div class="mfield"><label>Dátum</label><input id="m_datum" value="${esc(zac.toLocaleDateString("sk"))}"></div>
-    <div class="mfield"><label>Kilometre</label><input id="m_km" type="number" step="0.1" value="${km}"></div>
-    ${mapaBlokHtml()}
+    <div class="mfield"><label>Kilometre</label><input id="m_km" type="number" step="0.1" value="${km}" oninput="jazdaKmPovodUpozorni()"></div>
+    ${mapaBlokHtml("porovnat")}
     <div class="mfield"><label>Stav tachometra na začiatku</label>
       <input id="m_poc" type="number" value="${poc||""}" placeholder="napr. 48210">
       <div style="font-size:11.5px;color:var(--ink-soft);margin-top:5px">${poc
