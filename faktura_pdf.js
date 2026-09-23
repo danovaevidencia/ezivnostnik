@@ -88,7 +88,7 @@ export const TEXTY = {
     kontakt: "CONTACT", tel: "phone: ", email: "e-mail: ", vystavenie: "Issue date:", dodanie: "Delivery date:",
     splatnost: "Due date:", sposob: "Payment method:", prevod: "Bank transfer", suma: "Amount:", vs: "Variable symbol:",
     iban: "IBAN:", swift: "SWIFT/BIC:", qr: "PAY by square — scan to pay", c: "No.", nazov: "DESCRIPTION", mnozstvo: "QUANTITY",
-    cenaBez: "UNIT PRICE (EXCL. VAT)", dphPct: "VAT %", spoluBez: "TOTAL EXCL. VAT", sadzbaDph: "VAT RATE", zaklad: "TAXABLE AMOUNT", dph: "VAT",
+    cenaBez: "UNIT PRICE (NET)", dphPct: "VAT %", spoluBez: "TOTAL EXCL. VAT", sadzbaDph: "VAT RATE", zaklad: "TAXABLE AMOUNT", dph: "VAT",
     spoluH: "TOTAL", sucet: "Subtotal", spolu: "Total", zaloha: "Advance paid ", zostava: "Amount due",
     dphEur: "VAT in EUR (Slovak VAT Act, § 74) — ECB rate ", zakladEur: ", taxable amount ", obdobie: "Period: ",
     elektronicky: "This document was issued electronically", bezPodpisu: "and is valid without signature or stamp.",
@@ -277,8 +277,13 @@ export function vykresliFakturu(jsPDF, model, opts = {}) {
     if (icdph) parts.push(T.icdph + ": " + icdph);
     return parts.join("   ");
   };
-  doc.text(idLine(m.ico, m.dic, m.icdph), L, yd); yd += 6;
-  doc.text(idLine(odb.ico, odb.dic, odb.icdph), colR, yo); yo += 6;
+  // Riadok s identifikátormi sa zalamuje do stĺpca: „Company ID … Tax ID …
+  // VAT ID …“ je dlhší než „IČO … DIČ …“ a v angličtine pretekal do stĺpca
+  // odberateľa (zmerané pdftotext-om 24. 9. 2026).
+  const idD = doc.splitTextToSize(idLine(m.ico, m.dic, m.icdph), halfW);
+  doc.text(idD, L, yd); yd += idD.length * 4.2 + 1.8;
+  const idO = doc.splitTextToSize(idLine(odb.ico, odb.dic, odb.icdph), halfW);
+  doc.text(idO, colR, yo); yo += idO.length * 4.2 + 1.8;
 
   if (m.tel || m.email) {
     doc.setFont(FONT, "bold"); doc.setFontSize(8.3); setC(MUTED);
