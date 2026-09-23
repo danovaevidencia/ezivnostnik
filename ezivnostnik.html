@@ -2247,7 +2247,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.23-QI";  // Kniha jázd: záver merania porovnáva s mapou bez prepisu, ručná jazda „Odhadnúť km z trasy“, „naposledy na tejto trase“
+const APP_VERZIA = "2026.09.23-QJ";  // Poslať faktúru (zdieľanie PDF / e-mail), pravidelná faktúra ako pripomienka v zvončeku, web: čo fakturačky nemajú
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -6699,6 +6699,18 @@ function zbierNotifikacie(){
         }
       });
   }catch(_){}
+
+  // ── pravidelné faktúry na rade (č. 229) ──
+  // Zmizne sama, keď faktúra za obdobie existuje. Kľúč nesie obdobie, takže
+  // „prečítané“ za august nezhasne september.
+  try{
+    faktOpakovaneCakajuce().forEach(({vzor, obdobie})=>{
+      out.push({kluc:"faktOpak:"+(vzor.id||vzor.cislo)+":"+obdobie, ic:"🔁", nal:"info",
+        nazov:"Faktúra pre "+(vzor.odberatel||"odberateľa")+" za "+mesiacLabel(obdobie)+" je na rade",
+        detail:"Naposledy "+eur(+(faktSumy(vzor).spolu)||0)+" · "+((PERIODY[vzor.opakovanie.perioda]||{}).n||"")+". Ťuknutím sa otvorí predvyplnená nová faktúra — nič sa nevystaví samo.",
+        akcia:()=>vystavZOpakovania(vzor.id)});
+    });
+  }catch(e){ console.error("pravidelné faktúry:", e); }
 
   // ── faktúry za predplatné ──
   try{
@@ -12642,7 +12654,8 @@ function faktMenu(idx, zdroj){
   tbMenu("fakMenu", btn,
     (mozeOdoslat ? pol(`faktMenuAkcia(${idx},'odosli')`,"📮","Odoslať sieťou Peppol")+TB_CIARA
       : odoslatZnova ? pol(`faktMenuAkcia(${idx},'odosli')`,"📮","Odoslať znova sieťou Peppol")+TB_CIARA : "")
-    +pol(`faktMenuAkcia(${idx},'dobropis')`,"➖","Dobropis")
+    +pol(`faktMenuAkcia(${idx},'poslat')`,"📤","Poslať faktúru (PDF)")
+    +TB_CIARA+pol(`faktMenuAkcia(${idx},'dobropis')`,"➖","Dobropis")
     +TB_CIARA+pol(`faktMenuAkcia(${idx},'tarchopis')`,"➕","Ťarchopis")
     +TB_CIARA+pol(`faktMenuAkcia(${idx},'storno')`,"🚫","Storno — dobropis na celú sumu")
     +TB_CIARA+pol(`faktMenuAkcia(${idx},'kopia')`,"⧉","Kópia ako nová faktúra")
@@ -12652,6 +12665,7 @@ function faktMenu(idx, zdroj){
 function faktMenuAkcia(idx, druh){
   const m=document.getElementById("fakMenu"); if(m) m.remove();
   if(druh==="odosli") faktOdosliSietou(idx);
+  else if(druh==="poslat") zdielajFakturu(idx);
   else if(druh==="kopia") kopirujFakturu(idx);
   else vystavOpravu(idx, druh);
 }
@@ -12799,6 +12813,17 @@ function feModal(idx, nova, kluc){
     <div class="mfield"><label>Sprievodný text <span style="font-weight:400;color:var(--ink-soft)">— nad položkami na faktúre</span></label>
       <textarea id="m_popis" rows="2" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;font:inherit;font-size:13px;resize:vertical" placeholder="napr. Fakturujem Vám za poskytnuté služby na zákazke …">${esc(f.popis||S.faktText||'')}</textarea>
     </div>
+    ${jeZaloha ? "" : `<div class="mfield">
+      <label style="display:flex;align-items:center;gap:9px;cursor:pointer;font-size:13px">
+        <input type="checkbox" id="m_faktOpakovana" ${f.opakovanie?"checked":""} style="width:auto"
+               onchange="document.getElementById('m_faktOpakBox').style.display=this.checked?'block':'none'">
+        <b>Túto faktúru vystavujem pravidelne</b></label>
+      <div id="m_faktOpakBox" style="display:${f.opakovanie?'block':'none'};margin-top:8px">
+        <select id="m_faktPerioda" style="width:auto">${Object.keys(PERIODY).map(k=>
+          `<option value="${k}" ${(f.opakovanie&&f.opakovanie.perioda)===k?"selected":""}>${esc(PERIODY[k].n)}</option>`).join("")}</select>
+        <div style="font-size:11.5px;color:var(--ink-soft);margin-top:5px;line-height:1.5">Appka faktúru nevystaví sama — keď príde ďalšie obdobie, zvonček vám pripomenie „vystaviť ako minule“ s predvyplneným dokladom. Sumu a položky si skontrolujete.</div>
+      </div>
+    </div>`}
     <div class="mfield"><label>Interná poznámka <span style="font-weight:400;color:var(--ink-soft)">— NEtlačí sa na faktúru</span></label>
       <textarea id="m_poznamkaInterna" rows="2" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;font:inherit;font-size:13px;resize:vertical" placeholder="napr. prečo je tento doklad výnimka">${esc(f.poznamkaInterna||'')}</textarea>
       <div style="font-size:11.5px;color:var(--ink-soft);margin-top:4px">Pre vás, nie pre odberateľa. Do PDF, e-faktúry ani do výkazov nejde — je to miesto na vetu, ktorú o pol roka budete hľadať.</div>
@@ -12827,6 +12852,8 @@ function feModal(idx, nova, kluc){
     // poistka pre inú cestu k uloženiu (konzola, stará otvorená karta).
     if(!nova && faktOdoslana(f)){
       f.poznamkaInterna=val("m_poznamkaInterna")||"";
+      // Opakovanie je tiež len naša značka, nie údaj dokladu (č. 229).
+      if(!jeZaloha) f.opakovanie = chk("m_faktOpakovana") ? {perioda: val("m_faktPerioda")||"mes"} : null;
       // `f` je hlboká kópia záznamu (`_feEdit`); bez zápisu späť by sa zmena
       // stratila. Ostatné polia sme sa nedotkli, takže kópia je zhodná s originálom.
       POLE()[idx]=f;
@@ -12850,6 +12877,8 @@ function feModal(idx, nova, kluc){
     // ich rovnaké; kto niekedy potreboval rozlíšiť dodanie, má naň `dodanie`.
     f.datum=val("m_datum"); f.vystavenie=val("m_datum");
     f.dodanie=val("m_dodanie")||val("m_datum"); f.splatnost=val("m_splatnost");
+    // Pravidelná faktúra (č. 229): značka pre zvonček, nič sa nevystavuje samo.
+    if(!jeZaloha) f.opakovanie = chk("m_faktOpakovana") ? {perioda: val("m_faktPerioda")||"mes"} : null;
     f.opravujeDoklad=val("m_opravuje");
     f.popis=val("m_popis");   // sprievodný text nad položkami (KROS ho má, my sme ho nemali)
     // Interná poznámka je zámerne SAMOSTATNÉ pole. Do `popis` sa vpísať nedá:
@@ -15087,6 +15116,49 @@ function opakovaneCakajuce(){
   return von;
 }
 
+// ── PRAVIDELNÉ FAKTÚRY (č. 229) ────────────────────────────────────────────
+// Zrkadlo opakovaných výdavkov: faktúra označená „vystavujem pravidelne“ je
+// vzor; keď príde ďalšie obdobie bez faktúry tomu istému odberateľovi, zvonček
+// ponúkne „vystaviť ako minule“. Appka nič nevystavuje sama — suma a položky
+// sa menia a doklad s číslom sa nedá vziať späť (kap. 100).
+function faktOpakovaneVzory(){
+  return (firmaData.faktury||[]).filter(x=>x && x.opakovanie && PERIODY[x.opakovanie.perioda] && !x.opravujeDoklad);
+}
+function faktOpakovaneCakajuce(){
+  const dnes=new Date();
+  const teraz=dnes.getFullYear()+"-"+String(dnes.getMonth()+1).padStart(2,"0");
+  const kluc=x=>(x.ico||parNazovKluc(x.odberatel||""))+"";
+  const podlaKluca={};
+  faktOpakovaneVzory().forEach(x=>{
+    const k=kluc(x)+"|"+x.opakovanie.perioda;
+    if(!podlaKluca[k] || String(x.datum||"")>String(podlaKluca[k].datum||"")) podlaKluca[k]=x;
+  });
+  const von=[];
+  Object.values(podlaKluca).forEach(vzor=>{
+    const per=PERIODY[vzor.opakovanie.perioda];
+    const posledne=String(vzor.datum||"").slice(0,7);
+    if(!/^\d{4}-\d{2}$/.test(posledne)) return;
+    let dalsie=posunObdobie(posledne, per.mesiacov);
+    while(dalsie<=teraz){
+      const uz=(firmaData.faktury||[]).some(x=>x && !x.opravujeDoklad && kluc(x)===kluc(vzor) && String(x.datum||"").slice(0,7)===dalsie);
+      if(!uz) von.push({vzor, obdobie:dalsie});
+      dalsie=posunObdobie(dalsie, per.mesiacov);
+    }
+  });
+  return von;
+}
+// Otvorí NOVÚ faktúru predvyplnenú podľa vzoru (ako kópia): číslo pridelí
+// editor pri otvorení, do zoznamu sa dostane až uložením.
+function vystavZOpakovania(vzorId){
+  if(!strazZapis("faktury")) return;
+  const vzor=(firmaData.faktury||[]).find(x=>x && String(x.id)===String(vzorId));
+  if(!vzor){ alert("Vzorová faktúra sa nenašla."); return; }
+  if(!skontrolujLimit("faktury","Vo vyššom pláne máte faktúry bez obmedzenia.")) return;
+  const k=faktKopiaPreNovu(vzor);
+  k.opakovanie=Object.assign({}, vzor.opakovanie);
+  if(typeof otvorApp==="function" && modulNaObrazovke()!=="faktury") otvorApp("faktury");
+  editFaktura(null, k);
+}
 // vytvorí doklad na dané obdobie podľa vzoru — sumu si používateľ doplní sám
 function vytvorZOpakovania(vzorId, obdobie){
   if(!strazZapis("vydavky")) return;
@@ -30261,12 +30333,62 @@ async function exportZalohaPDF(idx){
   doc.save("zalohova_faktura_"+(z.cislo||"export")+".pdf");
 }
 async function exportFakturaPDF(idx){
-  const f=firmaData.faktury[idx]; const m=firmaData.meta||{};
+  const f=firmaData.faktury[idx];
   // ak bola faktúra importovaná ako PDF, stiahni AUTENTICKÝ originál (nie našu šablónu)
   if(f && f.originalSubor){
     try{ const url=await dokladUrl(f.originalSubor); if(url){ window.open(url,"_blank"); return; } }catch(_){}
   }
   if(!potvrdIbanPreTlac()) return;
+  const sub=await fakturaPdfSubor(idx);
+  if(sub.blob) downloadBlob(sub.blob, sub.nazov); else sub.doc.save(sub.nazov);
+}
+// ── POSLAŤ FAKTÚRU (č. 229, 23. 9. 2026) ─────────────────────────────────────
+// Do QI sa faktúra dala len stiahnuť; každá fakturačka ju vie poslať. Na
+// mobile ide PDF cez systémové zdieľanie (WhatsApp, mail, Messenger), inde sa
+// stiahne a otvorí sa e-mail s predvyplneným predmetom a textom — prílohu si
+// človek pridá, `mailto:` ju niesť nevie. Odberateľ e-mail v registri nemá,
+// preto sa adresát nepredvypĺňa. Importovaný originál sa zdieľa taký, aký je.
+function fakturaSpravaText(f){
+  const s=faktSumy(f); const m=firmaData.meta||{};
+  const spl=f.splatnost ? " so splatnosťou "+fmtDatum(f.splatnost) : "";
+  return {
+    predmet:"Faktúra č. "+(f.cislo||"")+(m.nazov?" — "+m.nazov:""),
+    text:"Dobrý deň,\n\nv prílohe posielam faktúru č. "+(f.cislo||"")+" na sumu "+eur(+s.spolu||0)+spl
+      +".\n\nĎakujem a prajem pekný deň.\n"+(m.nazov||"")+(m.telefon||m.tel?"\n"+(m.telefon||m.tel):"")
+  };
+}
+async function zdielajFakturu(idx){
+  const f=(firmaData.faktury||[])[idx]; if(!f) return;
+  let blob=null, nazov="faktura_"+(f.cislo||"export")+".pdf";
+  try{
+    if(f.originalSubor){
+      const url=await dokladUrl(f.originalSubor);
+      if(url){ const r=await fetch(url); if(r.ok) blob=await r.blob(); }
+    } else {
+      if(!potvrdIbanPreTlac()) return;
+      const sub=await fakturaPdfSubor(idx);
+      blob=sub.blob || new Blob([sub.doc.output("arraybuffer")],{type:"application/pdf"});
+      nazov=sub.nazov;
+    }
+  }catch(e){ console.error("PDF na zdieľanie:", e); }
+  if(!blob){ alert("PDF faktúry sa nepodarilo pripraviť."); return; }
+  const sprava=fakturaSpravaText(f);
+  const subor=(typeof File==="function") ? new File([blob], nazov, {type:"application/pdf"}) : null;
+  if(subor && navigator.share && navigator.canShare && navigator.canShare({files:[subor]})){
+    try{ await navigator.share({files:[subor], title:sprava.predmet, text:sprava.text}); return; }
+    catch(e){ if(e && e.name==="AbortError") return; console.error("zdieľanie:", e); }
+  }
+  // Bez systémového zdieľania: stiahnuť a otvoriť e-mail. Text sa dá aj
+  // skopírovať — pre toho, kto píše v inom programe.
+  downloadBlob(blob, nazov);
+  const mailto="mailto:?subject="+encodeURIComponent(sprava.predmet)+"&body="+encodeURIComponent(sprava.text+"\n\n(PDF „"+nazov+"“ je stiahnuté — priložte ho k správe.)");
+  try{ window.location.href=mailto; }catch(_){ /* bez poštového klienta ostáva stiahnuté PDF a hláška nižšie */ }
+  cloudMsg("PDF je stiahnuté. Otvára sa e-mail s textom — priložte stiahnutý súbor.", "ok");
+}
+// PDF faktúry ako súbor (s ISDOC prílohou, keď sa dá) — jedna cesta pre
+// stiahnutie aj poslanie. Vracia {blob, nazov} alebo {doc, nazov} bez ISDOC.
+async function fakturaPdfSubor(idx){
+  const f=firmaData.faktury[idx]; const m=firmaData.meta||{};
   const s=faktSumy(f); const S=firmaData.settings||{};
   const FP=await fakturaPdfModul();
   await ensureJsPDF();
@@ -30298,10 +30420,10 @@ async function exportFakturaPDF(idx){
   try{
     const bytes=doc.output("arraybuffer");
     const withIsdoc=await pripojISDOCdoPDF(bytes, isdocXml(idx), (f.cislo||"export"), m);
-    downloadBlob(new Blob([withIsdoc],{type:"application/pdf"}), nazov);
+    return {blob:new Blob([withIsdoc],{type:"application/pdf"}), nazov};
   }catch(e){
     console.warn("Vloženie ISDOC do PDF zlyhalo, ukladám PDF bez prílohy:", e);
-    doc.save(nazov);
+    return {doc, nazov};
   }
 }
 // Prilepí ISDOC XML do hotového PDF ako embedded prílohu (formát ISDOC.PDF ako
