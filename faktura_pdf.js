@@ -61,6 +61,48 @@ export function money(v) {
   return ce.replace(/\B(?=(\d{3})+(?!\d))/g, " ") + "," + de;
 }
 export const eur = v => money(v) + " €";
+// Anglický zápis čísla (1,250.00) — pre doklad v angličtine; slovenčina a
+// nemčina používajú medzeru a čiarku ako doteraz.
+export function moneyEn(v) {
+  const n = (+v || 0).toFixed(2);
+  const [ce, de] = n.split(".");
+  return ce.replace(/\B(?=(\d{3})+(?!\d))/g, ",") + "." + de;
+}
+
+// ── TEXTY DOKLADU (č. 231, 24. 9. 2026) ───────────────────────────────────
+// Jazyk je vlastnosťou modelu (`model.jazyk`: sk / en / de). Bez neho je
+// slovenčina — tak tlačí aj faktúra za predplatné z edge funkcie. Preklady sú
+// LEN popisky dokladu; názvy položiek a sprievodný text píše používateľ.
+// Suma v cudzej mene sa píše s kódom meny (1 250,00 CZK), eurá so znakom €.
+export const TEXTY = {
+  sk: { faktura: "FAKTÚRA", dodavatel: "DODÁVATEĽ", odberatel: "ODBERATEĽ", ico: "IČO", dic: "DIČ", icdph: "IČ DPH",
+    kontakt: "KONTAKTNÉ ÚDAJE", tel: "tel.: ", email: "e-mail: ", vystavenie: "Dátum vystavenia:", dodanie: "Dátum dodania:",
+    splatnost: "Splatnosť:", sposob: "Spôsob úhrady:", prevod: "Bankový prevod", suma: "Suma:", vs: "Variabilný symbol:",
+    iban: "IBAN:", swift: "SWIFT/BIC:", qr: "PAY by square — naskenujte a zaplaťte", c: "Č.", nazov: "NÁZOV", mnozstvo: "MNOŽSTVO",
+    cenaBez: "CENA BEZ DPH", dphPct: "DPH %", spoluBez: "SPOLU BEZ DPH", sadzbaDph: "SADZBA DPH", zaklad: "ZÁKLAD", dph: "DPH",
+    spoluH: "SPOLU", sucet: "Súčet", spolu: "Spolu", zaloha: "Uhradená záloha ", zostava: "Zostáva uhradiť",
+    dphEur: "DPH v eurách (§ 74 zákona o DPH) — kurz ECB ", zakladEur: ", základ ", obdobie: "Obdobie: ",
+    elektronicky: "Doklad je vystavený elektronicky", bezPodpisu: "a je platný bez podpisu a pečiatky.",
+    zivReg: "Živnostenský register: ", faktC: "Faktúra č.", isdoc: "Doklad obsahuje e-faktúru (ISDOC)", vytvorene: "Vytvorené v ", cislo: money },
+  en: { faktura: "INVOICE", dodavatel: "SUPPLIER", odberatel: "CUSTOMER", ico: "Company ID", dic: "Tax ID", icdph: "VAT ID",
+    kontakt: "CONTACT", tel: "phone: ", email: "e-mail: ", vystavenie: "Issue date:", dodanie: "Delivery date:",
+    splatnost: "Due date:", sposob: "Payment method:", prevod: "Bank transfer", suma: "Amount:", vs: "Variable symbol:",
+    iban: "IBAN:", swift: "SWIFT/BIC:", qr: "PAY by square — scan to pay", c: "No.", nazov: "DESCRIPTION", mnozstvo: "QUANTITY",
+    cenaBez: "UNIT PRICE (EXCL. VAT)", dphPct: "VAT %", spoluBez: "TOTAL EXCL. VAT", sadzbaDph: "VAT RATE", zaklad: "TAXABLE AMOUNT", dph: "VAT",
+    spoluH: "TOTAL", sucet: "Subtotal", spolu: "Total", zaloha: "Advance paid ", zostava: "Amount due",
+    dphEur: "VAT in EUR (Slovak VAT Act, § 74) — ECB rate ", zakladEur: ", taxable amount ", obdobie: "Period: ",
+    elektronicky: "This document was issued electronically", bezPodpisu: "and is valid without signature or stamp.",
+    zivReg: "Trade register: ", faktC: "Invoice No.", isdoc: "Contains e-invoice (ISDOC)", vytvorene: "Created with ", cislo: moneyEn },
+  de: { faktura: "RECHNUNG", dodavatel: "LIEFERANT", odberatel: "KUNDE", ico: "Firmen-Nr.", dic: "Steuer-Nr.", icdph: "USt-IdNr.",
+    kontakt: "KONTAKT", tel: "Tel.: ", email: "E-Mail: ", vystavenie: "Rechnungsdatum:", dodanie: "Lieferdatum:",
+    splatnost: "Fällig am:", sposob: "Zahlungsart:", prevod: "Überweisung", suma: "Betrag:", vs: "Variables Symbol:",
+    iban: "IBAN:", swift: "SWIFT/BIC:", qr: "PAY by square — scannen und bezahlen", c: "Nr.", nazov: "BEZEICHNUNG", mnozstvo: "MENGE",
+    cenaBez: "EINZELPREIS NETTO", dphPct: "MwSt. %", spoluBez: "GESAMT NETTO", sadzbaDph: "MWST.-SATZ", zaklad: "NETTO", dph: "MWST.",
+    spoluH: "BRUTTO", sucet: "Zwischensumme", spolu: "Gesamt", zaloha: "Bezahlte Anzahlung ", zostava: "Restbetrag",
+    dphEur: "MwSt. in EUR (slowak. UStG § 74) — EZB-Kurs ", zakladEur: ", Netto ", obdobie: "Zeitraum: ",
+    elektronicky: "Dieses Dokument wurde elektronisch erstellt", bezPodpisu: "und ist ohne Unterschrift und Stempel gültig.",
+    zivReg: "Gewerberegister: ", faktC: "Rechnung Nr.", isdoc: "Enthält E-Rechnung (ISDOC)", vytvorene: "Erstellt mit ", cislo: money },
+};
 
 export function fmtDatum(dt) {
   if (!dt) return "";
@@ -170,7 +212,14 @@ export function vykresliFakturu(jsPDF, model, opts = {}) {
   const odb = model.odberatel || {};
   const dt  = model.datumy || {};
   const pl  = model.platba || {};
-  const s   = model.sumy || { bez: 0, dph: 0, spolu: 0, sadzba: 0.23 };
+  const s0  = model.sumy || { bez: 0, dph: 0, spolu: 0, sadzba: 0.23 };
+  // Doklad v cudzej mene: na papieri sú sumy v mene dokladu (`vMene`), eurové
+  // hodnoty ostávajú na riadok s daňou v eurách (§ 74). Jazyk podľa modelu.
+  const cur = String(model.mena || "EUR").toUpperCase();
+  const s   = (cur !== "EUR" && s0.vMene) ? { ...s0.vMene, sadzba: s0.sadzba } : s0;
+  const T   = TEXTY[model.jazyk] || TEXTY.sk;
+  const num = v => T.cislo(v);
+  const suma = v => cur === "EUR" ? num(v) + " €" : num(v) + " " + cur;
   const sadzbaPct = Math.round((s.sadzba || 0.23) * 100);
 
   let y = 20;
@@ -187,7 +236,7 @@ export function vykresliFakturu(jsPDF, model, opts = {}) {
   // Nadpis je vlastnosťou modelu, nie natvrdo v generátore: ten istý layout
   // tlačí faktúru aj zálohovú faktúru a jediné, čím sa navonok líšia, je
   // nadpis a veta pod ním. Bez `nadpisDokladu` sa nič nemení.
-  doc.text(String(model.nadpisDokladu || "FAKTÚRA"), R, y, { align: "right" });
+  doc.text(String(model.nadpisDokladu || T.faktura), R, y, { align: "right" });
   doc.setFontSize(19); setC(BRAND);
   doc.text(String(model.cislo || ""), R, y + 8, { align: "right" });
   y += 22;
@@ -206,7 +255,7 @@ export function vykresliFakturu(jsPDF, model, opts = {}) {
   // ── DODÁVATEĽ / ODBERATEĽ ──
   const colR = L + (R - L) / 2 + 8, halfW = (R - L) / 2 - 6;
   doc.setFont(FONT, "bold"); doc.setFontSize(9); setC(MUTED);
-  doc.text("DODÁVATEĽ", L, y); doc.text("ODBERATEĽ", colR, y);
+  doc.text(T.dodavatel, L, y); doc.text(T.odberatel, colR, y);
   y += 6;
   doc.setFont(FONT, "bold"); doc.setFontSize(10.5); setC(INK);
   const dNazL = doc.splitTextToSize((m.nazov || "—").replace(/\s+/g, " "), halfW);
@@ -223,9 +272,9 @@ export function vykresliFakturu(jsPDF, model, opts = {}) {
   doc.setFontSize(8.7); setC(SOFT);
   const idLine = (ico, dic, icdph) => {
     const parts = [];
-    if (ico)   parts.push("IČO: " + ico);
-    if (dic)   parts.push("DIČ: " + dic);
-    if (icdph) parts.push("IČ DPH: " + icdph);
+    if (ico)   parts.push(T.ico + ": " + ico);
+    if (dic)   parts.push(T.dic + ": " + dic);
+    if (icdph) parts.push(T.icdph + ": " + icdph);
     return parts.join("   ");
   };
   doc.text(idLine(m.ico, m.dic, m.icdph), L, yd); yd += 6;
@@ -233,10 +282,10 @@ export function vykresliFakturu(jsPDF, model, opts = {}) {
 
   if (m.tel || m.email) {
     doc.setFont(FONT, "bold"); doc.setFontSize(8.3); setC(MUTED);
-    doc.text("KONTAKTNÉ ÚDAJE", L, yd); yd += 4.6;
+    doc.text(T.kontakt, L, yd); yd += 4.6;
     doc.setFont(FONT, "normal"); doc.setFontSize(9); setC(SOFT);
-    if (m.tel)   { doc.text("tel.: " + m.tel, L, yd);      yd += 4.4; }
-    if (m.email) { doc.text("e-mail: " + m.email, L, yd);  yd += 4.4; }
+    if (m.tel)   { doc.text(T.tel + m.tel, L, yd);      yd += 4.4; }
+    if (m.email) { doc.text(T.email + m.email, L, yd);  yd += 4.4; }
   }
   y = Math.max(yd, yo) + 9;
 
@@ -249,9 +298,9 @@ export function vykresliFakturu(jsPDF, model, opts = {}) {
     doc.setFont(FONT, b ? "bold" : "normal"); setC(INK); doc.text(v, L + 40, y);
     y += 6;
   };
-  dRow("Dátum vystavenia:", datum(dt.vystavenie));
-  dRow("Dátum dodania:", datum(dt.dodanie));
-  if (dt.splatnost) dRow("Splatnosť:", datum(dt.splatnost), true);
+  dRow(T.vystavenie, datum(dt.vystavenie));
+  dRow(T.dodanie, datum(dt.dodanie));
+  if (dt.splatnost) dRow(T.splatnost, datum(dt.splatnost), true);
 
   const qr = opts.qrDataUrl || null;
   const pbX = colR - 6, pbW = R - pbX;
@@ -280,20 +329,21 @@ export function vykresliFakturu(jsPDF, model, opts = {}) {
       doc.text(String(v), pvX, py); py += 5.4;
     }
   };
-  payR("Spôsob úhrady:", pl.sposob || "Bankový prevod");
+  // Predvolený spôsob úhrady sa prekladá; vlastný text z nastavení ostáva.
+  payR(T.sposob, (pl.sposob && pl.sposob !== "Bankový prevod") ? pl.sposob : T.prevod);
   // Suma, ktorú má odberateľ poslať — nie suma dokladu. Keď je na faktúre
   // odpočet už prijatej zálohy, líšia sa a platobný blok musí ukazovať zvyšok.
-  payR("Suma:", eur(model.zaloha ? +model.zaloha.splatit : s.spolu));
-  if (pl.vs) payR("Variabilný symbol:", pl.vs);
-  if (m.iban)  payR("IBAN:", m.iban, true);
-  if (m.swift) payR("SWIFT/BIC:", m.swift, true);
+  payR(T.suma, suma(model.zaloha ? +model.zaloha.splatit : s.spolu));
+  if (pl.vs) payR(T.vs, pl.vs);
+  if (m.iban)  payR(T.iban, m.iban, true);
+  if (m.swift) payR(T.swift, m.swift, true);
 
   let blokKoniec = blokY - 5 + pbH;
   if (qr) {
     const qsz = 26, qx = pbX + (pbW - qsz) / 2, qy = blokKoniec + 3;
     doc.addImage(qr, "PNG", qx, qy, qsz, qsz);
     doc.setFont(FONT, "normal"); doc.setFontSize(6.8); setC(MUTED);
-    doc.text("PAY by square — naskenujte a zaplaťte", pbX + pbW / 2, qy + qsz + 3, { align: "center" });
+    doc.text(T.qr, pbX + pbW / 2, qy + qsz + 3, { align: "center" });
     blokKoniec = qy + qsz + 5;
   }
   y = Math.max(y, blokKoniec) + 9;
@@ -318,22 +368,22 @@ export function vykresliFakturu(jsPDF, model, opts = {}) {
   const cC = L, cNaz = L + 9, cMn = L + (R - L) * 0.50,
         cCena = L + (R - L) * 0.68, cDph = L + (R - L) * 0.79, cSpolu = R;
   doc.setFont(FONT, "bold"); doc.setFontSize(7.8); setC(INK);
-  doc.text("Č.", cC, y);
-  doc.text("NÁZOV", cNaz, y);
-  doc.text("MNOŽSTVO", cMn, y, { align: "right" });
-  doc.text("CENA BEZ DPH", cCena, y, { align: "right" });
-  doc.text("DPH %", cDph, y, { align: "right" });
-  doc.text("SPOLU BEZ DPH", cSpolu, y, { align: "right" });
+  doc.text(T.c, cC, y);
+  doc.text(T.nazov, cNaz, y);
+  doc.text(T.mnozstvo, cMn, y, { align: "right" });
+  doc.text(T.cenaBez, cCena, y, { align: "right" });
+  doc.text(T.dphPct, cDph, y, { align: "right" });
+  doc.text(T.spoluBez, cSpolu, y, { align: "right" });
   y += 2.5; setD(INK); doc.setLineWidth(0.4); doc.line(L, y, R, y); y += 6;
   (model.polozky || []).forEach((p, i) => {
     const bez = r2((+p.mn || 0) * (+p.cena || 0));
     doc.setFont(FONT, "normal"); doc.setFontSize(9.3); setC(INK);
     doc.text(String(i + 1) + ".", cC, y);
     doc.text(doc.splitTextToSize(String(p.nazov || ""), cMn - cNaz - 24)[0], cNaz, y);
-    doc.setFont(FONT, "bold"); doc.text(money(p.mn) + (p.mj ? (" " + p.mj) : ""), cMn, y, { align: "right" });
-    doc.setFont(FONT, "normal"); doc.text(money(p.cena), cCena, y, { align: "right" });
+    doc.setFont(FONT, "bold"); doc.text(num(p.mn) + (p.mj ? (" " + p.mj) : ""), cMn, y, { align: "right" });
+    doc.setFont(FONT, "normal"); doc.text(num(p.cena), cCena, y, { align: "right" });
     setC(SOFT); doc.text(String(sadzbaPct), cDph, y, { align: "right" }); setC(INK);
-    doc.setFont(FONT, "bold"); doc.text(money(bez), cSpolu, y, { align: "right" });
+    doc.setFont(FONT, "bold"); doc.text(num(bez), cSpolu, y, { align: "right" });
     y += 6.5; setD(LINE); doc.setLineWidth(0.3); doc.line(L, y - 2, R, y - 2);
   });
   y += 6;
@@ -341,7 +391,7 @@ export function vykresliFakturu(jsPDF, model, opts = {}) {
   // ── OBDOBIE (len faktúra za predplatné) ──
   if (model.obdobie && model.obdobie.od && model.obdobie.do) {
     doc.setFont(FONT, "normal"); doc.setFontSize(8.5); setC(MUTED);
-    doc.text("Obdobie: " + fmtDatum(String(model.obdobie.od).slice(0, 10)) +
+    doc.text(T.obdobie + fmtDatum(String(model.obdobie.od).slice(0, 10)) +
              " – " + fmtDatum(String(model.obdobie.do).slice(0, 10)), L, y);
     y += 7;
   }
@@ -349,28 +399,37 @@ export function vykresliFakturu(jsPDF, model, opts = {}) {
   // ── REKAPITULÁCIA DPH ──
   const rc1 = L, rc2 = L + (R - L) * 0.42, rc3 = L + (R - L) * 0.62, rc4 = L + (R - L) * 0.82;
   doc.setFont(FONT, "normal"); doc.setFontSize(8.3); setC(MUTED);
-  doc.text("SADZBA DPH", rc1, y);
-  doc.text("ZÁKLAD", rc2, y, { align: "right" });
-  doc.text("DPH", rc3, y, { align: "right" });
-  doc.text("SPOLU", rc4, y, { align: "right" });
+  doc.text(T.sadzbaDph, rc1, y);
+  doc.text(T.zaklad, rc2, y, { align: "right" });
+  doc.text(T.dph, rc3, y, { align: "right" });
+  doc.text(T.spoluH, rc4, y, { align: "right" });
   y += 2.5; setD(LINE); doc.setLineWidth(0.3); doc.line(L, y, rc4 + 2, y); y += 5;
   doc.setFont(FONT, "normal"); doc.setFontSize(9.3); setC(INK);
   doc.text(sadzbaPct + " %", rc1, y);
-  doc.text(money(s.bez), rc2, y, { align: "right" });
-  doc.text(money(s.dph), rc3, y, { align: "right" });
-  doc.text(money(s.spolu), rc4, y, { align: "right" });
+  doc.text(num(s.bez), rc2, y, { align: "right" });
+  doc.text(num(s.dph), rc3, y, { align: "right" });
+  doc.text(num(s.spolu), rc4, y, { align: "right" });
   y += 2.5; setD(LINE); doc.line(L, y, rc4 + 2, y); y += 5;
   doc.setFont(FONT, "bold"); setC(INK);
-  doc.text("Súčet", rc1, y);
-  doc.text(money(s.bez), rc2, y, { align: "right" });
-  doc.text(money(s.dph), rc3, y, { align: "right" });
-  doc.text(money(s.spolu), rc4, y, { align: "right" });
+  doc.text(T.sucet, rc1, y);
+  doc.text(num(s.bez), rc2, y, { align: "right" });
+  doc.text(num(s.dph), rc3, y, { align: "right" });
+  doc.text(num(s.spolu), rc4, y, { align: "right" });
   y += 6;
 
   setF(BGSOFT); doc.roundedRect(L, y, R - L, 11, 2, 2, "F");
-  doc.setFont(FONT, "bold"); doc.setFontSize(11); setC(INK); doc.text("Spolu", L + 5, y + 7);
-  doc.setFontSize(14); setC(BRAND); doc.text(eur(s.spolu), R - 5, y + 7.5, { align: "right" });
+  doc.setFont(FONT, "bold"); doc.setFontSize(11); setC(INK); doc.text(T.spolu, L + 5, y + 7);
+  doc.setFontSize(14); setC(BRAND); doc.text(suma(s.spolu), R - 5, y + 7.5, { align: "right" });
   y += 13;
+
+  // Doklad v cudzej mene musí niesť daň v eurách (§ 74 ods. 1 zákona o DPH)
+  // a kurz, ktorým sa prepočítala — bez toho by odberateľ nevedel, koľko
+  // DPH si odpočíta, a kontrola by nevidela, ako číslo vzniklo.
+  if (cur !== "EUR" && s0 && +s0.kurz > 0) {
+    doc.setFont(FONT, "normal"); doc.setFontSize(8.5); setC(MUTED);
+    doc.text(T.dphEur + num(+s0.kurz) + " " + cur + "/EUR: " + num(+s0.dph) + " €" + T.zakladEur + num(+s0.bez) + " €", L + 5, y + 1);
+    y += 6;
+  }
 
   // Už prijatá záloha, ktorá NEBOLA zdanená samostatným dokladom: v sumách
   // faktúry je celé dodanie a odpočet sa robí až tu, na úhrade (podoba
@@ -382,12 +441,12 @@ export function vykresliFakturu(jsPDF, model, opts = {}) {
   // bola tichá chyba v prospech odberateľa.
   if (model.zaloha && +model.zaloha.suma > 0) {
     doc.setFont(FONT, "normal"); doc.setFontSize(9.3); setC(MUTED);
-    doc.text("Uhradená záloha " + (model.zaloha.cislo || ""), L + 5, y + 4);
-    doc.text("\u2212" + money(+model.zaloha.suma), R - 5, y + 4, { align: "right" });
+    doc.text(T.zaloha + (model.zaloha.cislo || ""), L + 5, y + 4);
+    doc.text("\u2212" + num(+model.zaloha.suma), R - 5, y + 4, { align: "right" });
     y += 8;
     setF(BGSOFT); doc.roundedRect(L, y, R - L, 11, 2, 2, "F");
-    doc.setFont(FONT, "bold"); doc.setFontSize(11); setC(INK); doc.text("Zostáva uhradiť", L + 5, y + 7);
-    doc.setFontSize(14); setC(BRAND); doc.text(eur(+model.zaloha.splatit), R - 5, y + 7.5, { align: "right" });
+    doc.setFont(FONT, "bold"); doc.setFontSize(11); setC(INK); doc.text(T.zostava, L + 5, y + 7);
+    doc.setFontSize(14); setC(BRAND); doc.text(suma(+model.zaloha.splatit), R - 5, y + 7.5, { align: "right" });
     y += 13;
   }
   y += 11;
@@ -404,12 +463,12 @@ export function vykresliFakturu(jsPDF, model, opts = {}) {
   doc.text((m.nazov || "").split(" - ")[0].replace(/\s+/g, " ").trim(), sigCx, y, { align: "center" });
   doc.setFont(FONT, "normal"); doc.setFontSize(8.3); setC(SOFT);
   let sy = y + 4.5;
-  if (m.ico)    { doc.text("IČO " + m.ico, sigCx, sy, { align: "center" }); sy += 4; }
-  if (m.zivReg) { doc.text("Živnostenský register: " + m.zivReg, sigCx, sy, { align: "center" }); sy += 4; }
+  if (m.ico)    { doc.text(T.ico + " " + m.ico, sigCx, sy, { align: "center" }); sy += 4; }
+  if (m.zivReg) { doc.text(T.zivReg + m.zivReg, sigCx, sy, { align: "center" }); sy += 4; }
   sy += 8; setD(MUTED); doc.setLineWidth(0.3); doc.line(sigX, sy, sigX + 58, sy); sy += 4.5;
   doc.setFontSize(7.8); setC(MUTED);
-  doc.text("Doklad je vystavený elektronicky", sigCx, sy, { align: "center" });
-  doc.text("a je platný bez podpisu a pečiatky.", sigCx, sy + 3.5, { align: "center" });
+  doc.text(T.elektronicky, sigCx, sy, { align: "center" });
+  doc.text(T.bezPodpisu, sigCx, sy + 3.5, { align: "center" });
 
   // ── PÄTIČKA ──
   const fy = 286;
@@ -417,12 +476,12 @@ export function vykresliFakturu(jsPDF, model, opts = {}) {
   doc.setFont(FONT, "normal"); doc.setFontSize(7.3); setC(MUTED);
   // Pätka pomenúva doklad tým, čím je. „Faktúra č. Z2026001" na zálohovej
   // faktúre je tvrdenie, ktoré si odberateľ môže zaúčtovať.
-  doc.text((model.pataLabel || "Faktúra č.") + " " + (model.cislo || ""), L, fy);
-  if (opts.isdoc) doc.text("Doklad obsahuje e-faktúru (ISDOC)", W / 2, fy, { align: "center" });
+  doc.text((model.pataLabel || T.faktC) + " " + (model.cislo || ""), L, fy);
+  if (opts.isdoc) doc.text(T.isdoc, W / 2, fy, { align: "center" });
   // Doména zámerne BEZ diakritiky — URL ju nemá (ezivnostnik.eu, nie eživnostník.eu).
   // Zvýraznená značkovou modrou, aby ju zákazník našiel.
   {
-    const label = "Vytvorené v ", url = "ezivnostnik.eu";
+    const label = T.vytvorene, url = "ezivnostnik.eu";
     const wLabel = doc.getTextWidth(label), wUrl = doc.getTextWidth(url);
     const xStart = R - wLabel - wUrl;
     setC(MUTED); doc.text(label, xStart, fy);
@@ -467,6 +526,9 @@ export function modelZakaznickejFaktury(f, meta, sumy, settings = {}) {
     popis: f.popis || settings.faktText || "",
     polozky: f.polozky || [],
     sumy,
+    // Mena a jazyk dokladu (č. 231); bez nich eurá a slovenčina ako doteraz.
+    mena: f.mena || "EUR",
+    jazyk: f.jazyk || "sk",
     obdobie: null,
     poznamka: null,
   };

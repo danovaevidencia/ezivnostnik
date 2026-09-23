@@ -2247,7 +2247,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.23-QK";  // Cenová ponuka: vlastný rad C…, PDF, faktúra z ponuky jedným ťuknutím
+const APP_VERZIA = "2026.09.24-QL";  // Faktúra v cudzej mene (kurz ECB, DPH v eurách, UBL s TaxCurrencyCode) a PDF v angličtine/nemčine
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -12126,16 +12126,38 @@ function faktSadzba(f){
   if(bez>0) return r2(dph/bez);
   return sadzbaDPHfirmy((f||{}).datum);
 }
+// ── CUDZIA MENA (č. 231, 24. 9. 2026) ────────────────────────────────────────
+// Do QK bola každá faktúra v eurách (PLAN_EFAKTURA §10.9 to odložilo, kým sa
+// nespraví celá: pole, PDF, sumy, DPH, kurz). Položky sa píšu V MENE dokladu;
+// `bez/dph/spolu` na doklade ostávajú V EURÁCH, lebo ich číta 81 funkcií
+// (DPH, KV, dane, párovanie) a zákon o DPH chce daň v eurách: § 26 ods. 1 —
+// základ dane v cudzej mene sa prepočíta referenčným kurzom ECB (NBS) platným
+// v deň vzniku daňovej povinnosti; daň sa počíta z eurového základu. Sumy
+// v mene nesie `vMene` (PDF, UBL) a na doklade `sumyMena`.
+const MENY={ EUR:"€", CZK:"Kč", USD:"$", GBP:"£", PLN:"zł", HUF:"Ft", CHF:"CHF" };
+function faktMena(f){ const m=String(f&&f.mena||"EUR").toUpperCase(); return MENY[m]?m:"EUR"; }
+// Kurz = koľko jednotiek meny je 1 EUR (tak ho kotuje ECB aj NBS: 1 EUR = 25,40 CZK).
+function faktKurz(f){ const k=+(f&&f.kurz)||0; return (faktMena(f)!=="EUR" && k>0) ? k : 1; }
+function sumaVMene(v, mena){
+  if(mena==="EUR") return eur(v);
+  return new Intl.NumberFormat("sk-SK",{minimumFractionDigits:2, maximumFractionDigits:2}).format(+v||0)+" "+(MENY[mena]||mena);
+}
 function faktSumy(f){
   const sadzba=faktSadzba(f);
+  const mena=faktMena(f), kurz=faktKurz(f), cudzia=mena!=="EUR";
   const pol=f.polozky||[];
   if(pol.length){
     // Základ sa počíta z položiek — tie sú údaj dokladu a nemenia sa v čase.
     // Daň už len sadzbou TOHO dokladu.
-    const bez=r2(pol.reduce((a,p)=>a+(+p.mn||0)*(+p.cena||0),0));
-    const dph=r2(bez*sadzba); return {bez,dph,spolu:r2(bez+dph),sadzba};
+    const bezM=r2(pol.reduce((a,p)=>a+(+p.mn||0)*(+p.cena||0),0));
+    const dphM=r2(bezM*sadzba), spoluM=r2(bezM+dphM);
+    if(!cudzia) return {bez:bezM,dph:dphM,spolu:spoluM,sadzba,mena:"EUR",kurz:1,vMene:{bez:bezM,dph:dphM,spolu:spoluM}};
+    const bez=r2(bezM/kurz), dph=r2(bez*sadzba);
+    return {bez,dph,spolu:r2(bez+dph),sadzba,mena,kurz,vMene:{bez:bezM,dph:dphM,spolu:spoluM}};
   }
-  const bez=+f.bez||0, dph=+f.dph||0; return {bez,dph,spolu:+f.spolu||r2(bez+dph),sadzba};
+  const bez=+f.bez||0, dph=+f.dph||0, spolu=+f.spolu||r2(bez+dph);
+  const vMene=(cudzia && f.sumyMena) ? f.sumyMena : {bez,dph,spolu};
+  return {bez,dph,spolu,sadzba,mena,kurz,vMene};
 }
 // ═══════════════════════════════════════════════════════════════
 //  FAKTUROVANÉ ZA OBDOBIE — JEDNA FUNKCIA, TRI POMENOVANÉ OTÁZKY
@@ -12850,8 +12872,19 @@ function feModal(idx, nova, kluc){
     </div>
     <div class="mrow2">
       <div class="mfield"><label>${jePonuka?"Platnosť do":"Splatnosť"}</label><input id="m_splatnost" type="date" value="${esc((f.splatnost||'').slice(0,10))}"></div>
-      <div class="mfield"></div>
+      <div class="mfield"><label>Mena</label>
+        <select id="m_mena" onchange="feMenaZmena()">${Object.keys(MENY).map(k=>`<option value="${k}" ${faktMena(f)===k?"selected":""}>${k}${k==="EUR"?" €":" "+esc(MENY[k])}</option>`).join("")}</select></div>
     </div>
+    <div id="feKurzBox" class="mrow2" style="${faktMena(f)==="EUR"?"display:none":""}">
+      <div class="mfield"><label>Kurz ECB — 1 € = ? <span id="feKurzMena">${esc(faktMena(f))}</span></label>
+        <input id="m_kurz" type="number" step="0.0001" min="0" value="${faktMena(f)==="EUR"?"":esc(f.kurz||"")}" placeholder="napr. 25,40" oninput="feMenaZmena()"></div>
+      <div class="mfield"><label>&nbsp;</label>
+        <button type="button" class="aabtn" onclick="feKurzECB(this)">Kurz ECB k dátumu dodania</button>
+        <div id="feKurzStav" style="font-size:11px;color:var(--ink-soft);margin-top:4px;line-height:1.4">Podľa § 26 zákona o DPH sa základ prepočíta kurzom ECB v deň dodania; DPH je vždy v eurách.</div></div>
+    </div>
+    <div class="mfield"><label>Jazyk dokladu</label>
+      <select id="m_jazyk">${[["sk","slovenčina"],["en","English"],["de","Deutsch"]].map(([k,n])=>`<option value="${k}" ${(f.jazyk||"sk")===k?"selected":""}>${n}</option>`).join("")}</select>
+      <div style="font-size:11px;color:var(--ink-soft);margin-top:4px">PDF sa vytlačí v tomto jazyku; názvy položiek a sprievodný text píšete vy.</div></div>
     ${jePonuka?"":`<div class="ocr-hint" style="margin:-6px 2px 10px">Pri DPH rozhoduje <b>dátum dodania</b> — do ktorého obdobia faktúra spadne. Vystavenie a dodanie sa väčšinou zhodujú; ak nie, riaďte sa dodaním.</div>`}
     <div class="mfield"><label>Druh plnenia</label>
       <select id="m_plnenie" onchange="feZmenPlnenie(this.value)">
@@ -12966,7 +12999,13 @@ function feModal(idx, nova, kluc){
     // sadzieb ponúka 23/19/10/5) a tak ju čaká `faktSadzba`. `faktSumy`
     // vracia podiel, preto ×100; bez toho by v dátach ležali dve jednotky
     // pod jedným menom.
+    // Mena, kurz a jazyk dokladu (č. 231) — pred sumami, lebo sumy z nich vychádzajú.
+    f.mena=faktMena({mena:val("m_mena")||"EUR"});
+    f.kurz=f.mena==="EUR" ? 1 : (parseFloat(String(val("m_kurz")).replace(",","."))||0);
+    f.jazyk=["sk","en","de"].includes(val("m_jazyk")) ? val("m_jazyk") : "sk";
+    if(f.mena!=="EUR" && !(f.kurz>0)){ alert("Faktúra v mene "+f.mena+" potrebuje kurz (1 € = ? "+f.mena+"). Načítajte ho tlačidlom Kurz ECB alebo zadajte ručne."); return false; }
     const s=faktSumy(f); f.bez=s.bez; f.dph=s.dph; f.spolu=s.spolu; f.sadzba=r2(s.sadzba*100);
+    if(f.mena!=="EUR") f.sumyMena=s.vMene; else delete f.sumyMena;
     // Identita sa prideľuje TU, nie až pri budúcom načítaní firmy. `zalohaId`
     // na konečnej faktúre ukazuje na `id` proformy — keby vzniklo až po
     // reštarte appky, väzba by v tej istej relácii neexistovala a doklad by
@@ -13770,10 +13809,49 @@ function feCistyHtml(){
 // a používateľ nevidí, čo vlastne fakturuje.
 function feSumyHtml(){
   const s=faktSumy(_feEdit);
-  return `<div style="display:flex;justify-content:space-between"><span>Základ bez DPH</span><b>${eur(s.bez)}</b></div>
-    <div style="display:flex;justify-content:space-between"><span>DPH ${Math.round(s.sadzba*100)} %</span><b>${eur(s.dph)}</b></div>
-    <div style="display:flex;justify-content:space-between;font-size:15px;margin-top:4px;border-top:1px solid var(--line);padding-top:4px"><span><b>Spolu</b></span><b style="color:var(--brand)">${eur(s.spolu)}</b></div>`
+  const cudzia=s.mena!=="EUR", v=s.vMene||s, m=s.mena;
+  return `<div style="display:flex;justify-content:space-between"><span>Základ bez DPH</span><b>${sumaVMene(v.bez,m)}</b></div>
+    <div style="display:flex;justify-content:space-between"><span>DPH ${Math.round(s.sadzba*100)} %</span><b>${sumaVMene(v.dph,m)}</b></div>
+    <div style="display:flex;justify-content:space-between;font-size:15px;margin-top:4px;border-top:1px solid var(--line);padding-top:4px"><span><b>Spolu</b></span><b style="color:var(--brand)">${sumaVMene(v.spolu,m)}</b></div>`
+    + (cudzia ? `<div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;line-height:1.5">${s.kurz>0
+        ? "V eurách kurzom "+esc(String(s.kurz).replace(".",","))+" "+esc(m)+"/€: základ <b>"+eur(s.bez)+"</b>, DPH <b>"+eur(s.dph)+"</b>, spolu <b>"+eur(s.spolu)+"</b> — tak vstúpi do DPH, výkazov a príjmov."
+        : "⚠ Bez kurzu sa doklad nedá prepočítať na eurá — zadajte kurz ECB."}</div>` : "")
     + feCistyHtml();
+}
+// Zmena meny alebo kurzu v editore: kurz sa ukáže len pri cudzej mene a sumy
+// sa prepočítajú hneď (č. 231).
+function feMenaZmena(){
+  const mena=faktMena({mena:val("m_mena")});
+  _feEdit.mena=mena;
+  _feEdit.kurz=mena==="EUR" ? 1 : (parseFloat(String(val("m_kurz")).replace(",","."))||0);
+  const box=document.getElementById("feKurzBox"); if(box) box.style.display=mena==="EUR"?"none":"";
+  const zn=document.getElementById("feKurzMena"); if(zn) zn.textContent=mena;
+  feRefreshSumy();
+}
+// Referenčný kurz ECB k dátumu dodania cez proxy (jediné, čo odchádza, je kód
+// meny a dátum). Keď server kurz nevie, človek ho zadá ručne — pole ostáva.
+async function feKurzECB(prvok){
+  const stav=document.getElementById("feKurzStav");
+  const povedz=t=>{ if(stav) stav.innerHTML=t; };
+  const mena=faktMena({mena:val("m_mena")});
+  if(mena==="EUR"){ povedz("Pri eurách kurz netreba."); return; }
+  const datum=(val("m_dodanie")||val("m_datum")||"").slice(0,10);
+  if(!sb || !SUPABASE_URL){ povedz("Kurz z ECB potrebuje cloudový účet — zadajte ho ručne (nbs.sk alebo ecb.europa.eu)."); return; }
+  if(prvok) prvok.disabled=true;
+  povedz("Načítavam kurz ECB…");
+  try{
+    const token=await ziskajToken();
+    if(!token){ povedz(esc(CHYBA_SESSION)); return; }
+    const res=await fetch(SUPABASE_URL+"/functions/v1/proxy",{ method:"POST",
+      headers:{"Content-Type":"application/json", Authorization:"Bearer "+token},
+      body:JSON.stringify({akcia:"kurz", mena, datum}) });
+    const d=res.ok ? await res.json() : {ok:false, sprava:"Server neodpovedal (HTTP "+res.status+")."};
+    if(!d.ok || !(+d.kurz>0)){ povedz("⚠ "+esc(d.sprava||"Kurz sa nepodarilo načítať.")+" Zadajte ho ručne."); return; }
+    const pole=document.getElementById("m_kurz"); if(pole) pole.value=d.kurz;
+    feMenaZmena();
+    povedz("Kurz ECB "+esc(String(d.kurz).replace(".",","))+" "+esc(mena)+"/€ zo dňa "+esc(fmtDatum(d.datum))+(d.datum!==datum&&datum?" (najbližší pracovný deň pred "+esc(fmtDatum(datum))+")":"")+".");
+  }catch(e){ console.error("kurz ECB:", e); povedz("⚠ Spojenie so serverom zlyhalo — zadajte kurz ručne."); }
+  finally{ if(prvok) prvok.disabled=false; }
 }
 function feRefreshSumy(){
   const box=document.getElementById("feSumy");
@@ -20485,7 +20563,7 @@ function dmKopiruj(){
 // sadu zhodí.
 const DOKUMENTY={
   podmienky:{url:"podmienky.html",     n:"Obchodné podmienky",      verzia:"1.6"},
-  sukromie: {url:"sukromie.html",      n:"Ochrana osobných údajov", verzia:"1.14"},
+  sukromie: {url:"sukromie.html",      n:"Ochrana osobných údajov", verzia:"1.15"},
   zmazanie: {url:"zmazanie-uctu.html", n:"Zmazanie účtu a údajov"},
 };
 // Záznam súhlasu k účtu (ROZHODNUTIA č. 52). Zmluva vzniká vytvorením účtu
@@ -28823,7 +28901,11 @@ function efakturaXml(idx){
   const datVyst=ublDatum(f.datum||f.vystavenie);
   const datDod=ublDatum(f.dodanie||f.datum||f.vystavenie);   // rozhodujúci pre DPH
   const datSplat=ublDatum(f.splatnost||f.datum||f.vystavenie);
-  const pol=(f.polozky&&f.polozky.length)?f.polozky:[{nazov:"Fakturované plnenie", mn:1, mj:"ks", cena:s.bez}];
+  // Cudzia mena (č. 231, EN 16931 BT-5/BT-6): sumy dokladu idú v mene dokladu,
+  // daň navyše v eurách ako druhý TaxTotal bez rozpisu (BR-53, PEPPOL-EN16931-R054).
+  const MENA=faktMena(f);
+  const vM=(s.vMene && MENA!=="EUR") ? s.vMene : s;
+  const pol=(f.polozky&&f.polozky.length)?f.polozky:[{nazov:"Fakturované plnenie", mn:1, mj:"ks", cena:vM.bez}];
   // riadky faktúry
   let lineXml="", lineTotal=0;
   pol.forEach((p,i)=>{
@@ -28832,7 +28914,7 @@ function efakturaXml(idx){
   <cac:${KOREN}Line>
     <cbc:ID>${i+1}</cbc:ID>
     <cbc:${jeDobropis?"Credited":"Invoiced"}Quantity unitCode="${ublJednotka(p.mj)}">${mn}</cbc:${jeDobropis?"Credited":"Invoiced"}Quantity>
-    <cbc:LineExtensionAmount currencyID="EUR">${sumaR.toFixed(2)}</cbc:LineExtensionAmount>${odkazRiadka(p)}
+    <cbc:LineExtensionAmount currencyID="${MENA}">${sumaR.toFixed(2)}</cbc:LineExtensionAmount>${odkazRiadka(p)}
     <cac:Item>
       <cbc:Name>${ubl(p.nazov||"Položka")}</cbc:Name>
       <cac:ClassifiedTaxCategory>
@@ -28840,10 +28922,12 @@ function efakturaXml(idx){
         <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
       </cac:ClassifiedTaxCategory>
     </cac:Item>
-    <cac:Price><cbc:PriceAmount currencyID="EUR">${cena.toFixed(2)}</cbc:PriceAmount></cac:Price>
+    <cac:Price><cbc:PriceAmount currencyID="${MENA}">${cena.toFixed(2)}</cbc:PriceAmount></cac:Price>
   </cac:${KOREN}Line>`;
   });
-  const bez=r2(lineTotal||s.bez), dph=r2(bez*sadzba), spolu=r2(bez+dph);
+  const bez=r2(lineTotal||vM.bez), dph=r2(bez*sadzba), spolu=r2(bez+dph);
+  // Daň v eurách pre doklad v cudzej mene: z eurového základu (§ 26), nie prepočet dane.
+  const dphEur=MENA==="EUR" ? dph : r2(s.dph);
   // Odpočet zálohy, ktorá NEBOLA zdanená samostatným dokladom (podoba
   // „uhrada", §100.3). Pri podobe „zaklad" je odpočet už v riadkoch a sem sa
   // nesmie dostať druhýkrát.
@@ -28854,7 +28938,7 @@ function efakturaXml(idx){
   // 10. 9. 2026 (§100.10) — nie odvodené.
   const prepaid = String(f.zalohaOdpocet||"")==="uhrada" ? r2(+f.zalohaSuma||0) : 0;
   const splatit = r2(spolu - prepaid);
-  const prepaidXml = prepaid>0 ? "\n    <cbc:PrepaidAmount currencyID=\"EUR\">"+prepaid.toFixed(2)+"</cbc:PrepaidAmount>" : "";
+  const prepaidXml = prepaid>0 ? "\n    <cbc:PrepaidAmount currencyID=\""+MENA+"\">"+prepaid.toFixed(2)+"</cbc:PrepaidAmount>" : "";
   // Odberateľova krajina bola natvrdo SK. Pri službe do EÚ, dodaní tovaru do EÚ
   // a vývoze je odberateľ z definície inde — a pri kategórii K sieť krajinu
   // dodania priamo vyžaduje (BR-IC-12).
@@ -28894,7 +28978,8 @@ function efakturaXml(idx){
   <cbc:CustomizationID>urn:cen.eu:en16931:2017#compliant#urn:fdc:peppol.eu:2017:poacc:billing:3.0</cbc:CustomizationID>
   <cbc:ProfileID>urn:fdc:peppol.eu:2017:poacc:billing:01:1.0</cbc:ProfileID>
   <cbc:ID>${ubl(f.cislo||"")}</cbc:ID>${hlavicka}
-  <cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>
+  <cbc:DocumentCurrencyCode>${MENA}</cbc:DocumentCurrencyCode>${MENA!=="EUR"?`
+  <cbc:TaxCurrencyCode>EUR</cbc:TaxCurrencyCode>`:""}
   <cbc:BuyerReference>${ubl(f.vs||f.cislo||"")}</cbc:BuyerReference>${odkazNaPovodny}
   <cac:AccountingSupplierParty>
     <cac:Party>
@@ -28942,22 +29027,25 @@ function efakturaXml(idx){
     <cac:PayeeFinancialAccount><cbc:ID>${ubl(String(m.iban||"").replace(/\s/g,""))}</cbc:ID></cac:PayeeFinancialAccount>
   </cac:PaymentMeans>
   <cac:TaxTotal>
-    <cbc:TaxAmount currencyID="EUR">${dph.toFixed(2)}</cbc:TaxAmount>
+    <cbc:TaxAmount currencyID="${MENA}">${dph.toFixed(2)}</cbc:TaxAmount>
     <cac:TaxSubtotal>
-      <cbc:TaxableAmount currencyID="EUR">${bez.toFixed(2)}</cbc:TaxableAmount>
-      <cbc:TaxAmount currencyID="EUR">${dph.toFixed(2)}</cbc:TaxAmount>
+      <cbc:TaxableAmount currencyID="${MENA}">${bez.toFixed(2)}</cbc:TaxableAmount>
+      <cbc:TaxAmount currencyID="${MENA}">${dph.toFixed(2)}</cbc:TaxAmount>
       <cac:TaxCategory>
         <cbc:ID>${kat.kod}</cbc:ID>${kat.bezSadzby?"":`
         <cbc:Percent>${sadzbaPct}</cbc:Percent>`}${katDovod}
         <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
       </cac:TaxCategory>
     </cac:TaxSubtotal>
-  </cac:TaxTotal>
+  </cac:TaxTotal>${MENA!=="EUR"?`
+  <cac:TaxTotal>
+    <cbc:TaxAmount currencyID="EUR">${dphEur.toFixed(2)}</cbc:TaxAmount>
+  </cac:TaxTotal>`:""}
   <cac:LegalMonetaryTotal>
-    <cbc:LineExtensionAmount currencyID="EUR">${bez.toFixed(2)}</cbc:LineExtensionAmount>
-    <cbc:TaxExclusiveAmount currencyID="EUR">${bez.toFixed(2)}</cbc:TaxExclusiveAmount>
-    <cbc:TaxInclusiveAmount currencyID="EUR">${spolu.toFixed(2)}</cbc:TaxInclusiveAmount>${prepaidXml}
-    <cbc:PayableAmount currencyID="EUR">${splatit.toFixed(2)}</cbc:PayableAmount>
+    <cbc:LineExtensionAmount currencyID="${MENA}">${bez.toFixed(2)}</cbc:LineExtensionAmount>
+    <cbc:TaxExclusiveAmount currencyID="${MENA}">${bez.toFixed(2)}</cbc:TaxExclusiveAmount>
+    <cbc:TaxInclusiveAmount currencyID="${MENA}">${spolu.toFixed(2)}</cbc:TaxInclusiveAmount>${prepaidXml}
+    <cbc:PayableAmount currencyID="${MENA}">${splatit.toFixed(2)}</cbc:PayableAmount>
   </cac:LegalMonetaryTotal>${lineXml}
 </${KOREN}>`;
   const chyba=[];
@@ -30356,6 +30444,10 @@ async function generujPayBySquareQR(f, m){
     // QR s účtom, ktorý neprejde kontrolnými číslicami, banka odmietne — žiadny
     // kód je menej mätúci. Človeka na to upozorní PDF (`potvrdIbanPreTlac`).
     if(!ibanPlatny(iban)){ console.warn("QR sa nekreslí — IBAN má preklep:", iban); return null; }
+    // Faktúra v cudzej mene (č. 231): PAY by square by niesol sumu v CZK na
+    // eurový účet — banka odberateľa by ju previedla vlastným kurzom a suma by
+    // nesedela ani s dokladom, ani s tým, čo appka očakáva. Bez QR.
+    if(faktMena(f)!=="EUR") return null;
     const s=faktSumy(f);
     // QR nesie sumu, ktorú má odberateľ POSLAŤ. Keď je na faktúre odpočet už
     // prijatej zálohy (podoba „uhrada"), je to zvyšok — inak by naskenovaný
