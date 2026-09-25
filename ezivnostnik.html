@@ -2247,7 +2247,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.25-QN";  // Prijatý doklad: dátum vystavenia z UBL/ISDOC a DIČ dodávateľa až do výdavku a pamäte partnerov
+const APP_VERZIA = "2026.09.25-QO";  // Ten istý doklad sieťou aj PDF: uložený výdavok vybaví čakajúcu e-faktúru podľa čísla dokladu
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -6443,7 +6443,12 @@ const AUTOMAT_TEXTY={
     detail:"Číslo na doklade sa nezmenilo — appka ich odteraz rozoznáva podľa vlastnej identity, aby si navzájom neprepisovali úhrady. Skontrolujte v Banke, či platby sedia na správne doklady." },
   icdph:{ ic:"🤖", modul:"vydavky",
     nazov:n=>"Doplnené IČ DPH k "+n+" "+(n===1?"dokladu":n<5?"dokladom":"dokladom"),
-    detail:"Appka ho prevzala od toho istého dodávateľa z iných dokladov. Ak dodávateľ platiteľom DPH nie je, opravte to v editore dokladu." }
+    detail:"Appka ho prevzala od toho istého dodávateľa z iných dokladov. Ak dodávateľ platiteľom DPH nie je, opravte to v editore dokladu." },
+  // č. 234: ten istý doklad prišiel sieťou aj inak (PDF, fotka, mail) — uložený
+  // výdavok vybavil čakajúcu e-faktúru, inak by čakala navždy
+  efaktura:{ ic:"🤖", modul:"efaktury",
+    nazov:n=>"Prijatá e-faktúra prepojená s "+n+" "+(n===1?"výdavkom":"výdavkami"),
+    detail:"Doklad s rovnakým číslom ste zaevidovali inou cestou (PDF, fotka, e-mail). E-faktúra zo siete už nečaká; originál XML ostáva v archíve. Ak to nie je ten istý doklad, výdavok upravte a e-faktúru zaevidujte znova z modulu E-faktúry." }
 };
 // K AKÝM dokladom automatika platby priradila. Páruje príjmy s faktúrami
 // (istý variabilný symbol alebo skóre) aj výdaje s výdavkami (skóre) —
@@ -14756,6 +14761,14 @@ async function ulozVydavokZFormularaRaz(idx, R){
   }
   zapamatajPartnera(ulozeny);
   if(doplnene) zapisAutomat("icdph", [dokladKluc(ulozeny)]);
+  // Ten istý doklad čaká aj ako e-faktúra zo siete (č. 234): výdavok z PDF,
+  // fotky či mailu ju vybaví, inak by čakala navždy. Nie pri zaevidovaní
+  // priamo z e-faktúry (`_efakturaSpracovavana` ju označí sám). Stopa ide
+  // do denníka automatiky — tiché prepojenie by sa nedalo nájsť.
+  if(!_efakturaSpracovavana && !ulozeny.efakturaId && typeof efakturyCakajuce==="function"){
+    const zEf=efakturyCakajuce().find(e=>efakturaZhodnaSVydavkom(e, ulozeny));
+    if(zEf && efakturaPrepojSVydavkom(zEf, ulozeny)) zapisAutomat("efaktura", [dokladKluc(ulozeny)]);
+  }
   // tankovanie prepojené s výdavkom (pri mazaní výdavku sa zmaže aj tankovanie)
   if(!d.tankovania) d.tankovania=[];
   const litre=+obj.litre||0;
@@ -29602,8 +29615,12 @@ function appEfaktury(){
             : efakturaPreskocena(z)
             ? `<span style="color:var(--ink-soft);font-size:11.5px">preskočená</span>
                <button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="efakturaVratSpat('${esc(z.id)}')"${zam("efaktury")} title="Vrátiť medzi čakajúce">Predsa zaevidovať</button>`
+            : (efakturaUzEvidovanyVydavok(z)
+            ? `<span style="color:var(--warn);font-size:11.5px;font-weight:600" title="Výdavok s rovnakým číslom dokladu už máte — prišiel inou cestou (PDF, fotka, e-mail)">už evidujete</span>
+               <button class="aabtn pri" style="padding:5px 9px;font-size:11px" onclick="efakturaPrepoj('${esc(z.id)}')"${zam("efaktury")} title="Označiť e-faktúru za vybavenú tým výdavkom — nič sa nezaeviduje dvakrát">Prepojiť</button>
+               <button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="efakturaZaevidujte('${esc(z.id)}')"${zam("efaktury")} title="Otvoriť formulár aj tak — ak to nie je ten istý doklad">Zaevidovať</button>`
             : `<button class="aabtn pri" style="padding:5px 9px;font-size:11px" onclick="efakturaZaevidujte('${esc(z.id)}')"${zam("efaktury")}>${z.stav==="zaevidovana"?"Zaevidovať znova":"Zaevidovať"}</button>
-               <button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="efakturaPreskoc('${esc(z.id)}')"${zam("efaktury")} title="Doklad sa evidovať nebude — originál ostáva v archíve">Nezaevidovať</button>`}
+               <button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="efakturaPreskoc('${esc(z.id)}')"${zam("efaktury")} title="Doklad sa evidovať nebude — originál ostáva v archíve">Nezaevidovať</button>`)}
             <button class="aabtn" style="padding:5px 9px;font-size:11px" onclick="otvorDokladSubor('${esc(z.cesta)}')" title="Otvoriť originál XML">XML</button></div>
         </div>`).join("") : `<div class="aempty">Zo siete zatiaľ neprišlo nič.</div>`}</div>
     </div>
@@ -29660,8 +29677,52 @@ function efakturyPrijate(){ return (firmaData && firmaData.efaktury) || []; }
 function efakturaMaDoklad(z){
   const c=String((z||{}).cesta||""); if(!c) return false;
   const d=firmaData||{};
-  return (d.vydavky||[]).some(v=>String((v||{}).doklad||"")===c)
+  // odkaz cez `efakturaId` drží výdavok zaevidovaný INOU cestou (PDF, fotka,
+  // mail) a prepojený podľa čísla dokladu (č. 234) — po zmazaní výdavku
+  // sa e-faktúra ponúkne znova, presne ako pri odkaze na originál
+  const id=String((z||{}).id||"");
+  return (d.vydavky||[]).some(v=>String((v||{}).doklad||"")===c || (id && String((v||{}).efakturaId||"")===id))
       || (d.faktury||[]).some(f=>String((f||{}).doklad||"")===c);
+}
+// ── Ten istý doklad sieťou AJ inou cestou (č. 234, kap. 139.7) ──
+// V prechodnom období bude dodávateľ posielať faktúru Peppolom aj mailom
+// ako PDF. Keď človek zaeviduje PDF, e-faktúra zo siete čakala navždy a
+// jediná cesta von bola „Nezaevidovať“. Schránka mailov sa pred otvorením
+// porovnať NEDÁ (riadok nesie len názov súboru a predmet, nie číslo dokladu),
+// preto sa porovnáva až ULOŽENÝ výdavok s čakajúcimi e-faktúrami.
+// Zhoda: rovnaké neprázdne číslo dokladu A k tomu rovnaká suma alebo
+// rovnaký dodávateľ — samotné číslo („1“, „2026001“) majú dvaja dodávatelia
+// ľahko rovnaké a falošné prepojenie by skryla skutočnú faktúru.
+function efakturaZhodnaSVydavkom(z, x){
+  if(!z || !x) return false;
+  const c=String(z.cislo||"").trim(), xc=String(x.cislo||"").trim();
+  if(!c || !xc || c!==xc) return false;
+  const sumaSedi = Math.abs((+z.spolu||0)-(+x.spolu||0))<0.005 && (+z.spolu||0)!==0;
+  const kz=(typeof partnerKluc==="function")?partnerKluc(z.dodavatel||""):"", kx=(typeof partnerKluc==="function")?partnerKluc(x.partner||""):"";
+  const partnerSedi = kz.length>=4 && kx.length>=4 && (kz===kx || kz.startsWith(kx) || kx.startsWith(kz));
+  return sumaSedi || partnerSedi;
+}
+// uložený výdavok, ktorý čakajúcej e-faktúre zodpovedá (pre modul: „už evidujete“)
+function efakturaUzEvidovanyVydavok(z){
+  return ((firmaData||{}).vydavky||[]).find(v=>v && !v.efakturaId && efakturaZhodnaSVydavkom(z, v)) || null;
+}
+// Prepojenie: výdavok ukáže na e-faktúru, e-faktúra dostane stav. Vracia true pri zmene.
+function efakturaPrepojSVydavkom(z, v){
+  if(!z || !v) return false;
+  v.efakturaId=z.id;
+  z.stav="zaevidovana"; z.zaevidovane=new Date().toISOString(); z.prepojene="vydavok";
+  return true;
+}
+// tlačidlo v module E-faktúry — človek videl, že ide o ten istý doklad
+function efakturaPrepoj(id){
+  if(!strazZapis("efaktury")) return;
+  const z=efakturyPrijate().find(x=>String(x.id)===String(id)); if(!z) return;
+  const v=efakturaUzEvidovanyVydavok(z);
+  if(!v){ alert("Výdavok s rovnakým číslom dokladu sa už nenašiel."); return; }
+  efakturaPrepojSVydavkom(z, v);
+  poZmene();
+  if(typeof appEfaktury==="function" && modulNaObrazovke()==="efaktury") appEfaktury();
+  if(typeof renderLauncher==="function") renderLauncher();
 }
 // Bez cesty k originálu sa overiť NEDÁ — vtedy platí zapísaný stav. Tvrdiť
 // „čaká" by znamenalo ponúknuť tlačidlo, ktoré nemá čo otvoriť; odvodenie
