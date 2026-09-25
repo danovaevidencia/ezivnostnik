@@ -2247,7 +2247,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.25-QQ";  // Exporty krok 1: účtovná dávka (partneri, doklady, úhrady, banka, majetok), záznam exportu, prírastok pre účtovníka, XLSX nad dávkou
+const APP_VERZIA = "2026.09.25-QR";  // ISDOC platný podľa oficiálnej schémy: Country/Name a účet ID/BankCode/Name pred IBAN
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -31050,6 +31050,28 @@ function generujISDOC(idx){
 // Vracia ISDOC XML ako reťazec — použiteľné aj na vloženie do PDF (viď
 // exportFakturaPDF). Predtým generovanie a stiahnutie boli zliate, takže XML
 // sa nedalo získať bez toho, aby sa hneď stiahlo.
+// ── Čo ISDOC XSD žiada a čo sme do QR nedávali (spec 140.9) ──
+// Overenie proti oficiálnej schéme 6.0.1 aj 6.0.2 (isdoc.cz) 25. 9. 2026 našlo:
+// `Country` musí mať aj `Name` a bankový účet v `Details` je skupina
+// ID (číslo účtu) → BankCode → Name (banka) → IBAN → BIC, všetko povinné
+// a v tomto poradí. Doklad bez toho POHODA/KROS môžu odmietnuť ako neplatný,
+// hoci obsahom je správny — a vyzeral správne od júla.
+const ISDOC_KRAJINY={SK:"Slovensko", CZ:"Česko", AT:"Rakúsko", DE:"Nemecko", HU:"Maďarsko", PL:"Poľsko",
+  IT:"Taliansko", FR:"Francúzsko", NL:"Holandsko", BE:"Belgicko", ES:"Španielsko", IE:"Írsko", LU:"Luxembursko",
+  SI:"Slovinsko", HR:"Chorvátsko", RO:"Rumunsko", BG:"Bulharsko", DK:"Dánsko", SE:"Švédsko", FI:"Fínsko",
+  PT:"Portugalsko", GR:"Grécko", EE:"Estónsko", LV:"Lotyšsko", LT:"Litva", CY:"Cyprus", MT:"Malta", GB:"Spojené kráľovstvo", CH:"Švajčiarsko", US:"USA"};
+function isdocKrajinaNazov(kod){ const k=String(kod||"").toUpperCase(); return ISDOC_KRAJINY[k]||k; }
+const ISDOC_BANKY={"0200":"Všeobecná úverová banka", "0900":"Slovenská sporiteľňa", "1100":"Tatra banka", "1111":"UniCredit Bank",
+  "0720":"Národná banka Slovenska", "5600":"Prima banka Slovensko", "6500":"365.bank", "7500":"Československá obchodná banka",
+  "8330":"Fio banka", "8360":"mBank", "3100":"Prima banka Slovensko", "8100":"Komerční banka", "8130":"Citibank Europe", "8170":"ČSOB stavebná sporiteľňa", "8320":"J&T Banka", "8420":"BKS Bank", "9950":"Slovenská záručná a rozvojová banka"};
+// Slovenský IBAN: SK + 2 kontrolné + 4 kód banky + 6 predčíslie + 10 číslo účtu.
+function isdocUcetZIbanu(iban){
+  const i=String(iban||"").replace(/\s/g,"").toUpperCase();
+  const m=i.match(/^SK\d{2}(\d{4})(\d{6})(\d{10})$/);
+  if(!m) return {id:"", kod:"", nazov:""};
+  const pred=m[2].replace(/^0+/,""), cislo=m[3].replace(/^0+(?=\d)/,"");
+  return {id:(pred?pred+"-":"")+cislo, kod:m[1], nazov:ISDOC_BANKY[m[1]]||""};
+}
 function isdocXml(idx){
   const f=firmaData.faktury[idx]; const m=firmaData.meta||{};
   const s=faktSumy(f);
@@ -31057,6 +31079,8 @@ function isdocXml(idx){
   const n2=v=>(+v||0).toFixed(2);
   const sadzbaPct=Math.round(s.sadzba*100);
   const da=rozlozAdresu(m.adresa);
+  const ucet=isdocUcetZIbanu(m.iban);
+  const odbKrajina=ublKrajina(f.icdph);   // z predpony IČ DPH, bez neho SK — to isté pravidlo ako UBL
   // Odberateľ: názov aj adresa sa čítajú rovnako ako v PDF a UBL — jeden zdroj,
   // inak by tri exporty tej istej faktúry niesli tri rôzne adresy. Do 8. 9. 2026
   // to tak nebolo: UBL bralo odberateľa z `settings` (odberateľ z výkazov, iná
@@ -31097,14 +31121,14 @@ function isdocXml(idx){
    <AccountingSupplierParty><Party>
       <PartyIdentification><ID>${esc(m.ico)}</ID></PartyIdentification>
       <PartyName><Name>${esc(m.nazov)}</Name></PartyName>
-      <PostalAddress><StreetName>${esc(da.ulica)}</StreetName><BuildingNumber>${esc(da.cislo)}</BuildingNumber><CityName>${esc(da.mesto)}</CityName><PostalZone>${esc(da.psc)}</PostalZone><Country><IdentificationCode>SK</IdentificationCode></Country></PostalAddress>
+      <PostalAddress><StreetName>${esc(da.ulica)}</StreetName><BuildingNumber>${esc(da.cislo)}</BuildingNumber><CityName>${esc(da.mesto)}</CityName><PostalZone>${esc(da.psc)}</PostalZone><Country><IdentificationCode>SK</IdentificationCode><Name>${esc(isdocKrajinaNazov("SK"))}</Name></Country></PostalAddress>
       <PartyTaxScheme><CompanyID>${esc(m.icdph)}</CompanyID><TaxScheme>VAT</TaxScheme></PartyTaxScheme>${m.dic?`
       <PartyTaxScheme><CompanyID>${esc(m.dic)}</CompanyID><TaxScheme>TIN</TaxScheme></PartyTaxScheme>`:""}
    </Party></AccountingSupplierParty>
    <AccountingCustomerParty><Party>
       <PartyIdentification><ID>${esc(f.ico||"")}</ID></PartyIdentification>
       <PartyName><Name>${esc(odbNazov)}</Name></PartyName>
-      <PostalAddress><StreetName>${esc(oa.ulica)}</StreetName><BuildingNumber>${esc(oa.cislo)}</BuildingNumber><CityName>${esc(oa.mesto)}</CityName><PostalZone>${esc(oa.psc)}</PostalZone><Country><IdentificationCode>SK</IdentificationCode></Country></PostalAddress>
+      <PostalAddress><StreetName>${esc(oa.ulica)}</StreetName><BuildingNumber>${esc(oa.cislo)}</BuildingNumber><CityName>${esc(oa.mesto)}</CityName><PostalZone>${esc(oa.psc)}</PostalZone><Country><IdentificationCode>${esc(odbKrajina)}</IdentificationCode><Name>${esc(isdocKrajinaNazov(odbKrajina))}</Name></Country></PostalAddress>
       <PartyTaxScheme><CompanyID>${esc(f.icdph||"")}</CompanyID><TaxScheme>VAT</TaxScheme></PartyTaxScheme>${f.dic?`
       <PartyTaxScheme><CompanyID>${esc(f.dic)}</CompanyID><TaxScheme>TIN</TaxScheme></PartyTaxScheme>`:""}
    </Party></AccountingCustomerParty>
@@ -31142,6 +31166,9 @@ ${lines}
          <PaymentMeansCode>42</PaymentMeansCode>
          <Details>
             <PaymentDueDate>${esc(String(f.splatnost||"").slice(0,10))}</PaymentDueDate>
+            <ID>${esc(ucet.id)}</ID>
+            <BankCode>${esc(ucet.kod)}</BankCode>
+            <Name>${esc(ucet.nazov)}</Name>
             <IBAN>${esc(String(m.iban||"").replace(/\s/g,""))}</IBAN>
             <BIC>${esc(m.swift||"")}</BIC>
             <VariableSymbol>${esc(String(f.vs||f.cislo||"").replace(/\D/g,""))}</VariableSymbol>
