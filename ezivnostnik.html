@@ -2247,7 +2247,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.24-QL";  // Faktúra v cudzej mene (kurz ECB, DPH v eurách, UBL s TaxCurrencyCode) a PDF v angličtine/nemčine
+const APP_VERZIA = "2026.09.25-QM";  // Kategória výdavku predvolená podľa posledného dokladu od toho istého dodávateľa
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -13746,6 +13746,8 @@ function feVyberFirmu(i){
   if(c.adresa && document.getElementById(c.adresa)) document.getElementById(c.adresa).value=v.adresa||"";
   if(c.dic && document.getElementById(c.dic)) document.getElementById(c.dic).value=v.dic||"";
   const box=document.getElementById(konf.nasep); if(box) box.style.display="none";
+  // výdavok: dodávateľ sa zmenil, kategória sa predvolí podľa jeho posledného dokladu (č. 232)
+  if(c.nazov==="m_partner" && typeof mKategoriaPodlaPartnera==="function") mKategoriaPodlaPartnera();
 }
 // ═══════════════════════════════════════════════════════════════
 //  ČO Z FAKTÚRY ZOSTANE (kap. 82)
@@ -14309,10 +14311,10 @@ function vydavokFormHtml(x, nova, idx){
   // `m_tuzemskyPrenos` (citajSamozdanenie).
   return `    ${_uhrHtml}${nova?vzoryHtml():""}<input type="hidden" id="m_samozdanenieTyp" value="${esc(x.samozdanenieTyp==="tuzemsky"?"":(x.samozdanenieTyp||""))}"><div class="mfield"><label>Druh dokladu</label><select id="m_druh" onchange="mDruhZmeneny()"><option ${x.druh==="Došlá faktúra"?"selected":""}>Došlá faktúra</option><option ${x.druh==="Bloček"?"selected":""}>Bloček</option><option ${x.druh==="PHM (tankovanie)"?"selected":""}>PHM (tankovanie)</option><option ${x.druh==="Interný doklad"?"selected":""}>Interný doklad</option></select></div>
     <div class="mfield" style="position:relative"><label>Partner</label>
-      <input id="m_partner" value="${esc(x.partner)}" autocomplete="off" oninput="feHladajFirmu(this.value,'m_partner')" placeholder="Začnite písať názov alebo IČO dodávateľa…">
+      <input id="m_partner" value="${esc(x.partner)}" autocomplete="off" oninput="feHladajFirmu(this.value,'m_partner')" onchange="mKategoriaPodlaPartnera()" placeholder="Začnite písať názov alebo IČO dodávateľa…">
       <div id="feNasepP" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:30;background:var(--paper);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px -8px rgba(19,28,43,.25);max-height:240px;overflow-y:auto;margin-top:2px"></div>
     </div>
-    <div class="mrow2"><div class="mfield"><label>IČO dodávateľa</label><input id="m_dodIco" value="${esc(x.dodavatelIco||'')}" placeholder="nepovinné"></div><div class="mfield"><label>IČ DPH dodávateľa</label><input id="m_dodIcDph" value="${esc(x.dodavatelIcDph||'')}" placeholder="nepovinné" oninput="skontrolujICDPHpole(this);mAktualizujOddiel();mUcetFS()"><div id="m_dodIcDphStav" class="ocr-hint"></div></div></div>
+    <div class="mrow2"><div class="mfield"><label>IČO dodávateľa</label><input id="m_dodIco" value="${esc(x.dodavatelIco||'')}" placeholder="nepovinné" onchange="mKategoriaPodlaPartnera()"></div><div class="mfield"><label>IČ DPH dodávateľa</label><input id="m_dodIcDph" value="${esc(x.dodavatelIcDph||'')}" placeholder="nepovinné" oninput="skontrolujICDPHpole(this);mAktualizujOddiel();mUcetFS()"><div id="m_dodIcDphStav" class="ocr-hint"></div></div></div>
     <div style="margin:-4px 0 10px"><button type="button" class="aabtn" style="font-size:12px;padding:5px 11px" onclick="doplnZRegistra()">🔎 Skontrolovať / doplniť z registra</button><span id="regStav" style="font-size:11.5px;margin-left:8px;color:var(--ink-soft)"></span></div>
     <div id="regNavrh" style="display:none"></div>
     <div class="mrow2"><div class="mfield"><label>Číslo dokladu</label><input id="m_cislo" value="${esc(x.cislo||'')}" placeholder="napr. 5421760153"></div><div class="mfield"><label>Variabilný symbol</label><input id="m_vs" value="${esc(x.variabilny||'')}" placeholder="nepovinné"></div></div>
@@ -14324,9 +14326,9 @@ function vydavokFormHtml(x, nova, idx){
     </div>
     <div class="mfield">
       <label>Do čoho to patrí</label>
-      <select id="m_kategoria" onchange="mKategoriaPozn();mPodielBox();mAktualizujOddiel()">
+      <select id="m_kategoria" data-zdroj="${predvolKategoriu(x, idx).zdroj}" data-auto="${x.kategoria&&KATEGORIE_VYDAVKOV[x.kategoria]?"":"1"}" data-idx="${idx==null?"":idx}" onchange="this.dataset.auto='';this.dataset.zdroj='';mKategoriaPozn();mPodielBox();mAktualizujOddiel()">
         ${Object.keys(KATEGORIE_VYDAVKOV).filter(k=>k!=="odpisy").map(k=>
-          `<option value="${k}" ${odhadniKategoriu(x)===k?"selected":""}>${esc(KATEGORIE_VYDAVKOV[k].n)}</option>`).join("")}
+          `<option value="${k}" ${predvolKategoriu(x, idx).kategoria===k?"selected":""}>${esc(KATEGORIE_VYDAVKOV[k].n)}</option>`).join("")}
       </select>
       <div class="ocr-hint" id="m_katPozn"></div>
     </div>
@@ -16725,6 +16727,55 @@ function odhadniKategoriu(x){
   if(/poist|banka|poplat|kancelar|cistiac|hygien|postov/.test(txt)) return "prevadzka";
   if(/najom|najmu|energi|elektrin|plyn|internet|telefon|softver|software|predplatne/.test(txt)) return "sluzby";
   return "sluzby";
+}
+// Kategória z POSLEDNÉHO výdavku toho istého dodávateľa (č. 232, kap. 139).
+// Pamäť partnerov kategóriu nedrží a regexový odhad má predvoľbu „služby",
+// takže doklad z e-faktúry, mailu či fotky od dodávateľa, od ktorého už výdavok
+// je, sa predvypĺňal odhadom namiesto toho, čo človek pri tom dodávateľovi
+// naposledy rozhodol. Je to len predvoľba: človek ju vo formulári vidí a mení.
+// Zhoda: IČO (keď ho majú obaja) → IČ DPH → presný kľúč názvu. Prefixová
+// zhoda z najdiPartnera sa tu NEPOUŽÍVA — šum z OCR nemá rozhodovať
+// o daňovom výdavku. Číta sa len z výdavkov TEJ ISTEJ firmy, nikdy z iného modulu.
+function kategoriaPodlaDodavatela(x, vynechajIdx){
+  if(!x) return "";
+  const ico=String(x.dodavatelIco||x.ico||"").replace(/\s/g,"");
+  const icdph=String(x.dodavatelIcDph||x.icdph||"").replace(/\s/g,"").toUpperCase();
+  const kluc=(typeof partnerKluc==="function")?partnerKluc(x.partner||""):"";
+  if(!ico && !icdph && kluc.length<4) return "";
+  let naj=null;
+  (firmaData.vydavky||[]).forEach((v,i)=>{
+    if(v===x || i===vynechajIdx) return;
+    if(!v.kategoria || v.kategoria==="odpisy" || !KATEGORIE_VYDAVKOV[v.kategoria]) return;
+    const vIco=String(v.dodavatelIco||v.ico||"").replace(/\s/g,"");
+    const vIcDph=String(v.dodavatelIcDph||v.icdph||"").replace(/\s/g,"").toUpperCase();
+    let sedi;
+    if(ico && vIco) sedi=(vIco===ico);
+    else if(icdph && vIcDph) sedi=(vIcDph===icdph);
+    else sedi=(kluc.length>=4 && partnerKluc(v.partner||"")===kluc);
+    if(!sedi) return;
+    if(!naj || String(v.datum||"")>String(naj.datum||"")) naj=v;
+  });
+  return naj ? naj.kategoria : "";
+}
+// Predvoľba kategórie vo formulári: uložená → od toho istého dodávateľa → odhad.
+// Vracia aj zdroj, aby formulár vedel povedať, odkiaľ predvoľba je.
+function predvolKategoriu(x, vynechajIdx){
+  if(x && x.kategoria && KATEGORIE_VYDAVKOV[x.kategoria]) return {kategoria:x.kategoria, zdroj:"ulozena"};
+  const d=kategoriaPodlaDodavatela(x, vynechajIdx);
+  if(d) return {kategoria:d, zdroj:"dodavatel"};
+  return {kategoria:odhadniKategoriu(x), zdroj:"odhad"};
+}
+// Po výbere alebo zmene partnera vo formulári výdavku: kým sa človek kategórie
+// nedotkol (data-auto), predvoľba sa prepočíta podľa nového dodávateľa.
+function mKategoriaPodlaPartnera(){
+  const sel=document.getElementById("m_kategoria"); if(!sel || !sel.dataset || !sel.dataset.auto) return;
+  const x={partner:val("m_partner"), dodavatelIco:val("m_dodIco"), dodavatelIcDph:val("m_dodIcDph")};
+  const d=kategoriaPodlaDodavatela(x, sel.dataset.idx===""?undefined:+sel.dataset.idx);
+  if(!d || d===sel.value) return;
+  sel.value=d; sel.dataset.zdroj="dodavatel";
+  if(typeof mKategoriaPozn==="function") mKategoriaPozn();
+  if(typeof mPodielBox==="function") mPodielBox();
+  if(typeof mAktualizujOddiel==="function") mAktualizujOddiel();
 }
 
 // Druhy samozdanenia. Rozhodujú o tom, do ktorých riadkov priznania doklad ide —
@@ -24929,7 +24980,11 @@ function mKategoriaPozn(){
   if(typeof mZaRokPozn==="function") mZaRokPozn();
   if(!p) return;
   if(!k){ p.textContent=""; return; }
-  p.innerHTML=esc(k.p)+(k.zaklad?"":` <b style="color:var(--warn)">Tento výdavok nezníži vašu daň.</b>`);
+  // predvoľba z pamäte nie je odhad — človek má vidieť, odkiaľ je, aby vedel, čo prepisuje
+  const sel=document.getElementById("m_kategoria");
+  const zPamate=sel && sel.dataset && sel.dataset.zdroj==="dodavatel";
+  p.innerHTML=esc(k.p)+(k.zaklad?"":` <b style="color:var(--warn)">Tento výdavok nezníži vašu daň.</b>`)
+    +(zPamate?` <span style="color:var(--ink-soft)">Predvolené podľa vášho posledného dokladu od tohto dodávateľa.</span>`:"");
 }
 // Rok povinnosti je pole, ktoré ticho mení výsledok — preto sa hneď povie, čo
 // znamená, a prázdne pole sa nepredstiera za rozhodnutie.
