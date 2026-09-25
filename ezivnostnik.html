@@ -23613,6 +23613,7 @@ function xkRokyVydavkov(D){
 // Hárok Majetok z ÚČTOVNEJ DÁVKY (č. 237): `M` sú záznamy `uctovnaDavka().majetok`,
 // nie karty z firmaData — plán a vstupnú cenu so zhodnotením už dávka prepočítala.
 function xkMajetokSheet(X, S, M, wb, fmtSk){
+  if(M && !Array.isArray(M) && M.majetok) M=davkaMajetok(M);   // karty z firmaData → záznamy dávky
   M=M||[];
   if(!M.length) return;
   const aoa=[[xkCell("Majetok a odpisy",S.title)],[],
@@ -23699,6 +23700,25 @@ function davkaPartnerKluc(nazov, ico, icdph){
   const k=(typeof partnerKluc==="function")?partnerKluc(nazov):String(nazov||"").toLowerCase().replace(/\s/g,"");
   return k ? "n:"+k : "";
 }
+// Záznamy majetku dávky — samostatne, lebo hárok Majetok ich potrebuje aj mimo dávky (starší test).
+function davkaMajetok(D){
+  const iso=d=>String(d||"").slice(0,10);
+  return ((D||{}).majetok||[]).filter(mj=>mj).map(mj=>{
+    const Pl=odpisPlan(mj)||{};
+    const typ = mj.typMajetku==="drobny" ? "drobný" : (mj.typMajetku==="neodpisovany" ? "neodpisovaný" : "odpisovaný");
+    const sk = (mj.typMajetku==="odpisovany") ? ((ODPIS_SKUPINY[mj.odpisovaSkupina]||{}).nazov || String(mj.odpisovaSkupina)) : "—";
+    return {
+      id:String(mj.id||""), nazov:String(mj.nazov||""), typMajetku:String(mj.typMajetku||"odpisovany"), typ, skupina:sk, skupinaKod:mj.odpisovaSkupina,
+      zaradenie:iso(mj.datumZaradenia), vstupnaCena:r2(mj.vstupnaCena||0),
+      vstupnaCenaCelkom:r2(Pl.vstupnaCenaCelkom!=null?Pl.vstupnaCenaCelkom:(+mj.vstupnaCena||0)),
+      rocnyOdpis:r2((Pl.tzSpolu?Pl.rocnyOdpisTz:Pl.rocnyOdpis)||0),
+      osobnaPotreba:(mj.osobnaPotreba!=null && +mj.osobnaPotreba<100)?+mj.osobnaPotreba:100,
+      vyradeny:(mj.vyradeny&&mj.vyradeny.datum)?{datum:iso(mj.vyradeny.datum), dovod:String(mj.vyradeny.dovod||""), predajnaCena:r2(mj.vyradeny.predajnaCena||0)}:null,
+      plan:{luxusne:!!Pl.luxusne, luxLimit:+Pl.luxLimit||0, tzSpolu:r2(Pl.tzSpolu||0), stratenePredZaradenim:r2(Pl.stratenePredZaradenim||0),
+        riadky:(Pl.plan||[]).map(r=>({rok:+r.rok||0, mesiace:+r.mesiace||0, odpis:r2(r.odpis), odpisUplatneny:r2(r.odpisUplatneny), zostatok:r2(r.zostatok)}))},
+    };
+  });
+}
 function uctovnaDavka(volby){
   const V=volby||{}; const D=firmaData||{};
   const roky=(V.roky && V.roky.length) ? V.roky.map(String) : null;
@@ -23733,7 +23753,7 @@ function uctovnaDavka(volby){
     .sort((a,b)=>String(a.datum||a.vystavenie||"").localeCompare(String(b.datum||b.vystavenie||"")))
     .map(f=>{
       const s=faktSumy(f); const opr=faktOprava(f); const kluc=dokladKluc(f);
-      let st={stav:"neznamy", zost:0}; try{ st=uhradaStav("faktura", kluc)||st; }catch(_){}
+      let st={stav:"neznamy", zost:0}; try{ st=uhradaStav("faktura", kluc)||st; }catch(e){ console.error("dávka: stav úhrady faktúry "+kluc, e); }
       const typ=jePrijmovyDoklad(f) ? "prijmovy" : jeDokladKPlatbe(f) ? "dokladKPlatbe" : opr ? (opr.tarchopis?"tarchopis":"dobropis") : "faktura";
       const cd=(f.polozky||[]).reduce((a,p)=>{const mj=(p.mj||"").toLowerCase();return a+(/člov|clov|deň|den|md/.test(mj)?(+p.mn||0):0);},0);
       const odb=typeof f.odberatel==="string"?f.odberatel:(f.odberatel&&f.odberatel.nazov)||"";
@@ -23759,11 +23779,12 @@ function uctovnaDavka(volby){
 
   // ── výdavky: rok dane podľa pravidla appky, DPH so žiadosťou o vrátenie v inom roku sa hlási zvlášť ──
   const rokyKandidati=[...new Set([...xkRokyVydavkov(D), ...(D.vypis||[]).map(t=>rokZ(t.datum))].filter(y=>/^\d{4}$/.test(y)))].sort();
+  const bezKategorie=[], bezDokladu=[];
   const vydavky=(D.vydavky||[]).filter(x=>x && (rokyKandidati.some(y=>chceRok(y) && vydavokVRoku(x, y)) || chceRok(vydavokDphVratenieObdobie(x).slice(0,4))))
     .sort((a,b)=>String(a.datum||"").localeCompare(String(b.datum||"")))
     .map(x=>{
       const kluc=dokladKluc(x);
-      let st={stav:"neznamy", zost:0}; try{ st=uhradaStav("vydavok", kluc)||st; }catch(_){}
+      let st={stav:"neznamy", zost:0}; try{ st=uhradaStav("vydavok", kluc)||st; }catch(e){ console.error("dávka: stav úhrady výdavku "+kluc, e); }
       const kat=(x.kategoria && KATEGORIE_VYDAVKOV[x.kategoria]) ? x.kategoria : "";
       const odhad=(!kat && typeof odhadniKategoriu==="function") ? odhadniKategoriu(x) : "";
       const rozpis=(typeof rozpisRiadky==="function"?rozpisRiadky(x):[]).map(r=>({sadzba:+r.sadzba||0, bez:r2(r.bez), dph:r2(r.dph)}));
@@ -23787,16 +23808,28 @@ function uctovnaDavka(volby){
         efakturaId:String(x.efakturaId||""), ekasaId:String(x.ekasaId||""), zdroj:String(x.zdroj||""),
       };
       if(!rec.cislo) nalez("chyba", "Výdavok bez čísla dokladu ("+(rec.partner||rec.datum)+")", "Bez čísla sa v cudzom programe nedá zaevidovať ani spárovať s platbou.", "vydavok:"+kluc);
-      if(!kat) nalez("pozor", "Výdavok "+(rec.cislo||rec.datum)+" bez kategórie", "V exporte je „neurčené“; základ dane ide podľa odhadu appky ("+((KATEGORIE_VYDAVKOV[odhad]||{}).n||odhad||"—")+"). Kategóriu doplníte v editore výdavku.", "vydavok:"+kluc);
-      if(!rec.doklad && rec.druh!=="Interný doklad") nalez("pozor", "Výdavok "+(rec.cislo||rec.datum)+" bez priloženého dokladu", "Účtovník originál zvyčajne chce; priložíte ho v editore výdavku (📎).", "vydavok:"+kluc);
+      if(!kat) bezKategorie.push(rec);
+      if(!rec.doklad && rec.druh!=="Interný doklad") bezDokladu.push(rec);
       return rec;
     });
+  // Hromadné nálezy: jeden riadok na doklad by pri desiatkach bločkov bez fotky
+  // zahltil kontrolu a človek by prestal čítať aj skutočné chyby (kap. 16:
+  // falošný poplach je drahší než žiadny). Do troch po jednom, viac spolu.
+  const hromadne=(zoz, typ, jeden, viac, detail)=>{
+    if(!zoz.length) return;
+    if(zoz.length<=3) zoz.forEach(r=>nalez(typ, jeden(r), detail(r), "vydavok:"+r.kluc));
+    else nalez(typ, viac(zoz.length), detail(null)+" Napr. "+zoz.slice(0,5).map(r=>r.cislo||r.datum).join(", ")+(zoz.length>5?" …":"")+".", "vydavky:"+zoz.map(r=>r.kluc).join(","));
+  };
+  hromadne(bezKategorie, "pozor", r=>"Výdavok "+(r.cislo||r.datum)+" bez kategórie", n=>n+" "+sklon(n,"výdavok","výdavky","výdavkov")+" bez kategórie",
+    r=>"V exporte je „neurčené“; základ dane ide podľa odhadu appky"+(r?" ("+((KATEGORIE_VYDAVKOV[r.odhad]||{}).n||r.odhad||"—")+")":"")+". Kategóriu doplníte v editore výdavku.");
+  hromadne(bezDokladu, "pozor", r=>"Výdavok "+(r.cislo||r.datum)+" bez priloženého dokladu", n=>n+" "+sklon(n,"výdavok","výdavky","výdavkov")+" bez priloženého dokladu",
+    ()=>"Účtovník originál zvyčajne chce; priložíte ho v editore výdavku (📎).");
 
   // ── banka: všetky pohyby vo zvolených rokoch; skryté a ignorované sú atribút, nie výber (kap. 88.5) ──
   const banka=(D.vypis||[]).filter(t=>t && chceRok(rokZ(t.datum)))
     .sort((a,b)=>String(a.datum||"").localeCompare(String(b.datum||"")))
     .map(t=>{
-      let st={kod:"", text:""}; try{ st=pohybStav(t)||st; }catch(_){}
+      let st={kod:"", text:""}; try{ st=pohybStav(t)||st; }catch(e){ console.error("dávka: stav pohybu "+txId(t), e); }
       const doklady=(t.uhrady||[]).map(u=>({typ:String(u.typ||""), kluc:String(u.cislo||""), suma:r2(uhrNaDoklad(u)), auto:!!u.auto}));
       doklady.forEach(u=>{ if(!najdiDoklad(u.typ, u.kluc)) nalez("chyba", "Platba "+iso(t.datum)+" ukazuje na doklad "+u.kluc+", ktorý neexistuje", "Sirota po zmazanom doklade — v Banke ju odpojte alebo doklad obnovte.", "banka:"+txId(t)); });
       return {
@@ -23813,21 +23846,7 @@ function uctovnaDavka(volby){
   banka.forEach(b=>b.doklady.forEach(u=>uhrady.push({dokladTyp:u.typ, dokladKluc:u.kluc, pohybId:b.id, datum:b.datum, suma:u.suma, auto:u.auto})));
 
   // ── majetok: karta + plán; vyradenie ako atribút ──
-  const majetok=(D.majetok||[]).filter(mj=>mj).map(mj=>{
-    const Pl=odpisPlan(mj)||{};
-    const typ = mj.typMajetku==="drobny" ? "drobný" : (mj.typMajetku==="neodpisovany" ? "neodpisovaný" : "odpisovaný");
-    const sk = (mj.typMajetku==="odpisovany") ? ((ODPIS_SKUPINY[mj.odpisovaSkupina]||{}).nazov || String(mj.odpisovaSkupina)) : "—";
-    return {
-      id:String(mj.id||""), nazov:String(mj.nazov||""), typMajetku:String(mj.typMajetku||"odpisovany"), typ, skupina:sk, skupinaKod:mj.odpisovaSkupina,
-      zaradenie:iso(mj.datumZaradenia), vstupnaCena:r2(mj.vstupnaCena||0),
-      vstupnaCenaCelkom:r2(Pl.vstupnaCenaCelkom!=null?Pl.vstupnaCenaCelkom:(+mj.vstupnaCena||0)),
-      rocnyOdpis:r2((Pl.tzSpolu?Pl.rocnyOdpisTz:Pl.rocnyOdpis)||0),
-      osobnaPotreba:(mj.osobnaPotreba!=null && +mj.osobnaPotreba<100)?+mj.osobnaPotreba:100,
-      vyradeny:(mj.vyradeny&&mj.vyradeny.datum)?{datum:iso(mj.vyradeny.datum), dovod:String(mj.vyradeny.dovod||""), predajnaCena:r2(mj.vyradeny.predajnaCena||0)}:null,
-      plan:{luxusne:!!Pl.luxusne, luxLimit:+Pl.luxLimit||0, tzSpolu:r2(Pl.tzSpolu||0), stratenePredZaradenim:r2(Pl.stratenePredZaradenim||0),
-        riadky:(Pl.plan||[]).map(r=>({rok:+r.rok||0, mesiace:+r.mesiace||0, odpis:r2(r.odpis), odpisUplatneny:r2(r.odpisUplatneny), zostatok:r2(r.zostatok)}))},
-    };
-  });
+  const majetok=davkaMajetok(D);
 
   // register partnerov — aj bez dokladu (adresár pre cudzí program)
   (D.partneri||[]).forEach(p=>partner(p.nazov, p.ico, p.dic, p.icdph, "", "", "register"));
