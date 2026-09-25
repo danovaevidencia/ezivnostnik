@@ -2247,7 +2247,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.25-QO";  // Ten istý doklad sieťou aj PDF: uložený výdavok vybaví čakajúcu e-faktúru podľa čísla dokladu
+const APP_VERZIA = "2026.09.25-QP";  // Exporty krok 0: jedna cesta sťahovania, jeden XML escape, hárok Partneri, kategória v XLSX bez odhadu
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -10401,10 +10401,9 @@ function ensureDocx(){
   });
   return _docxLoading;
 }
-function stiahniBlob(blob, nazov){
-  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=nazov; a.click();
-  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
-}
+// `stiahniBlob` bola druhá cesta sťahovania vedľa `downloadBlob` — bez mostu
+// `EzSubor`, takže v obale pre Play šli DOCX, XLSX, ZIP a XML podania inak než
+// PDF a záloha. Od QP (spec 140.5 krok 0) je cesta jedna: `downloadBlob`.
 // ═══════════════════════════════════════════════════════════════════════════
 //  ČLOVEKODEŇ — JEDNO PRAVIDLO
 //
@@ -10550,10 +10549,8 @@ function buildVykazXlsx(w,X){
   const wb=X.utils.book_new();
   X.utils.book_append_sheet(wb,ws,"SP");
   const buf=X.write(wb,{type:"array",bookType:"xlsx"});
-  const blob=new Blob([buf],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
-  const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
-  a.download="Výkaz_prác_"+(w.zakazka||w.projekt||"vykaz").replace(/[^\w.-]+/g,"_")+".xlsx"; a.click();
-  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  downloadBlob(new Blob([buf],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}),
+    "Výkaz_prác_"+(w.zakazka||w.projekt||"vykaz").replace(/[^\w.-]+/g,"_")+".xlsx");
 }
 function buildVykazDocx(w,D){
   const S=firmaData.settings||{};
@@ -10586,7 +10583,7 @@ function buildVykazDocx(w,D){
     new Paragraph(""),
     new Paragraph("Dátum a podpis: __________________________________"),
   ]}]});
-  Packer.toBlob(doc).then(b=>stiahniBlob(b,"vykaz_"+(w.zakazka||"prac").replace(/[^\w.-]+/g,"_")+".docx"));
+  Packer.toBlob(doc).then(b=>downloadBlob(b,"vykaz_"+(w.zakazka||"prac").replace(/[^\w.-]+/g,"_")+".docx"));
 }
 
 function exportProtokolDocx(idx){
@@ -10648,7 +10645,7 @@ function buildProtokolDocx(w,D){
       sigCell("Za dodávateľa:",w.pracovnik||m.nazov||"",true),
     ]})]}),
   ]}]});
-  Packer.toBlob(doc).then(b=>stiahniBlob(b,nadpis.replace(/[^\w.-]+/g,"_")+".docx"));
+  Packer.toBlob(doc).then(b=>downloadBlob(b,nadpis.replace(/[^\w.-]+/g,"_")+".docx"));
 }
 
 // Mesiac, za ktorý je výkaz — z obdobia "1.5.2026 - 30.5.2026" alebo z dátumov
@@ -17150,7 +17147,7 @@ async function rocnaZostavaPDF(rok){
          +". Zoznam je v appke v module Uzávierka.")
       : "Ročná kontrola nenašla žiadne nezrovnalosti."
   });
-  doc.save("rocna_uzavierka_"+Z.rok+".pdf");
+  downloadBlob(doc.output("blob"), "rocna_uzavierka_"+Z.rok+".pdf");
 }
 // ── Sprievodca ročnou uzávierkou ──────────────────────────────────────────
 // Najlacnejší zo všetkých: obrazovka UŽ JE náhľad a `rocnaKontrola` UŽ JE
@@ -17832,7 +17829,7 @@ async function dovExportXlsx(){
   rows.push({"Mesiac":"Zostatok","Čerpané dni":r2((+d.narok||0)-cerpane)});
   const ws=XLSX.utils.json_to_sheet(rows);
   const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,"Dovolenka "+dovRok);
-  XLSX.writeFile(wb,"dovolenka_"+dovRok+".xlsx");
+  downloadBlob(new Blob([XLSX.write(wb,{type:"array",bookType:"xlsx"})],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}), "dovolenka_"+dovRok+".xlsx");
 }
 // (starý placeholder — ponechaný pre kompatibilitu s prognózou, ale prázdny)
 function dphPoMesiacoch(rok){
@@ -18583,11 +18580,7 @@ function kjwPrepisKnihu(){
       typ:"ezivnostnik-jazdy-zaloha", vytvorene:new Date().toISOString(),
       obdobie:{od:_kjW.od, do:_kjW.doD}, jazdy:povodne,
     }, null, 1);
-    const blob=new Blob([zaloha],{type:"application/json"});
-    const a=document.createElement("a");
-    a.href=URL.createObjectURL(blob);
-    a.download="jazdy_pred_nahradenim_"+_kjW.od+"_"+_kjW.doD+".json";
-    a.click(); URL.revokeObjectURL(a.href);
+    downloadBlob(new Blob([zaloha],{type:"application/json"}), "jazdy_pred_nahradenim_"+_kjW.od+"_"+_kjW.doD+".json");
   }catch(e){
     alert("Zálohu sa nepodarilo stiahnuť, preto sa nič nemení.\n\n"+(e.message||e));
     return;
@@ -21442,7 +21435,7 @@ async function upomienkaPDF(odberatel){
   const model=FP.modelUpomienky(zoz.map(fakturaPreTlac), m, dnes);
   model.stupen=stupen;
   const doc=FP.vykresliUpomienku(jsPDF, model, { qrDataUrl });
-  doc.save("upomienka"+(stupen>1?stupen:"")+"_"+String(odberatel).replace(/[^\w-]+/g,"_").slice(0,40)+"_"+dnes+".pdf");
+  downloadBlob(doc.output("blob"), "upomienka"+(stupen>1?stupen:"")+"_"+String(odberatel).replace(/[^\w-]+/g,"_").slice(0,40)+"_"+dnes+".pdf");
   // Zápis až po vygenerovaní: keby PDF spadlo, denník by tvrdil, že upomienka
   // odišla, a ďalšia by nastúpila o stupeň vyššie bez toho, aby prvá existovala.
   upomienkaZapis(odberatel, stupen, zoz);
@@ -22336,10 +22329,10 @@ function pbExportXml(){
   const O=pbDanovnikUdaje(pbRok);
   const Dr=pbDruh(pbRok), X=pbDodatocneRozdiely(pbRok, v)||{};
   // datumDDP: DD.MM.RRRR (typ date v XSD), len pri dodatočnom
-  const datumDDP=(typ==="dodatocne" && /^\d{4}-\d{2}-\d{2}$/.test(Dr.datumZistenia)) ? Dr.datumZistenia.split("-").reverse().join(".") : "";
+  const datumDDP=(typ==="dodatocne") ? xmlDatumSk(Dr.datumZistenia) : "";
   const n=x=>{const q=(+x||0);return q?q.toFixed(2):"";};
   const b=x=>x?"1":"0";
-  const esc=s=>String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  const esc=xmlEsc;
   const _k=(typeof pbKontroly==="function")?pbKontroly(pbRok):{blok:[]};
   if(_k.blok && _k.blok.length){
     if(!confirm("Priznanie má blokujúce kontroly:\n\n• "+_k.blok.join("\n• ")+"\n\nExportovať XML aj tak?")) return;
@@ -23196,9 +23189,7 @@ function pbExportXml(){
   </telo>
 </dokument>`;
   if(typeof pbUlozPodanie==="function") pbUlozPodanie(pbRok, xml, v);
-  const blob=new Blob([xml],{type:"application/xml"});
-  const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
-  a.download="dpfo_b_"+pbRok+"_navrh.xml"; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  downloadBlob(new Blob([xml],{type:"application/xml"}), "dpfo_b_"+pbRok+"_navrh.xml");
   setTimeout(()=>alert("XML návrh priznania B "+pbRok+" stiahnutý (štruktúra podľa reálne prijatého podania FS). Skontrolujte a podajte cez portál FS. Nenahrádza daňového poradcu."),100);
 }
 // ═══ ARCHÍV VYGENEROVANÝCH PODANÍ B ═══
@@ -23218,7 +23209,7 @@ function pbUlozPodanie(rok, xml, v){
 function pbStiahniPodanie(rok){
   const p=(firmaData.priznanieB||{})[rok];
   if(!p||!p.xml){ alert("Pre rok "+rok+" nie je uložené žiadne podanie."); return; }
-  stiahniBlob(new Blob([p.xml],{type:"application/xml"}), "dpfo_b_"+rok+"_navrh.xml");
+  downloadBlob(new Blob([p.xml],{type:"application/xml"}), "dpfo_b_"+rok+"_navrh.xml");
 }
 function pbZmazPodanie(rok){
   if(!strazZapis("priznanieB")) return;
@@ -23775,10 +23766,15 @@ function xkBuild(X, volby){
       [xkCell("Číslo dokladu",S.hdr),xkCell("Dátum",S.hdr),xkCell("Partner",S.hdr),xkCell("Popis",S.hdr),
        xkCell("Druh",S.hdr),xkCell("Kategória",S.hdr),xkCell("Bez DPH",S.hdr),xkCell("DPH",S.hdr),
        xkCell("Spolu",S.hdr),xkCell("Do základu dane",S.hdr)]];
-    let tb=0,td=0,ts=0,tz=0;
+    let tb=0,td=0,ts=0,tz=0,neurcene=0;
     zoz.forEach((x,i)=>{ const z=i%2===1, sc=z?S.cellZ:S.cell, se=z?S.eurZ:S.eur;
-      const kat=(typeof odhadniKategoriu==="function")?odhadniKategoriu(x):"";
-      const katN=(KATEGORIE_VYDAVKOV[kat]||{}).n||"";
+      // Kategória sa exportuje ULOŽENÁ, nie odhadnutá (spec 140.4 c): pre človeka
+      // je odhad predvoľba, pre cudzí program tichá zámena. Chýbajúca je „neurčené“
+      // a vedľa je, ako s ňou appka počíta — základ dane ide podľa pravidiel appky.
+      const kat=(x.kategoria && KATEGORIE_VYDAVKOV[x.kategoria]) ? x.kategoria : "";
+      const odhad=(!kat && typeof odhadniKategoriu==="function") ? odhadniKategoriu(x) : "";
+      if(!kat) neurcene++;
+      const katN=kat ? ((KATEGORIE_VYDAVKOV[kat]||{}).n||"") : "neurčené"+(odhad ? " (appka počíta ako "+((KATEGORIE_VYDAVKOV[odhad]||{}).n||odhad)+")" : "");
       // doklad iného roka je tu len pre DPH so žiadosťou o vrátenie v tomto roku (č. 77)
       const inyRok=!vydavokVRoku(x, rk);
       const vrat=vydavokDphVratenieObdobie(x).slice(0,4)===String(rk) ? vydavokDphVratenieDoZakladu(x) : 0;
@@ -23791,11 +23787,47 @@ function xkBuild(X, volby){
     aoa.push([xkCell("Spolu "+rk,S.foot),xkCell("",S.foot),xkCell("",S.foot),xkCell("",S.foot),xkCell("",S.foot),
               xkCell("",S.foot),xkCell(r2(tb),S.footE),xkCell(r2(td),S.footE),xkCell(r2(ts),S.footE),xkCell(r2(tz),S.footE)]);
     if(Math.abs(r2(tb)-r2(tz))>0.005) aoa.push([],[xkCell("Rozdiel medzi dokladmi a základom dane je krátenie (auto, pohonné hmoty) alebo výdavok, ktorý základ dane neovplyvňuje.",S.sub)]);
+    if(neurcene) aoa.push([],[xkCell(neurcene+" "+sklon(neurcene,"doklad","doklady","dokladov")+" bez kategórie: v stĺpci Kategória je „neurčené“ a základ dane ide podľa odhadu appky. Kategóriu doplníte v editore výdavku.",S.sub)]);
     const ws=X.utils.aoa_to_sheet(aoa);
     ws['!cols']=[{wch:14},{wch:12},{wch:24},{wch:30},{wch:14},{wch:20},{wch:12},{wch:11},{wch:12},{wch:16}];
     ws['!merges']=[{s:{r:0,c:0},e:{r:0,c:5}}]; ws['!freeze']={xSplit:0,ySplit:3}; ws['!rows']=[{hpt:22},{hpt:6},{hpt:24}];
     X.utils.book_append_sheet(wb,ws,xkSheetName("Výdavky "+rk));
   });
+
+  // --- Partneri (spec 140.5 krok 0, otvorené od júla ako 33.3) ---
+  // Dodávatelia z výdavkov a odberatelia z faktúr vo zvolených rokoch, doplnení
+  // o register partnerov. Cudzí program páruje doklad na partnera cez IČO
+  // alebo IČ DPH — bez nich sa nespáruje, preto je to vidieť tu, nie až v ňom.
+  {
+    const P=new Map();
+    const kluc=(ico, nazov)=>String(ico||"").replace(/\s/g,"") || ("n:"+((typeof partnerKluc==="function")?partnerKluc(nazov):String(nazov||"").toLowerCase()));
+    const pridaj=(nazov, ico, dic, icdph, rola)=>{
+      nazov=String(nazov||"").trim(); ico=String(ico||"").replace(/\s/g,"");
+      if(!nazov && !ico) return;
+      const k=kluc(ico, nazov); const p=P.get(k)||{nazov:"", ico:"", dic:"", icdph:"", dod:0, odb:0};
+      if(!p.nazov && nazov) p.nazov=nazov;
+      if(!p.ico && ico) p.ico=ico;
+      if(!p.dic && dic) p.dic=String(dic).replace(/\s/g,"");
+      if(!p.icdph && icdph) p.icdph=String(icdph).replace(/\s/g,"").toUpperCase();
+      if(rola==="dod") p.dod++; if(rola==="odb") p.odb++;
+      P.set(k,p);
+    };
+    (D.partneri||[]).forEach(p=>pridaj(p.nazov,p.ico,p.dic,p.icdph,null));
+    (D.vydavky||[]).filter(x=>chceRok(String(x.datum||"").slice(0,4))).forEach(x=>pridaj(x.partner,x.dodavatelIco||x.ico,x.dodavatelDic||x.dic,x.dodavatelIcDph||x.icdph,"dod"));
+    (D.faktury||[]).filter(f=>chceRok(String(f.datum||f.vystavenie||"").slice(0,4))).forEach(f=>pridaj(f.odberatel,f.ico,f.dic,f.icdph,"odb"));
+    const zoz=[...P.values()].filter(p=>p.nazov).sort((a,b)=>a.nazov.localeCompare(b.nazov,"sk"));
+    if(zoz.length){
+      const aoa=[[xkCell("Partneri",S.title)],
+        [xkCell("Dodávatelia z výdavkov a odberatelia z faktúr vo zvolených rokoch, doplnení o register partnerov. Bez IČO alebo IČ DPH sa doklad v cudzom programe na partnera nespáruje.",S.sub)],[],
+        [xkCell("Názov",S.hdr),xkCell("IČO",S.hdr),xkCell("DIČ",S.hdr),xkCell("IČ DPH",S.hdr),xkCell("Prijaté doklady",S.hdr),xkCell("Vystavené faktúry",S.hdr)]];
+      zoz.forEach((p,i)=>{ const sc=i%2===1?S.cellZ:S.cell;
+        aoa.push([xkCell(p.nazov,sc),xkCell(p.ico,sc),xkCell(p.dic,sc),xkCell(p.icdph,sc),xkCell(p.dod,sc),xkCell(p.odb,sc)]); });
+      const ws=X.utils.aoa_to_sheet(aoa);
+      ws['!cols']=[{wch:34},{wch:12},{wch:14},{wch:16},{wch:14},{wch:16}];
+      ws['!merges']=[{s:{r:0,c:0},e:{r:0,c:5}},{s:{r:1,c:0},e:{r:1,c:5}}]; ws['!freeze']={xSplit:0,ySplit:4}; ws['!rows']=[{hpt:22},{hpt:14},{hpt:6},{hpt:24}];
+      X.utils.book_append_sheet(wb,ws,xkSheetName("Partneri"));
+    }
+  }
 
   // --- DPH po obdobiach (spec 130.4) ---
   // Pre platiteľa podstatný hárok, ktorý v exporte chýbal (kap. 33.3). Čísla
@@ -24459,7 +24491,7 @@ async function knihaPDF(typ, rok, kuDnu){
     poznamka:poznamky.join(" ")
   };
   const doc=FP.vykresliZostavu(jsPDF, model);
-  doc.save((typ==="faktura"?"kniha_pohladavok_":"kniha_zavazkov_")+K.rok+".pdf");
+  downloadBlob(doc.output("blob"), (typ==="faktura"?"kniha_pohladavok_":"kniha_zavazkov_")+K.rok+".pdf");
 }
 async function saasFakturaPDF(f){
   const FP = await fakturaPdfModul();
@@ -24472,7 +24504,7 @@ async function saasFakturaPDF(f){
 async function stiahniSaasFakturu(cislo){
   const f=(_saasFaktury||[]).find(x=>x.cislo===cislo);
   if(!f){ alert("Faktúra sa nenašla."); return; }
-  try{ (await saasFakturaPDF(f)).save("faktura-"+f.cislo+".pdf"); }
+  try{ downloadBlob((await saasFakturaPDF(f)).output("blob"), "faktura-"+f.cislo+".pdf"); }
   catch(e){ alert("PDF sa nepodarilo vytvoriť: "+e.message); }
 }
 
@@ -25129,9 +25161,7 @@ async function gdprMojExport(){
   if(gdprBezServera()){
     // lokálny/demo režim → export priamo z pamäte
     try{
-      const blob=new Blob([JSON.stringify(firmaData,null,2)],{type:"application/json"});
-      const url=URL.createObjectURL(blob); const a=document.createElement("a");
-      a.href=url; a.download="moje_data.json"; a.click(); URL.revokeObjectURL(url);
+      downloadBlob(new Blob([JSON.stringify(firmaData,null,2)],{type:"application/json"}), "moje_data.json");
     }catch(e){ if(msg){msg.textContent="Export zlyhal: "+e.message;} }
     return;
   }
@@ -25144,8 +25174,7 @@ async function gdprMojExport(){
       body:JSON.stringify({akcia:"export"})
     });
     if(!res.ok){ const e=await res.json().catch(()=>({})); if(msg){msg.textContent="Export zlyhal: "+(e.error||res.status);} return; }
-    const blob=await res.blob(); const url=URL.createObjectURL(blob);
-    const a=document.createElement("a"); a.href=url; a.download="moje_data.json"; a.click(); URL.revokeObjectURL(url);
+    downloadBlob(await res.blob(), "moje_data.json");
     if(msg){ msg.textContent=""; }
   }catch(e){ if(msg){msg.textContent="Chyba: "+e.message;} }
 }
@@ -25218,7 +25247,7 @@ const XK_SUCHO={utils:{
 }};
 const XK_POPIS=[["Daň ","mesačná daňová evidencia"],["Jazdy prehľad","kniha jázd po mesiacoch"],["KJ ","jednotlivé jazdy po mesiacoch"],
   ["Faktúry","vystavené faktúry"],["Pohľadávky ","kniha pohľadávok"],["Záväzky ","kniha záväzkov"],["Denník ","pohyb peňazí v čase"],
-  ["Výdavky ","vrátane stĺpca do základu dane"],["DPH","obdobia, stiahnutie priznania a KV, úhrada"],["Banka ","pohyby a stav spárovania"],
+  ["Výdavky ","vrátane stĺpca do základu dane"],["Partneri","dodávatelia a odberatelia s IČO, DIČ, IČ DPH"],["DPH","obdobia, stiahnutie priznania a KV, úhrada"],["Banka ","pohyby a stav spárovania"],
   ["Majetok","odpisový plán"],["Výkazy","odpracované dni"],["Dovolenka","čerpanie a nárok"],["Protokoly","akceptačné protokoly"]];
 // Riadky s údajmi: za hlavičkou (prvý riadok aspoň s dvoma textovými bunkami),
 // bez prázdnych a súčtových riadkov.
@@ -25310,7 +25339,7 @@ function exportVsetkoXlsx(){
       const final=xkApplyFreeze(X,fflate,buf,freezeMap);
       const blob=new Blob([final],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
       const nm=((firmaData.meta&&firmaData.meta.nazov)||"export").replace(/[^\w.-]+/g,"_")+"_kompletny_"+new Date().toISOString().slice(0,10)+".xlsx";
-      stiahniBlob(blob,nm);
+      downloadBlob(blob,nm);
       if(stav){ stav.textContent="✓ Kompletný export hotový ("+wb.SheetNames.length+" hárkov)."; stav.className="cloudmsg ok"; }
       analytikaUdalost("export");
     }catch(e){ console.error(e); if(stav){ stav.textContent="Chyba pri exporte: "+e.message; stav.className="cloudmsg err"; } }
@@ -28784,7 +28813,14 @@ function efakturaInfo(){
 // Generuje štruktúrovaný XML podľa EN 16931. Súbor sa dá nahrať Digitálnemu poštárovi.
 // Odosiela ho appka cez edge funkciu `postar` (`faktOdosliSietou`); doručuje
 // certifikovaný poskytovateľ (Access Point), nie my (spec 38.13).
-function ubl(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+// ── JEDEN escape pre každý XML výstup (spec 140.5 krok 0) ──
+// Do QP mal každý generátor vlastný `esc` (UBL, ISDOC, priznanie DPH, KV,
+// súhrnný výkaz, DP FO B, rozdiely) — šesť kópií toho istého pravidla, dve
+// z nich bez `&quot;`. Escapovanie úvodzovky v texte elementu je vždy platné XML.
+function xmlEsc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+// Dátum pre tlačivá FS (typ date v XSD): DD.MM.RRRR z ISO; iný vstup vráti prázdno.
+function xmlDatumSk(iso){ const m=String(iso||"").match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? m[3]+"."+m[2]+"."+m[1] : ""; }
+function ubl(s){ return xmlEsc(s); }
 function ublDatum(d){ const m=String(d||"").match(/(\d{4})-(\d{2})-(\d{2})/); if(m) return m[0]; const m2=String(d||"").match(/(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})/); if(m2) return `${m2[3]}-${String(m2[2]).padStart(2,"0")}-${String(m2[1]).padStart(2,"0")}`; return new Date().toISOString().slice(0,10); }
 // mapovanie mernej jednotky na UN/ECE kód (Peppol)
 function ublJednotka(mj){ const m=String(mj||"").toLowerCase();
@@ -29133,10 +29169,7 @@ function efakturaXml(idx){
 }
 function exportEFakturaUBL(idx){
   const v=efakturaXml(idx); if(!v) return;
-  const blob=new Blob([v.xml],{type:"application/xml"});
-  const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
-  a.download="efaktura_"+v.cislo.replace(/[^\w.-]+/g,"_")+".xml"; a.click();
-  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  downloadBlob(new Blob([v.xml],{type:"application/xml"}), "efaktura_"+v.cislo.replace(/[^\w.-]+/g,"_")+".xml");
   const ib=v.ibanChyba ? "\n\n⚠ "+v.ibanChyba+" Odberateľ podľa tejto e-faktúry nezaplatí. Opravte IBAN v Nastavenia a dáta → Firemné údaje a e-faktúru vygenerujte znova." : "";
   setTimeout(()=>alert((v.chyba.length
     ? "E-faktúra (UBL 2.1) vygenerovaná, ale sieť Peppol ju takto nedoručí.\n\nChýba: "+v.chyba.join(", ")+".\n\nÚčastník sa v sieti hľadá podľa DIČ; bez neho poštár nevie, komu doklad patrí."
@@ -30621,7 +30654,7 @@ async function exportZalohaPDF(idx){
   model.podnadpis="Nie je daňový doklad — výzva na platbu";
   model.pataLabel="Zálohová faktúra č.";
   const doc=FP.vykresliFakturu(jsPDF, model, { qrDataUrl, isdoc:false });
-  doc.save("zalohova_faktura_"+(z.cislo||"export")+".pdf");
+  downloadBlob(doc.output("blob"), "zalohova_faktura_"+(z.cislo||"export")+".pdf");
 }
 // Cenová ponuka v PDF (č. 230): bez QR na platbu, bez ISDOC, bez kontroly IBAN —
 // nie je to výzva na platbu, len cena a platnosť.
@@ -30637,7 +30670,7 @@ async function exportPonukaPDF(idx){
   model.podnadpis=(p.splatnost?"Platí do "+fmtDatum(p.splatnost)+" · ":"")+"nie je daňový doklad";
   model.pataLabel="Cenová ponuka č.";
   const doc=FP.vykresliFakturu(jsPDF, model, { qrDataUrl:null, isdoc:false });
-  doc.save("cenova_ponuka_"+(p.cislo||"export")+".pdf");
+  downloadBlob(doc.output("blob"), "cenova_ponuka_"+(p.cislo||"export")+".pdf");
 }
 async function exportFakturaPDF(idx){
   const f=firmaData.faktury[idx];
@@ -30647,7 +30680,7 @@ async function exportFakturaPDF(idx){
   }
   if(!potvrdIbanPreTlac()) return;
   const sub=await fakturaPdfSubor(idx);
-  if(sub.blob) downloadBlob(sub.blob, sub.nazov); else sub.doc.save(sub.nazov);
+  downloadBlob(sub.blob || sub.doc.output("blob"), sub.nazov);
 }
 // ── POSLAŤ FAKTÚRU (č. 229, 23. 9. 2026) ─────────────────────────────────────
 // Do QI sa faktúra dala len stiahnuť; každá fakturačka ju vie poslať. Na
@@ -30769,7 +30802,7 @@ function generujISDOC(idx){
 function isdocXml(idx){
   const f=firmaData.faktury[idx]; const m=firmaData.meta||{};
   const s=faktSumy(f);
-  const esc=x=>String(x==null?"":x).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  const esc=xmlEsc;
   const n2=v=>(+v||0).toFixed(2);
   const sadzbaPct=Math.round(s.sadzba*100);
   const da=rozlozAdresu(m.adresa);
@@ -33476,7 +33509,7 @@ async function dphStiahniArchiv(mk, typ, idx){
   // viac verzií toho istého obdobia → dátum v názve, nech sa navzájom neprepíšu
   const cas=String(z.kedy||"").slice(0,10);
   const nazov=(typ==="kv"?"kv_dph_":typ==="sv"?"sv_dph_":"dp_dph_")+mk+(zoznam.length>1?"_"+cas:"")+".xml";
-  if(z.xml){ stiahniBlob(new Blob([z.xml],{type:"application/xml"}), nazov); return; }
+  if(z.xml){ downloadBlob(new Blob([z.xml],{type:"application/xml"}), nazov); return; }
   const url=await dokladUrl(z.cesta);
   if(url) window.open(url,"_blank");
   else alert("Súbor sa nepodarilo načítať z úložiska. Skontrolujte pripojenie.");
@@ -33535,9 +33568,7 @@ function dphStiahni(typ, mk){
   }
   const xml = typ==="kv" ? dphGenerujKV(mk) : (typ==="sv" ? svGeneruj(mk) : dphGenerujDP(mk));
   const nazov = (typ==="kv"?"kv_dph_":typ==="sv"?"sv_dph_":"dp_dph_")+mk+".xml";
-  const blob=new Blob([xml],{type:"application/xml"});
-  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=nazov; a.click();
-  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  downloadBlob(new Blob([xml],{type:"application/xml"}), nazov);
 
   // ── ZAZNAMENANIE PODANIA ──
   // Bez tohto kroku appka nevie, čo už odoslala. Prestane fungovať upozornenie
@@ -33619,7 +33650,7 @@ function dphRozdielyRiadkov(mk, aktualneXml){
 // riadky rozdielov späť do XML, v poradí predpísanom schémou
 function dphRozdielyNaXml(rozdiely){
   const PORADIE=["A1","A2","B1","B2","B31","B32","C1","C2","D1","D2"];
-  const esc=x=>String(x==null?"":x).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  const esc=xmlEsc;
   return PORADIE.flatMap(el=>rozdiely.filter(r=>r.el===el).map(r=>{
     const a={...r.atr, KOpr:r.kopr};
     return `<${el} ${Object.keys(a).filter(k=>a[k]!==""&&a[k]!=null).map(k=>`${k}="${esc(a[k])}"`).join(" ")}/>`;
@@ -33744,7 +33775,7 @@ function dphGenerujKV(mk){
   const rok=P.rok, mes=P.mesiac;
   const doklady=dphZberObdobie(mk);
   const m=dphMeta();
-  const esc=x=>String(x==null?"":x).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  const esc=xmlEsc;
   const n=v=>(+v||0).toFixed(2);
   // ── PORADIE ELEMENTOV JE PREDPÍSANÉ SCHÉMOU ──
   // <Transakcie> je v XSD definované ako <sequence>: A1, A2, B1, B2, B31, B32,
@@ -33840,7 +33871,7 @@ function dphGenerujDP(mk){
   const doklady=dphZberObdobie(mk);
   const S=dphSumare(doklady);
   const m=dphMeta();
-  const esc=x=>String(x==null?"":x).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  const esc=xmlEsc;
   const n=v=>(+v||0)===0?"":(+v||0).toFixed(2);
   // r03/r04 = všetky zdaniteľné dodania (A.1 + tržby nepodnikateľom D.1/D.2),
   // nie len A.1 — inak by faktúra vystavená občanovi z priznania vypadla.
@@ -34235,7 +34266,7 @@ function svGeneruj(kod){
   const m=dphMeta();
   const riadky=svRiadky(kod);
   const D=svDruhPodania(kod);
-  const esc=x=>String(x==null?"":x).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  const esc=xmlEsc;
   const b=v=>v?"1":"0";
   const _d=new Date(), _dv=n=>String(n).padStart(2,"0");
 
@@ -39340,7 +39371,7 @@ async function dennikPDF(){
     sucet:{datum:"Spolu", prijem:FP.eur(D.sumy.prijem), vydaj:FP.eur(D.sumy.vydaj)},
     poznamka:dennikPoznamka(D)
   });
-  doc.save("penazny_dennik_"+D.obdobie+".pdf");
+  downloadBlob(doc.output("blob"), "penazny_dennik_"+D.obdobie+".pdf");
 }
 // Hárok denníka. Jedna stavba pre samostatné stiahnutie aj pre kompletný
 // export — rovnaký dôvod ako pri `knihaHarok` (kap. 86.7).
@@ -41986,7 +42017,7 @@ async function exportZalohaZip(){
     suborov:cesty.length-chybajuce.length, chybajuce, vynechaneVypisy:vynechane }, null, 2));
   const zip=fflate.zipSync(subory, {level:6});
   const meno=((data.meta&&data.meta.nazov)||"firma").replace(/[^\w]+/g,"_")+"_uplna_zaloha_"+new Date().toISOString().slice(0,10)+".zip";
-  stiahniBlob(new Blob([zip], {type:"application/zip"}), meno);
+  downloadBlob(new Blob([zip], {type:"application/zip"}), meno);
   zaznacZalohu();
   analytikaUdalost("export");
   cloudMsg("✓ Úplná záloha stiahnutá: "+(cesty.length-chybajuce.length)+" "+sklon(cesty.length-chybajuce.length,"súbor","súbory","súborov")
@@ -42026,10 +42057,7 @@ async function riesKonfliktUlozenia(){
   } else {
     // aby sa práca nestratila ani pri zamietnutí — stiahne sa ako súbor
     try{
-      const blob=new Blob([zaloha],{type:"application/json"});
-      const url=URL.createObjectURL(blob); const a=document.createElement("a");
-      a.href=url; a.download="eziv_neulozene_"+new Date().toISOString().slice(0,19).replace(/[:T]/g,"-")+".json";
-      a.click(); URL.revokeObjectURL(url);
+      downloadBlob(new Blob([zaloha],{type:"application/json"}), "eziv_neulozene_"+new Date().toISOString().slice(0,19).replace(/[:T]/g,"-")+".json");
       cloudMsg("Vaše zmeny sme stiahli ako zálohu. Uloženie do cloudu neprebehlo.","err");
     }catch(_){ cloudMsg("Uloženie neprebehlo — dáta na serveri sú novšie.","err"); }
   }
@@ -42183,11 +42211,9 @@ async function pockajNaUlozenie(data){
 // Stiahne dáta firmy ako JSON a vráti meno súboru. Spoločné pre zálohu
 // a zálohu pred importom.
 function stiahniZalohuJson(data, druh){
-  const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
-  const url=URL.createObjectURL(blob); const a=document.createElement("a");
   const nazov=(data.meta&&data.meta.nazov)?data.meta.nazov.replace(/[^\w]+/g,"_"):"firma";
   const subor=nazov+"_"+druh+"_"+new Date().toISOString().slice(0,10)+".json";
-  a.href=url; a.download=subor; a.click(); URL.revokeObjectURL(url);
+  downloadBlob(new Blob([JSON.stringify(data,null,2)],{type:"application/json"}), subor);
   return subor;
 }
 function exportFirmu(){
