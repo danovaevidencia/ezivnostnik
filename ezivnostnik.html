@@ -2247,7 +2247,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.25-QM";  // Kategória výdavku predvolená podľa posledného dokladu od toho istého dodávateľa
+const APP_VERZIA = "2026.09.25-QN";  // Prijatý doklad: dátum vystavenia z UBL/ISDOC a DIČ dodávateľa až do výdavku a pamäte partnerov
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -13666,7 +13666,7 @@ function zapamatajPartnera(obj){
   const nazov=String(obj.partner||"").trim();
   const ico=String(obj.dodavatelIco||obj.ico||"").replace(/\s/g,"");
   const icdph=String(obj.dodavatelIcDph||obj.icdph||"").replace(/\s/g,"").toUpperCase();
-  const dic=String(obj.dic||"").replace(/\s/g,"");
+  const dic=String(obj.dodavatelDic||obj.dic||"").replace(/\s/g,"");   // výdavok nesie dodavatelDic, faktúra dic
   // musíme mať aspoň názov a aspoň jeden identifikátor, ktorý stojí za zapamätanie
   if(nazovJeSumovy(nazov)) return;
   if(!ico && !icdph) return;   // bez IČO/IČ DPH nemá zmysel pamätať
@@ -14674,6 +14674,10 @@ async function ulozVydavokZFormularaRaz(idx, R){
     // pôvod dokladu — prepísanie na „ocr" by zahladilo, že prišiel ako e-faktúra
     Object.assign(obj, {zdroj:R.ekasaId?"ekasa":(R.zdroj||"ocr")});
     if(R.ekasaId){ obj.ekasaId=R.ekasaId; obj.cislo=obj.cislo||R.ekasaId; }
+    // DIČ dodávateľa formulár nemá, takže sa z dokladu strácalo — pritom je to
+    // Peppol identita firmy (0245:DIČ) a pamäť partnerov ju vie použiť, keď tá
+    // istá firma bude neskôr odberateľom (kap. 139.6)
+    if(R.dodavatelDic && !obj.dodavatelDic) obj.dodavatelDic=String(R.dodavatelDic).replace(/\s/g,"");
   }
 
   // Pamäť partnerov sa musí aj čítať, nielen plniť — inak doklad od dávno
@@ -28622,6 +28626,9 @@ function parseUBLFaktura(xmlText){
     druh:"Došlá faktúra", zdroj:"efaktura-ubl", jeDobropis, mena,
     partner:partnerNazov, cislo, vs: vsRef||cislo,
     datum:(datum||"").slice(0,10), splatnost:(splatnost||"").slice(0,10),
+    // vystavenie je samostatné pole výdavku (m_vystavenie); do QM ho parser
+    // nedával a formulár ostal prázdny, hoci IssueDate je v každom doklade (kap. 139.6)
+    vystavenie:(txt(root,"IssueDate")||"").slice(0,10),
     bez:r2(bez), dph:r2(dph), spolu:r2(spolu), sadzba, iban,
     ico:partnerIco, icdph:partnerIcDph,
     dodavatelIco:partnerIco, dodavatelIcDph:partnerIcDph, dodavatelDic:partnerDic,
@@ -28739,6 +28746,7 @@ function parseIsdocFaktura(xmlText){
   const R={
     druh:"Došlá faktúra", zdroj:"efaktura-isdoc", jeDobropis, mena,
     partner, cislo, vs: vs||cislo, datum, splatnost,
+    vystavenie:tx(dieta(root,"IssueDate")).slice(0,10),
     bez:r2(bez), dph:r2(dph), spolu:r2(spolu), sadzba,
     ico, icdph, dodavatelIco:ico, dodavatelIcDph:icdph, dodavatelDic:dic, samozdanenieTyp,
     rozpis: rozpis.length>1?rozpis:null,
