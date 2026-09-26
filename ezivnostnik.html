@@ -2247,7 +2247,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.26-QS";  // ISDOC: poznámka dokladu z prvej položky, keď faktúra nemá sprievodný text (POHODA ju ukazuje ako Text)
+const APP_VERZIA = "2026.09.26-QT";  // Exporty krok 3: Pohoda XML (adresár, prijaté faktúry, pokladničné doklady, banka) nad účtovnou dávkou
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -23802,7 +23802,7 @@ function uctovnaDavka(volby){
         zaradenyOdpisovany:!!x.zaradenyOdpisovany, majetokId:String(x.zaradenyMajetokId||""),
         podnikPct:(x.podnikPct!=null && +x.podnikPct<100)?+x.podnikPct:100,
         samozdanenieTyp:String(x.samozdanenieTyp||""), zahranicny:!!x.zahranicny, kodKrajiny:String(x.kodKrajiny||"").toUpperCase(),
-        opravuje:String(x.opravujeDoklad||""), doklad:String(x.doklad||x.originalSubor||""),
+        opravuje:String(x.opravujeDoklad||""), doklad:String(x.doklad||x.originalSubor||""), iban:String(x.iban||"").replace(/\s/g,""),
         uhrada:{stav:st.stav||"neznamy", zostava:r2(st.zost||0), hotovost:!!jeHotovostnyDoklad("vydavok", x),
           rucne:x.uhradaRucne?{datum:iso(x.uhradaRucne.datum), suma:r2(x.uhradaRucne.suma||0), sposob:String(x.uhradaRucne.sposob||"")}:null},
         efakturaId:String(x.efakturaId||""), ekasaId:String(x.ekasaId||""), zdroj:String(x.zdroj||""),
@@ -23908,6 +23908,127 @@ function davkaZmenyOdExportu(format){
   const z=((firmaData||{}).exporty||{})[format||"xlsx"];
   if(!z) return null;
   return memoRok("davkaZmeny·"+(format||"xlsx"), ()=>davkaZmeny(format||"xlsx", uctovnaDavka({roky:z.roky||null, format:format||"xlsx"})));
+}
+// ═══════════════════════════════════════════════════════════════
+//  POHODA XML — ZAPISOVAČ NAD ÚČTOVNOU DÁVKOU (spec kap. 140.10, č. 239)
+//
+//  dataPack 2.0 podľa schém Stormware (version_2). Agendy:
+//    · adresár (adb)          — partneri dávky
+//    · prijaté faktúry (inv)  — výdavky, ktoré nie sú hotovosť (receivedInvoice,
+//                               záporná suma → receivedCreditNotice)
+//    · pokladničné doklady (vch) — hotovostné výdavky (bloček, PHM) ako výdaj
+//    · banka (bnk)            — pohyby na účte
+//  Vydané faktúry NIE: POHODA ich prijme z PDF s prílohou ISDOC (140.9).
+//  Majetok NIE: POHODA nemá XML agendu majetku. Interné doklady zatiaľ NIE.
+//
+//  Mapovanie polí (dokumentácia v XSD): `originalDocument` = pole „Doklad“
+//  (číslo dodávateľa, POHODA ho použije ako VS pri príkaze), `symVar` = VS,
+//  `date` = vystavenie, `dateTax` = dodanie / dátum odpočtu, `dateAccounting`
+//  = dátum účtovného prípadu, `dateDue` = splatnosť, `text` je povinný.
+//  Kódovanie UTF-8 (deklarácia v hlavičke). Predkontáciu a členenie DPH
+//  neposielame — nastaví si ich účtovník, ako pri importe ISDOC.
+// ═══════════════════════════════════════════════════════════════
+const POHODA_NS={
+  dat:"http://www.stormware.cz/schema/version_2/data.xsd",
+  inv:"http://www.stormware.cz/schema/version_2/invoice.xsd",
+  vch:"http://www.stormware.cz/schema/version_2/voucher.xsd",
+  bnk:"http://www.stormware.cz/schema/version_2/bank.xsd",
+  adb:"http://www.stormware.cz/schema/version_2/addressbook.xsd",
+  typ:"http://www.stormware.cz/schema/version_2/type.xsd",
+};
+// Sadzba → trieda POHODY: základná (23, staršie 20) high, znížená (19, 10) low,
+// druhá znížená (5) third, 0 none.
+function pohodaSadzba(pct){ const p=+pct||0; if(p===0) return "none"; if(p>=20) return "high"; if(p===5) return "third"; return "low"; }
+// Súčty dokladu podľa tried sadzieb (typ:typeCurrencyHome). Základ ide do
+// priceNone/priceLow/priceHigh/price3, daň do …VAT. Záporné sumy sa vracajú
+// kladné — dobropis má vlastný typ dokladu.
+function pohodaSumyHome(rozpis){
+  const S={none:0, low:0, lowV:0, high:0, highV:0, third:0, thirdV:0};
+  (rozpis||[]).forEach(r=>{ const t=pohodaSadzba(r.sadzba); const b=Math.abs(+r.bez||0), d=Math.abs(+r.dph||0);
+    if(t==="none") S.none+=b; else { S[t]+=b; S[t+"V"]+=d; } });
+  const n2=v=>(Math.round(v*100)/100).toFixed(2);
+  let x="";
+  if(S.none) x+=`<typ:priceNone>${n2(S.none)}</typ:priceNone>`;
+  if(S.low||S.lowV) x+=`<typ:priceLow>${n2(S.low)}</typ:priceLow><typ:priceLowVAT>${n2(S.lowV)}</typ:priceLowVAT>`;
+  if(S.high||S.highV) x+=`<typ:priceHigh>${n2(S.high)}</typ:priceHigh><typ:priceHighVAT>${n2(S.highV)}</typ:priceHighVAT>`;
+  if(S.third||S.thirdV) x+=`<typ:price3>${n2(S.third)}</typ:price3><typ:price3VAT>${n2(S.thirdV)}</typ:price3VAT>`;
+  return x;
+}
+// typ:address z partnera dávky; adresa sa rozloží tým istým pravidlom ako pri ISDOC/UBL
+function pohodaAdresa(p, nazovNahradny){
+  const e=xmlEsc; const nazov=(p&&p.nazov)||nazovNahradny||"";
+  const a=(p&&p.adresa&&typeof rozlozAdresu==="function")?rozlozAdresu(p.adresa):null;
+  let x=`<typ:company>${e(nazov.slice(0,255))}</typ:company>`;
+  if(a && a.mesto){ x+=`<typ:city>${e(a.mesto.slice(0,45))}</typ:city><typ:street>${e((a.ulica+(a.cislo?" "+a.cislo:"")).slice(0,64))}</typ:street><typ:zip>${e(a.psc.slice(0,15))}</typ:zip>`; }
+  if(p&&p.ico) x+=`<typ:ico>${e(p.ico)}</typ:ico>`;
+  if(p&&p.dic) x+=`<typ:dic>${e(p.dic.slice(0,18))}</typ:dic>`;
+  if(p&&p.icdph) x+=`<typ:icDph>${e(p.icdph.slice(0,18))}</typ:icDph>`;
+  return `<typ:address>${x}</typ:address>`;
+}
+// účet dodávateľa / protiúčet: číslo a kód banky zo slovenského IBAN (isdocUcetZIbanu)
+function pohodaUcet(tag, iban){
+  const u=(typeof isdocUcetZIbanu==="function")?isdocUcetZIbanu(iban):{id:"",kod:""};
+  if(!u.id || !u.kod) return "";
+  return `<${tag}><typ:accountNo>${xmlEsc(u.id)}</typ:accountNo><typ:bankCode>${xmlEsc(u.kod)}</typ:bankCode></${tag}>`;
+}
+function davkaDoPohodaXml(davka){
+  const e=xmlEsc, d=davka||{}, F=d.firma||{};
+  const P=new Map((d.partneri||[]).map(p=>[p.id,p]));
+  const dat=iso=>String(iso||"").slice(0,10);
+  const items=[];
+  const item=(id, telo)=>items.push(`  <dat:dataPackItem id="${e(id.slice(0,64))}" version="2.0">\n${telo}\n  </dat:dataPackItem>`);
+
+  // ── adresár ──
+  (d.partneri||[]).filter(p=>p.nazov).forEach(p=>{
+    item("ADB-"+p.id, `    <adb:addressbook version="2.0"><adb:addressbookHeader><adb:identity>${pohodaAdresa(p)}</adb:identity><adb:intNote>eživnostník · ${e(p.id)}</adb:intNote></adb:addressbookHeader></adb:addressbook>`);
+  });
+
+  // ── výdavky: prijaté faktúry a pokladničné doklady ──
+  let interne=0;
+  (d.vydavky||[]).forEach(v=>{
+    if(v.druh==="Interný doklad"){ interne++; return; }
+    const p=P.get(v.partnerId)||null;
+    const text=(v.popis||(v.druh+" "+(v.cislo||v.datum))).slice(0,240);
+    const pozn=[v.kategoriaNazov?("Kategória: "+v.kategoriaNazov):"Kategória: neurčené", v.podnikPct<100?("Podnikanie "+v.podnikPct+" %"):"", v.samozdanenieTyp?"Samozdanenie":"", v.zahranicny?("Zahraničie "+v.kodKrajiny):""].filter(Boolean).join(" · ");
+    const sumy=pohodaSumyHome(v.rozpis);
+    if(v.uhrada && v.uhrada.hotovost){
+      item("VCH-"+v.kluc, `    <vch:voucher version="2.0"><vch:voucherHeader><vch:voucherType>expense</vch:voucherType>${v.cislo?`<vch:originalDocument>${e(v.cislo.slice(0,32))}</vch:originalDocument>`:""}<vch:date>${dat(v.datum)}</vch:date><vch:datePayment>${dat(v.datum)}</vch:datePayment><vch:dateTax>${dat(v.datum)}</vch:dateTax><vch:text>${e(text)}</vch:text><vch:partnerIdentity>${pohodaAdresa(p, v.partner)}</vch:partnerIdentity><vch:note>${e(pozn)}</vch:note><vch:intNote>eživnostník · vydavok:${e(v.kluc)}</vch:intNote></vch:voucherHeader><vch:voucherSummary><vch:roundingDocument>none</vch:roundingDocument><vch:homeCurrency>${sumy}</vch:homeCurrency></vch:voucherSummary></vch:voucher>`);
+    } else {
+      const dobropis=(+v.spolu||0)<0;
+      item("INV-"+v.kluc, `    <inv:invoice version="2.0"><inv:invoiceHeader><inv:invoiceType>${dobropis?"receivedCreditNotice":"receivedInvoice"}</inv:invoiceType>${v.vs?`<inv:symVar>${e(v.vs.replace(/\D/g,"").slice(0,20))}</inv:symVar>`:""}${v.cislo?`<inv:originalDocument>${e(v.cislo.slice(0,32))}</inv:originalDocument>`:""}${dobropis&&v.opravuje?`<inv:originalDocumentNumber>${e(v.opravuje)}</inv:originalDocumentNumber>`:""}<inv:date>${dat(v.vystavenie||v.datum)}</inv:date><inv:dateTax>${dat(v.datum)}</inv:dateTax><inv:dateAccounting>${dat(v.datum)}</inv:dateAccounting>${v.splatnost?`<inv:dateDue>${dat(v.splatnost)}</inv:dateDue>`:""}<inv:text>${e(text)}</inv:text><inv:partnerIdentity>${pohodaAdresa(p, v.partner)}</inv:partnerIdentity><inv:paymentType><typ:paymentType>draft</typ:paymentType></inv:paymentType>${pohodaUcet("inv:paymentAccount", v.iban)}<inv:note>${e(pozn)}</inv:note><inv:intNote>eživnostník · vydavok:${e(v.kluc)}</inv:intNote></inv:invoiceHeader><inv:invoiceSummary><inv:roundingDocument>none</inv:roundingDocument><inv:homeCurrency>${sumy}</inv:homeCurrency></inv:invoiceSummary></inv:invoice>`);
+    }
+  });
+
+  // ── banka ──
+  // `bnk:account` je odkaz na bankový účet ZALOŽENÝ V POHODE (ids/id), nie číslo
+  // účtu — schéma accountNo tu odmieta (prvá validácia 26. 9. 2026). Účet sa
+  // neposiela, POHODA použije účet z používateľského nastavenia; náš IBAN je
+  // v poznámke, aby účtovník vedel, ku ktorému účtu pohyby patria.
+  (d.banka||[]).forEach(b=>{
+    const doklady=(b.doklady||[]).map(u=>u.kluc).filter(Boolean).join(", ");
+    const pozn=["Účet: "+String(b.ucet||F.iban||"—").replace(/\s/g,""), b.stav&&b.stav.text?("Stav v appke: "+b.stav.text):"", doklady?("Doklady: "+doklady):"", b.skryty?"skrytý v appke":""].filter(Boolean).join(" · ");
+    item("BNK-"+b.id, `    <bnk:bank version="2.0"><bnk:bankHeader><bnk:bankType>${b.smer==="vydaj"?"expense":"receipt"}</bnk:bankType>${b.vs?`<bnk:symVar>${e(b.vs.replace(/\D/g,"").slice(0,20))}</bnk:symVar>`:""}<bnk:dateStatement>${dat(b.datum)}</bnk:dateStatement><bnk:datePayment>${dat(b.datum)}</bnk:datePayment><bnk:text>${e((b.popis||b.proti||b.kategoria||"pohyb").slice(0,96))}</bnk:text>${b.proti?`<bnk:partnerIdentity><typ:address><typ:company>${e(b.proti.slice(0,255))}</typ:company></typ:address></bnk:partnerIdentity>`:""}${pohodaUcet("bnk:paymentAccount", b.ibanProti)}${b.ks?`<bnk:symConst>${e(b.ks.replace(/\D/g,"").slice(0,4))}</bnk:symConst>`:""}${b.ss?`<bnk:symSpec>${e(b.ss.replace(/\D/g,"").slice(0,10))}</bnk:symSpec>`:""}<bnk:note>${e(pozn)}</bnk:note><bnk:intNote>eživnostník · banka:${e(b.id)}</bnk:intNote></bnk:bankHeader><bnk:bankSummary><bnk:roundingDocument>none</bnk:roundingDocument><bnk:roundingVAT>none</bnk:roundingVAT><bnk:homeCurrency><typ:priceNone>${(Math.round((+b.suma||0)*100)/100).toFixed(2)}</typ:priceNone></bnk:homeCurrency></bnk:bankSummary></bnk:bank>`);
+  });
+
+  const kedy=String(d.vytvorene||new Date().toISOString()).slice(0,16).replace(/[-:T]/g,"");
+  const pocty=`adresár ${(d.partneri||[]).length}, doklady ${(d.vydavky||[]).length-interne}, banka ${(d.banka||[]).length}`+(interne?`; interné doklady (${interne}) a majetok sa neprenášajú`:"; majetok sa neprenáša");
+  const note=`eživnostník ${typeof APP_VERZIA!=="undefined"?APP_VERZIA:""} — ${d.prirastok?"prírastok od posledného exportu":"celé obdobie"}${d.roky?" "+d.roky.join(", "):""}; ${pocty}. Vydané faktúry idú cez PDF s ISDOC.`;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<dat:dataPack version="2.0" id="${e("eziv-"+kedy)}" ico="${e(F.ico||"")}" application="eživnostník" note="${e(note)}"`
+    + Object.keys(POHODA_NS).map(k=>` xmlns:${k}="${POHODA_NS[k]}"`).join("") + `>\n` + items.join("\n") + `\n</dat:dataPack>\n`;
+}
+// Tlačidlo v sprievodcovi exportu: tá istá dávka a voľby ako XLSX, vlastný záznam „čo už odišlo“ (formát pohoda).
+function exportPohodaXml(){
+  const stav=document.getElementById("xlsxMsg");
+  try{
+    const V=Object.assign({}, xkVolbyTeraz(), {format:"pohoda"});
+    const davka=uctovnaDavka(V);
+    const xml=davkaDoPohodaXml(davka);
+    const nm=((firmaData.meta&&firmaData.meta.nazov)||"export").replace(/[^\w.-]+/g,"_")+"_pohoda_"+new Date().toISOString().slice(0,10)+".xml";
+    downloadBlob(new Blob([xml],{type:"application/xml"}), nm);
+    if(typeof davkaZapisExport==="function") davkaZapisExport("pohoda", davka);
+    if(stav){ stav.textContent="✓ Pohoda XML hotový ("+(davka.vydavky||[]).length+" dokladov, "+(davka.banka||[]).length+" pohybov). V POHODE: Súbor → Dátová komunikácia → XML import/export."; stav.className="cloudmsg ok"; }
+    if(typeof analytikaUdalost==="function") analytikaUdalost("export");
+  }catch(e){ console.error(e); if(stav){ stav.textContent="Chyba pri exporte: "+e.message; stav.className="cloudmsg err"; } }
 }
 function xkBuild(X, volby){
   const S=xkStyles(); const wb=X.utils.book_new(); const D=firmaData, SET=D.settings||{};
@@ -25572,6 +25693,8 @@ function xkSprievodcaHtml(){
      stav:()=>({text:"XLSX"+(xkPrirastok&&posledny?" · prírastok":"")}),
      telo:()=>`<button class="abtn pri" style="width:100%;margin-top:11px" onclick="exportVsetkoXlsx()">📊 ${xkPrirastok&&posledny?"Stiahnuť prírastok pre účtovníka":"Stiahnuť kompletný export"}</button>
       <div class="ocr-hint" style="margin-top:6px">Appka si zapamätá, čo v súbore bolo. Doklad, ktorý potom zmeníte, sa ohlási vo zvončeku a v ďalšom exporte pôjde znova.</div>
+      <button class="abtn" style="width:100%;margin-top:10px" onclick="exportPohodaXml()">🧾 Pohoda XML pre účtovníka s POHODOU</button>
+      <div class="ocr-hint" style="margin-top:6px">Prijaté faktúry, pokladničné doklady, banka a adresár v tvare, ktorý POHODA načíta cez Súbor → Dátová komunikácia → XML import. Vydané faktúry účtovník načíta z PDF s prílohou ISDOC; majetok POHODA cez XML neprijíma.</div>
       <div class="cloudmsg" id="xlsxMsg" style="margin-top:8px"></div>`}
   ]};
   return zostavaSprievodcaHtml("xk", def);
