@@ -795,13 +795,15 @@ function kampanFormularRucne(k, p){
     + '<div class="hint">Ručná kampaň: e-maily sa neposielajú cez poskytovateľa. Server skontroluje odhlásenia a pripraví text, '
       + 'ty ho odošleš zo svojej schránky (info@ezivnostnik.eu) a klikneš <b>Odoslané</b>. Nič sa nemeria.</div>'
     + p("kampNazov", "Názov", k.nazov) + p("kampPredmet", "Predmet e-mailu", k.predmet)
-    + '<div class="field"><label>Text (čistý text; polia {source_url}, {odhlasenie} — bez {odhlasenie} sa poslať nedá)</label>'
+    + '<div class="field"><label>Text — čistý text alebo HTML zo šablóny (polia {source_url}, {odhlasenie} — bez {odhlasenie} sa poslať nedá)</label>'
       + '<textarea id="kampTelo" rows="14">' + esc(k.telo) + "</textarea></div>"
     + p("kampUtm", "utm_campaign (podľa toho sa kampaň nájde v Návštevnosti)", k.utm_campaign)
     + p("kampLimit", "Denný limit (odporúčané 20–30)", k.denny_limit, "number")
     + p("kampGmail", "Gmail účet, v ktorom sa otvorí koncept (napr. roman@ezivnostnik.eu)", kampGmailUcet())
     + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
       + '<button class="btn" style="width:auto" onclick="kampanSablonaUctovnici()">Vložiť šablónu pre účtovníkov</button>'
+      + '<button class="btn" style="width:auto" onclick="document.getElementById(\'kampSablonaSubor\').click()">Importovať šablónu (HTML)</button>'
+      + '<input type="file" id="kampSablonaSubor" accept=".html,.htm,text/html" hidden onchange="kampanSablonaImport(this)">'
       + '<button class="btn" style="width:auto" onclick="kampanUloz(' + k.id + ')">Uložiť</button>'
       + '<button class="btn" style="width:auto" onclick="kampanNahlad(' + k.id + ')">Náhľad</button>'
       + '<button class="btn" style="width:auto" onclick="kampanStav(' + k.id + ',\'' + (k.stav === "bezi" ? "pozastavena" : "bezi") + '\')">' + (k.stav === "bezi" ? "Pozastaviť" : "Spustiť") + "</button>"
@@ -827,6 +829,58 @@ function kampanSablonaUctovnici(){
   if(!document.getElementById("kampUtm").value) document.getElementById("kampUtm").value = "uctovnici";
   kampanSprava("Šablóna vložená — skontroluj a ulož.");
 }
+// ── Šablóna zo súboru (č. 243) ─────────────────────────────────────────
+// HTML súbor: <title> = predmet, obsah <body> = telo. Ručná kampaň ho
+// posiela vložením do Gmailu (Ctrl+V), preto platí to, čo Gmail pri vložení
+// zachová: len inline štýly, obrázky z nášho webu, žiadny skript ani formulár.
+// Rozbor je čisto textový (bez DOM), aby ho vedel overiť test v Node.
+function kampanSablonaRozober(zdroj){
+  // Komentáre preč ešte pred hľadaním značiek — návod v komentári hlavičky
+  // spomína „<title>“ aj „<body>“ a regex by sa chytil jeho.
+  const s = String(zdroj || "").replace(/<!--[\s\S]*?-->/g, "");
+  const dekoduj = t => t.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&");
+  const predmet = dekoduj(((s.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || "").replace(/\s+/g, " ").trim());
+  const telo = ((s.match(/<body[^>]*>([\s\S]*)<\/body>/i) || [])[1] || "").trim();
+  const chyby = [];
+  if(!predmet) chyby.push("chýba <title> — z neho sa berie predmet e-mailu");
+  if(!telo) chyby.push("chýba <body> s obsahom e-mailu");
+  if(telo && telo[0] !== "<") chyby.push("telo musí začínať značkou HTML — inak ho server pošle ako čistý text");
+  if(!telo.includes("{odhlasenie}")) chyby.push("chýba odkaz {odhlasenie}");
+  if(!telo.includes("{source_url}")) chyby.push("chýba {source_url} — adresát musí vidieť, kde sme jeho kontakt našli");
+  if(/<script/i.test(telo)) chyby.push("obsahuje <script>");
+  if(/<(form|input|iframe|object|embed|video|audio)\b/i.test(telo)) chyby.push("obsahuje formulár, rámec alebo médium — e-mail ich nezobrazí");
+  if(/\son[a-z]+\s*=/i.test(telo)) chyby.push("obsahuje obsluhu udalosti (on…=)");
+  if(/href\s*=\s*"\s*javascript:/i.test(telo)) chyby.push("obsahuje odkaz javascript:");
+  if(/<style/i.test(s)) chyby.push("blok <style> Gmail pri vložení zahodí — štýly patria inline do atribútu style");
+  (telo.match(/<img\b[^>]*>/gi) || []).forEach(img => {
+    const src = (img.match(/\ssrc\s*=\s*"([^"]*)"/i) || [])[1] || "";
+    if(!src.startsWith("https://ezivnostnik.eu/")) chyby.push("obrázok mimo ezivnostnik.eu: " + (src || "(bez src)"));
+    if(!/\salt\s*=/i.test(img)) chyby.push("obrázok bez alt: " + src);
+  });
+  if(telo.length > 100000) chyby.push("telo má " + telo.length + " znakov — Gmail dlhé správy skracuje");
+  return { predmet, telo, chyby };
+}
+async function kampanSablonaImport(vstup){
+  const subor = vstup.files && vstup.files[0];
+  vstup.value = "";
+  if(!subor) return;
+  const r = kampanSablonaRozober(await subor.text());
+  if(r.chyby.length){ kampanSprava("Šablóna " + subor.name + " sa nedá použiť: " + r.chyby.join(" · "), true); return; }
+  const tel = document.getElementById("kampTelo"), pr = document.getElementById("kampPredmet");
+  if(tel.value.trim() && !confirm("Prepísať súčasný predmet a text šablónou " + subor.name + "?")) return;
+  pr.value = r.predmet;
+  tel.value = r.telo;
+  kampanHtmlNahlad(r.telo.split("{source_url}").join("www.priklad-uctovnictvo.sk/kontakt").split("{odhlasenie}").join("#"), "Náhľad importovanej šablóny (ešte neuložená)");
+  kampanSprava("Šablóna " + subor.name + " načítaná — skontroluj náhľad a ulož.");
+}
+// Náhľad HTML v izolovanom rámci: sandbox bez skriptov, odkazy nikam nevedú.
+function kampanHtmlNahlad(html, nadpis){
+  const el = document.getElementById("kampRucne");
+  if(!el) return;
+  el.innerHTML = '<div class="hint"><b>' + esc(nadpis) + '</b></div>'
+    + '<iframe id="kampNahladRam" sandbox="" style="width:100%;height:900px;border:1px solid var(--line);border-radius:10px;background:#fff"></iframe>';
+  document.getElementById("kampNahladRam").srcdoc = html;
+}
 async function kampanVolaj(telo){
   const { data, error } = await sb.functions.invoke("kampan-posli", { body: telo });
   if(error || (data && data.chyba)) throw new Error((data && data.chyba) || error.message);
@@ -835,6 +889,7 @@ async function kampanVolaj(telo){
 async function kampanNahlad(id){
   try{
     const d = await kampanVolaj({ kampan: id, akcia: "nahlad" });
+    if(d.nahlad.html){ kampanHtmlNahlad(d.nahlad.html, "Náhľad (uložená verzia, vymyslený adresát) · Predmet: " + d.nahlad.predmet); return; }
     document.getElementById("kampRucne").innerHTML = '<div class="hint"><b>Náhľad</b> (uložená verzia, vymyslený adresát)<br><b>Predmet:</b> '
       + esc(d.nahlad.predmet) + '<pre style="white-space:pre-wrap;font:inherit;margin-top:8px">' + esc(d.nahlad.text) + "</pre></div>";
   }catch(e){ kampanSprava("Chyba: " + e.message, true); }
@@ -863,8 +918,10 @@ function kampanRucneVykresli(){
     + '<div><b>' + esc(e.email) + '</b> <span style="color:var(--soft);font-size:12px">zdroj: ' + esc(e.source_url) + "</span></div>"
     + '<div style="font-size:12.5px"><b>Predmet:</b> ' + esc(e.predmet) + "</div>"
     + '<details><summary style="cursor:pointer;font-size:12.5px">Text</summary><pre style="white-space:pre-wrap;font:inherit;font-size:12.5px;margin-top:6px">' + esc(e.text) + "</pre></details>"
+    + (e.html ? '<div style="font-size:12.5px;color:var(--soft)">HTML šablóna: tlačidlo skopíruje e-mail a otvorí koncept s adresátom a predmetom — v Gmaile vlož telo cez <b>Ctrl+V</b>. Šablóna má vlastný podpis: ak ho Gmail pridá druhýkrát, zmaž ho (alebo v Gmaile nastav pre nové e-maily z odosielacej adresy „Bez podpisu“).</div>' : "")
     + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
-      + '<a class="rowbtn" href="' + esc(kampGmailOdkaz(e)) + '" target="_blank" rel="noopener">Otvoriť v Gmaile</a>'
+      + (e.html ? '<button class="rowbtn" onclick="kampanHtmlDoGmailu(' + i + ')">Kopírovať a otvoriť Gmail</button>'
+        : '<a class="rowbtn" href="' + esc(kampGmailOdkaz(e)) + '" target="_blank" rel="noopener">Otvoriť v Gmaile</a>')
       + '<button class="rowbtn" onclick="kampanKopiruj(' + i + ')">Kopírovať text</button>'
       + '<button class="rowbtn" onclick="kampanOdoslane(' + i + ')">Odoslané ✓</button>'
     + "</div></div>").join("");
@@ -873,6 +930,22 @@ async function kampanKopiruj(i){
   const e = _rucnePripravene[i];
   try{ await navigator.clipboard.writeText("Predmet: " + e.predmet + "\n\n" + e.text); kampanSprava("Skopírované: " + e.email); }
   catch(err){ kampanSprava("Kopírovanie zlyhalo: " + err.message, true); }
+}
+// HTML e-mail sa do Gmailu nedá poslať odkazom (parameter body nesie len
+// čistý text). Schránka dostane HTML aj čistý text naraz a koncept sa otvorí
+// bez tela — Ctrl+V doň vloží naformátovaný e-mail. Najprv zápis do schránky
+// (vyžaduje zameranú stránku), až potom nová karta — tá by fokus vzala.
+async function kampanHtmlDoGmailu(i){
+  const e = _rucnePripravene[i];
+  try{
+    await navigator.clipboard.write([new ClipboardItem({
+      "text/html": new Blob([e.html], { type: "text/html" }),
+      "text/plain": new Blob([e.text], { type: "text/plain" }),
+    })]);
+  }catch(err){ kampanSprava("Kopírovanie zlyhalo: " + err.message, true); return; }
+  // S „noopener“ vracia window.open vždy null — zablokované okno sa rozpoznať nedá.
+  window.open(kampGmailOdkaz(Object.assign({}, e, { text: "" })), "_blank", "noopener");
+  kampanSprava("Skopírované: " + e.email + " — v Gmaile vlož telo cez Ctrl+V (ak sa karta neotvorila, povoľ vyskakovacie okná).");
 }
 // „Odoslané“ zapisuje až človek — server nevie, či e-mail naozaj odišiel.
 async function kampanOdoslane(i){
