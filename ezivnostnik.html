@@ -2247,7 +2247,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.26-QT";  // Exporty krok 3: Pohoda XML (adresár, prijaté faktúry, pokladničné doklady, banka) nad účtovnou dávkou
+const APP_VERZIA = "2026.09.26-QU";  // Pohoda XML po importe v POHODA Start: adresár len s adresou, bez dateAccounting
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -23924,7 +23924,9 @@ function davkaZmenyOdExportu(format){
 //  Mapovanie polí (dokumentácia v XSD): `originalDocument` = pole „Doklad“
 //  (číslo dodávateľa, POHODA ho použije ako VS pri príkaze), `symVar` = VS,
 //  `date` = vystavenie, `dateTax` = dodanie / dátum odpočtu, `dateAccounting`
-//  = dátum účtovného prípadu, `dateDue` = splatnosť, `text` je povinný.
+//  `dateDue` = splatnosť, `text` je povinný. `dateAccounting` sa NEposiela —
+//  v jednoduchom účtovníctve ho POHODA pri prijatej faktúre nepoužíva
+//  (varovanie 602 pri každom doklade, import 26. 9. 2026).
 //  Kódovanie UTF-8 (deklarácia v hlavičke). Predkontáciu a členenie DPH
 //  neposielame — nastaví si ich účtovník, ako pri importe ISDOC.
 // ═══════════════════════════════════════════════════════════════
@@ -23978,8 +23980,14 @@ function davkaDoPohodaXml(davka){
   const items=[];
   const item=(id, telo)=>items.push(`  <dat:dataPackItem id="${e(id.slice(0,64))}" version="2.0">\n${telo}\n  </dat:dataPackItem>`);
 
-  // ── adresár ──
+  // ── adresár: len partneri S ADRESOU. Import 26. 9. 2026 v POHODA Start: záznam
+  // adresára bez mesta končí chybou 104 „Nebola zadaná adresa firmy“ (17 z 22),
+  // kým doklad s tým istým partnerom vloženým inline prejde — POHODA si ho
+  // založí sama. Partner bez adresy teda ide len na dokladoch.
+  let bezAdresy=0;
   (d.partneri||[]).filter(p=>p.nazov).forEach(p=>{
+    const a=(p.adresa&&typeof rozlozAdresu==="function")?rozlozAdresu(p.adresa):null;
+    if(!a || !a.mesto){ bezAdresy++; return; }
     item("ADB-"+p.id, `    <adb:addressbook version="2.0"><adb:addressbookHeader><adb:identity>${pohodaAdresa(p)}</adb:identity><adb:intNote>eživnostník · ${e(p.id)}</adb:intNote></adb:addressbookHeader></adb:addressbook>`);
   });
 
@@ -23995,7 +24003,7 @@ function davkaDoPohodaXml(davka){
       item("VCH-"+v.kluc, `    <vch:voucher version="2.0"><vch:voucherHeader><vch:voucherType>expense</vch:voucherType>${v.cislo?`<vch:originalDocument>${e(v.cislo.slice(0,32))}</vch:originalDocument>`:""}<vch:date>${dat(v.datum)}</vch:date><vch:datePayment>${dat(v.datum)}</vch:datePayment><vch:dateTax>${dat(v.datum)}</vch:dateTax><vch:text>${e(text)}</vch:text><vch:partnerIdentity>${pohodaAdresa(p, v.partner)}</vch:partnerIdentity><vch:note>${e(pozn)}</vch:note><vch:intNote>eživnostník · vydavok:${e(v.kluc)}</vch:intNote></vch:voucherHeader><vch:voucherSummary><vch:roundingDocument>none</vch:roundingDocument><vch:homeCurrency>${sumy}</vch:homeCurrency></vch:voucherSummary></vch:voucher>`);
     } else {
       const dobropis=(+v.spolu||0)<0;
-      item("INV-"+v.kluc, `    <inv:invoice version="2.0"><inv:invoiceHeader><inv:invoiceType>${dobropis?"receivedCreditNotice":"receivedInvoice"}</inv:invoiceType>${v.vs?`<inv:symVar>${e(v.vs.replace(/\D/g,"").slice(0,20))}</inv:symVar>`:""}${v.cislo?`<inv:originalDocument>${e(v.cislo.slice(0,32))}</inv:originalDocument>`:""}${dobropis&&v.opravuje?`<inv:originalDocumentNumber>${e(v.opravuje)}</inv:originalDocumentNumber>`:""}<inv:date>${dat(v.vystavenie||v.datum)}</inv:date><inv:dateTax>${dat(v.datum)}</inv:dateTax><inv:dateAccounting>${dat(v.datum)}</inv:dateAccounting>${v.splatnost?`<inv:dateDue>${dat(v.splatnost)}</inv:dateDue>`:""}<inv:text>${e(text)}</inv:text><inv:partnerIdentity>${pohodaAdresa(p, v.partner)}</inv:partnerIdentity><inv:paymentType><typ:paymentType>draft</typ:paymentType></inv:paymentType>${pohodaUcet("inv:paymentAccount", v.iban)}<inv:note>${e(pozn)}</inv:note><inv:intNote>eživnostník · vydavok:${e(v.kluc)}</inv:intNote></inv:invoiceHeader><inv:invoiceSummary><inv:roundingDocument>none</inv:roundingDocument><inv:homeCurrency>${sumy}</inv:homeCurrency></inv:invoiceSummary></inv:invoice>`);
+      item("INV-"+v.kluc, `    <inv:invoice version="2.0"><inv:invoiceHeader><inv:invoiceType>${dobropis?"receivedCreditNotice":"receivedInvoice"}</inv:invoiceType>${v.vs?`<inv:symVar>${e(v.vs.replace(/\D/g,"").slice(0,20))}</inv:symVar>`:""}${v.cislo?`<inv:originalDocument>${e(v.cislo.slice(0,32))}</inv:originalDocument>`:""}${dobropis&&v.opravuje?`<inv:originalDocumentNumber>${e(v.opravuje)}</inv:originalDocumentNumber>`:""}<inv:date>${dat(v.vystavenie||v.datum)}</inv:date><inv:dateTax>${dat(v.datum)}</inv:dateTax>${v.splatnost?`<inv:dateDue>${dat(v.splatnost)}</inv:dateDue>`:""}<inv:text>${e(text)}</inv:text><inv:partnerIdentity>${pohodaAdresa(p, v.partner)}</inv:partnerIdentity><inv:paymentType><typ:paymentType>draft</typ:paymentType></inv:paymentType>${pohodaUcet("inv:paymentAccount", v.iban)}<inv:note>${e(pozn)}</inv:note><inv:intNote>eživnostník · vydavok:${e(v.kluc)}</inv:intNote></inv:invoiceHeader><inv:invoiceSummary><inv:roundingDocument>none</inv:roundingDocument><inv:homeCurrency>${sumy}</inv:homeCurrency></inv:invoiceSummary></inv:invoice>`);
     }
   });
 
@@ -24011,7 +24019,7 @@ function davkaDoPohodaXml(davka){
   });
 
   const kedy=String(d.vytvorene||new Date().toISOString()).slice(0,16).replace(/[-:T]/g,"");
-  const pocty=`adresár ${(d.partneri||[]).length}, doklady ${(d.vydavky||[]).length-interne}, banka ${(d.banka||[]).length}`+(interne?`; interné doklady (${interne}) a majetok sa neprenášajú`:"; majetok sa neprenáša");
+  const pocty=`adresár ${(d.partneri||[]).length-bezAdresy}${bezAdresy?` (${bezAdresy} bez adresy len na dokladoch)`:""}, doklady ${(d.vydavky||[]).length-interne}, banka ${(d.banka||[]).length}`+(interne?`; interné doklady (${interne}) a majetok sa neprenášajú`:"; majetok sa neprenáša");
   const note=`eživnostník ${typeof APP_VERZIA!=="undefined"?APP_VERZIA:""} — ${d.prirastok?"prírastok od posledného exportu":"celé obdobie"}${d.roky?" "+d.roky.join(", "):""}; ${pocty}. Vydané faktúry idú cez PDF s ISDOC.`;
   return `<?xml version="1.0" encoding="UTF-8"?>\n<dat:dataPack version="2.0" id="${e("eziv-"+kedy)}" ico="${e(F.ico||"")}" application="eživnostník" note="${e(note)}"`
     + Object.keys(POHODA_NS).map(k=>` xmlns:${k}="${POHODA_NS[k]}"`).join("") + `>\n` + items.join("\n") + `\n</dat:dataPack>\n`;
