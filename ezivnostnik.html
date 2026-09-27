@@ -4306,7 +4306,10 @@ function deVypocetDane(zaklad, S, rok, prijmy){
   let nczd=nczdPlna;
   // 2026: krátenie strmšie — 1/3 základu dane (nie 1/4)
   const delitel=sadzbaFirmy("nczdDelitel", R_, S) || 3;   // 2025 delilo štyrmi, od 2026 tromi
-  if(zaklad>hranica) nczd=Math.max(0, konst - zaklad/delitel);
+  // Podiel základu sa zaokrúhli na centy PRED odpočítaním (§ 47 — každý prepočet
+  // na dve desatinné miesta; tak počíta aj eFormulár FS, inliner73). Inak vyjde
+  // o cent iná NČZD, keď má štvrtina/tretina základu tretie desatinné miesto 5.
+  if(zaklad>hranica) nczd=Math.max(0, konst - r2(zaklad/delitel));
   if(zaklad>=zanik) nczd=0;
   nczd=Math.min(nczd, nczdPlna);
 
@@ -4352,15 +4355,34 @@ function danZoZakladu(zaklad, rok, prijmy, S){
   const pasma=sadzbaRoka("danPasma", rok);
   // Bez známych príjmov alebo bez pásiem ostáva pôvodné správanie — plochá sadzba.
   if(!(+prijmy>hranica) || !pasma || !pasma.length)
-    return {dan:r2(z*plocha), sadzba:plocha, progresia:false, rozpis:[], hranica};
+    return {dan:danSadzbou(z, plocha), sadzba:plocha, progresia:false, rozpis:[], hranica};
+  const P=danPoPasmach(z, rok);
+  return {dan:P.dan, sadzba:P.sadzba, progresia:true, rozpis:P.rozpis, hranica};
+}
+// Daň po pásmach § 15 písm. a) roka (sadzby.js, danPasma). Pre základ podľa § 4
+// ods. 1 písm. b) (podnikanie) sa použije len nad hranicou príjmov — rozhoduje
+// danZoZakladu. Základ podľa § 4 ods. 1 písm. a) (zostatok § 5 po NČZD, prenájom,
+// § 8 — r. 80 priznania B) sa zdaňuje pásmami VŽDY, 15 % preň neexistuje
+// (§ 15 písm. a) bod 1, poučenie DPFOBv25 bod 4, eFormulár FS vypocet_t81).
+function danPoPasmach(zaklad, rok){
+  const z=Math.max(0, +zaklad||0);
+  const pasma=sadzbaRoka("danPasma", rok)||[];
   let spodok=0, dan=0; const rozpis=[];
   pasma.forEach(b=>{
     const strop=(b.do==null)?Infinity:b.do;
-    const cast=Math.max(0, Math.min(z, strop)-spodok);
-    if(cast>0){ dan=r2(dan+cast*b.s); rozpis.push({od:spodok, do:b.do, sadzba:b.s, cast:r2(cast), dan:r2(cast*b.s)}); }
+    const cast=r2(Math.max(0, Math.min(z, strop)-spodok));
+    if(cast>0){ const d=danSadzbou(cast, b.s); dan=r2(dan+d); rozpis.push({od:spodok, do:b.do, sadzba:b.s, cast, dan:d}); }
     spodok=strop;
   });
-  return {dan:r2(dan), sadzba:(z>0?Math.round(dan/z*10000)/10000:0), progresia:true, rozpis, hranica};
+  return {dan:r2(dan), sadzba:(z>0?Math.round(dan/z*10000)/10000:0), rozpis};
+}
+// Daň sadzbou zo základu, zaokrúhlená podľa § 47 (pol centa hore). Počíta sa
+// v celých centoch a bázických bodoch: 8 612,10 × 15 % je presne 1 291,815 →
+// 1 291,82, kým 8612.1*0.15 v plávajúcej čiarke dá 1291.8149999… → 1 291,81
+// a eFormulár FS (Big.js) by hlásil rozdiel v r. 96 (kolo 142 F).
+function danSadzbou(zaklad, sadzba){
+  const c=Math.round((+zaklad||0)*100), bp=Math.round((+sadzba||0)*10000);
+  return Math.round(c*bp/10000)/100;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -4432,7 +4454,7 @@ function deNczdManzel(zaklad, S, rok){
   const konst=sadzbaFirmy("nczdManzelKonst", rok, S);
   const prijem=+S.nczdManzelPrijem||0;
   const del=sadzbaFirmy("nczdDelitel", rok, S) || 3;
-  let n = (zaklad<=hr) ? max : (konst - zaklad/del);
+  let n = (zaklad<=hr) ? max : (konst - r2(zaklad/del));   // § 47, ako NČZD na daňovníka
   n = n - prijem;
   return r2(Math.min(Math.max(0,n), max));
 }
@@ -21881,7 +21903,7 @@ function zmazPriznanie(rok){
 // ═══ SPRIEVODCA DAŇOVÝM PRIZNANÍM B (Release 9) ═══
 // POZOR: predvyplňovací nástroj, NENAHRÁDZA daňového poradcu ani oficiálne priznanie.
 // Sadzby a hranice podľa zdaňovacieho obdobia zo sadzby.js: 15 % sadzba (príjmy <100k), NČZD,
-// daňový bonus s krátením podľa príjmu. Progresia 19/25 % len ako voliteľná vetva.
+// daňový bonus s krátením podľa príjmu, pásma § 15 (danPasma) pre r. 81 a nad hranicou aj r. 96.
 
 // Daňový bonus na deti — sumy, hranica krátenia a percentuálny limit sú v sadzby.js
 // po rokoch. Predtým tu stála kópia sadzieb roku 2026, ktorá rok 2025 krátila
@@ -21896,48 +21918,137 @@ function detiBonusSadzby(rok){
     pctLimit: pocet=>sadzbaFirmy("bonusLimitSadzba"+Math.min(Math.max(pocet,1),6), rok, S),
   };
 }
+// Rodné číslo dieťaťa pre r. 33 priznania B — bez lomky a medzier. Poučenie
+// DPFOBv25: dieťa bez slovenského rodného čísla sa uvádza dátumom narodenia
+// DDMM/RRRR, v XML teda osem číslic DDMMRRRR (eFormulár FS, form.621.xmlfdf.js).
+function detiRc(dieta){ return String((dieta&&dieta.rc)||"").replace(/[\s/]/g,""); }
+// Dátum narodenia z rodného čísla (desať číslic, mesiac +50 u dievčat) alebo
+// z tvaru DDMMRRRR; inak z poľa `narodenie` v tvare RRRR-MM-DD. Neplatné = null.
+// Rodné číslo musí byť deliteľné 11 (zákon 301/1995 o rodnom čísle) — preklep sa
+// tak zachytí skôr, než ho odmietne finančná správa. Mesiac +20/+70 appka neberie,
+// lebo ho nečíta ani eFormulár FS (DietaInfo).
+function detiDatumNarodenia(dieta, rok){
+  const rc=detiRc(dieta);
+  const platny=(y,m,d)=>(m>=1 && m<=12 && d>=1 && d<=new Date(y, m, 0).getDate()) ? {y, m, d} : null;
+  if(/^\d{10}$/.test(rc)){
+    const n=+rc, prvych9=+rc.slice(0,9);
+    if(!(n%11===0 || (prvych9%11===10 && rc[9]==="0"))) return null;
+    let y=2000+(+rc.slice(0,2)); const R=+rok||new Date().getFullYear();
+    if(y>R) y-=100;
+    let m=+rc.slice(2,4); if(m>50) m-=50;
+    return platny(y, m, +rc.slice(4,6));
+  }
+  if(/^\d{8}$/.test(rc)) return platny(+rc.slice(4,8), +rc.slice(2,4), +rc.slice(0,2));
+  const n=String((dieta&&dieta.narodenie)||"").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return n ? platny(+n[1], +n[2], +n[3]) : null;
+}
 // vek dieťaťa k danému roku
 function detiVek(dieta, rok){
+  const D=detiDatumNarodenia(dieta, rok);
+  if(D) return rok-D.y;
   if(dieta.vek!=null && !dieta.narodenie) return +dieta.vek;
   const n=String(dieta.narodenie||"").match(/(\d{4})/);
   return n?rok-(+n[1]):0;
 }
-// maximálny ročný bonus na jedno dieťa podľa veku (bez krátenia)
-function detiBonusMaxRok(dieta, rok){
-  const vek=detiVek(dieta, rok);
-  if(vek>=18) return 0;
-  const B=detiBonusSadzby(rok);
-  return (vek<15?B.do15:B.do18)*12;
-}
-// celkový daňový bonus na deti pre daný ročný základ dane (sadzby roka zo sadzby.js)
-function detiBonusSpolu(deti, zakladDane, rok){
-  const opravnene=(deti||[]).filter(dt=>detiVek(dt,rok)<18);
-  const pocet=opravnene.length;
-  if(!pocet) return {bonus:0, maxBonus:0, pctLimit:0, kratenieVysokyPrijem:0, opravnenych:0};
-  // 1) teoretická plná suma podľa veku
-  const maxBonus=r2(opravnene.reduce((a,dt)=>a+detiBonusMaxRok(dt,rok),0));
-  // 2) percentuálny limit zo základu dane podľa počtu detí
-  const B=detiBonusSadzby(rok);
-  const pct=B.pctLimit(pocet);
-  const limitZoZakladu=r2(Math.max(0,zakladDane)*pct);
-  // 3) krátenie pri vysokom príjme: na každé dieťa −1/10 × (základ − hranica)
-  let poVysokom=maxBonus;
-  if(zakladDane>B.hranicaKratenia){
-    const znizNaDieta=r2((zakladDane-B.hranicaKratenia)/10);
-    // krátenie sa uplatňuje na každé dieťa (proporčne k jeho max sume cez mesiace)
-    let spolu=0;
-    opravnene.forEach(dt=>{ const mes=(detiVek(dt,rok)<15?B.do15:B.do18)*12; spolu+=Math.max(0, mes - znizNaDieta); });
-    poVysokom=r2(spolu);
+// Bonus po mesiacoch roka (§ 33 ods. 1 a 5 ZDP): 100 € (do15) mesačne naposledy
+// za mesiac, v ktorom dieťa dovŕši 15 rokov, potom 50 € (do18) naposledy za mesiac
+// dovŕšenia 18 rokov; už za mesiac narodenia. Vek sa berie k poslednému dňu
+// predošlého mesiaca — tak to počíta aj eFormulár FS (inliner117, DateDiffInYears).
+// Bez dátumu narodenia (len `vek`) ostáva pôvodné správanie: celý rok jednou sumou.
+function detiMesiace(dieta, rok){
+  const B=detiBonusSadzby(rok), R=+rok, D=detiDatumNarodenia(dieta, R), out=[];
+  if(!D){
+    const vek=detiVek(dieta, R), s=vek<15?B.do15:(vek<18?B.do18:0);
+    for(let m=1;m<=12;m++) out.push(s);
+    return out;
   }
-  // výsledný bonus = min(plný/po vysokom, percentuálny limit)
-  const bonus=r2(Math.max(0, Math.min(poVysokom, limitZoZakladu)));
-  return {bonus, maxBonus, pctLimit:pct, limitZoZakladu, poVysokomPrijme:poVysokom, opravnenych:pocet};
+  for(let m=1;m<=12;m++){
+    if(R<D.y || (R===D.y && m<D.m)){ out.push(0); continue; }
+    if(R===D.y && m===D.m){ out.push(B.do15); continue; }
+    const kon=new Date(R, m-1, 0);                         // posledný deň predošlého mesiaca
+    let vek=kon.getFullYear()-D.y;
+    if((kon.getMonth()+1)<D.m || ((kon.getMonth()+1)===D.m && kon.getDate()<D.d)) vek--;
+    out.push(vek<15?B.do15:(vek<18?B.do18:0));
+  }
+  return out;
 }
+// maximálny ročný bonus na jedno dieťa (bez limitu a krátenia)
+function detiBonusMaxRok(dieta, rok){
+  return r2(detiMesiace(dieta, rok).reduce((a,x)=>a+x,0));
+}
+// Celkový daňový bonus na deti (r. 117) pre základ dane r. 38 + r. 45 (sadzby roka zo sadzby.js).
+// Postup zodpovedá zákonu a výpočtu eFormulára FS DPFOBv25 (inliner117):
+//  · do hranice krátenia: po skupinách mesiacov s rovnakým počtom detí najviac
+//    percento zo základu v pomernej výške za mesiace skupiny (§ 33 ods. 6 a 10),
+//  · nad hranicou: na každé dieťa −1/10 rozdielu základu a hranice (§ 33 ods. 11),
+//    pri dieťati len časť roka pomerne za jeho mesiace (eFormulár).
+// Deti s celým rokom (bežný prípad, aj všetky zadané len vekom) dávajú presne
+// pôvodný výsledok: min(plná suma, percento zo základu).
+function detiBonusSpolu(deti, zakladDane, rok){
+  const B=detiBonusSadzby(rok);
+  const deca=(deti||[]).map(dt=>({dt, mes:detiMesiace(dt, rok)})).filter(k=>k.mes.some(x=>x>0));
+  const pocet=deca.length;
+  if(!pocet) return {bonus:0, maxBonus:0, pctLimit:0, kratenieVysokyPrijem:0, opravnenych:0, mesiace:[]};
+  const zaklad=Math.max(0, +zakladDane||0);
+  // 1) teoretická plná suma podľa veku po mesiacoch
+  const maxBonus=r2(deca.reduce((a,k)=>a+k.mes.reduce((b,x)=>b+x,0),0));
+  // 2) percentuálny limit zo základu dane podľa počtu detí v mesiaci
+  const pct=B.pctLimit(pocet);
+  const limitZoZakladu=r2(zaklad*pct);
+  const skupiny={};
+  for(let m=0;m<12;m++){
+    const c=deca.filter(k=>k.mes[m]>0).length; if(!c) continue;
+    (skupiny[c]=skupiny[c]||{mes:0, suma:0});
+    skupiny[c].mes++; skupiny[c].suma=r2(skupiny[c].suma+deca.reduce((a,k)=>a+k.mes[m],0));
+  }
+  let poLimite=0;
+  Object.keys(skupiny).forEach(c=>{
+    const G=skupiny[c];
+    let limit=r2(zaklad*B.pctLimit(+c));
+    if(G.mes!==12) limit=r2(r2(limit/12)*G.mes);
+    poLimite=r2(poLimite+Math.min(G.suma, limit));
+  });
+  let bonus=poLimite, poVysokom=maxBonus;
+  // 3) krátenie pri vysokom príjme: na každé dieťa −1/10 × (základ − hranica)
+  if(zaklad>B.hranicaKratenia){
+    const znizNaDieta=r2((zaklad-B.hranicaKratenia)/10);
+    let spolu=0;
+    deca.forEach(k=>{
+      const m15=k.mes.filter(x=>x>0 && x===B.do15).length, m18=k.mes.filter(x=>x>0 && x!==B.do15).length;
+      const celyRok=(m15===12 || m18===12);
+      const pom=celyRok ? znizNaDieta : r2(znizNaDieta/12);
+      const seg=(suma, zn)=>zn===0 ? suma : Math.max(0, suma-zn);
+      const s15=r2(k.mes.filter(x=>x>0 && x===B.do15).reduce((a,x)=>a+x,0));
+      const s18=r2(k.mes.filter(x=>x>0 && x!==B.do15).reduce((a,x)=>a+x,0));
+      spolu=r2(spolu+seg(s15, celyRok?pom:r2(pom*m15))+seg(s18, celyRok?pom:r2(pom*m18)));
+    });
+    poVysokom=r2(spolu);
+    bonus=r2(Math.min(poVysokom, limitZoZakladu));
+  }
+  bonus=r2(Math.max(0, bonus));
+  return {bonus, maxBonus, pctLimit:pct, limitZoZakladu, poVysokomPrijme:poVysokom, opravnenych:pocet,
+          mesiace:deca.map(k=>({dieta:k.dt, mes:k.mes}))};
+}
+// Rok, ktorý už skončil (kolo 142 F). Za uzavretý rok idú NČZD, daňový bonus aj
+// hranica 100 000 € pre 15 % sadzbu zo SKUTOČNÝCH údajov roka. Prognóza
+// (dePrognoza) je odhad pre rok, ktorý ešte beží — za uzavretý rok by dopočítala
+// mesiace po poslednom doklade a kto fakturoval len marec až máj, dostal NČZD
+// z umelo vysokého základu (kolo 141 D, otvorený bod 4).
+function pbRokUzavrety(rok){ return +rok < new Date().getFullYear(); }
 // hlavný výpočet priznania B
+// Zdroj: poučenie DPFOBv25 (bod 4, oddiely V až IX) a výpočty eFormulára FS
+// form.621 (vypocet_t72, t77, t78, t80, t81, t91, t92, inliner96, t118, t120,
+// t121, inliner135/136), dev/opravy/kolo142_F.md. Dva základy dane:
+//  · § 4 ods. 1 písm. b) — podnikanie (§ 6 ods. 1 a 2): r. 92 = r. 57 − r. 91,
+//    15 % do 100 000 € príjmov (r. 95), inak pásma → r. 96,
+//  · § 4 ods. 1 písm. a) — zostatok zamestnania po NČZD (r. 78) + prenájom
+//    (r. 65) + § 8 (r. 71): r. 80, VŽDY pásma (19 %/25 %, od 2026 štyri) → r. 81.
+// NČZD sa odpočíta najprv od § 5, zvyšok (r. 91) od podnikania (§ 11 ods. 12).
 function pbVypocet(rok){
   const S=firmaData.settings||{};
   const R=deRocnySuhrn(rok);
-  const P=dePrognoza(rok);
+  const uzavrety=pbRokUzavrety(rok);
+  const P=uzavrety?null:dePrognoza(rok);
   // Spôsob výdavkov je na rok (kap. 89.3) — ten istý zápis ako v Nastaveniach.
   // Predtým tu rozhodoval jeden prepínač pbPausalne pre všetky roky.
   const pausalne=(vydavkyRezimEfektivny(rok)==="pausal");
@@ -21946,59 +22057,32 @@ function pbVypocet(rok){
   let vydavky;
   if(pausalne){ vydavky=r2(pausalVydavky(prijmy, rok).suma+R.odvodyRok); }
   else { vydavky=R.vydavkySkutSpolu; }
-  const zaklad=Math.max(0, r2(prijmy-vydavky-(pausalne?0:R.odvodyRok)));  // r41 čiastkový základ §6 (odvody v skutočných sú v module)
+  const zaklad=Math.max(0, r2(prijmy-vydavky-(pausalne?0:R.odvodyRok)));  // r41 čiastkový základ § 6 ods. 1 a 2
   // §5 – príjmy zo závislej činnosti (zamestnanie/dohody) — zadáva sa ručne v sprievodcovi,
   // appka ich z dokladov nevie odvodiť (plynú z potvrdenia od zamestnávateľa).
-  const zamPrijmy=r2(+S.pbZamPrijmy||0);           // r36 úhrn príjmov od zamestnávateľov
-  const zamDohody=r2(+S.pbZamDohody||0);           // r36a z toho z dohôd mimo prac. pomeru
-  const zamPoistne=r2(+S.pbZamPoistne||0);         // r37 úhrn povinného poistného (§5 ods.8)
+  const zamPrijmy=r2(pbUdaj(rok,"pbZamPrijmy"));           // r36 úhrn príjmov od zamestnávateľov
+  const zamDohody=r2(pbUdaj(rok,"pbZamDohody"));           // r36a z toho z dohôd mimo prac. pomeru
+  const zamPoistne=r2(pbUdaj(rok,"pbZamPoistne"));         // r37 úhrn povinného poistného (§5 ods.8)
   const zaklad5=r2(Math.max(0, zamPrijmy-zamPoistne)); // r38 čiastkový základ §5 (r36−r37)
-  const zamZrazenaDan=r2(+S.pbZamZrazenaDan||0);   // zrazený preddavok zamestnávateľom → r131
-  // §6 ods.3 – príjmy z prenájmu (manuál). Oslobodenie 500 €, výdavky sa krátia pomerne,
-  // paušál 60 % pri prenájme NEPLATÍ (len skutočné výdavky).
-  const najomPrijmy=r2(+S.pbNajomPrijmy||0);
-  const najomVydavky=r2(+S.pbNajomVydavky||0);
-  const najomOslob=r2(Math.min(najomPrijmy,500));
-  const najomZdan=r2(Math.max(0,najomPrijmy-najomOslob));
-  const najomVydKrat= najomPrijmy>0 ? r2(najomVydavky*(najomZdan/najomPrijmy)) : 0;
-  const najomZaklad=r2(Math.max(0,najomZdan-najomVydKrat));
-  // §7 kapitálový majetok a §8 ostatné príjmy — zdaňujú sa SAMOSTATNE sadzbou 19 %.
-  const kapZaklad=r2(+S.pbKapitalZaklad||0);              // §7 čistý základ
-  const ostPrijmy=r2(+S.pbOstatnePrijmy||0);
-  const ostVydavky=r2(+S.pbOstatneVydavky||0);
-  const zaklad8=r2(Math.max(0, ostPrijmy-ostVydavky));   // r71/r80 základ §8
-  // §6 čiastkový základ vrátane prenájmu (r41) a kombinovaný základ §5+§6 (r72)
-  const zaklad6=r2(zaklad+najomZaklad);
-  const zakladCelkom=r2(zaklad6+zaklad5);                 // r72 = §5 + §6 PRED NČZD
-  // NČZD — z ROČNÉHO základu (pravidlá viazané na ročný príjem)
-  const zakladRocnyPreNczd = (P ? P.zaklad : zaklad) + zaklad5 + najomZaklad;
-  const rocPrijmyPB = P ? (P.rocPrijmy||P.prijmy) : prijmy;
-  const Droc=deVypocetDane(zakladRocnyPreNczd, S, rok, rocPrijmyPB);
-  const nczd=Droc.nczd;
-  // NČZD (r77, do výšky r72) sa uplatní najprv na §5, zvyšok (r91) na §6.
-  const nczdCap=r2(Math.min(nczd, zakladCelkom));         // r77
-  const nczdZvysok=r2(Math.max(0, nczdCap-zaklad5));      // r91 zostatok pre §6
-  const zaklad6Zniz=r2(Math.max(0, zaklad6-nczdZvysok));  // r92/r94 zdaniteľný §6
-  const zakladZniz=zaklad6Zniz;
-  // §6 daň — 15 % do 100 000 € príjmov, inak progresia. §7/§8 samostatne 19 %.
-  const DZ=danZoZakladu(zaklad6Zniz, rok, rocPrijmyPB, S);
-  const dan6=DZ.dan;                                       // r96
-  const progresia=DZ.progresia;
-  const dan7=r2(kapZaklad*0.19);                           // §7
-  const dan8=r2(zaklad8*0.19);                             // r81/r90 §8
-  const danCelkom=r2(dan6+dan7+dan8);                      // r116 súčet čiastkových daní
-  // daňový bonus na deti (2026 pravidlá) — z ROČNÉHO základu
-  const zakladRocny = P ? P.zaklad : zaklad;
-  const bd=detiBonusSpolu(S.deti||[], zakladRocny, rok);
-  const bonusDeti=bd.bonus;
-  const danPoBonuse=Math.max(0, r2(danCelkom-bonusDeti)); // r118/r124
-  const preddavky=r2(((P&&P.zaplatenePreddavkyDan)|| R.preddavkyDanRok || 0) + zamZrazenaDan);
-  const doplatok=r2(danPoBonuse-preddavky);
-  // Dar 2 %/3 % z dane (§ 50) — 3 % pri dobrovoľníctve 40+ h; min. 3 €, inak nemožno poukázať.
-  const darPct=(S.darNNO&&S.darNNO.aktivny)?(S.darNNO.treProcenta?0.03:0.02):0;
-  const darRaw=darPct?r2(danPoBonuse*darPct):0;
-  const darSuma=darRaw>=3?darRaw:0;
-  const r39v=r2(prijmy+najomZdan);
+  const zamZrazenaDan=r2(pbUdaj(rok,"pbZamZrazenaDan"));   // preddavky zrazené zamestnávateľom (§ 35) → r131
+  const zamBonus=r2(pbUdaj(rok,"pbZamBonus"));             // daňový bonus vyplatený zamestnávateľom → r119
+  // §6 ods.3 – prenájom (manuál) → tabuľka č. 1, r. 11 a r. 13 → r. 58 až 65 (poučenie
+  // DPFOBv25, tabuľka č. 1). Oslobodených 500 € (§ 9 ods. 1 písm. g), výdavky sa krátia
+  // pomerom zdaňovaných príjmov k celým — pomer na dve desatinné miesta (§ 47; príklad
+  // v poučení: 9 448 : 9 948 → 0,95 × 3 785 = 3 595,75). Paušál pri prenájme nie je
+  // a strata tiež nie: výdavky najviac do výšky príjmov (eFormulár vypocet_t1r11s2_C1).
+  const najomPrijmy=r2(pbUdaj(rok,"pbNajomPrijmy"));
+  const najomVydavky=r2(pbUdaj(rok,"pbNajomVydavky"));
+  const najomZdan=r2(Math.max(0, najomPrijmy-500));                          // t1r11 s1 → r58
+  const najomPomer=najomPrijmy>0 ? r2(najomZdan/najomPrijmy) : 0;
+  const najomVydKrat=r2(Math.min(najomZdan, r2(najomVydavky*najomPomer)));   // t1r11 s2 → r59
+  const najomZaklad=r2(Math.max(0, najomZdan-najomVydKrat));                  // r60 = r65
+  // §7 kapitálový majetok — samostatne 19 % (§ 15 písm. a) bod 4). §8 ostatné príjmy
+  // patria do základu podľa § 4 ods. 1 písm. a) (r. 71 → r. 80).
+  const kapZaklad=r2(pbUdaj(rok,"pbKapitalZaklad"));              // §7 čistý základ
+  const ostPrijmy=r2(pbUdaj(rok,"pbOstatnePrijmy"));
+  const ostVydavky=r2(pbUdaj(rok,"pbOstatneVydavky"));
+  const zaklad8=r2(Math.max(0, ostPrijmy-ostVydavky));   // r71
   // Výdavky § 6 ods. 1 a 2 VRÁTANE poistného — to, čo ide do tabuľky č. 1, r. 10,
   // stĺ. 2 (kolo 141 D). Pri paušále je to vzorec eFormulára FS DPFOBv25:
   // min(min(60 % príjmov; strop) + poistné; príjmy). Pri skutočných výdavkoch
@@ -22008,26 +22092,86 @@ function pbVypocet(rok){
   const strata16=pausalne ? 0 : r2(Math.max(0, vydavky16-prijmy));
   // r45 = r41 − r42 (r43/r44 len v podvojnom účtovníctve); r55 = r45 − odpočet
   // straty (appka ho nerobí); r57 = r55 − r56 (odpočet § 30c/30e/30ca, appka nerobí).
-  // Tlačivo z r57 skladá r72 (= r38 + r57) aj r92 (= r57 − r91), preto nesmie
-  // ostať prázdny, keď sú r72 a r92 vyplnené.
-  const r45v=r2(Math.max(0, zaklad6-strata16));
+  const r45v=r2(Math.max(0, zaklad-strata16));
+  const r57=r45v;
+  // r72 = r38 + r57 (eFormulár vypocet_t72). Prenájom sem nepatrí: NČZD sa odpočítava
+  // len od § 5 a § 6 ods. 1 a 2 (§ 11 ods. 1). Pri strate z podnikania je r72 = r38.
+  const zakladCelkom=r2(zaklad5+r57);
+  // NČZD sa určuje z r. 72 (poučenie, r. 73). Pre bežiaci rok z prognózy celého roka
+  // (odhad, rovnako ako dashboard), pre uzavretý zo skutočnosti.
+  const zakladPreNczd = P ? r2(P.zaklad+zaklad5) : zakladCelkom;
+  const rocPrijmyPB = P ? (P.rocPrijmy||P.prijmy) : prijmy;   // hranica 100 000 € (r. 95)
+  const Droc=deVypocetDane(zakladPreNczd, S, rok, rocPrijmyPB);
+  const r73=zakladCelkom>0 ? Droc.nczdVlastna : 0;        // eFormulár inliner73: pri r72 = 0 nula
+  const r74=Droc.nczdManzel, r75=Droc.nczd3pilier;
+  const nczd=r2(r73+r74+r75);
+  const r77=r2(Math.min(nczd, zakladCelkom));             // do výšky r72
+  const r78=r2(Math.max(0, zaklad5-r77));                 // § 5 po NČZD
+  const r91=r2(Math.max(0, r77-zaklad5));                 // zvyšok NČZD na podnikanie
+  const r92=r2(Math.max(0, r57-r91));                     // = r94 (r93 appka nevypĺňa)
+  const zakladZniz=r92;
+  // § 4 ods. 1 písm. a): r80 = r78 + r65 + r71 (+ r79, appka nevypĺňa) — pásma roka.
+  const r80=r2(Math.max(0, r78+najomZaklad+zaklad8));
+  const DA=danPoPasmach(r80, rok);
+  const r81=DA.dan;                                        // = r90 (bez zahraničia)
+  // § 4 ods. 1 písm. b): 15 % do 100 000 € príjmov, inak pásma (danZoZakladu).
+  const DZ=danZoZakladu(r92, rok, rocPrijmyPB, S);
+  const dan6=DZ.dan;                                       // r96 = r105
+  const progresia=DZ.progresia;
+  const dan7=danSadzbou(kapZaklad, 0.19);                  // §7 (r106/r115 appka nevypĺňa)
+  const danCelkom=r2(r81+dan6+dan7);                       // r116 = r90 + r105 + r115
+  // Daňový bonus (§ 33): základom je úhrn r. 38 + r. 45 (poučenie r. 116a, eFormulár
+  // inliner117), pre bežiaci rok z prognózy, pre uzavretý zo skutočnosti.
+  const zakladPreBonus = P ? r2(zaklad5+P.zaklad) : r2(zaklad5+r45v);
+  const bd=detiBonusSpolu(S.deti||[], zakladPreBonus, rok);
+  const bonusDeti=bd.bonus;                                // r117
+  const r118=r2(Math.max(0, danCelkom-bonusDeti));         // daň po bonuse = r124
+  const r120=r2(Math.max(0, bonusDeti-zamBonus));          // bonus po odpočítaní vyplateného
+  const r121=r2(Math.max(0, r120-danCelkom));              // bonus na vyplatenie (XIV. oddiel)
+  const r122=r2(Math.max(0, zamBonus-bonusDeti));          // vyplatený bonus na vrátenie
+  const danPoBonuse=r118;
+  // Preddavky: zrazené zamestnávateľom (§ 35) patria do r. 131, zaplatené z podnikania
+  // (§ 34) do r. 133 — eFormulár FS, popis polí t131 a t133. Predtým išlo všetko do r. 131
+  // a preddavky z podnikania sa nečítali vôbec (R.preddavkyDanRok deRocnySuhrn nevracia),
+  // takže r. 131 mal len zrazené zamestnávateľom a doplatok vychádzal bez preddavkov.
+  // Preddavok = doklad kategórie preddavokDan za rok (vydavokZaRok) — doplatok dane
+  // za rok sem nepatrí, platí sa až po priznaní.
+  const preddavky6=r2(((uhradenePovinnosti(rok).polozky||{}).dan||[])
+    .filter(p=>p.kategoria==="preddavokDan").reduce((a,p)=>a+p.suma,0));
+  const preddavky=r2(preddavky6+zamZrazenaDan);
+  // r135/r136 (inliner135/136): r116 − r117 + r119 + r121 − r131 − r133;
+  // daň na úhradu do 5 € sa neplatí (poučenie DPFOBv25, bod 1).
+  const doplatok=r2(danCelkom-bonusDeti+zamBonus+r121-zamZrazenaDan-preddavky6);
+  // Dar 2 %/3 % z dane (§ 50) — 3 % pri dobrovoľníctve 40+ h; min. 3 €, inak nemožno poukázať.
+  const darPct=(S.darNNO&&S.darNNO.aktivny)?(S.darNNO.treProcenta?0.03:0.02):0;
+  const darRaw=darPct?r2(danPoBonuse*darPct):0;
+  const darSuma=darRaw>=3?darRaw:0;
+  // r146 = r146a: zdaniteľné príjmy (celosvetové / zo SR) — vypĺňa ich, kto uplatňuje
+  // bonus (§ 33 ods. 9, poučenie r. 146); bez nich eFormulár bonus nepriznáva
+  // (vypocet_t117). Appka nepozná príjmy zo zahraničia, preto oba riadky rovnako.
+  const r146=bonusDeti>0 ? r2(zamPrijmy+prijmy+najomZdan+ostPrijmy) : 0;
   return {
-    rok, pausalne, progresia, prijmy, vydavky, odvody:R.odvodyRok, vydavky16, strata16,
+    rok, uzavrety, pausalne, progresia, prijmy, vydavky, odvody:R.odvodyRok, vydavky16, strata16,
     socRok:R.socRok, zpRok:R.zpRok,
-    zaklad, zaklad5, zaklad6, zakladCelkom, zamPrijmy, zamDohody, zamPoistne, zamZrazenaDan,
-    najomPrijmy, najomZaklad, kapZaklad, ostPrijmy, ostVydavky, zaklad8, dan6, dan7, dan8, danCelkom,
-    zakladRocny, nczd, zakladZniz, darSuma,
-    dan:dan6, bonusDeti, bonusDetail:bd, danPoBonuse, preddavky, doplatok,
-    // NČZD sa rozpisuje: r73 daňovník, r74 manžel, r75 III. pilier; r77 = súčet (export).
-    // §7/§8 sa zdaňujú samostatne 19 % (r80/r81/r90). Overené proti reálnemu podaniu FS a dpfo_b2025.xsd.
+    zaklad, zaklad5, zaklad6:zaklad, zakladCelkom, zamPrijmy, zamDohody, zamPoistne, zamZrazenaDan, zamBonus,
+    najomPrijmy, najomVydavky, najomZdan, najomVydKrat, najomZaklad, kapZaklad, ostPrijmy, ostVydavky, zaklad8,
+    zakladA:r80, danA:r81, rozpisA:DA.rozpis,
+    dan6, dan7, dan8:0, danCelkom,
+    zakladRocny:zakladPreNczd, zakladPreNczd, zakladPreBonus, nczd, zakladZniz, darSuma,
+    dan:dan6, bonusDeti, bonusDetail:bd, danPoBonuse, preddavky, preddavky6, doplatok,
+    // NČZD sa rozpisuje: r73 daňovník, r74 manžel, r75 III. pilier; r77 = súčet do výšky r72.
     r:{ r36:zamPrijmy, r36a:zamDohody, r37:zamPoistne, r38:zaklad5,
-        r39:r39v, r40:r2(r39v-zaklad6+strata16), r41:zaklad6, r42:strata16, r45:r45v, r46:strata16,
-        r55:r45v, r57:r45v, r72:zakladCelkom,
-        r73:Droc.nczdVlastna, r74:Droc.nczdManzel, r75:Droc.nczd3pilier,
-        r69:ostPrijmy, r70:ostVydavky, r71:zaklad8, r80:zaklad8, r81:dan8, r90:dan8,
-        r91:nczdZvysok, r92:zaklad6Zniz, r94:zaklad6Zniz, r95:r39v,
-        r96:dan6, r105:dan6, r116:danCelkom, r117:bonusDeti, r118:danPoBonuse,
-        r120:bonusDeti, r124:danPoBonuse, r131:preddavky, r135:doplatok>0?doplatok:0, r136:doplatok<0?-doplatok:0, r152:darSuma }
+        r39:prijmy, r40:r2(prijmy-zaklad+strata16), r41:zaklad, r42:strata16, r45:r45v, r46:strata16,
+        r55:r45v, r57:r57,
+        r58:najomZdan, r59:najomVydKrat, r60:najomZaklad, r65:najomZaklad,
+        r69:ostPrijmy, r70:ostVydavky, r71:zaklad8,
+        r72:zakladCelkom, r73, r74, r75, r77, r78,
+        r80, r81, r90:r81,
+        r91, r92, r94:r92, r95:prijmy,
+        r96:dan6, r105:dan6, r116:danCelkom, r117:bonusDeti, r118, r119:zamBonus,
+        r120, r121, r122, r124:danPoBonuse,
+        r131:zamZrazenaDan, r133:preddavky6,
+        r135:doplatok>5?doplatok:0, r136:doplatok<0?-doplatok:0, r146, r146a:r146, r152:darSuma }
   };
 }
 // Dátum poslednej úhrady dokladu (z bankových výpisov + ručného potvrdenia), alebo null.
@@ -22084,17 +22228,25 @@ function pbKontroly(rok){
     if((S.darNNO&&S.darNNO.aktivny)||(S.darRodic&&S.darRodic.aktivny)||(+Dr.pov.r152>0))
       upoz.push("Dodatočné priznanie: už poukázaný podiel dane sa neupravuje (§ 50 ods. 10, § 50aa ods. 8). Ak bol vyšší než 2 % alebo 3 % z novej dane, rozdiel sa pripočíta v r. 140; pri poukázaní rodičom sa preplatok upravuje podľa § 50aa ods. 8.");
   }
-  // 1d) Časti, ktoré tlačivo DPFOBv25 zdaňuje inak, než ich appka dnes počíta
-  // (kolo 141 D, poučenie DPFOBv25 bod 4 a riadky 78 a 80): § 5 po NČZD (r. 78),
-  // § 6 ods. 3 a 4 (r. 65) a § 8 (r. 71) tvoria spolu základ podľa § 4 ods. 1
-  // písm. a) v r. 80 so sadzbou 19 %/25 %. Appka prenájom pripočítava k podnikaniu
-  // (r. 39, 15 %) a zostatok § 5 po NČZD nezdaňuje vôbec. Kým sa výpočet neopraví,
-  // nesmie to prejsť ticho — číslo by vyzeralo ako normálne.
-  if((+v.najomPrijmy||0)>0)
-    blok.push(`Prenájom (§ 6 ods. 3): tlačivo za rok ${rok} ho vedie v tabuľke č. 1, r. 11 a v r. 58 až 65 a zdaňuje ho 19 % v r. 80 spolu so zamestnaním a ostatnými príjmami. Appka ho zatiaľ pripočítava k príjmom z podnikania (r. 39) a zdaňuje 15 % — túto časť priznania upravte na portáli FS alebo s poradcom.`);
-  const r78=r2(Math.max(0, (+v.zaklad5||0)-r2(Math.min(+v.nczd||0, +v.zakladCelkom||0))));
-  if(r78>0)
-    blok.push(`Zamestnanie (§ 5): po odpočítaní nezdaniteľnej časti zostáva ${eur(r78)} (r. 78), ktoré sa zdaňuje 19 % v r. 80. Appka tento zostatok zatiaľ do dane nezapočíta — daň by vyšla nižšia, než má byť. Výpočet dane upravte na portáli FS alebo s poradcom.`);
+  // 1d) Zamestnanie po NČZD (r. 78), prenájom (r. 65) a § 8 (r. 71) appka od kola
+  // 142 F zdaňuje v r. 80 a r. 81 podľa tlačiva (kolo 141 D ich len blokovalo).
+  // Ostávajú veci, ktoré z dát appky nevyčíta:
+  if((+v.najomPrijmy||0)>0 && (+v.ostPrijmy||0)>0)
+    upoz.push(`Oslobodenie 500 € (§ 9 ods. 1 písm. g) je spoločné pre prenájom a príležitostné príjmy podľa § 8 ods. 1 písm. a). Appka ho uplatnila celé na prenájom; ak sú ostatné príjmy z príležitostnej činnosti, rozdeľte ho na portáli FS.`);
+  if((+v.zamPrijmy||0)>0 && (+v.bonusDeti||0)>0 && !(+v.zamBonus>0))
+    upoz.push(`Zamestnanie a daňový bonus: ak vám zamestnávateľ bonus na deti už vyplácal, zadajte ho v kroku Príjmy a výdavky (r. 119) — inak by sa v priznaní uplatnil druhýkrát.`);
+  // 1e) Deti v r. 33 (poučenie DPFOBv25, r. 33): bez mena a rodného čísla FS bonus
+  // nepriznáva — eFormulár ho počíta z rodného čísla a mesiacov (inliner117).
+  if((+v.bonusDeti||0)>0){
+    const deti=((v.bonusDetail||{}).mesiace||[]).map(x=>x.dieta);
+    const bezMena=deti.filter(dt=>!String(dt.meno||"").trim()).length;
+    const bezRc=deti.filter(dt=>!detiDatumNarodenia(dt, rok) || !/^\d{8}(\d{2})?$/.test(detiRc(dt))).length;
+    if(bezMena || bezRc)
+      blok.push(`Daňový bonus: pri ${bezMena||bezRc} ${(bezMena||bezRc)===1?"dieťati":"deťoch"} chýba ${bezMena&&bezRc?"meno a platné rodné číslo":bezMena?"priezvisko a meno":"platné rodné číslo"} (r. 33). Bez nich finančná správa bonus neprizná. Doplňte ich v kroku Daň a bonus.`);
+    upoz.push(`Daňový bonus: r. 146 a 146a (zdaniteľné príjmy) appka vypĺňa rovnakou sumou — predpokladá, že všetky príjmy sú zo Slovenska. Ak ste mali príjmy zo zahraničia, upravte ich na portáli FS.`);
+  }
+  if((+(v.r||{}).r121||0)>0)
+    upoz.push(`Daňový bonus prevyšuje daň o ${eur(v.r.r121)} (r. 121). Vyplatenie si žiadate v XIV. oddiele priznania (spôsob a číslo účtu) — ten appka nevypĺňa, doplňte ho na portáli FS.`);
   // Príloha č. 4: pri vyplnenom poistnom pod tabuľkou č. 1 sa vypĺňa aj r. 14
   // (preddavky na ZP patriace k roku). Zaplatené v roku (r. 13) appka má,
   // rozdelenie na „patriace k roku“ nie — nevymýšľa ho.
@@ -22201,8 +22353,11 @@ function pbNahladFormular(rok){
     ${rr("40","Výdavky "+(V.pausalne?"(paušálne "+Math.round(pausalVydavky(V.prijmy, rok).sadzba*100)+" % + odvody)":"(skutočné + odpisy)"), R.r40)}
     ${rr("41","Čiastkový základ dane (r. 39 − r. 40)", R.r41, "sub")}
     ${(+R.r42)?rr("42","Strata (r. 40 − r. 39) — prenáša sa do r. 46", R.r42):""}
+    ${(+R.r58)?`${rr("58","Príjmy z prenájmu po oslobodení 500 € (t1 r. 13)", R.r58)}
+    ${rr("59","Výdavky k prenájmu (pomerne, najviac do výšky príjmov)", R.r59)}
+    ${rr("65","Čiastkový základ dane z prenájmu (§ 6 ods. 3)", R.r65, "sub")}`:""}
 
-    ${(+R.r71||+R.r80)?`<div class="pbf-sec">VIII. oddiel – Ostatné príjmy (§ 8)</div>
+    ${(+R.r71||+R.r69)?`<div class="pbf-sec">VIII. oddiel – Ostatné príjmy (§ 8)</div>
     ${rr("69","Príjmy (napr. predaj majetku)", R.r69)}
     ${rr("70","Výdavky", R.r70)}
     ${rr("71","Základ dane (r. 69 − r. 70)", R.r71, "sub")}`:""}
@@ -22212,17 +22367,24 @@ function pbNahladFormular(rok){
     ${rr("73","Nezdaniteľná časť na daňovníka", R.r73)}
     ${(+R.r74)?rr("74","Nezdaniteľná časť na manžela/manželku", R.r74):""}
     ${(+R.r75)?rr("75","Doplnkové dôchodkové sporenie (III. pilier)", R.r75):""}
-    ${((+R.r73||0)+(+R.r74||0)+(+R.r75||0))?rr("77","Nezdaniteľné časti spolu", r2((+R.r73||0)+(+R.r74||0)+(+R.r75||0)), "sub"):""}
+    ${(+R.r77)?rr("77","Nezdaniteľné časti spolu (najviac r. 72)", R.r77, "sub"):""}
+    ${(+R.r38)?rr("78","Základ dane zo zamestnania po NČZD", R.r78):""}
+    ${(+R.r80)?rr("80","Základ dane § 4 ods. 1 písm. a) (r. 78 + r. 65 + r. 71)", R.r80, "sub"):""}
+    ${(+R.r91)?rr("91","Zostatok NČZD na podnikanie", R.r91):""}
+    ${rr("92","Základ dane z podnikania po NČZD (r. 57 − r. 91)", R.r92, "sub")}
 
-    <div class="pbf-sec">X. oddiel – Výpočet dane</div>
-    ${rr("96","Daň zo základu (§ 5, 6) "+(V.progresia?"(progresívne 19/25 %)":"(15 %)"), R.r96)}
-    ${(+R.r90)?rr("90","Daň z ostatných príjmov (§ 7, 8) – 19 %", R.r90):""}
+    <div class="pbf-sec">IX. oddiel – Výpočet dane</div>
+    ${(+R.r80)?rr("81","Daň zo základu r. 80 ("+(V.rozpisA||[]).map(p=>Math.round(p.sadzba*100)+" %").join(" + ")+")", R.r81):""}
+    ${rr("96","Daň z podnikania "+(V.progresia?"(progresívne pásma)":"(15 %)"), R.r96)}
     ${rr("116","Daň spolu", R.r116, "sub")}
-    ${V.bonusDeti?rr("120","Daňový bonus na deti", R.r120):""}
+    ${V.bonusDeti?rr("117","Daňový bonus na deti", R.r117):""}
+    ${(+R.r119)?rr("119","Bonus vyplatený zamestnávateľom", R.r119):""}
     ${rr("124","Daň po znížení o bonus", R.r124, "sub")}
+    ${(+R.r121)?rr("121","Bonus na vyplatenie", R.r121):""}
 
     <div class="pbf-sec">Vysporiadanie</div>
-    ${rr("131","Zaplatené preddavky na daň", R.r131)}
+    ${(+R.r131)?rr("131","Preddavky zrazené zamestnávateľom (§ 35)", R.r131):""}
+    ${rr("133","Zaplatené preddavky z podnikania (§ 34)", R.r133)}
     ${R.r135?rr("135","Daň na úhradu (doplatok)", R.r135, "pay"):""}
     ${R.r136?rr("136","Daňový preplatok (vrátenie)", R.r136, "ret"):""}
     ${X?`<div class="pbf-sec">X. oddiel – Rozdiely z dodatočného priznania</div>
@@ -22375,10 +22537,39 @@ function pbDarSekcia(v, S){
     <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:6px">Neziskovku aj rodičov možno poukázať naraz jedným vyhlásením. Podmienka: daň zaplatená a bez nedoplatku nad 5 €.</div>`;
 }
 // Číselný vstup pre ručné polia §5 (zamestnanie) v sprievodcovi.
-function pbZamInput(label, key, val){
+// Ručné údaje priznania B (zamestnanie, prenájom, § 7, § 8) sa menia rok čo rok,
+// preto sú po rokoch v settings.pbUdajeRoky[rok] (kolo 142 F). Do kola 141 boli
+// jednou hodnotou pre všetky roky (settings.pbZamPrijmy …) — keď sa zostatok
+// zamestnania začal zdaňovať, zamestnanie roku 2025 by sa zdanilo aj v 2026.
+// Starý zápis bez roka sa ešte prečíta (nič nezmizne), kontrola na to upozorní.
+const PB_UDAJE_KLUCE=["pbZamPrijmy","pbZamDohody","pbZamPoistne","pbZamZrazenaDan","pbZamBonus",
+  "pbNajomPrijmy","pbNajomVydavky","pbOstatnePrijmy","pbOstatneVydavky","pbKapitalZaklad"];
+function pbUdajZapis(rok, kluc){
+  const Z=(((((firmaData&&firmaData.settings)||{}).pbUdajeRoky)||{})[String(rok)])||{};
+  return (Z[kluc]!=null && Z[kluc]!=="") ? +Z[kluc]||0 : null;
+}
+function pbUdaj(rok, kluc){
+  const z=pbUdajZapis(rok, kluc);
+  return z!=null ? z : (+(((firmaData&&firmaData.settings)||{})[kluc])||0);
+}
+// Kľúče, ktoré sa pre rok berú zo starého zápisu bez roka.
+function pbUdajeBezRoka(rok){
+  const S=(firmaData&&firmaData.settings)||{};
+  return PB_UDAJE_KLUCE.filter(k=>pbUdajZapis(rok, k)==null && +S[k]);
+}
+function pbNastavUdaj(rok, kluc, hodnota){
+  if(!strazZapis("priznanieB")){ appPriznanieB(); return; }   // pole sa vráti na uloženú hodnotu
+  if(!PB_UDAJE_KLUCE.includes(kluc)) return;
+  const S=firmaData.settings=firmaData.settings||{}, R=String(rok);
+  S.pbUdajeRoky=Object.assign({}, S.pbUdajeRoky);
+  S.pbUdajeRoky[R]=Object.assign({}, S.pbUdajeRoky[R], {[kluc]:r2(+String(hodnota==null?"":hodnota).replace(",",".")||0)});
+  poZmene(); appPriznanieB();
+}
+function pbZamInput(label, key, rok){
+  const val=pbUdaj(rok, key);
   return `<div class="mfield" style="margin-bottom:8px"><label style="font-size:12.5px">${label}</label>
-    <input type="number" step="0.01" inputmode="decimal" value="${esc(String(val!=null&&val!==''?val:''))}" placeholder="0.00"
-      ${zam("priznanieB")} onchange="${PB_STRAZ}firmaData.settings.${key}=+this.value||0;poZmene();appPriznanieB()"
+    <input type="number" step="0.01" inputmode="decimal" value="${esc(val?String(val):'')}" placeholder="0.00"
+      ${zam("priznanieB")} onchange="pbNastavUdaj(${+rok},'${key}',this.value)"
       style="width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:8px"></div>`;
 }
 // Druh priznania za rok (poučenie DPFOBv25, bod 2 a 3): riadne; opravné pred
@@ -22541,14 +22732,16 @@ function pbNastavDruhPrijmu(rok, hodnota){
 // Tabuľka č. 1 z výpočtu priznania. Príjmy § 6 ods. 1 a 2 idú do riadku druhu
 // a do súčtu r10; výdavky pri skutočných výdavkoch do riadku aj do r10, pri
 // paušále len úhrnom do r10 vrátane poistného (poučenie DPFOBv25, tabuľka č. 1).
-// Prenájom (r11, r13) sa tu zámerne nevypĺňa — appka ho zatiaľ vedie v r. 39,
-// kontrola to hlási (pbKontroly).
+// Prenájom (§ 6 ods. 3) ide do r. 11 a súčtu r. 13 → r. 58 a r. 59 (kolo 142 F);
+// r. 12 (použitie diela pri § 43 ods. 14) appka nevedie.
 function pbTabulka1(v){
   const D=pbDruhPrijmu(v.rok), T={};
   for(let i=1;i<=13;i++) T[i]={s1:0, s2:0};
   T[D.riadok].s1=r2(v.prijmy);
   if(!v.pausalne) T[D.riadok].s2=r2(v.vydavky16);
   T[10]={s1:r2(v.prijmy), s2:r2(v.vydavky16)};
+  T[11]={s1:r2(v.najomZdan||0), s2:r2(v.najomVydKrat||0)};
+  T[13]={s1:T[11].s1, s2:T[11].s2};
   return {druh:D, T};
 }
 function pbDruhPrijmuSekcia(v){
@@ -22587,61 +22780,77 @@ function pbKrokObsah(krok, v, S){
       ${pbRiadok("Výdavky"+(v.pausalne?` (paušál ${pctP} % + odvody)`:" (skutočné + odpis)"), v.vydavky, "r40")}
       ${pbRiadok("Zaplatené odvody (ZP+SP)", v.odvody)}
       ${pbRiadok("Čiastkový základ dane", v.zaklad, "r41", true)}
+      ${pbUdajeBezRoka(v.rok).length?`<div class="csub" style="margin:16px 0 0;color:var(--accent-deep)">⚠ Niektoré údaje nižšie (zamestnanie, prenájom, ostatné príjmy) sa predtým ukladali naraz pre všetky roky. Teraz patria ku konkrétnemu roku — overte, že čísla platia pre rok ${v.rok}, a zapíšte ich znova.</div>`:""}
       <div style="margin:16px 0 6px;font-weight:700;font-size:14px">Príjmy zo zamestnania (§ 5) — nepovinné</div>
-      <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:8px">Z potvrdenia o zdaniteľných príjmoch od zamestnávateľa (vrátane dohôd). Nechajte prázdne, ak ste boli celý rok len na živnosti.</div>
-      ${pbZamInput("Úhrn príjmov od zamestnávateľov (r. 36)","pbZamPrijmy",S.pbZamPrijmy)}
-      ${pbZamInput("Z toho z dohôd mimo prac. pomeru (r. 36a)","pbZamDohody",S.pbZamDohody)}
-      ${pbZamInput("Povinné poistné zo zamestnania (r. 37)","pbZamPoistne",S.pbZamPoistne)}
-      ${pbZamInput("Zrazený preddavok na daň (r. 131)","pbZamZrazenaDan",S.pbZamZrazenaDan)}
-      ${(+S.pbZamPrijmy)?pbRiadok("Čiastkový základ dane §5 (r. 38)", v.zaklad5, "r38", true):""}
+      <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:8px">Z potvrdenia o zdaniteľných príjmoch od zamestnávateľa za rok ${v.rok} (vrátane dohôd). Nechajte prázdne, ak ste boli celý rok len na živnosti.</div>
+      ${pbZamInput("Úhrn príjmov od zamestnávateľov (r. 36)","pbZamPrijmy",v.rok)}
+      ${pbZamInput("Z toho z dohôd mimo prac. pomeru (r. 36a)","pbZamDohody",v.rok)}
+      ${pbZamInput("Povinné poistné zo zamestnania (r. 37)","pbZamPoistne",v.rok)}
+      ${pbZamInput("Zrazené preddavky na daň (r. 131)","pbZamZrazenaDan",v.rok)}
+      ${pbZamInput("Daňový bonus na deti vyplatený zamestnávateľom (r. 119)","pbZamBonus",v.rok)}
+      ${v.zamPrijmy?pbRiadok("Čiastkový základ dane §5 (r. 38)", v.zaklad5, "r38", true):""}
       <div style="margin:16px 0 6px;font-weight:700;font-size:14px">Prenájom nehnuteľnosti (§ 6 ods. 3) — nepovinné</div>
-      <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:8px">Oslobodených je prvých 500 € príjmu; výdavky sa krátia v rovnakom pomere. Paušál ${pctP} % pri prenájme neplatí.</div>
-      ${pbZamInput("Príjmy z prenájmu","pbNajomPrijmy",S.pbNajomPrijmy)}
-      ${pbZamInput("Skutočné výdavky k prenájmu","pbNajomVydavky",S.pbNajomVydavky)}
-      ${(+S.pbNajomPrijmy)?pbRiadok("Základ z prenájmu (po oslobodení 500 €)", v.najomZaklad):""}
+      <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:8px">Oslobodených je prvých 500 € príjmu; výdavky sa krátia v rovnakom pomere a najviac do výšky príjmov. Paušál ${pctP} % pri prenájme neplatí. Prenájom ide do tabuľky č. 1, r. 11 a zdaňuje sa spolu so zamestnaním a ostatnými príjmami (r. 80).</div>
+      ${pbZamInput("Príjmy z prenájmu","pbNajomPrijmy",v.rok)}
+      ${pbZamInput("Skutočné výdavky k prenájmu","pbNajomVydavky",v.rok)}
+      ${v.najomPrijmy?pbRiadok("Základ z prenájmu (r. 65)", v.najomZaklad):""}
       <div style="margin:16px 0 6px;font-weight:700;font-size:14px">Ostatné príjmy (§ 8) — napr. predaj majetku — nepovinné</div>
-      <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:8px">Napr. predaj nehnuteľnosti či hnuteľného majetku. Zdaňuje sa samostatne sadzbou 19 %.</div>
-      ${pbZamInput("Príjmy (r. 69)","pbOstatnePrijmy",S.pbOstatnePrijmy)}
-      ${pbZamInput("Výdavky (r. 70)","pbOstatneVydavky",S.pbOstatneVydavky)}
-      ${(+S.pbOstatnePrijmy)?pbRiadok("Základ dane §8 (r. 71 / 80)", v.zaklad8, "r80"):""}
-      ${v.dan8?pbRiadok("Daň §8 (19 %, r. 90)", v.dan8, "r90", true):""}
+      <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:8px">Napr. predaj nehnuteľnosti či hnuteľného majetku. Zdaňujú sa spolu so zamestnaním a prenájmom (r. 80).</div>
+      ${pbZamInput("Príjmy (r. 69)","pbOstatnePrijmy",v.rok)}
+      ${pbZamInput("Výdavky (r. 70)","pbOstatneVydavky",v.rok)}
+      ${v.ostPrijmy?pbRiadok("Základ dane §8 (r. 71)", v.zaklad8, "r71"):""}
       <div style="margin:16px 0 6px;font-weight:700;font-size:14px">Kapitálový majetok (§ 7) — nepovinné</div>
       <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:8px">Čistý základ dane z kapitálového majetku (napr. úroky, výnosy). Zdaňuje sa samostatne 19 %.</div>
-      ${pbZamInput("Základ dane §7","pbKapitalZaklad",S.pbKapitalZaklad)}
+      ${pbZamInput("Základ dane §7","pbKapitalZaklad",v.rok)}
       ${v.dan7?pbRiadok("Daň §7 (19 %)", v.dan7, "", true):""}`;
   }
   if(krok===1){
     return `<h2 style="font-size:16px;margin-bottom:12px">Nezdaniteľné časti</h2>
-      ${pbRiadok("Čiastkový základ §6 (podnikanie)", v.zaklad, "r41")}
+      ${pbRiadok("Čiastkový základ §6 (podnikanie)", v.r.r57, "r57")}
       ${v.zaklad5?pbRiadok("Čiastkový základ §5 (zamestnanie)", v.zaklad5, "r38"):""}
       ${pbRiadok("Základ dane spolu (§5 + §6)", v.zakladCelkom, "r72")}
-      ${pbRiadok("Nezdaniteľné časti spolu", v.nczd, "r77")}
+      ${pbRiadok("Nezdaniteľné časti spolu", v.r.r77, "r77")}
       ${nczdRozpadRiadky(v)}
-      <div style="font-size:11.5px;color:var(--ink-soft);margin:6px 0 10px">NČZD ${v.rok}: plná ${eur(sadzbaFirmy("nezdanitCast", +v.rok, S))}, kráti sa /${sadzbaFirmy("nczdDelitel", +v.rok, S)||3} nad základom ${eur(sadzbaFirmy("nczdHranicaPlna", +v.rok, S))}, zaniká nad ${eur(sadzbaFirmy("nczdZanik", +v.rok, S))}. Určuje sa z ročného základu.</div>
-      ${pbRiadok("Základ dane po NČZD (zdaniteľný)", v.zakladZniz, "", true)}`;
+      <div style="font-size:11.5px;color:var(--ink-soft);margin:6px 0 10px">NČZD ${v.rok}: plná ${eur(sadzbaFirmy("nezdanitCast", +v.rok, S))}, kráti sa /${sadzbaFirmy("nczdDelitel", +v.rok, S)||3} nad základom ${eur(sadzbaFirmy("nczdHranicaPlna", +v.rok, S))}, zaniká nad ${eur(sadzbaFirmy("nczdZanik", +v.rok, S))}. ${v.uzavrety?`Určuje sa zo skutočného základu roka ${v.rok}.`:"Rok ešte beží — určuje sa z odhadu základu za celý rok."} Odpočíta sa najprv od zamestnania, zvyšok od podnikania.</div>
+      ${v.zaklad5?pbRiadok("Zamestnanie po NČZD (r. 78)", v.r.r78):""}
+      ${pbRiadok("Podnikanie po NČZD (r. 92)", v.zakladZniz, "r92", true)}`;
   }
   if(krok===2){
     const deti=S.deti||[];
     const bd=v.bonusDetail, B=detiBonusSadzby(v.rok);
+    const pasma=(v.rozpisA||[]).map(p=>Math.round(p.sadzba*100)+" %").join(" + ");
     return `<h2 style="font-size:16px;margin-bottom:12px">Daň a daňový bonus</h2>
-      ${v.progresia?`<div class="csub" style="margin-bottom:10px">Príjmy presiahli hranicu 100 000 € — daň sa počíta progresívne po pásmach. Uplatňuje sa automaticky, nič netreba zapínať.</div>`:''}
-      ${pbRiadok("Základ dane spolu (§5 + §6)", v.zakladCelkom, "r72")}
-      ${pbRiadok("Základ dane po NČZD", v.zakladZniz)}
-      ${pbRiadok("Daň "+(v.progresia?"(progresívne pásma)":"(15 %)"), v.dan, "r96", true)}
+      ${v.progresia?`<div class="csub" style="margin-bottom:10px">Príjmy z podnikania presiahli hranicu 100 000 € — daň sa počíta progresívne po pásmach. Uplatňuje sa automaticky, nič netreba zapínať.</div>`:''}
+      ${pbRiadok("Podnikanie po NČZD", v.zakladZniz, "r92")}
+      ${pbRiadok("Daň z podnikania "+(v.progresia?"(progresívne pásma)":"(15 %)"), v.dan, "r96", true)}
+      ${v.zakladA?pbRiadok("Zamestnanie po NČZD, prenájom a ostatné príjmy", v.zakladA, "r80"):""}
+      ${v.zakladA?pbRiadok("Daň z nich ("+(pasma||"19 %")+")", v.danA, "r81", true):""}
+      ${(v.zakladA||v.dan7)?pbRiadok("Daň spolu", v.danCelkom, "r116", true):""}
       <div style="margin:14px 0 8px;font-weight:700;font-size:14px">Daňový bonus na deti</div>
+      <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:8px">Do priznania (r. 33) patrí priezvisko, meno a rodné číslo každého dieťaťa — bez nich finančná správa bonus neprizná. Dieťa bez slovenského rodného čísla: dátum narodenia v tvare DDMMRRRR.</div>
       <div style="margin-bottom:10px">
-        ${deti.length?deti.map((dt,i)=>`<div style="display:flex;gap:8px;align-items:center;margin-bottom:5px">
-          <input type="number" value="${esc(String(dt.vek!=null?dt.vek:''))}" placeholder="vek" ${zam("priznanieB")} onchange="${PB_STRAZ}firmaData.settings.deti[${i}].vek=+this.value;delete firmaData.settings.deti[${i}].narodenie;poZmene();appPriznanieB()" style="width:70px;padding:5px;border:1px solid var(--line);border-radius:7px">
-          <span style="font-size:12.5px;color:var(--ink-soft)">${detiVek(dt,v.rok)<15?`do 15 r. (${eur(B.do15)}/mes)`:detiVek(dt,v.rok)<18?`15–17 r. (${eur(B.do18)}/mes)`:'nad 18 r. (bez nároku)'}</span>
-          <span ${zam("priznanieB")} onclick="${PB_STRAZ}firmaData.settings.deti.splice(${i},1);poZmene();appPriznanieB()" style="cursor:pointer;color:var(--neg);margin-left:auto">✕</span>
-        </div>`).join(''):'<div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:8px">Žiadne deti. Pridajte vek dieťaťa.</div>'}
+        ${deti.length?deti.map((dt,i)=>{
+          const D=detiDatumNarodenia(dt, v.rok), rc=detiRc(dt), mes=detiMesiace(dt, v.rok), suma=mes.reduce((a,x)=>a+x,0), mesN=mes.filter(x=>x>0).length;
+          const vekTxt=detiVek(dt,v.rok)<15?`do 15 r. (${eur(B.do15)}/mes)`:detiVek(dt,v.rok)<18?`15–17 r. (${eur(B.do18)}/mes)`:'nad 18 r. (bez nároku)';
+          return `<div style="border:1px solid var(--line);border-radius:9px;padding:8px;margin-bottom:6px">
+          <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+            <input value="${esc(dt.meno||'')}" placeholder="Priezvisko a meno" ${zam("priznanieB")} onchange="pbNastavDieta(${i},'meno',this.value)" style="flex:1 1 150px;min-width:0;padding:6px 8px;border:1px solid var(--line);border-radius:7px">
+            <input value="${esc(rc)}" placeholder="Rodné číslo" inputmode="numeric" ${zam("priznanieB")} onchange="pbNastavDieta(${i},'rc',this.value)" style="flex:1 1 110px;min-width:0;padding:6px 8px;border:1px solid var(--line);border-radius:7px">
+            <span ${zam("priznanieB")} onclick="${PB_STRAZ}firmaData.settings.deti.splice(${i},1);poZmene();appPriznanieB()" style="cursor:pointer;color:var(--neg);padding:0 4px">✕</span>
+          </div>
+          <div style="font-size:12px;color:var(--ink-soft);margin-top:5px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            ${D?`nar. ${D.d}. ${D.m}. ${D.y} · ${mesN===12?"celý rok":mesN+" mes."} · ${eur(suma)}`
+              :`${rc?`<span style="color:var(--neg)">Rodné číslo sa nedá prečítať.</span> `:""}Vek <input type="number" value="${esc(String(dt.vek!=null?dt.vek:''))}" ${zam("priznanieB")} onchange="pbNastavDieta(${i},'vek',this.value)" style="width:56px;padding:4px;border:1px solid var(--line);border-radius:6px"> ${vekTxt}`}
+          </div></div>`;}).join(''):'<div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:8px">Žiadne deti.</div>'}
         <button class="aabtn" ${zam("priznanieB")} onclick="${PB_STRAZ}firmaData.settings.deti=firmaData.settings.deti||[];firmaData.settings.deti.push({vek:10});poZmene();appPriznanieB()">+ Pridať dieťa</button>
       </div>
       ${deti.length?`<div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:8px">
-        ${bd.opravnenych} detí s nárokom · plná suma ${eur(bd.maxBonus)} · limit ${Math.round(bd.pctLimit*100)} % zo základu = ${eur(bd.limitZoZakladu||0)}${v.zaklad>B.hranicaKratenia?` · po krátení vysokým príjmom ${eur(bd.poVysokomPrijme||0)}`:''}</div>`:''}
-      ${pbRiadok("Daňový bonus na deti", v.bonusDeti, "r120", true)}
-      ${(v.zakladRocny||v.zaklad)>B.hranicaKratenia&&v.bonusDeti===0&&deti.length?`<div style="font-size:11.5px;color:var(--accent-deep);margin-bottom:8px">⚠ Pri ročnom základe dane ${eur(v.zakladRocny||v.zaklad)} (nad ${eur(B.hranicaKratenia)}) nárok na bonus zaniká — krátenie vysokým príjmom.</div>`:''}
-      ${pbRiadok("Daň po bonuse", v.danPoBonuse, "r124", true)}`;
+        ${bd.opravnenych} detí s nárokom · plná suma ${eur(bd.maxBonus)} · limit ${Math.round(bd.pctLimit*100)} % zo základu = ${eur(bd.limitZoZakladu||0)}${v.zakladPreBonus>B.hranicaKratenia?` · po krátení vysokým príjmom ${eur(bd.poVysokomPrijme||0)}`:''}</div>`:''}
+      ${pbRiadok("Daňový bonus na deti", v.bonusDeti, "r117", true)}
+      ${v.zamBonus?pbRiadok("Z toho už vyplatil zamestnávateľ", v.zamBonus, "r119"):""}
+      ${v.zakladPreBonus>B.hranicaKratenia&&v.bonusDeti===0&&deti.length?`<div style="font-size:11.5px;color:var(--accent-deep);margin-bottom:8px">⚠ Pri základe dane ${eur(v.zakladPreBonus)} (nad ${eur(B.hranicaKratenia)}) nárok na bonus zaniká — krátenie vysokým príjmom.</div>`:''}
+      ${pbRiadok("Daň po bonuse", v.danPoBonuse, "r124", true)}
+      ${v.r.r121?pbRiadok("Bonus na vyplatenie (prevyšuje daň)", v.r.r121, "r121", true):""}`;
   }
   // zhrnutie
   return `<h2 style="font-size:16px;margin-bottom:12px">Zhrnutie priznania ${v.rok}</h2>
@@ -22651,16 +22860,54 @@ function pbKrokObsah(krok, v, S){
     ${pbRiadok("Príjmy", v.prijmy, "r39")}
     ${pbRiadok("Výdavky", v.vydavky, "r40")}
     ${pbRiadok("Čiastkový základ dane", v.zaklad, "r41")}
-    ${pbRiadok("Nezdaniteľné časti spolu", v.nczd, "r77")}
+    ${pbRiadok("Nezdaniteľné časti spolu", v.r.r77, "r77")}
     ${pbRiadok("Základ dane spolu (§5 + §6)", v.zakladCelkom, "r72")}
-    ${pbRiadok("Daň", v.dan, "r96")}
-    ${pbRiadok("Daňový bonus", v.bonusDeti, "r120")}
+    ${pbRiadok("Daň z podnikania", v.dan, "r96")}
+    ${v.zakladA?pbRiadok("Daň zo zamestnania, prenájmu a ostatných príjmov", v.danA, "r81"):""}
+    ${(v.zakladA||v.dan7)?pbRiadok("Daň spolu", v.danCelkom, "r116"):""}
+    ${pbRiadok("Daňový bonus", v.bonusDeti, "r117")}
     ${pbRiadok("Daň po bonuse", v.danPoBonuse, "r124", true)}
-    ${pbRiadok("Zaplatené preddavky", v.preddavky, "r131")}
+    ${v.zamZrazenaDan?pbRiadok("Preddavky zrazené zamestnávateľom", v.zamZrazenaDan, "r131"):""}
+    ${pbRiadok("Zaplatené preddavky z podnikania", v.preddavky6, "r133")}
     ${pbDarSekcia(v, S)}
     <div style="margin-top:12px;padding:12px;border-radius:10px;background:${v.doplatok>0?'#fdf2f2':'var(--sfc-pos)'}">
       ${pbRiadok(v.doplatok>0?"Daň na úhradu":"Daňový preplatok", Math.abs(v.doplatok), v.doplatok>0?"r135":"r136", true)}
+      ${(v.doplatok>0&&v.doplatok<=5)?`<div style="font-size:11.5px;color:var(--ink-soft)">Daň na úhradu do 5 € sa neplatí — r. 135 ostane prázdny.</div>`:""}
     </div>`;
+}
+// Údaje dieťaťa v sprievodcovi — meno a rodné číslo do r. 33, vek len ako
+// náhradný údaj, kým rodné číslo nie je (kolo 142 F).
+function pbNastavDieta(i, pole, hodnota){
+  if(!strazZapis("priznanieB")){ appPriznanieB(); return; }   // pole sa vráti na uloženú hodnotu
+  const S=firmaData.settings=firmaData.settings||{};
+  const dt=(S.deti||[])[i]; if(!dt) return;
+  if(pole==="meno") dt.meno=String(hodnota||"").trim().slice(0,70);
+  else if(pole==="rc") dt.rc=String(hodnota||"").replace(/[\s/]/g,"").slice(0,10);
+  else if(pole==="vek"){ dt.vek=+hodnota||0; delete dt.narodenie; }
+  else return;
+  poZmene(); appPriznanieB();
+}
+// Riadok 33 — deti, na ktoré sa uplatňuje daňový bonus (kolo 142 F). Predtým išli
+// vždy štyri prázdne a FS bonus bez nich neuzná: eFormulár ho počíta z rodného
+// čísla a vyznačených mesiacov (inliner117). XSD: najmenej 4, najviac 20 detí;
+// nad štyri sa zaškrtne r. 33a (poučenie DPFOBv25, r. 33). Mesiace: m00 = celý
+// rok, inak len mesiace s nárokom (dieťa narodené alebo 18-ročné v roku).
+function pbR33Xml(v){
+  const bd=v.bonusDetail||{}, deti=(+v.bonusDeti>0) ? (bd.mesiace||[]).slice(0,20) : [];
+  const riadky=deti.map(k=>({meno:String(k.dieta.meno||"").trim(), rc:detiRc(k.dieta), mes:k.mes}));
+  while(riadky.length<4) riadky.push(null);
+  const e=xmlEsc, out=["    <r33>"];
+  riadky.forEach(d=>{
+    const cely=d && d.mes.every(x=>x>0);
+    out.push("      <dieta>",
+      "        <priezviskoMeno>"+(d?e(d.meno):"")+"</priezviskoMeno>",
+      "        <rodneCislo>"+(d?e(d.rc):"")+"</rodneCislo>",
+      "        <m00>"+(cely?"1":"0")+"</m00>");
+    for(let m=1;m<=12;m++) out.push("        <m"+String(m).padStart(2,"0")+">"+(d && !cely && d.mes[m-1]>0?"1":"0")+"</m"+String(m).padStart(2,"0")+">");
+    out.push("      </dieta>");
+  });
+  out.push("    </r33>", "    <r33a>"+(deti.length>4?"1":"0")+"</r33a>");
+  return out.join("\n");
 }
 function pbExportXml(){
   if(!strazZapis("priznanieB")) return;
@@ -22687,7 +22934,6 @@ function pbExportXml(){
   if(_k.blok && _k.blok.length){
     if(!confirm("Priznanie má blokujúce kontroly:\n\n• "+_k.blok.join("\n• ")+"\n\nExportovať XML aj tak?")) return;
   }
-  const r77sum=(+(v.r.r73)||0)+(+(v.r.r74)||0)+(+(v.r.r75)||0);
   const dN=S.darNNO||{}, dR=S.darRodic||{}, rA=dR.a||{}, rB=dR.b||{};
   // Tabuľka č. 1 a údaje pod ňou (kolo 141 D). Predtým išla celá prázdna, hoci ju
   // podľa poučenia vypĺňa každý s daňovou evidenciou alebo paušálom a Sociálna
@@ -22765,77 +23011,7 @@ function pbExportXml(){
       <vlastnePrijmy></vlastnePrijmy>
       <pocetMesiacov></pocetMesiacov>
     </r32>
-    <r33>
-      <dieta>
-        <priezviskoMeno></priezviskoMeno>
-        <rodneCislo></rodneCislo>
-        <m00>0</m00>
-        <m01>0</m01>
-        <m02>0</m02>
-        <m03>0</m03>
-        <m04>0</m04>
-        <m05>0</m05>
-        <m06>0</m06>
-        <m07>0</m07>
-        <m08>0</m08>
-        <m09>0</m09>
-        <m10>0</m10>
-        <m11>0</m11>
-        <m12>0</m12>
-      </dieta>
-      <dieta>
-        <priezviskoMeno></priezviskoMeno>
-        <rodneCislo></rodneCislo>
-        <m00>0</m00>
-        <m01>0</m01>
-        <m02>0</m02>
-        <m03>0</m03>
-        <m04>0</m04>
-        <m05>0</m05>
-        <m06>0</m06>
-        <m07>0</m07>
-        <m08>0</m08>
-        <m09>0</m09>
-        <m10>0</m10>
-        <m11>0</m11>
-        <m12>0</m12>
-      </dieta>
-      <dieta>
-        <priezviskoMeno></priezviskoMeno>
-        <rodneCislo></rodneCislo>
-        <m00>0</m00>
-        <m01>0</m01>
-        <m02>0</m02>
-        <m03>0</m03>
-        <m04>0</m04>
-        <m05>0</m05>
-        <m06>0</m06>
-        <m07>0</m07>
-        <m08>0</m08>
-        <m09>0</m09>
-        <m10>0</m10>
-        <m11>0</m11>
-        <m12>0</m12>
-      </dieta>
-      <dieta>
-        <priezviskoMeno></priezviskoMeno>
-        <rodneCislo></rodneCislo>
-        <m00>0</m00>
-        <m01>0</m01>
-        <m02>0</m02>
-        <m03>0</m03>
-        <m04>0</m04>
-        <m05>0</m05>
-        <m06>0</m06>
-        <m07>0</m07>
-        <m08>0</m08>
-        <m09>0</m09>
-        <m10>0</m10>
-        <m11>0</m11>
-        <m12>0</m12>
-      </dieta>
-    </r33>
-    <r33a>0</r33a>
+${pbR33Xml(v)}
     <uplatnujemPar33Ods8>0</uplatnujemPar33Ods8>
     <r34>
       <priezviskoMeno></priezviskoMeno>
@@ -22925,7 +23101,7 @@ function pbExportXml(){
     </tabulka1>
     <mikrodanovnikPar2w>0</mikrodanovnikPar2w>
     <vydavkyPar6ods11_ods1a2>${b(jeP6 && !v.pausalne)}</vydavkyPar6ods11_ods1a2>
-    <vydavkyPar6ods11_ods3>0</vydavkyPar6ods11_ods3>
+    <vydavkyPar6ods11_ods3>${b((+v.najomZdan>0) && (+v.najomVydKrat>0))}</vydavkyPar6ods11_ods3>
     <vydavkyPar6ods11_ods4>0</vydavkyPar6ods11_ods4>
     <vydavkyPar6ods10_ods1a2>${b(jeP6 && v.pausalne)}</vydavkyPar6ods10_ods1a2>
     <vydavkyPar6ods10_ods4>0</vydavkyPar6ods10_ods4>
@@ -23025,14 +23201,14 @@ function pbExportXml(){
     <r55>${n(v.r.r55)}</r55>
     <r56></r56>
     <r57>${n(v.r.r57)}</r57>
-    <r58></r58>
-    <r59></r59>
-    <r60></r60>
+    <r58>${n(v.r.r58)}</r58>
+    <r59>${n(v.r.r59)}</r59>
+    <r60>${n(v.r.r60)}</r60>
     <r61></r61>
     <r62></r62>
     <r63></r63>
     <r64></r64>
-    <r65></r65>
+    <r65>${n(v.r.r65)}</r65>
     <tabulka2>
       <t2r1>
         <s1></s1>
@@ -23169,8 +23345,8 @@ function pbExportXml(){
     <r73>${n(v.r.r73)}</r73>
     <r74>${n(v.r.r74)}</r74>
     <r75>${n(v.r.r75)}</r75>
-    <r77>${n(r77sum)}</r77>
-    <r78></r78>
+    <r77>${n(v.r.r77)}</r77>
+    <r78>${n(v.r.r78)}</r78>
     <r79></r79>
     <r80>${n(v.r.r80)}</r80>
     <r81>${n(v.r.r81)}</r81>
@@ -23212,10 +23388,10 @@ function pbExportXml(){
     <r116a></r116a>
     <r117>${n(v.r.r117)}</r117>
     <r118>${n(v.r.r118)}</r118>
-    <r119></r119>
+    <r119>${n(v.r.r119)}</r119>
     <r120>${n(v.r.r120)}</r120>
-    <r121></r121>
-    <r122></r122>
+    <r121>${n(v.r.r121)}</r121>
+    <r122>${n(v.r.r122)}</r122>
     <r123></r123>
     <r124>${n(v.r.r124)}</r124>
     <r125></r125>
@@ -23226,7 +23402,7 @@ function pbExportXml(){
     <r130></r130>
     <r131>${n(v.r.r131)}</r131>
     <r132></r132>
-    <r133></r133>
+    <r133>${n(v.r.r133)}</r133>
     <r134></r134>
     <r135>${n(v.r.r135)}</r135>
     <r136>${n(v.r.r136)}</r136>
@@ -23239,8 +23415,8 @@ function pbExportXml(){
     <r143></r143>
     <r144></r144>
     <r145></r145>
-    <r146></r146>
-    <r146a></r146a>
+    <r146>${n(v.r.r146)}</r146>
+    <r146a>${n(v.r.r146a)}</r146a>
     <r147></r147>
     <r148></r148>
     <r149>0</r149>

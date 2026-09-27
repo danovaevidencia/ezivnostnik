@@ -53,8 +53,14 @@ const SADZBY = {
     h:[{od:null, v:0.15, zdroj:"§ 15 ZDP — 15 % pri zdaniteľných príjmoch z podnikania do 100 000 € vrátane"}]},
   danPrijemHranica:{n:"Hranica príjmov pre 15 % sadzbu", sk:"dan", mienaSa:"zriedka", overenost:"zdroj", kontrola:"2026-07-21",
     h:[{od:"2025-01-01", v:100000, zdroj:"§ 15 ZDP — 15 % pri zdaniteľných príjmoch do 100 000 € vrátane"}]},
-  danPasma:       {n:"Pásma progresívnej dane", sk:"dan", mienaSa:"rocne", overenost:"zdroj", kontrola:"2026-07-21",
-    h:[{od:"2026-01-01", v:[{do:43983.32, s:0.19},{do:60349.21, s:0.25},{do:75010.32, s:0.30},{do:null, s:0.35}],
+  // Pásma platia pre základ podľa § 4 ods. 1 písm. a) (zamestnanie po NČZD, prenájom,
+  // § 8 — r. 81) VŽDY a pre základ podľa písm. b) (podnikanie — r. 96) len nad hranicou
+  // príjmov danPrijemHranica. Rok 2025 doplnený 27. 9. 2026 (kolo 142 F): dovtedy sa
+  // pre 2025 brali pásma 2026 (sadzbaSPoistkou vráti najstarší záznam).
+  danPasma:       {n:"Pásma progresívnej dane", sk:"dan", mienaSa:"rocne", overenost:"zdroj", kontrola:"2026-09-27",
+    h:[{od:"2025-01-01", v:[{do:48441.43, s:0.19},{do:null, s:0.25}],
+        zdroj:"§ 15 písm. a) body 1 a 3 ZDP v znení k 1. 1. 2025 — 19 % do 176,8-násobku ŽM (273,99 €) = 48 441,43 €, 25 % nad; poučenie DPFOBv25 a eFormulár FS (r. 81, r. 96)"},
+       {od:"2026-01-01", v:[{do:43983.32, s:0.19},{do:60349.21, s:0.25},{do:75010.32, s:0.30},{do:null, s:0.35}],
         zdroj:"§ 15 ZDP — štyri pásma od 1. 1. 2026 (154,8× / 212,4× / 264× ŽM)"}]},
   // Paušálne výdavky. Predtým 0.6 a 20000 natvrdo na troch miestach appky.
   // Poučenie DPFOBv25 (za rok 2025) ich uvádza; dátum účinnosti neoverený, preto od:null.
@@ -115,10 +121,13 @@ const SADZBY = {
   nczdManzelMax:  {n:"Max. NČZD na manžela/manželku", sk:"nczd", mienaSa:"rocne", overenost:"zdroj", kontrola:"2026-07-21",
     h:[{od:"2025-01-01", v:5260.61, zdroj:"19,2-násobok ŽM 2025"},
        {od:"2026-01-01", v:5455.30, zdroj:"19,2-násobok ŽM"}]},
-  nczdManzelHranica:{n:"Hranica pre NČZD na manželku", sk:"nczd", mienaSa:"rocne", overenost:"zdroj", kontrola:"2026-07-21",
-    h:[{od:"2026-01-01", v:43983.32, zdroj:"154,8-násobok ŽM — nad ním sa uplatní vzorec"}]},
-  nczdManzelKonst:{n:"Konštanta NČZD na manželku", sk:"nczd", mienaSa:"rocne", overenost:"zdroj", kontrola:"2026-07-21",
-    h:[{od:"2026-01-01", v:20116.40, zdroj:"vzorec 20 116,40 − ZD/3; nuluje sa pri 60 349,21 €"}]},
+  // Rok 2025 doplnený 27. 9. 2026 (kolo 142 F) — dovtedy sa pre 2025 brali hodnoty 2026.
+  nczdManzelHranica:{n:"Hranica pre NČZD na manželku", sk:"nczd", mienaSa:"rocne", overenost:"zdroj", kontrola:"2026-09-27",
+    h:[{od:"2025-01-01", v:48441.43, zdroj:"§ 11 ods. 3 ZDP v znení k 1. 1. 2025 — 176,8-násobok ŽM (273,99 €); poučenie DPFOBv25, r. 74"},
+       {od:"2026-01-01", v:43983.32, zdroj:"154,8-násobok ŽM — nad ním sa uplatní vzorec"}]},
+  nczdManzelKonst:{n:"Konštanta NČZD na manželku", sk:"nczd", mienaSa:"rocne", overenost:"zdroj", kontrola:"2026-09-27",
+    h:[{od:"2025-01-01", v:17370.97, zdroj:"§ 11 ods. 3 písm. b) ZDP v znení k 1. 1. 2025 — 63,4-násobok ŽM (273,99 €) − ZD/4"},
+       {od:"2026-01-01", v:20116.40, zdroj:"vzorec 20 116,40 − ZD/3; nuluje sa pri 60 349,21 €"}]},
   nczdDelitel:    {n:"Deliteľ vo vzorci krátenia NČZD", sk:"nczd", mienaSa:"zriedka", overenost:"zdroj", kontrola:"2026-07-21",
     h:[{od:"2025-01-01", v:4, zdroj:"§ 11 ZDP — krátenie ZD/4 v roku 2025"},
        {od:"2026-01-01", v:3, zdroj:"§ 11 ZDP — od 2026 strmšie krátenie ZD/3"}]},
