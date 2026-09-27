@@ -275,7 +275,9 @@ async function kontKampanDetail(kampan){
     + '<div class="hint" style="font-size:12.5px">'
       + (k.utm_campaign
         ? "<b>Z webu</b> (utm_campaign=<code>" + esc(k.utm_campaign) + "</code>): návštevy <b>" + (an.navstevy || 0) + "</b> · spustenia ukážky "
-          + (an.demo_sa_meria ? "<b>" + (an.demo || 0) + "</b>" : "<i>nemerajú sa</i>") + " · registrácie <b>" + (an.registracie || 0) + "</b>. "
+          // Odkaz na ukážku vedie cez úvodnú stránku (?do=ukazka, č. 254) — klik
+          // na ukážku je teda návšteva s UTM kampane; samostatná udalosť v appke nie je.
+          + (an.demo_sa_meria ? "<b>" + (an.demo || 0) + "</b>" : "<i>sú v návštevách (odkaz vedie cez úvodnú stránku)</i>") + " · registrácie <b>" + (an.registracie || 0) + "</b>. "
           + "Súhrnne a len <b>v rámci toho istého dňa</b>: návštevník je jednodňový otlačok bez cookies (denná soľ), takže registráciu vidíme pri kampani, len ak prišla v deň návštevy s odkazom kampane. "
           + "Počíta sa len web (úvod, články) — odkaz priamo do appky (ezivnostnik.html) návštevu nezapíše."
         : '<span class="warnTxt">Kampaň nemá utm_campaign — návštevy z nej sa v analytike nedajú nájsť.</span>')

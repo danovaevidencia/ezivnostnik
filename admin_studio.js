@@ -40,9 +40,12 @@ const STUDIO_SKUPINY = {
 };
 
 // Kam smie viesť odkaz. Článok je „clanok:<slug>“ → clanky/<slug>.html.
+// Ukážka a registrácia vedú cez úvodnú stránku (?do=…), ktorá návštevu s UTM
+// kampane zaznamená a hneď presmeruje do appky — appka zobrazenia nehlási,
+// takže priamy odkaz do nej by z kampane nezmeral nič (Roman 27. 9. 2026, č. 254).
 const STUDIO_CIELE = {
-  demo:        { n: "Ukážka bez registrácie (demo)", cesta: "ezivnostnik.html?vstup=demo" },
-  registracia: { n: "Registrácia",                   cesta: "ezivnostnik.html?vstup=register" },
+  demo:        { n: "Ukážka bez registrácie (demo)", cesta: "?do=ukazka" },
+  registracia: { n: "Registrácia",                   cesta: "?do=registracia" },
   web:         { n: "Web — úvodná stránka",          cesta: "" },
   cennik:      { n: "Cenník na webe",                cesta: "", kotva: "cennik" },
   clanky:      { n: "Zoznam článkov",                cesta: "clanky/" },

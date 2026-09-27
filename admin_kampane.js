@@ -116,7 +116,7 @@ const SABLONA_UCTOVNICI = {
     "Pre vás je určený plán Účtovník: firmy klientov spravujete z jedného účtu (2, 5 alebo 10 firiem, od 19,80 € bez DPH mesačne). Klient vás do svojej firmy pozve sám a podklady za celý rok vám odovzdá v jednom súbore Excel.",
     "",
     "Aplikáciu si môžete hneď pozrieť v ukážke bez registrácie:",
-    "https://ezivnostnik.eu/ezivnostnik.html?vstup=demo&utm_source=email&utm_medium=osobne&utm_campaign=uctovnici",
+    "https://ezivnostnik.eu/?do=ukazka&utm_source=email&utm_medium=osobne&utm_campaign=uctovnici",
     "",
     "Ak vás to zaujíma, rád vám ju ukážem aj na krátkom online stretnutí — stačí odpísať na tento e-mail.",
     "",
