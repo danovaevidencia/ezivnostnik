@@ -24492,6 +24492,441 @@ function exportPohodaXml(){
     if(typeof analytikaUdalost==="function") analytikaUdalost("export");
   }catch(e){ console.error(e); if(stav){ stav.textContent="Chyba pri exporte: "+e.message; stav.className="cloudmsg err"; } }
 }
+// ═══════════════════════════════════════════════════════════════
+//  KROS TXT — ZAPISOVAČ NAD ÚČTOVNOU DÁVKOU (spec kap. 142)
+//
+//  Textový import OMEGY (Firma → Import → Import z textového súboru); ALFA plus
+//  ten istý súbor načíta LEN do pohľadávok (Import faktúr z Omegy). Štruktúra
+//  KROS ImportExport_28_00_2025 (doklady od 1. 1. 2025): TAB, CRLF,
+//  Windows-1250 bez BOM, vety R00/R01/R02, dátum DD.MM.RRRR, vždy plný počet
+//  stĺpcov (T01 R01 97, R02 58, T04 R01 35). Každý typ údajov má vlastné R00.
+//    · ALFA plus: T01 typ 0 (faktúra) a 4 (dobropis)
+//    · OMEGA:     T04 (partneri s IČO a úplnou adresou) + T01 typ 0, 4, 14 (došlé)
+//  Bloček, PHM, interný doklad a banka (T00 EUD) nie — fáza 3 (142.14).
+//
+//  Tvar záznamov dávky sa kvôli KROS NEMENÍ: pole navyše by zmenilo odtlačky
+//  a v XLSX aj POHODE by sa každý doklad ohlásil ako zmenený. Čo KROS potrebuje
+//  navyše, dodá `krosVolby` funkciami nad firmaData podľa kľúča dokladu (142.4).
+//
+//  Druhý, nezávislý výpočet je referencia dev/kros/kros_txt.js: nad tou istou
+//  dávkou musí dať bajtovo rovnaký súbor (test_kros_export). Zlaté súbory
+//  dev/kros/fixtures sa menia len po importe do KROS (overovací protokol U1–U12).
+//  Kým import neoverí Roman, tlačidlá drží KROS_EXPORT_ZAPNUTY; firma so
+//  settings.krosOverovanie ich vidí s označením „overuje sa“ (142.10).
+// ═══════════════════════════════════════════════════════════════
+const KROS_EXPORT_ZAPNUTY={alfa:false, omega:false};
+// Mapa Windows-1250 sa postaví z TextDecoder (bajty 0x80–0xFF) — tabuľka sa
+// neopisuje ručne. Prehliadač aj Node (full ICU) CP1250 vedia dekódovať, nie zakódovať.
+let _krosMapa=null;
+function krosMapaCp1250(){
+  if(_krosMapa) return _krosMapa;
+  const dec=new TextDecoder("windows-1250"); const M=new Map();
+  for(let b=0x80;b<=0xFF;b++){ const ch=dec.decode(new Uint8Array([b])); if(ch && ch!=="\uFFFD" && !M.has(ch)) M.set(ch,b); }
+  _krosMapa=M; return M;
+}
+// Znaky mimo CP1250: medzery a pomlčky na ASCII, cyrilské dvojníky latinky na
+// latinku (známe riziko U+0430 v slovenskom texte), inak NFD bez diakritiky,
+// inak „?“. Kľúče len ako \u escapy — kontrola cyriliky nad súborom ostáva čistá.
+const KROS_NAHRADY={"\u00A0":" ","\u2009":" ","\u202F":" ","\u2212":"-","\u2010":"-","\u2011":"-",
+  "\u0430":"a","\u0435":"e","\u043E":"o","\u0440":"p","\u0441":"c","\u0445":"x","\u0443":"y","\u0456":"i",
+  "\u0410":"A","\u0415":"E","\u041E":"O","\u0420":"P","\u0421":"C","\u0425":"X","\u041A":"K","\u041C":"M","\u0422":"T","\u041D":"H","\u0412":"B"};
+function krosCp1250(str){
+  const M=krosMapaCp1250(); const out=[];
+  for(const ch of String(str)){
+    const c=ch.codePointAt(0);
+    if(c<0x80){ out.push(c); continue; }
+    if(M.has(ch)){ out.push(M.get(ch)); continue; }
+    const n=KROS_NAHRADY[ch];
+    if(n){ out.push(n.charCodeAt(0)); continue; }
+    const z=ch.normalize("NFD").replace(/[\u0300-\u036F]/g,"");
+    if(z && z!==ch && [...z].every(x=>x.codePointAt(0)<0x80 || M.has(x))){ for(const x of z) out.push(x.codePointAt(0)<0x80?x.codePointAt(0):M.get(x)); continue; }
+    out.push(0x3F);
+  }
+  return new Uint8Array(out);
+}
+// Suma: bodka, dve desatinné. Množstvo a jednotková cena: najviac štyri, bez koncových núl.
+function krosN2(v){ return r2(v).toFixed(2); }
+function krosNq(v){ const s=(Math.round((+v||0)*10000)/10000).toFixed(4); return s.replace(/0+$/,"").replace(/\.$/,""); }
+function krosDatum(iso){ const m=String(iso||"").match(/^(\d{4})-(\d{2})-(\d{2})/); return m?m[3]+"."+m[2]+"."+m[1]:""; }
+// Text bunky: bez TAB/CR/LF (rozbili by vetu); emoji, modifikátory a ZWJ mimo
+// CP1250 vypadnú (\u2122 \u00A9 \u00AE v CP1250 sú, ostanú); orezaný na maxDlzka
+// a bez koncovej medzery — presah dĺžky KROS výslovne zakazuje.
+const KROS_EMOJI=/\p{Extended_Pictographic}|\p{Emoji_Modifier}|\u200D|\uFE0F/u;
+function krosTxt(v, max){
+  const M=krosMapaCp1250();
+  let s=[...String(v==null?"":v).replace(/[\t\r\n]+/g," ")].filter(ch=>!(KROS_EMOJI.test(ch) && !M.has(ch))).join("");
+  s=s.replace(/\s{2,}/g," ").trim();
+  if(max && s.length>max) s=s.slice(0,max).trimEnd();
+  return s;
+}
+// Sadzby 2025+: V vyššia/základná (23), N nižšia/znížená (19), Y znížená 2 (5),
+// 0 nulová, X neobsahuje DPH. Hlavička nesie sadzby v st. 12, 13 a 95.
+const KROS_SADZBY={N:19, V:23, Y:5};
+function krosTrieda(pct){ const p=Math.round(+pct||0); if(p===23) return "V"; if(p===19) return "N"; if(p===5) return "Y"; return null; }
+function krosJeSadzba(t){ return t==="V"||t==="N"||t==="Y"; }
+// Typ DPH položky (R02 st. 30, číselník typov súm 2025) — overiť U7.
+const KROS_TYP_SUMY={
+  predaj:{V:"03", N:"01", Y:"Y01"},
+  oprava:{V:"2403", N:"2401", Y:"24Y01"},                  // dobropis k tuzemskému plneniu (r. 24/25)
+  nakup: {V:"A",  N:"XA", Y:"YA"},
+  nakupBezOdpoctu:{V:"KV", N:"XKV", Y:"YKV"},
+  plnenie:{prenos69:"OA2", eu_sluzba:"Osv", eu_tovar:"14", vyvozTovar:"15t", vyvozSluzba:"15s", oslobodene:"13"},
+  plnenieOprava:{prenos69:"OC1", eu_sluzba:"Osv", eu_tovar:"14o", vyvozTovar:"15o", vyvozSluzba:"15o", oslobodene:"13o"},
+};
+// PSČ „949 01“ len pre SK/CZ; zahraničné ostáva, ako je (text(6)).
+function krosPsc(psc, krajina){
+  const k=String(krajina||"").toUpperCase(); const d=String(psc||"").replace(/\D/g,"");
+  if((!k || k==="SK" || k==="CZ") && d.length===5) return d.slice(0,3)+" "+d.slice(3);
+  return krosTxt(psc,6);
+}
+function krosKrajina(p){ const ic=String(p.icdph||"").toUpperCase(); return String(p.krajina||"").toUpperCase() || (/^[A-Z]{2}/.test(ic)?ic.slice(0,2):""); }
+function krosUcet(iban){ const u=isdocUcetZIbanu(iban); return u.id&&u.kod?u.id+"/"+u.kod:""; }
+// Forma úhrady: štítky appky (UHRADA_SPOSOBY) → predvolený číselník KROS
+// (reálny export OMEGY 2026). Iný spôsob ostáva prázdny.
+const KROS_FORMA={"Bankový prevod":"Prevodný príkaz","Hotovosť":"Hotovosť","Platba kartou":"Platba kartou"};
+function krosFormaUhrady(stitok){ return KROS_FORMA[String(stitok||"").trim()]||""; }
+const KROS_ODDIEL_KV=/^(A1|A2|B1|B2|B3|C1|C2|D1|D2)$/;
+// Veta s plným počtom stĺpcov: c[1..n] = stĺpce 1..n (číslovanie ako v XLS KROS).
+function krosRiadok(pocet, vypln){ const c=new Array(pocet+1).fill(""); vypln(c); return c.slice(1).join("\t"); }
+function krosSucty(riadky){
+  const S={N:0,V:0,Y:0,"0":0,X:0,dN:0,dV:0,dY:0};
+  riadky.forEach(r=>{ S[r.trieda]+=r.bez; if(krosJeSadzba(r.trieda)) S["d"+r.trieda]+=r.dph; });
+  Object.keys(S).forEach(k=>S[k]=r2(S[k]));
+  return S;
+}
+// Hlavička T01 R01 (97 stĺpcov). Mapovanie stĺpcov je v spec 142.4.
+function krosHlavickaT01(c, h){
+  const p=h.partner, kr=krosKrajina(p);
+  c[1]="R01";
+  c[2]=krosTxt(h.cislo,20); c[3]=krosTxt(p.nazov,75); c[4]=krosTxt(p.ico,12);
+  c[5]=krosDatum(h.datumVystPrij); c[6]=krosDatum(h.splatnost||h.datumVystPrij); c[7]=krosDatum(h.duzp||h.datumVystPrij);
+  const S=h.sucty;
+  c[8]=krosN2(S.N); c[9]=krosN2(S.V); c[10]=krosN2(S["0"]); c[11]=krosN2(S.X);
+  c[12]=String(KROS_SADZBY.N); c[13]=String(KROS_SADZBY.V);
+  c[14]=krosN2(S.dN); c[15]=krosN2(S.dV);
+  c[16]=krosN2(h.halier||0);
+  c[17]=krosN2(h.spolu);
+  c[18]=String(h.typDokladu);
+  c[19]=krosTxt(h.kodEvidencie,5); c[20]=krosTxt(h.kodRadu,5);
+  const a=h.adresa;
+  c[25]=krosTxt([a.ulica,a.cislo].filter(Boolean).join(" "),40); c[26]=a.psc?krosPsc(a.psc,kr):""; c[27]=krosTxt(a.mesto,40);
+  c[28]=krosTxt(p.dic,12);
+  c[38]=krosTxt(h.formaUhrady,60);
+  c[40]="EUR"; c[41]="1"; c[42]="1"; c[43]=krosN2(h.spolu);
+  c[45]=krosTxt(h.poznamka,250); c[46]=krosTxt(h.predmet,250);
+  const icdph=krosTxt(p.icdph,50);
+  if(icdph){ c[48]=icdph.slice(0,2).toUpperCase(); c[49]=icdph; }
+  c[55]=krosTxt(p.nazov,15);
+  c[61]="-2"; c[62]="3"; c[64]="-2";
+  c[67]="0"; c[68]="0";
+  c[71]=krosTxt(String(h.vs||"").replace(/\D/g,""),20);
+  c[85]=h.dphPodlaUhrad?"-1":"0";
+  c[86]="0";
+  if(h.partnerIban){ c[87]=krosTxt(h.partnerIban,50); c[88]=krosTxt(krosUcet(h.partnerIban),50); }
+  c[89]="0";
+  c[95]=String(KROS_SADZBY.Y); c[96]=krosN2(S.Y); c[97]=krosN2(S.dY);
+}
+// Položka T01 R02 (58 stĺpcov). Voľná položka (V) — bez väzby na sklad.
+function krosPolozkaT01(p){
+  return krosRiadok(58, c=>{
+    c[1]="R02"; c[2]=krosTxt(p.nazov,250); c[3]=krosNq(p.mn); c[4]=krosTxt(p.mj||"ks",5);
+    c[5]=krosNq(p.cena); c[6]=p.trieda; c[7]="0"; c[8]=krosNq(p.cena); c[9]="0"; c[10]="V";
+    c[30]=krosTxt(p.typDph,5);
+    c[38]=krosTxt(p.mj||"ks",5); c[39]=krosNq(p.mn);
+    c[45]="-2"; c[46]="3"; c[47]="0";
+    c[50]="0"; c[51]=krosNq(p.cenaSDph); c[52]="0"; c[53]="0";
+    if(p.oddielKV && KROS_ODDIEL_KV.test(p.oddielKV)) c[54]=p.oddielKV;
+  });
+}
+// Kódy evidencie a číselného radu (st. 19/20). Musia v OMEGE existovať — povie ich účtovník (U1).
+const KROS_CISLOVANIE_PREDVOLENE={OF:{ev:"OF",rad:"OF"}, OD:{ev:"OF",rad:"OF"}, DF:{ev:"DF",rad:"DF"}};
+function krosKod(v){ return String(v||"").toUpperCase().replace(/[^A-Z0-9]/g,"").slice(0,5); }
+function krosCislovanie(S){
+  const K=(S||{}).krosCislovanie||{}; const out={};
+  Object.keys(KROS_CISLOVANIE_PREDVOLENE).forEach(d=>{ const p=KROS_CISLOVANIE_PREDVOLENE[d], z=K[d]||{};
+    out[d]={ev:krosKod(z.ev)||p.ev, rad:krosKod(z.rad)||p.rad}; });
+  return out;
+}
+// Súbor pre KROS z dávky. Vracia {text, bajty (CP1250), nalezy, pocty, ciel, odoslane}.
+// `odoslane` = kľúče dávky („faktura:…“, „vydavok:…“), ktoré v súbore naozaj sú.
+function davkaDoKrosTxt(davka, volby){
+  const D=davka||{}, V=volby||{};
+  const ciel=V.ciel==="omega"?"omega":"alfa";
+  const fn=(k,dflt)=>typeof V[k]==="function"?V[k]:dflt;
+  const jePlatca=fn("jePlatca",()=>false), adresaP=fn("adresaPartnera",p=>p.adresa||""),
+        o68d=fn("osobitna68d",()=>false), jeTovar=fn("jeTovar",()=>false), formaF=fn("formaUhrady",()=>"");
+  const cisl=Object.assign({}, KROS_CISLOVANIE_PREDVOLENE, V.cislovanie||{});
+  const P=new Map((D.partneri||[]).map(p=>[p.id,p]));
+  const partnerDokladu=(id, nazov)=>{ const p=P.get(id); return p?Object.assign({},p,{nazov:p.nazov||nazov||""}):{nazov:nazov||"", ico:"", dic:"", icdph:"", adresa:"", krajina:""}; };
+  const nalezy=[]; const nalez=(typ,text,detail,kluc)=>nalezy.push({typ,text,detail:detail||"",kluc:kluc||""});
+  const pocty={partneri:0, partneriLenNaDokladoch:0, vydane:0, dobropisy:0, dosle:0, preskocene:0, uzVKros:0};
+  const preskocene=[];   // texty nálezov preskočených dokladov — do hlásenia po stiahnutí
+  const preskoc=(typ,text,detail,kluc)=>{ pocty.preskocene++; preskocene.push(text); nalez(typ,text,detail,kluc); };
+  const odoslane=[];
+  const mimo2025=iso=>String(iso||"")<"2025-01-01";
+  // Doklady spred 2025: pri exporte „všetkých rokov“ by jeden nález na doklad
+  // zahltil kontrolu (kap. 16) — do troch po jednom, viac spolu.
+  const stare=[];
+  // Prírastok (142.11): ZMENENÝ doklad v KROS už je a import ho neaktualizuje —
+  // neposiela sa, spočíta sa do hlásenia. Ide len NOVÉ (vzor: POHODA, uzVPohode).
+  const uzVKros=k=>!!(D.prirastok && D.zmeny && (D.zmeny.zmenene||[]).indexOf(k)>=0);
+
+  // ── vydané faktúry a dobropisy (T01, typ 0 / 4) ──
+  const vydane=[];
+  (D.faktury||[]).forEach(f=>{
+    const kl="faktura:"+f.kluc;
+    if(f.typ==="prijmovy" || f.typ==="dokladKPlatbe") return preskoc("info", (f.typ==="prijmovy"?"Príjmový doklad":"Doklad k prijatej platbe")+" "+f.cislo+" sa do KROS neprenáša", "Nie je to faktúra (pohľadávka). V ALFA plus ho účtovník zapíše do peňažného denníka, v OMEGE do pokladne.", kl);
+    if(f.typ==="tarchopis") return preskoc("pozor", "Ťarchopis "+f.cislo+" sa do KROS neprenáša", "Textový import KROS nemá typ ťarchopisu; zapíšte ho ručne.", kl);
+    if(f.mena && f.mena!=="EUR") return preskoc("pozor", "Faktúra "+f.cislo+" v mene "+f.mena+" sa neprenáša", "Prepočet kurzu v textovom importe KROS nie je overený; zaevidujte ju ručne.", kl);
+    const duzp=f.dodanie||f.vystavenie;
+    if(mimo2025(duzp)){ pocty.preskocene++; stare.push({cislo:f.cislo, datum:duzp, kl, druh:"Faktúra"}); return; }
+    if(uzVKros(kl)){ pocty.uzVKros++; return; }
+    const p=partnerDokladu(f.partnerId, f.odberatel);
+    if(!p.nazov) return preskoc("chyba", "Faktúra "+f.cislo+" bez odberateľa", "Meno partnera je v KROS povinné; doplňte ho na faktúre.", kl);
+    const platca=!!jePlatca(duzp), dobropis=f.typ==="dobropis", druh=f.druhPlnenia||"tuzemsko";
+    const dphDokl=r2(f.dph);
+    let trieda, typDph;
+    if(!platca || druh!=="tuzemsko"){
+      // Doklad bez DPH, ktorý DPH predsa nesie: KROS by ju nemal kam dať a skončila
+      // by potichu v halierovom vyrovnaní — chyba dokladu, neposiela sa.
+      if(Math.abs(dphDokl)>=0.005) return preskoc("chyba", "Faktúra "+f.cislo+" má DPH "+krosN2(dphDokl)+" €, hoci "+(platca?"druh plnenia je bez slovenskej DPH":"firma k DUZP nie je platiteľ"), "Opravte doklad (sadzbu alebo druh plnenia) a exportujte znova.", kl);
+      trieda=platca?"0":"X";
+      const kod=druh==="vyvoz"?(jeTovar(f.kluc)?"vyvozTovar":"vyvozSluzba"):druh;
+      typDph=platca?((dobropis?KROS_TYP_SUMY.plnenieOprava:KROS_TYP_SUMY.plnenie)[kod]||""):"";
+    } else {
+      trieda=krosTrieda(f.sadzba) || (Math.abs(dphDokl)<0.005?"0":null);
+      if(!trieda) return preskoc("chyba", "Faktúra "+f.cislo+": sadzba "+f.sadzba+" % nie je sadzba roka 2025+", "Opravte sadzbu na doklade.", kl);
+      typDph=krosJeSadzba(trieda)?(dobropis?KROS_TYP_SUMY.oprava:KROS_TYP_SUMY.predaj)[trieda]:"";
+    }
+    const bez=r2(f.bez), dph=krosJeSadzba(trieda)?dphDokl:0, spolu=r2(f.spolu);
+    const sucty=krosSucty([{trieda, bez, dph}]);
+    const halier=r2(spolu-(bez+dph));
+    const sadzbaPct=krosJeSadzba(trieda)?KROS_SADZBY[trieda]:0;
+    // položky: ak nesedia na základ (zľava, zaokrúhlenie), ide jedna súhrnná
+    let pol=(f.polozky||[]).map(x=>({nazov:x.nazov, mn:+x.mn||0, mj:x.mj, cena:+x.cena||0}));
+    const sumPol=r2(pol.reduce((a,x)=>a+r2(x.mn*x.cena),0));
+    if(!pol.length || Math.abs(sumPol-bez)>0.01){
+      if(pol.length) nalez("info", "Faktúra "+f.cislo+": položky nesedia na základ ("+krosN2(sumPol)+" ≠ "+krosN2(bez)+")", "Do KROS ide jedna súhrnná položka so základom dokladu.", kl);
+      pol=[{nazov:(dobropis?"Dobropis k faktúre "+(f.opravuje||""):"Plnenie podľa faktúry "+f.cislo), mn:1, mj:"ks", cena:bez}];
+    }
+    const k=dobropis?cisl.OD:cisl.OF;
+    const h={cislo:f.cislo, partner:p, datumVystPrij:f.vystavenie, splatnost:f.splatnost, duzp,
+      sucty, halier, spolu, typDokladu:dobropis?4:0, kodEvidencie:k.ev, kodRadu:k.rad, adresa:rozlozAdresu(adresaP(p)),
+      formaUhrady:krosFormaUhrady(formaF(f.kluc)), vs:f.vs||f.cislo,
+      poznamka:"eživnostník · "+kl+(dobropis&&f.opravuje?" · opravuje "+f.opravuje:""),
+      predmet:dobropis?("Dobropis k faktúre "+(f.opravuje||"")+(f.popis?" — "+f.popis:"")):(f.popis||""),
+      dphPodlaUhrad:false, partnerIban:""};
+    const riadky=[krosRiadok(97, c=>krosHlavickaT01(c,h))];
+    pol.forEach(x=>riadky.push(krosPolozkaT01({nazov:x.nazov, mn:x.mn, mj:x.mj, cena:x.cena, trieda, typDph,
+      cenaSDph:x.cena*(1+sadzbaPct/100), oddielKV:platca?f.oddielKV:""})));
+    vydane.push(riadky); odoslane.push(kl); if(dobropis) pocty.dobropisy++; else pocty.vydane++;
+    if(!p.ico) nalez("pozor", "Faktúra "+f.cislo+": odberateľ bez IČO", "KROS páruje partnera podľa IČO; bez neho ho založí podľa mena.", kl);
+  });
+
+  // ── došlé faktúry (T01, typ 14) — len OMEGA; ALFA plus ich cez tento import nevie (U8) ──
+  const dosle=[]; const cislaDosle=new Map();
+  if(ciel==="omega" && V.dosle!==false){
+    (D.vydavky||[]).forEach(x=>{
+      const kl="vydavok:"+x.kluc;
+      if(x.druh!=="Došlá faktúra") return;
+      if(x.samozdanenieTyp || x.zahranicny) return preskoc("pozor", "Došlá faktúra "+(x.cislo||x.datum)+" so samozdanením / zo zahraničia sa neprenáša", "Samozdanenie (daň aj odpočet) textový import T01 nevyjadrí; zaevidujte ju v OMEGE ručne.", kl);
+      if(mimo2025(x.datum)){ pocty.preskocene++; stare.push({cislo:x.cislo, datum:x.datum, kl, druh:"Došlá faktúra"}); return; }
+      if(uzVKros(kl)){ pocty.uzVKros++; return; }
+      const p=partnerDokladu(x.partnerId, x.partner);
+      if(!p.nazov) return preskoc("chyba", "Došlá faktúra "+(x.cislo||x.datum)+" bez dodávateľa", "Meno partnera je v KROS povinné.", kl);
+      // Číslo v KROS = náš kľúč. V appke je to číslo dodávateľa, kým dva doklady
+      // s rovnakým číslom neodlíši ročná kontrola (klucId). Neodlíšené dva by KROS
+      // zapísal ako jeden doklad alebo druhý odmietol — druhý sa neposiela.
+      const cisloKros=pohodaCislo(x.kluc);
+      if(cislaDosle.has(cisloKros)) return preskoc("chyba", "Došlá faktúra "+(x.cislo||x.datum)+" má rovnaké číslo ako iná došlá faktúra", "V KROS by sa zliali do jedného dokladu. Rozlíšte ich v Ročnej kontrole (kolízne čísla dokladov) a exportujte znova.", kl);
+      cislaDosle.set(cisloKros, kl);
+      const platca=!!jePlatca(x.datum);
+      const pct=(x.podnikPct!=null && +x.podnikPct<100)?Math.max(0,+x.podnikPct):100;
+      const polozky=[]; const trr=[];
+      const rozpis=(x.rozpis&&x.rozpis.length)?x.rozpis:[{sadzba:0,bez:x.bez,dph:x.dph}];
+      rozpis.forEach(r=>{
+        const bez=r2(r.bez), dph=r2(r.dph);
+        const text=(x.popis||x.druh)+(rozpis.length>1?" ("+Math.round(+r.sadzba||0)+" %)":"");
+        // Neplatiteľ si DPH neodpočíta — je súčasťou nákladu: celá suma „neobsahuje“.
+        if(!platca){ trr.push({trieda:"X", bez:r2(bez+dph), dph:0}); polozky.push({nazov:text, mn:1, mj:"ks", cena:r2(bez+dph), trieda:"X", typDph:"", cenaSDph:r2(bez+dph)}); return; }
+        let t=Math.abs(dph)<0.005?"0":krosTrieda(r.sadzba);
+        if(!t){ nalez("chyba", "Došlá faktúra "+x.cislo+": sadzba "+r.sadzba+" % nie je sadzba 2025+", "Riadok ide ako nulová sadzba so základom a DPH spolu; opravte doklad.", kl); t="0"; }
+        const bezT=t==="0"?r2(bez+dph):bez, dphT=krosJeSadzba(t)?dph:0;
+        trr.push({trieda:t, bez:bezT, dph:dphT});
+        const sp=krosJeSadzba(t)?KROS_SADZBY[t]:0;
+        const kv=platca?x.oddielKV:"";
+        if(krosJeSadzba(t) && pct<100){
+          // čiastočný odpočet (napr. auto 50 %): dve položky — s odpočtom a bez (U7)
+          const b1=r2(bezT*pct/100), b2=r2(bezT-b1);
+          polozky.push({nazov:text+" — "+pct+" % s odpočtom", mn:1, mj:"ks", cena:b1, trieda:t, typDph:KROS_TYP_SUMY.nakup[t], cenaSDph:b1*(1+sp/100), oddielKV:kv});
+          polozky.push({nazov:text+" — "+(100-pct)+" % bez odpočtu", mn:1, mj:"ks", cena:b2, trieda:t, typDph:KROS_TYP_SUMY.nakupBezOdpoctu[t], cenaSDph:b2*(1+sp/100), oddielKV:kv});
+        } else {
+          polozky.push({nazov:text, mn:1, mj:"ks", cena:bezT, trieda:t, typDph:krosJeSadzba(t)?KROS_TYP_SUMY.nakup[t]:"", cenaSDph:bezT*(1+sp/100), oddielKV:kv});
+        }
+      });
+      const sucty=krosSucty(trr);
+      const spolu=r2(x.spolu);
+      const halier=r2(spolu-trr.reduce((a,r)=>a+r.bez+r.dph,0));
+      // Číslo dodávateľa nie je jedinečné — ide do poznámky, na začiatok predmetu a do VS.
+      const h={cislo:cisloKros, partner:p, datumVystPrij:x.datum, splatnost:x.splatnost, duzp:x.datum,
+        sucty, halier, spolu, typDokladu:14, kodEvidencie:cisl.DF.ev, kodRadu:cisl.DF.rad, adresa:rozlozAdresu(adresaP(p)),
+        formaUhrady:"", vs:x.vs, dphPodlaUhrad:!!o68d(x.kluc),
+        poznamka:"eživnostník · "+kl+(x.cislo?" · č. dodávateľa "+x.cislo:"")+(x.kategoriaNazov?" · "+x.kategoriaNazov:"")+(pct<100?" · podnikanie "+pct+" %":""),
+        predmet:(x.cislo?x.cislo+" — ":"")+(x.popis||""), partnerIban:x.iban||""};
+      const riadky=[krosRiadok(97, c=>{ krosHlavickaT01(c,h); c[69]=krosDatum(x.vystavenie||x.datum); })];
+      polozky.forEach(q=>riadky.push(krosPolozkaT01(q)));
+      dosle.push(riadky); odoslane.push(kl); pocty.dosle++;
+    });
+  }
+  if(stare.length){
+    const det="Doklady do roku 2024 majú v KROS inú štruktúru (Import_24_60); export ich neposiela.";
+    if(stare.length<=3) stare.forEach(s=>{ const t=s.druh+" "+(s.cislo||"")+" ("+s.datum+") je spred roka 2025"; preskocene.push(t); nalez("pozor", t, det, s.kl); });
+    else { const t=stare.length+" "+sklon(stare.length,"doklad je","doklady sú","dokladov je")+" spred roka 2025"; preskocene.push(t);
+      nalez("pozor", t, det+" Napr. "+stare.slice(0,5).map(s=>s.cislo||s.datum).join(", ")+(stare.length>5?" …":"")+".", "kros:stare"); }
+  }
+
+  // ── partneri (T04) — len OMEGA. Len s IČO a úplnou adresou (ulica je v T04
+  // povinná); ostatní idú len na dokladoch — rovnaké poučenie ako POHODA (chyba 104).
+  const partneri=[];
+  if(ciel==="omega" && V.partneri){
+    (D.partneri||[]).filter(p=>p.nazov && (p.dod||p.odb)).forEach(p=>{
+      const a=rozlozAdresu(adresaP(p));
+      if(!p.ico || !a.mesto || !a.ulica){ pocty.partneriLenNaDokladoch++; return; }
+      partneri.push(krosRiadok(35, c=>{
+        c[1]="R01"; c[2]=krosTxt(p.nazov,75); c[3]=krosTxt(p.ico,12);
+        c[4]=krosTxt([a.ulica,a.cislo].filter(Boolean).join(" "),40); c[5]=a.psc?krosPsc(a.psc,krosKrajina(p)):""; c[6]=krosTxt(a.mesto,40);
+        c[13]=p.icdph?"T":"F";
+        const icdph=krosTxt(p.icdph,50); if(icdph){ c[25]=icdph.slice(0,2).toUpperCase(); c[26]=icdph; }
+        c[27]=krosTxt(p.dic,50);
+        c[32]=p.ico?"F":"T";
+      }));
+      pocty.partneri++;
+    });
+  }
+
+  // ── súbor: každý typ údajov vlastným R00; T04 pred T01 ──
+  const vety=[];
+  if(partneri.length){ vety.push("R00\tT04"); vety.push(...partneri); }
+  const t01=[...vydane, ...dosle];
+  if(t01.length){ vety.push("R00\tT01"); t01.forEach(r=>vety.push(...r)); }
+  if(!vety.length) nalez("pozor","Nič na export pre KROS","Vo zvolenom období nie je žiadna faktúra pre KROS.","");
+  const text=vety.length?vety.join("\r\n")+"\r\n":"";
+  return {text, bajty:krosCp1250(text), nalezy, pocty, ciel, odoslane, preskocene};
+}
+// Voľby writera z firmaData (142.4): čo KROS potrebuje a dávka to nenesie.
+function krosVolby(ciel){
+  const D=firmaData||{}, S=D.settings||{};
+  const F=new Map(), X=new Map(), reg=new Map();
+  (D.faktury||[]).forEach(f=>{ if(f) F.set(String(dokladKluc(f)), f); });
+  (D.vydavky||[]).forEach(x=>{ if(x) X.set(String(dokladKluc(x)), x); });
+  (D.partneri||[]).forEach(p=>{ const i=String((p&&p.ico)||"").replace(/\s/g,""); const a=String((p&&p.adresa)||"").trim(); if(i && a && !reg.has(i)) reg.set(i, a); });
+  return {ciel:ciel==="omega"?"omega":"alfa", partneri:ciel==="omega",
+    jePlatca:d=>jePlatcaDPH(d),
+    // štítok úhrady appka ukladá až pri označení úhrady — často prázdny, nevadí
+    formaUhrady:k=>{ const f=F.get(String(k)); return f && typeof f.uhrada==="string" ? f.uhrada : ""; },
+    // dávka nesie adresu len z vydaných faktúr; dodávateľ ju má z registra partnerov
+    adresaPartnera:p=>{ if(p.adresa) return p.adresa; const i=String(p.ico||""); if(i && reg.has(i)) return reg.get(i); return adresaOdberatela({ico:p.ico, odberatel:p.nazov}); },
+    osobitna68d:k=>{ const x=X.get(String(k)); return !!(x && x.osobitna68d); },
+    jeTovar:k=>{ const f=F.get(String(k)); return !!(f && (String(f.tovarKod||"").trim() || String(f.tovarDruh||"").trim())); },
+    cislovanie:krosCislovanie(S)};
+}
+// Stav cieľa: „zapnuty“ po overení, „overuje“ na overovacej firme, inak "" (tlačidlo sa nekreslí).
+function krosCielStav(ciel){
+  if(KROS_EXPORT_ZAPNUTY[ciel]) return "zapnuty";
+  if((((firmaData||{}).settings)||{}).krosOverovanie===true) return "overuje";
+  return "";
+}
+const KROS_CIELE={
+  alfa:{n:"KROS ALFA plus", tl:"📗 KROS ALFA plus — vydané faktúry (TXT)",
+    navod:"Evidencie → Pohľadávky → Import dokladov → Import faktúr z Omegy → vyberte súbor a stĺpec peňažného denníka → Ďalej; potom „Zapíš do DPH“."},
+  omega:{n:"KROS OMEGA", tl:"📘 KROS OMEGA — faktúry a partneri (TXT)",
+    navod:"Firma → Import → Import z textového súboru → Zdrojový súbor → Štart. Pred prvým importom skontrolujte Firma → Nastavenia → Všeobecné nastavenia → Prechod/Import/Eshop (porovnávacie kritériá partnerov)."},
+};
+// Dávka pre cieľ: voľby sprievodcu, vlastný záznam „čo už odišlo“ (kros-alfa / kros-omega).
+function krosDavka(ciel){ return uctovnaDavka(Object.assign({}, xkVolbyTeraz(), {format:"kros-"+ciel})); }
+// Nálezy writera pre krok „Kontrola dát“ — len keď je aspoň jeden cieľ viditeľný.
+// OMEGA je nadmnožina ALFY (tie isté vydané + došlé), preto stačí jeden beh.
+function krosNalezySprievodcu(){
+  const ciel=krosCielStav("omega")?"omega":(krosCielStav("alfa")?"alfa":"");
+  if(!ciel) return [];
+  return memoRok("krosNalezy·"+ciel+"·"+JSON.stringify(xkVolbyTeraz()), ()=>{
+    // „info“ (príjmový doklad, súhrnná položka) by pri desiatkach dokladov zahltil
+    // kontrolu; odberateľa bez IČO už hlási dávka raz za partnera (kap. 16).
+    try{ return davkaDoKrosTxt(krosDavka(ciel), krosVolby(ciel)).nalezy.filter(n=>n.typ!=="info" && !/odberateľ bez IČO/.test(n.text))
+      .map(n=>Object.assign({}, n, {text:"KROS: "+n.text})); }
+    catch(e){ console.error("kontrola pre KROS:", e); return [{typ:"chyba", text:"KROS: kontrola zlyhala", detail:String(e&&e.message||e)}]; }
+  });
+}
+// Tlačidlá, návod a kódy pre KROS v kroku „Generovať“ (142.10).
+function krosTlacidlaHtml(){
+  const ciele=["alfa","omega"].filter(c=>krosCielStav(c));
+  const S=((firmaData||{}).settings)||{};
+  const odkaz=/[?&]kros=1(&|$)/.test(String((typeof location!=="undefined"&&location.search)||""));
+  const prepinac=odkaz ? `<div class="ocr-hint" style="margin-top:10px">Overovanie exportu pre KROS v tejto firme je <b>${S.krosOverovanie===true?"zapnuté":"vypnuté"}</b>. <button class="abtn" style="padding:4px 10px"${zam("zaloha")} onclick="krosNastavOverovanie(${S.krosOverovanie===true?"false":"true"})">${S.krosOverovanie===true?"Vypnúť":"Zapnúť"}</button></div>` : "";
+  if(!ciele.length) return prepinac;
+  const C=krosCislovanie(S);
+  const riadokKodu=(d,popis)=>`<div style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:13px"><span style="flex:1">${popis}</span>
+      <input value="${esc(C[d].ev)}" maxlength="5" aria-label="${popis} — kód evidencie" onchange="krosNastavKod('${d}','ev',this.value)" style="width:64px;text-transform:uppercase;border:1px solid var(--line);border-radius:8px;padding:5px 7px;font:inherit"${zam("zaloha")}>
+      <input value="${esc(C[d].rad)}" maxlength="5" aria-label="${popis} — kód číselného radu" onchange="krosNastavKod('${d}','rad',this.value)" style="width:64px;text-transform:uppercase;border:1px solid var(--line);border-radius:8px;padding:5px 7px;font:inherit"${zam("zaloha")}></div>`;
+  return ciele.map(c=>{ const K=KROS_CIELE[c], over=krosCielStav(c)==="overuje";
+      return `<button class="abtn" style="width:100%;margin-top:10px" onclick="exportKrosTxt('${c}')">${K.tl}${over?' · <i>overuje sa</i>':""}</button>
+      <div class="ocr-hint" style="margin-top:6px">${esc(K.n)}: ${esc(K.navod)}</div>`; }).join("")
+    + `<div class="ocr-hint" style="margin-top:6px">Účtovník s KROS Digitálnou kanceláriou môže namiesto toho nahrať PDF faktúr (s prílohou ISDOC).</div>
+      <details style="margin-top:8px"><summary style="cursor:pointer;font-size:13px">Kódy pre KROS</summary>
+      <div class="ocr-hint" style="margin-top:6px">Kód evidencie a číselného radu (najviac 5 znakov). Musia v programe KROS existovať — povie vám ich účtovník.</div>
+      <div style="display:flex;gap:6px;margin-top:6px;font-size:12px;color:var(--ink-soft)"><span style="flex:1"></span><span style="width:64px">evidencia</span><span style="width:64px">rad</span></div>
+      ${riadokKodu("OF","Vydané faktúry")}${riadokKodu("OD","Dobropisy")}${riadokKodu("DF","Došlé faktúry")}</details>`
+    + prepinac;
+}
+function krosNastavKod(druh, pole, hodnota){
+  if(!strazPole("zaloha", xkPrekresli)) return;
+  if(!KROS_CISLOVANIE_PREDVOLENE[druh] || (pole!=="ev" && pole!=="rad")) return;
+  if(!firmaData.settings) firmaData.settings={};
+  const K=Object.assign({}, firmaData.settings.krosCislovanie||{});
+  K[druh]=Object.assign({}, K[druh]||{}, {[pole]:krosKod(hodnota)});
+  firmaData.settings.krosCislovanie=K;
+  poZmene(); xkPrekresli();
+}
+function krosNastavOverovanie(zapnut){
+  if(!strazZapis("zaloha")) return;
+  if(!firmaData.settings) firmaData.settings={};
+  if(zapnut) firmaData.settings.krosOverovanie=true; else delete firmaData.settings.krosOverovanie;
+  poZmene(); xkPrekresli();
+}
+// Tlačidlo v sprievodcovi: súbor pre KROS a záznam „čo už odišlo“ (kros-alfa / kros-omega).
+function exportKrosTxt(ciel){
+  const stav=document.getElementById("xlsxMsg");
+  ciel=ciel==="omega"?"omega":"alfa";
+  const hlas=(t,ok)=>{ if(stav){ stav.textContent=t; stav.className="cloudmsg "+(ok?"ok":"err"); } };
+  try{
+    if(!krosCielStav(ciel)) return hlas("Export pre KROS ešte nie je overený.", false);
+    const davka=krosDavka(ciel);
+    const R=davkaDoKrosTxt(davka, krosVolby(ciel));
+    const P=R.pocty;
+    if(!R.text) return hlas("Pre KROS nie je čo exportovať — vo zvolenom období nie je žiadna faktúra"+(P.uzVKros?" (nové doklady od posledného exportu nie sú; zmenené: "+P.uzVKros+")":"")+".", false);
+    const nm=((firmaData.meta&&firmaData.meta.nazov)||"export").replace(/[^\w.-]+/g,"_")+"_kros_"+ciel+"_"+new Date().toISOString().slice(0,10)+".txt";
+    downloadBlob(new Blob([R.bajty],{type:"text/plain;charset=windows-1250"}), nm);
+    // Záznam až po stiahnutí. Odtlačky len dokladov, ktoré v KROS naozaj sú
+    // (odoslané teraz alebo skôr): preskočený doklad s chybou sa po oprave
+    // javí ako NOVÝ a pôjde, nie ako „zmenený, už v KROS“.
+    const bolo=((((firmaData.exporty||{})["kros-"+ciel])||{}).odtlacky)||{};
+    const teraz=new Set(R.odoslane); const odt={};
+    Object.keys(davka.odtlacky||{}).forEach(k=>{ if(teraz.has(k) || (k in bolo)) odt[k]=davka.odtlacky[k]; });
+    if(typeof davkaZapisExport==="function") davkaZapisExport("kros-"+ciel, Object.assign({}, davka, {odtlacky:odt}));
+    const casti=[P.vydane+" "+sklon(P.vydane,"faktúra","faktúry","faktúr")];
+    if(P.dobropisy) casti.push(P.dobropisy+" "+sklon(P.dobropisy,"dobropis","dobropisy","dobropisov"));
+    if(ciel==="omega"){ casti.push(P.dosle+" "+sklon(P.dosle,"došlá faktúra","došlé faktúry","došlých faktúr"));
+      casti.push(P.partneri+" "+sklon(P.partneri,"partner","partneri","partnerov")+" v adresári"+(P.partneriLenNaDokladoch?" ("+P.partneriLenNaDokladoch+" bez IČO alebo adresy len na dokladoch)":"")); }
+    const presk=R.preskocene;
+    const t="✓ "+KROS_CIELE[ciel].n+(davka.prirastok?" — prírastok":"")+": "+casti.join(", ")+"."
+      +(P.preskocene?" Preskočené "+P.preskocene+": "+presk.slice(0,3).join("; ")+(presk.length>3?"; …":"")+" (podrobnosti v kroku Kontrola dát).":"")
+      +(P.uzVKros?" Už v KROS z minulého exportu, zmeny zapíšte ručne: "+P.uzVKros+".":"")
+      +(krosCielStav(ciel)==="overuje"?" Export sa ešte overuje — najprv skúšobná firma.":"")
+      +" "+KROS_CIELE[ciel].navod;
+    hlas(t, true);
+    if(typeof analytikaUdalost==="function") analytikaUdalost("export");
+  }catch(e){ console.error(e); hlas("Chyba pri exporte pre KROS: "+e.message, false); }
+}
 function xkBuild(X, volby){
   const S=xkStyles(); const wb=X.utils.book_new(); const D=firmaData, SET=D.settings||{};
   // Voľby zo sprievodcu (kap. 88.9). Bez nich sa správa ako predtým —
@@ -26117,7 +26552,8 @@ function xkSprievodcaHtml(){
   // Nálezy: ročná kontrola + reťaz zostatkov (ako doteraz) + nálezy dávky
   // (doklad bez čísla či kategórie, partner bez IČO, sirota) — spec 140.4 c, e.
   const dav=xkDavka();
-  const nalezy=xkNalezy().concat(dav.nalezy||[]);
+  // + nálezy zapisovača KROS, len keď je niektorý cieľ viditeľný (spec 142.9–142.10)
+  const nalezy=xkNalezy().concat(dav.nalezy||[]).concat(krosNalezySprievodcu());
   const chyb=nalezy.filter(n=>n.typ==="chyba").length;
   const Z=dav.zmeny||{}; const posledny=Z.zaznam;
   const zmienZmeny=posledny ? (Z.nove.length+Z.zmenene.length+Z.zmazane.length) : 0;
@@ -26161,6 +26597,7 @@ function xkSprievodcaHtml(){
       <div class="ocr-hint" style="margin-top:6px">Appka si zapamätá, čo v súbore bolo. Doklad, ktorý potom zmeníte, sa ohlási vo zvončeku a v ďalšom exporte pôjde znova.</div>
       <button class="abtn" style="width:100%;margin-top:10px" onclick="exportPohodaXml()">🧾 Pohoda XML pre účtovníka s POHODOU</button>
       <div class="ocr-hint" style="margin-top:6px">Prijaté faktúry, pokladničné doklady, banka a adresár v tvare, ktorý POHODA načíta cez Súbor → Dátová komunikácia → XML import. Vydané faktúry účtovník načíta z PDF s prílohou ISDOC; majetok POHODA cez XML neprijíma.</div>
+      ${krosTlacidlaHtml()}
       <div class="cloudmsg" id="xlsxMsg" style="margin-top:8px"></div>`}
   ]};
   return zostavaSprievodcaHtml("xk", def);
