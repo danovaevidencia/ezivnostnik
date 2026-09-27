@@ -104,6 +104,49 @@ export const TEXTY = {
     zivReg: "Gewerberegister: ", faktC: "Rechnung Nr.", isdoc: "Enthält E-Rechnung (ISDOC)", vytvorene: "Erstellt mit ", cislo: money },
 };
 
+// ── Zápis obchodnej spoločnosti v obchodnom registri (§ 3a Obchodného zákonníka) ──
+// Firemný režim (ROZHODNUTIA č. 257): spoločnosť (settings.pravnaForma
+// "spolocnost") má na faktúre namiesto čísla živnostenského registra zápis
+// v obchodnom registri — súd, oddiel a vložku. Súd sa ukladá v 1. páde tak, ako
+// ho vracia register (RPO `sourceRegister.registrationOffices`, napr. „Mestský
+// súd Bratislava III“, „Okresný súd Žilina“); do vety sa skloňuje tu. Súd, ktorý
+// sa skloňovať nedá (ručne napísaný), ide do vety za dvojbodku — radšej menej
+// pekná veta než zlý pád v názve súdu.
+const SUD_PADY = [
+  // [1. pád, 2. pád sk, anglicky, nemecky (2. pád)]
+  ["Okresný súd ", "Okresného súdu ", "District Court ", "Bezirksgerichts "],
+  ["Mestský súd ", "Mestského súdu ", "Municipal Court ", "Stadtgerichts "],
+];
+export function jeSpolocnostNastavenia(settings) {
+  return !!settings && settings.pravnaForma === "spolocnost";
+}
+// Veta zápisu v jazyku dokladu, alebo "" keď firma nie je spoločnosť.
+// Chýbajúci údaj sa nevymýšľa: vo vete ostane len to, čo je vyplnené —
+// appka chýbajúci zápis hlási pri vystavení (orZapisChyba v ezivnostnik.html).
+export function orZapisText(meta, jazyk) {
+  const m = meta || {};
+  const sud = String(m.orSud || "").trim(), odd = String(m.orOddiel || "").trim(), vl = String(m.orVlozka || "").trim();
+  if (!sud && !odd && !vl) return "";
+  const pad = SUD_PADY.find(p => sud.startsWith(p[0]));
+  const zvysok = pad ? sud.slice(pad[0].length) : sud;
+  const j = TEXTY[jazyk] ? jazyk : "sk";
+  const casti = [];
+  if (j === "en") {
+    casti.push("Registered in the Commercial Register" + (sud ? (pad ? " of the " + pad[2] + zvysok : ": " + sud) : ""));
+    if (odd) casti.push("Section: " + odd);
+    if (vl) casti.push("Insert No.: " + vl);
+  } else if (j === "de") {
+    casti.push("Eingetragen im Handelsregister" + (sud ? (pad ? " des " + pad[3] + zvysok : ": " + sud) : ""));
+    if (odd) casti.push("Abteilung: " + odd);
+    if (vl) casti.push("Einlage Nr.: " + vl);
+  } else {
+    casti.push("Zapísaná v Obchodnom registri" + (sud ? (pad ? " " + pad[1] + zvysok : ": " + sud) : ""));
+    if (odd) casti.push("oddiel " + odd);
+    if (vl) casti.push("vložka č. " + vl);
+  }
+  return casti.join(", ");
+}
+
 export function fmtDatum(dt) {
   if (!dt) return "";
   if (/^\d{4}-\d{2}-\d{2}/.test(dt)) {
@@ -118,7 +161,7 @@ export function fmtDatum(dt) {
 //
 //  model = {
 //    cislo,
-//    dodavatel : { nazov, adresa, ico, dic, icdph, tel, email, zivReg, iban, swift },
+//    dodavatel : { nazov, adresa, ico, dic, icdph, tel, email, zivReg, orZapis, iban, swift },
 //    odberatel : { nazov, adresa, ico, dic, icdph },
 //    datumy    : { vystavenie, dodanie, splatnost },
 //    platba    : { sposob, vs },
@@ -469,7 +512,12 @@ export function vykresliFakturu(jsPDF, model, opts = {}) {
   doc.setFont(FONT, "normal"); doc.setFontSize(8.3); setC(SOFT);
   let sy = y + 4.5;
   if (m.ico)    { doc.text(T.ico + " " + m.ico, sigCx, sy, { align: "center" }); sy += 4; }
-  if (m.zivReg) { doc.text(T.zivReg + m.zivReg, sigCx, sy, { align: "center" }); sy += 4; }
+  // Spoločnosť: zápis v obchodnom registri (§ 3a ObZ) namiesto živnostenského
+  // registra. Veta je dlhá — zalomí sa do šírky podpisového stĺpca.
+  if (m.orZapis) {
+    doc.splitTextToSize(m.orZapis, 62).forEach(r => { doc.text(r, sigCx, sy, { align: "center" }); sy += 3.6; });
+    sy += 0.4;
+  } else if (m.zivReg) { doc.text(T.zivReg + m.zivReg, sigCx, sy, { align: "center" }); sy += 4; }
   sy += 8; setD(MUTED); doc.setLineWidth(0.3); doc.line(sigX, sy, sigX + 58, sy); sy += 4.5;
   doc.setFontSize(7.8); setC(MUTED);
   doc.text(T.elektronicky, sigCx, sy, { align: "center" });
@@ -506,12 +554,16 @@ export function vykresliFakturu(jsPDF, model, opts = {}) {
 export function modelZakaznickejFaktury(f, meta, sumy, settings = {}) {
   const odbNazov = (typeof f.odberatel === "string")
     ? f.odberatel : ((f.odberatel && f.odberatel.nazov) || "");
+  // Spoločnosť nesie zápis v obchodnom registri, živnostník živnostenský register —
+  // nikdy oboje (číslo ŽR na faktúre s. r. o. by bolo cudzie tvrdenie).
+  const spol = jeSpolocnostNastavenia(settings);
   return {
     cislo: f.cislo,
     dodavatel: {
       nazov: meta.nazov, adresa: meta.adresa,
       ico: meta.ico, dic: meta.dic, icdph: meta.icdph,
-      tel: meta.tel, email: meta.email, zivReg: meta.zivReg,
+      tel: meta.tel, email: meta.email, zivReg: spol ? "" : meta.zivReg,
+      orZapis: spol ? orZapisText(meta, f.jazyk || "sk") : "",
       iban: meta.iban, swift: meta.swift,
     },
     odberatel: {

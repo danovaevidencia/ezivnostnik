@@ -3014,7 +3014,15 @@ const MODUL_KATEGORIA={
   jazdy:"jazdy", majetok:"jazdy", dokumenty:"jazdy", dovolenka:"jazdy",
   knihy:"knihy"
 };
+// Moduly, ktoré platia LEN pre fyzickú osobu (priznanie k dani z príjmov FO,
+// jeho import a prognóza dane a odvodov). Obchodnej spoločnosti sa nezobrazia
+// v žiadnom pláne (ROZHODNUTIA č. 257) — jedno miesto pre mriežku, lištu, bočný
+// panel, zvonček, návody aj Štatistiky, lebo všetky idú cez túto bránu.
+// Poradie zámerne: test_statistiky stráži, že za priznaním B v zozname modulov prognóza nestojí.
+const MODUL_LEN_SZCO=["prognoza","priznania","priznanieB"];
+function modulLenSZCOSkryty(m){ return MODUL_LEN_SZCO.includes(m) && jeSpolocnost(); }
 function modulPovolenyPreModul(m){
+  if(modulLenSZCOSkryty(m)) return false;
   const kat=MODUL_KATEGORIA[m];
   if(!kat) return true;              // neznámy modul → nechaj (kalendár a pod.)
   if(modulPovoleny(kat)) return true;
@@ -5011,7 +5019,9 @@ function nastSadzbaPrepisana(S, r){
 }
 function nastSadzbyPrehladHtml(S){
   const dnes=new Date();
-  const riadky=NAST_SADZBY_PREHLAD.map(r=>{
+  // Spoločnosti len DPH — daň z príjmov FO, zdravotné, NČZD a stravné SZČO jej
+  // nepatria (č. 257).
+  const riadky=NAST_SADZBY_PREHLAD.filter(r=>!jeSpolocnost() || r.kluc==="sadzbaDPH").map(r=>{
     const z=sadzbaZaznam(r.kluc, dnes);
     const prepis=nastSadzbaPrepisana(S, r);
     const zakon=z ? nastSadzbaTvar(z.v, r.tvar) : "—";
@@ -6133,6 +6143,8 @@ function _dashWidgetKatalogVypocet(){
   // Platiteľ DPH paušál uplatniť NEMÔŽE (§ 6 ods. 10 ZDP) — porovnanie by mu
   // ponúkalo voľbu, ktorú nemá. Osoba podľa § 7a platiteľom nie je, paušál môže.
   if(jePlatcaDPH()) delete kat.pausal;
+  // Obchodná spoločnosť (č. 257): odvody, daň FO a paušál sa jej netýkajú.
+  if(jeSpolocnost()){ delete kat.dan; delete kat.pausal; }
   return kat;
 }
 // dáta pre stĺpcový graf podľa metriky
@@ -7370,6 +7382,15 @@ function pasSumyData(mk){
   const rok=+mk.slice(0,4), mi=+mk.slice(5,7)-1;
   const {spolu, dph, pocet, bez}=pasSumyFakturovane(mk);
   let C=null;
+  // Obchodná spoločnosť (č. 257): odvody a daň FO jej appka nepočíta — pás
+  // ukáže len fakturované bez DPH a DPH, nie „odvody a daň 0 €“.
+  if(jeSpolocnost()){
+    const d0=new Date(rok, mi-1, 1), predMk0=d0.getFullYear()+"-"+String(d0.getMonth()+1).padStart(2,"0");
+    const P0=pasSumyFakturovane(predMk0);
+    const zmena0=(P0.pocet && P0.spolu>0) ? Math.round((spolu-P0.spolu)/P0.spolu*100) : null;
+    return {mk, pocet, spolu, dph, odvody:0, tvoje:r2(spolu-dph), dan:0, zdrav:0, soc:0, zmena:zmena0, predMk:predMk0,
+      neznameOdvody:false, bezOdvodov:true, riadok:null};
+  }
   // Keď daňový výpočet zlyhá, odvody sa NEUKÁŽU ako nula — to by bolo
   // tvrdenie, že sa neplatí nič. Pás v tom prípade povie, že ich nevie.
   //
@@ -7462,9 +7483,10 @@ function pasSumyObalkyHtml(D){
     +'<i style="width:'+pct(D.odvody)+'%;background:var(--ob-odvody)"></i>'
     +'</div>'
     +'<div class="pasSumy-rozpad">'
-    +'<span class="pasSumy-pol">'+teg("var(--ob-tvoje)")+'tvoje <b>'+eur0(D.tvoje)+'</b></span>'
+    +'<span class="pasSumy-pol">'+teg("var(--ob-tvoje)")+(D.bezOdvodov?'bez DPH':'tvoje')+' <b>'+eur0(D.tvoje)+'</b></span>'
     +(D.dph>0 ? sep+'<span class="pasSumy-pol">'+teg("var(--ob-dph)")+'DPH <b>'+eur0(D.dph)+'</b></span>' : '')
-    +(D.neznameOdvody
+    +(D.bezOdvodov ? ''
+      : D.neznameOdvody
         ? sep+'<span class="pasSumy-pol" style="color:var(--ink-warn)">odvody a daň sa nepodarilo spočítať</span>'
         : sep+'<span class="pasSumy-pol">'+teg("var(--ob-odvody)")+'odvody a daň <b>'+eur0(D.odvody)+'</b></span>')
     +'</div></div>';
@@ -7498,6 +7520,20 @@ function prehladOdlozHtml(H, kedy, pozn){
 function prehladRokZonaHtml(){
   if(!firmaData) return "";
   const rok=new Date().getFullYear();
+  // Spoločnosť: fakturované a DPH za rok, bez „Odlož si“ — daň z príjmov PO
+  // a odvody appka nepočíta (č. 257).
+  if(jeSpolocnost()){
+    let sp=0, dp=0, po=0;
+    for(let m=1;m<=12;m++){ const F=pasSumyFakturovane(rok+"-"+String(m).padStart(2,"0")); sp=r2(sp+F.spolu); dp=r2(dp+F.dph); po+=F.pocet; }
+    if(!po) return "";
+    return '<div class="pasSumy">'
+      +'<div class="pasSumy-lavo">'
+      +'<div class="pasSumy-hlav"><span class="pasSumy-lbl">Fakturované</span><span class="pasSumy-rok">rok '+rok+'</span></div>'
+      +'<div class="pasSumy-suma"><span class="pasSumy-cislo">'+eur0(sp)+'</span></div>'
+      +'</div>'
+      +pasSumyObalkyHtml({spolu:sp, dph:dp, odvody:0, tvoje:r2(sp-dp), neznameOdvody:false, bezOdvodov:true})
+      +'</div>';
+  }
   const {t}=danTotals(rok, firmaData.settings||{});
   // Fakturované za rok = súčet tých istých mesiacov ako v mesačnom pohľade
   // (dodanie, s DPH) — nie faktB z daňového výpočtu, inak by rok a mesiac
@@ -7524,6 +7560,7 @@ function prehladHtml(obd){
   const m=prehladMesiacHtml();
   if(!m) return "";
   const D=pasSumyData(pasMesiac);
+  if(D && D.bezOdvodov) return prehladPrepinacHtml("mesiac")+m;   // spoločnosť: bez „Odlož si“ (č. 257)
   // Mesiac: calcDanRow.odlozit = daň + odvody mesiaca − preddavky zaplatené
   // v ňom. Keď výpočet zlyhal, nepovie nulu — povie, že to nevie.
   const odloz=(D && D.riadok)
@@ -7627,7 +7664,12 @@ function sdNastavPohlad(p){ superDashPohlad=p; gpsUloz("eziv_sd_pohlad", p); ren
 // daňové zaťaženie; keby si ju každý počítal sám, prvá oprava by tri karty
 // rozišla a percentá by prestali sedieť.
 function sdRozdelenieRoka(rok){
-  const {t}=danTotals(+rok, firmaData.settings||{});
+  const t0=danTotals(+rok, firmaData.settings||{}).t;
+  // Spoločnosť (č. 257): odvody a daň FO jej nepatria — výsledok je príjmy
+  // mínus náklady a výseče odvodov a dane z koláča vypadnú (v > 0 filter).
+  const t=jeSpolocnost()
+    ? Object.assign({}, t0, {zdrav:0, soc:0, dan:0, odvodyDan:0, odlozit:0, danPreddavok:0, preddavokZP:0, cisty:t0.faktB})
+    : t0;
   const ostatneNakl=Math.max(0, r2(t.nakladySpolu-t.odpis));
   // `vysledok` môže byť ZÁPORNÝ — vtedy náklady a odvody prevýšili fakturované.
   // `zostane` je orezané na nulu, lebo výseč zápornej veľkosti neexistuje, a
@@ -7769,15 +7811,19 @@ function sdPohladRok(rok){
   // dovtedy za celú históriu — jedna dlaždica, dva rozsahy.
   const jazdyRok=jazdyRoka(rok);
   const kmRok=kmPodnik(jazdyRok), kmSukr=kmSukromne(jazdyRok);
+  // Spoločnosť: druhý stĺpec je príjem mínus náklady — „čistý“ z výpočtu FO
+  // by odrátal odvody a daň živnostníka (č. 257).
+  const spol=jeSpolocnost();
+  const druhy=r=>spol ? r2((+r.faktB||0)-(+r.nakladySpolu||0)) : r.cisty;
   // graf mesačný — príjmy (faktB) + čistý (cisty)
-  const maxMes=Math.max(...rows.map(r=>Math.max(r.faktB,r.cisty)),1);
+  const maxMes=Math.max(...rows.map(r=>Math.max(r.faktB,druhy(r))),1);
   const graf=rows.map((r,i)=>{
     const hP=Math.max(2,Math.round(r.faktB/maxMes*100));
-    const hC=Math.max(2,Math.round(r.cisty/maxMes*100));
+    const hC=Math.max(2,Math.round(druhy(r)/maxMes*100));
     return `<div class="sdbarpair">
       <div class="sdbars">
         <div class="sdbar" style="height:${hP}%;background:var(--brand)" title="Príjem ${eur0(r.faktB)}"></div>
-        <div class="sdbar" style="height:${hC}%;background:var(--st-zisk)" title="Čistý ${eur0(r.cisty)}"></div>
+        <div class="sdbar" style="height:${hC}%;background:var(--st-zisk)" title="${spol?"Príjem − náklady":"Čistý"} ${eur0(druhy(r))}"></div>
       </div>
       <i>${MES_SK[i]}</i>
     </div>`;
@@ -7800,14 +7846,16 @@ function sdPohladRok(rok){
   ];
   return `
     <div class="amini" style="margin-bottom:16px">
+      ${spol ? `<div class="aminbox"><div class="al">Príjmy − náklady</div><div class="av ${R.strata?"neg":"pos"}">${eur0(R.vysledok)}</div><div class="as">pred zdanením · podľa evidencie v appke</div></div>
+      <div class="aminbox"><div class="al">Fakturované</div><div class="av">${eur0(t.faktB)}</div><div class="as">bez DPH · náklady ${eur0(t.nakladySpolu)}</div></div>` : `
       <div class="aminbox"><div class="al">Odložiť na dane</div><div class="av" style="color:var(--accent-deep)">${eur0(t.odlozit)}</div><div class="as">mať bokom (rok)</div></div>
-      <div class="aminbox"><div class="al">Čistý príjem</div><div class="av pos">${eur0(t.cisty)}</div><div class="as">pred nákladmi · fakturované ${eur0(t.faktB)}</div></div>
+      <div class="aminbox"><div class="al">Čistý príjem</div><div class="av pos">${eur0(t.cisty)}</div><div class="as">pred nákladmi · fakturované ${eur0(t.faktB)}</div></div>`}
       <div class="aminbox"><div class="al">Dovolenka ${rok}</div><div class="av">${dovZost} dní</div><div class="as">nárok ${dovNarok} · čerp. ${dovCerp}</div></div>
       <div class="aminbox"><div class="al">Najazdené ${rok}</div><div class="av">${Math.round(kmRok).toLocaleString('sk')} km</div><div class="as">${jazdyRok.length} jázd${kmSukr>0?` · súkromne ${Math.round(kmSukr).toLocaleString('sk')} km`:""}</div></div>
     </div>
     <div class="card" style="margin-bottom:16px">
       <div class="chead" style="margin-bottom:4px">Príjmy a čistý zisk po mesiacoch</div>
-      <div class="sdlegend"><span><i style="background:var(--brand)"></i>Príjem bez DPH</span><span><i style="background:var(--st-zisk)"></i>Čistý zisk</span></div>
+      <div class="sdlegend"><span><i style="background:var(--brand)"></i>Príjem bez DPH</span><span><i style="background:var(--st-zisk)"></i>${spol?"Príjem − náklady":"Čistý zisk"}</span></div>
       <div class="sdchart">${graf}</div>
     </div>
     <div class="card" style="margin-bottom:16px">
@@ -7819,7 +7867,7 @@ function sdPohladRok(rok){
           ${R.casti.map(c=>`<div style="display:flex;align-items:center;gap:8px;font-size:12.5px"><i style="width:11px;height:11px;border-radius:3px;background:${c.c};flex-shrink:0"></i><span style="flex:1">${c.l}</span><b>${eur0(c.v)}</b><span style="color:var(--ink-soft);font-size:11px;width:38px;text-align:right">${Math.round(c.v/sumaCasti*100)}%</span></div>`).join("")}
         </div>
       </div>
-      ${t.faktB>0?`<div style="margin-top:12px;background:var(--bg);border-radius:10px;padding:10px 13px;font-size:12.5px">
+      ${(t.faktB>0 && !spol)?`<div style="margin-top:12px;background:var(--bg);border-radius:10px;padding:10px 13px;font-size:12.5px">
         Z každého fakturovaného eura zoberú odvody a daň <b>${Math.round(R.zatazenie*100)} centov</b>.
       </div>`:""}
     </div>
@@ -7854,6 +7902,7 @@ function sdKategorieKarta(rok){
 // ─── POHĽAD „TREND" ───────────────────────────────────────────────────────
 function sdPohladTrend(rok){
   const P=sdPorovnanieRokov();
+  const spol=jeSpolocnost();   // bez odvodov a dane FO (č. 257)
   if(!P.length) return `<div class="card"><div class="csub">Zatiaľ nie je čo porovnávať — pridajte doklady aspoň za jeden rok.</div></div>`;
   const max=Math.max(...P.map(r=>r.faktB), 1);
   const tento=P.find(r=>r.rok===+rok), predch=P.find(r=>r.rok===+rok-1);
@@ -7901,7 +7950,8 @@ function sdPohladTrend(rok){
     <div class="amini" style="margin-bottom:16px">
       <div class="aminbox"><div class="al">Fakturované ${rok}</div><div class="av">${eur0(tento?tento.faktB:0)}</div><div class="as">${predch?`vlani ${eur0(predch.faktB)} · `:""}${sipka(predch&&tento?zmena(tento.faktB,predch.faktB):null)}</div></div>
       <div class="aminbox"><div class="al">${tento&&tento.strata?"Strata":"Čo ostalo"}</div><div class="av ${tento&&tento.strata?"neg":"pos"}">${eur0(tento?tento.vysledok:0)}</div><div class="as">${predch?`vlani ${eur0(predch.vysledok)} · `:""}${sipka(predch&&tento&&predch.vysledok>0?zmena(tento.vysledok,predch.vysledok):null)}</div></div>
-      <div class="aminbox"><div class="al">Odvody a daň</div><div class="av">${tento?Math.round(tento.zatazenie*100):0} %</div><div class="as">z fakturovaného${predch?` · vlani ${Math.round(predch.zatazenie*100)} %`:""}</div></div>
+      ${spol ? `<div class="aminbox"><div class="al">Náklady ${rok}</div><div class="av">${eur0(tento?tento.naklady:0)}</div><div class="as">${predch?`vlani ${eur0(predch.naklady)}`:"podľa evidencie v appke"}</div></div>`
+      : `<div class="aminbox"><div class="al">Odvody a daň</div><div class="av">${tento?Math.round(tento.zatazenie*100):0} %</div><div class="as">z fakturovaného${predch?` · vlani ${Math.round(predch.zatazenie*100)} %`:""}</div></div>`}
       <div class="aminbox"><div class="al">Rokov v evidencii</div><div class="av">${P.length}</div><div class="as">${P[0].rok}–${P[P.length-1].rok}</div></div>
     </div>
     <div class="card" style="margin-bottom:16px">
@@ -7932,15 +7982,15 @@ function sdPohladTrend(rok){
       <div class="chead" style="margin-bottom:10px">Čísla rok po roku</div>
       <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:420px">
         <thead><tr style="text-align:right;color:var(--ink-soft);border-bottom:2px solid var(--line)">
-          <th style="text-align:left;padding:6px 4px">Rok</th><th style="padding:6px 4px">Fakturované</th><th style="padding:6px 4px">Náklady</th><th style="padding:6px 4px">Odvody+daň</th><th style="padding:6px 4px">Ostalo</th><th style="padding:6px 4px">Záťaž</th>
+          <th style="text-align:left;padding:6px 4px">Rok</th><th style="padding:6px 4px">Fakturované</th><th style="padding:6px 4px">Náklady</th>${spol?"":`<th style="padding:6px 4px">Odvody+daň</th>`}<th style="padding:6px 4px">Ostalo</th>${spol?"":`<th style="padding:6px 4px">Záťaž</th>`}
         </tr></thead>
         <tbody>${P.slice().reverse().map(r=>`<tr style="text-align:right;border-bottom:1px solid var(--line-soft)${r.rok===+rok?';font-weight:700':''}">
           <td style="text-align:left;padding:6px 4px">${r.rok}</td>
           <td style="padding:6px 4px">${eur0(r.faktB)}</td>
           <td style="padding:6px 4px;color:var(--ink-soft)">${eur0(r.naklady)}</td>
-          <td style="padding:6px 4px">${eur0(r.odvodyDan)}</td>
+          ${spol?"":`<td style="padding:6px 4px">${eur0(r.odvodyDan)}</td>`}
           <td style="padding:6px 4px;color:${r.strata?'var(--neg)':'var(--pos)'}">${eur0(r.vysledok)}</td>
-          <td style="padding:6px 4px">${Math.round(r.zatazenie*100)} %</td>
+          ${spol?"":`<td style="padding:6px 4px">${Math.round(r.zatazenie*100)} %</td>`}
         </tr>`).join("")}</tbody>
       </table></div>
     </div>`;
@@ -9432,6 +9482,12 @@ function modulNaObrazovke(){
 // 13. 9. 2026, ROZHODNUTIA.md 30). Dlaždicu plán skryje, odkazy ju obchádzali.
 function modulMimoPlanu(id){
   if(modulPovolenyPreModul(id)) return false;
+  // Spoločnosti modul nechýba v PLÁNE — neplatí pre ňu. Cenník by jej ponúkal
+  // kúpu niečoho, čo jej žiadny plán nedá.
+  if(modulLenSZCOSkryty(id)){
+    alert((APPS[id]||{n:id}).n+" sa týka len živnostníka (fyzickej osoby). Obchodná spoločnosť ho v appke nemá — daň z príjmov právnickej osoby rieši jej účtovný program.\n\nPrávnu formu zmeníte v Nastavenia a dáta → Firemné údaje.");
+    return true;
+  }
   zobrazCennik(id);   // výber zo zvončeka pre neotvorený modul vráti otvorSVyberom
   return true;
 }
@@ -9883,9 +9939,17 @@ function nvOtvorModulHtml(id){
   return `<button class="aabtn pri" onclick="nvOtvorModul('${id}')">Otvoriť ${esc(a.n)}</button>`;
 }
 // Vrstva 0: zoznam návodov po skupinách, v tom poradí, v akom sú moduly na ploche.
+// Návody, ktoré hovoria len o dani a odvodoch FO — spoločnosti sa neponúkajú
+// (č. 257). Modul celý (priznanie B, priznania) skrýva `modulLenSZCOSkryty`.
+const NV_ULOHY_LEN_SZCO=["dph/odlozit","superdash/rok"];
+function nvUlohyPreFirmu(id, ulohy){
+  // `typeof` ako pri nvDostupny: test_navody skladá návody z výrezu appky.
+  return (typeof jeSpolocnost==="function" && jeSpolocnost()) ? (ulohy||[]).filter(u=>!NV_ULOHY_LEN_SZCO.includes(id+"/"+u.id)) : (ulohy||[]);
+}
 function nvZoznamHtml(N){
   const riadok=id=>{
     const a=APPS[id], m=N[id]; if(!a||!m) return "";
+    if(typeof modulLenSZCOSkryty==="function" && modulLenSZCOSkryty(id)) return "";   // spoločnosť: modul len pre živnostníka
     return `<button class="nv-riadok" onclick="otvorNavod('${id}')">
       <span class="appic nv-ic" style="background:${a.c}">${a.ic}</span>
       <span class="nv-rtext"><b>${esc(a.n)}</b><span>${esc(m.vJednejVete||"")}</span>${nvDostupny(id) ? "" : `<span class="nv-planmini">🔒 nie je vo vašom pláne</span>`}</span>
@@ -9911,7 +9975,7 @@ function nvZoznamHtml(N){
 // Vrstva 1: na čo je modul a zoznam úloh.
 function nvModulHtml(id, m){
   const a=APPS[id]||{n:id};
-  const ulohy=(m.ulohy||[]).map((u,i)=>`<button class="nv-riadok" onclick="otvorNavod('${id}','${u.id}')">
+  const ulohy=nvUlohyPreFirmu(id, m.ulohy).map((u,i)=>`<button class="nv-riadok" onclick="otvorNavod('${id}','${u.id}')">
       <span class="nv-cislo">${i+1}</span>
       <span class="nv-rtext"><b>${esc(u.nazov)}</b><span>${esc(u.kedy||"")}</span></span>
       <span class="nv-sip">›</span></button>`).join("");
@@ -9925,7 +9989,7 @@ function nvModulHtml(id, m){
 function nvUlohaHtml(id, m, u){
   const a=APPS[id]||{n:id};
   const kroky=u.kroky||[];
-  const vsetky=m.ulohy||[];
+  const vsetky=nvUlohyPreFirmu(id, m.ulohy);
   const dalsia=vsetky[vsetky.indexOf(u)+1];
   const podrobnosti=u.podrobnosti||[];
   return `${nvSpatHtml(a.n+" — návody",`otvorNavod('${id}')`)}
@@ -13052,6 +13116,11 @@ function feModal(idx, nova, kluc){
     if(_ibChyba) alert((jeZaloha?"Zálohová faktúra":"Faktúra")+" je uložená.\n\n"+_ibChyba+"\n\n"+
       "Odberateľ by podľa nej nezaplatil — banka účet s preklepom odmietne a QR kód sa na PDF nevytvorí. "+
       "Opravte IBAN v Nastavenia a dáta → Firemné údaje; faktúra sa potom vytlačí aj odošle so správnym účtom.");
+    // Spoločnosť bez zápisu v obchodnom registri (§ 3a ObZ, č. 257): uložiť áno —
+    // zápis doklad v sebe nenesie, berie sa z Nastavení pri PDF aj e-faktúre —
+    // ale nie potichu. Platí pre každý doklad z editora vrátane ponuky (obchodná listina).
+    const _orChyba=orZapisChyba(firmaData.meta, firmaData.settings);
+    if(_orChyba) alert((jeZaloha?"Zálohová faktúra":jePonuka?"Cenová ponuka":"Faktúra")+" je uložená.\n\n"+_orChyba);
   },
   nova?null:()=>{
     const _f=POLE()[idx]||{};
@@ -13200,7 +13269,8 @@ function feMapFirmu(r){
     const mesto=T(a.municipality);
     adresa=[ (ulica+(cislo?" "+cislo:"")).trim(), (psc+" "+mesto).trim() ].filter(Boolean).join(", ");
   }
-  return {nazov:T(nazov), ico:T(ico), dic, icdph, adresa};
+  // Zápis v registri (obchodný / živnostenský) — pre nastavenia vlastnej firmy (č. 257).
+  return {nazov:T(nazov), ico:T(ico), dic, icdph, adresa, register:rpoRegister(r)};
 }
 // Dátum z FS do tvaru YYYY-MM-DD. FS ho vracia ako `createDate`, ktorý býva
 // ISO timestamp (2026-07-24T14:59:44) alebo s pásmom (…+02:00), niekedy aj
@@ -13794,6 +13864,7 @@ function feVyberFirmu(i){
 // ═══════════════════════════════════════════════════════════════
 function faktCistyOdhad(f){
   if(!f || !firmaData) return null;
+  if(jeSpolocnost()) return null;   // daň a odvody FO spoločnosti nepatria (č. 257)
   const bez=r2(+((faktSumy(f)||{}).bez)||0);
   if(!(bez>0)) return null;
   const mk=faktObdobie(f);
@@ -17037,8 +17108,12 @@ function appDPH(){
   if(prekresliVRamci("dph")) return;   // rámec super apky (GY)
   const rok=new Date().getFullYear();
   const S=firmaData.settings||{};
-  const {t}=danTotals(rok, S);              // konzistentný výpočet (ako dashboard a prognóza)
-  const dan=deDanovyVypocet(rok,"skutocne"); // len pre informatívny NČZD odhad
+  // Spoločnosť (č. 257): daň z príjmov FO, odvody ani NČZD sa jej nepočítajú
+  // a nekreslia — ostáva DPH, kontrolný a súhrnný výkaz a podania.
+  const spol=jeSpolocnost();
+  if(spol && dphTab==="dane") dphTab="vykaz";   // záložka „Dane a odvody“ je výpočet FO
+  const {t}=spol ? {t:null} : danTotals(rok, S);   // konzistentný výpočet (ako dashboard a prognóza)
+  const dan=spol ? null : deDanovyVypocet(rok,"skutocne"); // len pre informatívny NČZD odhad
   const dph=dphSaldoRok(rok);
   const mesiace=dphPoMesiacoch(rok);
   const poslMesiac=mesiace.length?mesiace[mesiace.length-1]:null;
@@ -17046,9 +17121,11 @@ function appDPH(){
   document.getElementById("appScreen").innerHTML=appHlavicka("dph","")+pasIbaCitanie("dph")+strazcaBanner()+`
     <div class="amini">
       <div class="aminbox"><div class="al">DPH na úhradu</div><div class="av warn">${eur(dph.saldo)}</div></div>
+      ${spol ? `<div class="aminbox"><div class="al">DPH vo faktúrach</div><div class="av">${eur(dph.out)}</div></div>
+      <div class="aminbox"><div class="al">DPH na odpočet</div><div class="av">${eur(dph.inp)}</div></div>` : `
       <div class="aminbox"><div class="al">Odložiť na dane a odvody</div><div class="av warn">${eur(t.odlozit)}</div></div>
       <div class="aminbox"><div class="al">Skutočné odvody (rok)</div><div class="av">${eur(t.zdrav+t.soc)}</div></div>
-      <div class="aminbox"><div class="al">Daň z príjmov</div><div class="av">${eur(t.dan)}</div></div>
+      <div class="aminbox"><div class="al">Daň z príjmov</div><div class="av">${eur(t.dan)}</div></div>`}
     </div>
     <div class="atool atabs" style="flex-wrap:wrap;margin-bottom:14px">
       ${[["vykaz","🧾 Kontrolný výkaz a priznanie"],
@@ -17062,7 +17139,7 @@ function appDPH(){
          // v jednej skupine sú horšie než duplicita: pri duplicite človek aspoň
          // vie, že je jedno, kam klikne. Súhrn sa presunul do modulu.
          ["podania","📁 Odoslané podania"],
-         ["dane","💶 Dane a odvody"]]
+         ...(spol?[]:[["dane","💶 Dane a odvody"]])]
         .map(([k,l])=>`<span class="atab ${dphTabPlatny()===k?'on':''}" onclick="dphNastavTab('${k}')">${l}</span>`).join("")}
     </div>
 
@@ -17129,11 +17206,14 @@ function rocnaZostavaRiadky(rok){
   if(su.vyradenie) pridaj("Vyradený majetok — do výdavkov", eur(su.vyradenie));
   if(Z.NAH.aktivne && Z.NAH.spolu) pridaj("Náhrady za km — do výdavkov", eur(Z.NAH.spolu));
   if(su.lux && su.lux.pripocitat) pridaj("Úprava pri aute nad "+eur(ODPIS_LUX_LIMIT), "+"+eur(su.lux.pripocitat));
+  // Spoločnosť (č. 257): odvody, základ dane FO, NČZD ani daň FO do zostavy nejdú.
+  if(!jeSpolocnost()){
   pridaj("Odvody (ZP + SP)", eur(dan.odvodyRok));
   r.push({polozka:"", suma:""});
   pridaj("Základ dane", eur(dan.zaklad));
   pridaj("Nezdaniteľné časti", "−"+eur(dan.nczd));
   pridaj("Daň z príjmov", eur(dan.dan));
+  }
   r.push({polozka:"", suma:""});
   pridaj("Faktúr / dokladov", Z.pocFakt+" / "+Z.pocVyd);
   pridaj("Najazdené km"+(Z.kmRokSukr?" (podnikateľské)":""),
@@ -17215,14 +17295,14 @@ function uzavierkaHtml(rok){
   const pocFakt=Z.pocFakt, pocVyd=Z.pocVyd;
   return `<div class="card" style="margin-top:14px">
     <h2 style="font-size:16px;margin-bottom:4px">📋 Ročná uzávierka ${rok}</h2>
-    <div class="csub" style="margin-bottom:12px">Súhrn pre daňové priznanie — všetko na jednom mieste.</div>
+    <div class="csub" style="margin-bottom:12px">${jeSpolocnost()?"Súhrn roka pre účtovníka — daň z príjmov právnickej osoby počíta váš účtovný program.":"Súhrn pre daňové priznanie — všetko na jednom mieste."}</div>
     <div class="dphline"><span>Príjmy (bez DPH)</span><b>${eur(su.prijmy)}</b></div>
     <div class="dphline"><span>Výdavky (bez odpisu)</span><b>${eur(su.vydavkySkut||su.vydavky||0)}</b></div>
     <div class="dphline"><span>Odpisy majetku</span><b>${eur(odpis)}</b></div>
-    <div class="dphline"><span>Odvody (ZP + SP)</span><b>${eur(dan.odvodyRok)}</b></div>
+    ${jeSpolocnost() ? "" : `<div class="dphline"><span>Odvody (ZP + SP)</span><b>${eur(dan.odvodyRok)}</b></div>
     <div class="dphline"><span>Základ dane</span><b>${eur(dan.zaklad)}</b></div>
     <div class="dphline"><span>Nezdaniteľné časti${nczdRozpad(rok)}</span><b>−${eur(dan.nczd)}</b></div>
-    <div class="dphline"><span>Daň z príjmov</span><b style="color:var(--warn)">${eur(dan.dan)}</b></div>
+    <div class="dphline"><span>Daň z príjmov</span><b style="color:var(--warn)">${eur(dan.dan)}</b></div>`}
     <div class="dphline" style="border-top:1px solid var(--line)"><span>Faktúr / dokladov</span><b>${pocFakt} / ${pocVyd}</b></div>
     <div class="dphline"><span>Najazdené km${kmRokSukr?" (podnikateľské)":""}</span><b>${Math.round(kmRokSukr?kmRokPodnik:kmRok).toLocaleString('sk')} km${kmRokSukr?` <span style="color:var(--ink-soft);font-weight:400">z ${Math.round(kmRok).toLocaleString('sk')}</span>`:""}</b></div>
     ${NAH.aktivne?`<div class="dphline"><span>Náhrady za km — do výdavkov</span><b>${eur(NAH.spolu)}</b></div>`:""}
@@ -20643,7 +20723,7 @@ function dmKopiruj(){
 // stránkou stráži test_pravne, takže nová verzia dokumentu bez úpravy tu
 // sadu zhodí.
 const DOKUMENTY={
-  podmienky:{url:"podmienky.html",     n:"Obchodné podmienky",      verzia:"1.6"},
+  podmienky:{url:"podmienky.html",     n:"Obchodné podmienky",      verzia:"1.7"},
   sukromie: {url:"sukromie.html",      n:"Ochrana osobných údajov", verzia:"1.19"},
   zmazanie: {url:"zmazanie-uctu.html", n:"Zmazanie účtu a údajov"},
 };
@@ -20916,7 +20996,10 @@ function appData(){
       ${dokumentyHtml()}
       <div style="text-align:center;font-size:11px;color:var(--ink-soft);margin-top:10px">eživnostník · verzia ${APP_VERZIA}</div>
     </div>
-    <div class="card" style="margin-bottom:14px">
+    <!-- Karty s triedou len-szco platia len pre živnostníka (č. 257). Spoločnosti sa
+         SKRYJÚ, nie vynechajú — ulozNastavenia číta ich polia vždy a chýbajúce pole
+         by uložené preddavky prepísalo nulou. -->
+    <div class="card len-szco" style="margin-bottom:14px${jeSpolocnost(d)?';display:none':''}">
       <h2 style="font-size:16px;margin-bottom:4px">Režim výdavkov</h2>
       <div class="csub" style="margin-bottom:14px">${jePlatcaDPH()?'Ste platiteľ DPH. Paušálne výdavky zákon dovoľuje neplatiteľovi a aj v roku, v ktorom ste sa platiteľom stali (§ 6 ods. 10) — pri roku, keď ste boli platiteľom celý, ich appka nepustí.':'Vyberte, ako uplatňujete výdavky. Appka pod voľbou ukáže, ktorá možnosť vychádza výhodnejšie.'}</div>
       ${nastVydavkyRezimHtml()}
@@ -20933,7 +21016,7 @@ function appData(){
             : "Použije sa dovtedy, kým si auto nezaevidujete v <b>Majetku</b>. Potom appka počíta odpisy sama a toto číslo prestane platiť."
           }</div>
         </div>
-        <div class="mfield">
+        <div class="mfield len-szco"${jeSpolocnost(d)?' style="display:none"':''}>
           <label>III. pilier — zaplatené za rok (€)</label>
           <input type="number" step="0.01" min="0" id="set_3pilier" value="${esc((d.settings||{}).nczd3pilier||0)}">
           <div class="mhint">Doplnkové dôchodkové sporenie. Odpočíta sa od základu dane, najviac ${eur(NCZD_3PILIER_MAX)} ročne — ak zadáte viac, appka uplatní len strop. Zadávajte zaplatené príspevky, nie nasporenú sumu.</div>
@@ -20941,7 +21024,7 @@ function appData(){
       </div>
     </div>
 
-    <div class="card" style="margin-bottom:14px">
+    <div class="card len-szco" style="margin-bottom:14px${jeSpolocnost(d)?';display:none':''}">
       <h2 style="font-size:16px;margin-bottom:4px">Preddavky a odvody</h2>
       <div class="csub" style="margin-bottom:14px">Preddavky, ktoré platíte priebežne, znižujú sumu „Odložiť" v prognóze.</div>
       <div class="mfield"><label>Mesačný preddavok ZP (€)</label><input type="number" step="0.01" id="set_preddavokZP" value="${esc((d.settings||{}).preddavokZP||0)}"></div>
@@ -21036,7 +21119,23 @@ function appData(){
         <div class="mfield"><label>Telefón (na faktúre)</label><input id="set_tel" value="${esc((d.meta||{}).tel||'')}" placeholder="0900 000 000"></div>
         <div class="mfield"><label>E-mail (na faktúre)</label><input id="set_email" value="${esc((d.meta||{}).email||'')}" placeholder="vas@email.sk"></div>
       </div>
-      <div class="mfield"><label>Číslo živnostenského registra</label><input id="set_zivReg" value="${esc((d.meta||{}).zivReg||'')}" placeholder="napr. 140-35561"></div>
+      <div class="mfield"><label for="set_pravnaForma">Právna forma</label>
+        <select id="set_pravnaForma" onchange="nastPravnaFormaPrepni()">
+          <option value=""${jeSpolocnost(d)?"":" selected"}>Živnostník (SZČO)</option>
+          <option value="spolocnost"${jeSpolocnost(d)?" selected":""}>Obchodná spoločnosť (s. r. o., a. s., …)</option>
+        </select>
+        <div class="ocr-hint" id="set_pravnaFormaPozn" style="margin-top:5px">${esc(pravnaFormaPoznamka(jeSpolocnost(d)))}</div></div>
+      <div class="mfield" id="set_zivRegBox"${jeSpolocnost(d)?' style="display:none"':''}><label>Číslo živnostenského registra</label><input id="set_zivReg" value="${esc((d.meta||{}).zivReg||'')}" placeholder="napr. 140-35561"></div>
+      <div id="set_orBox"${jeSpolocnost(d)?'':' style="display:none"'}>
+        <div class="mfield"><label for="set_orSud">Zápis v obchodnom registri — registrový súd</label>
+          <input id="set_orSud" list="set_orSudy" value="${esc((d.meta||{}).orSud||'')}" placeholder="napr. Mestský súd Bratislava III">
+          <datalist id="set_orSudy">${OR_SUDY.map(x=>`<option value="${esc(x)}">`).join("")}</datalist></div>
+        <div class="mrow2">
+          <div class="mfield"><label for="set_orOddiel">Oddiel</label><input id="set_orOddiel" value="${esc((d.meta||{}).orOddiel||'')}" placeholder="napr. Sro"></div>
+          <div class="mfield"><label for="set_orVlozka">Vložka č.</label><input id="set_orVlozka" value="${esc((d.meta||{}).orVlozka||'')}" placeholder="napr. 12345/B"></div>
+        </div>
+        <div class="ocr-hint" style="margin:-4px 0 12px">Faktúra spoločnosti musí niesť zápis v obchodnom registri (§ 3a Obchodného zákonníka) — súd, oddiel a vložku nájdete na orsr.sk alebo ich doplní tlačidlo „Doplniť z registra“.</div>
+      </div>
       <div class="mrow2">
         <div class="mfield"><label>DIČ</label><input id="set_dic" value="${esc((d.meta||{}).dic||'')}"></div>
         <div class="mfield"><label>IČ DPH</label><input id="set_icdph" value="${esc((d.meta||{}).icdph||'')}"></div>
@@ -21126,7 +21225,19 @@ async function doplnFirmuPodlaICO(){
     if(adresa && document.getElementById("set_adresa")) document.getElementById("set_adresa").value=adresa;
     if(dic && document.getElementById("set_dic")) document.getElementById("set_dic").value=dic;
     if(icdph && document.getElementById("set_icdph")) document.getElementById("set_icdph").value=icdph;
-    if(stav){ stav.textContent="✓ Údaje doplnené z registra. Skontrolujte ich."; stav.style.color="var(--pos)"; }
+    // Právna forma a zápis podľa registra, v ktorom firma je (č. 257): obchodný
+    // register → spoločnosť so súdom, oddielom a vložkou; živnostenský → SZČO
+    // s číslom ŽR. Register, ktorý nevrátil nič, nemení nič.
+    const R=F.register||null, nast=(id,v)=>{ const e=document.getElementById(id); if(e && v) e.value=v; };
+    let veta="";
+    if(R && R.druh==="or"){
+      nast("set_pravnaForma","spolocnost"); nast("set_orSud",R.urad); nast("set_orOddiel",R.oddiel); nast("set_orVlozka",R.vlozka);
+      veta=" Firma je v obchodnom registri — nastavená ako obchodná spoločnosť.";
+    } else if(R && R.druh==="zr"){
+      nast("set_pravnaForma",""); nast("set_zivReg",R.cislo);
+    }
+    if(document.getElementById("set_pravnaForma")) nastPravnaFormaPrepni();
+    if(stav){ stav.textContent="✓ Údaje doplnené z registra."+veta+" Skontrolujte ich a uložte."; stav.style.color="var(--pos)"; }
   }catch(err){
     if(stav){ stav.textContent="Register sa nepodarilo osloviť — vyplňte údaje ručne."; stav.style.color="var(--warn)"; }
   }
@@ -21146,6 +21257,79 @@ function nastDicUpozornenieHtml(meta){
   // nie až pri prvom odoslaní, keď už má človek doklad rozpísaný.
   if(peppolUcastnik((meta||{}).dic, (meta||{}).icdph)) return "";
   return `<div class="ocr-hint" style="margin-top:8px;color:var(--ink-warn)">⚠ Firma nemá vyplnené DIČ — bez neho sa v sieti Peppol nedá vystupovať: e-faktúry sa neprijmú ani neodošlú. Doplňte ho vyššie v údajoch firmy.</div>`;
+}
+// ═══ FIREMNÝ REŽIM — právna forma (ROZHODNUTIA č. 257, kolo 141 E) ═══
+// Appku môže používať aj obchodná spoločnosť: fakturuje (aj e-faktúry), eviduje
+// doklady, páruje banku, vedie knihu jázd, DPH a kontrolný výkaz — účtovníctvo
+// vedie v inom programe a appka jej dá export. Prázdna hodnota = živnostník,
+// teda doterajšie správanie bez zmeny. Príznak je v `settings` (synchronizuje sa
+// s firmou), nie v databáze — stĺpec by potreboval migráciu a nič na serveri ho
+// nečíta. Čo sa spoločnosti skrýva, je v `modulLenSZCO` / `widgetLenSZCO`; dáta
+// sa nemažú, len nezobrazujú.
+function jeSpolocnost(d){
+  const S=((d||firmaData||{}).settings)||{};
+  return S.pravnaForma==="spolocnost";
+}
+// Registrové súdy (od 1. 6. 2023 osem, § 3 zákona o obchodnom registri) — len
+// ponuka k písaniu; register vracia súd v tomto tvare a faktura_pdf.js ho skloňuje.
+const OR_SUDY=["Mestský súd Bratislava III","Okresný súd Banská Bystrica","Mestský súd Košice",
+  "Okresný súd Nitra","Okresný súd Prešov","Okresný súd Trenčín","Okresný súd Trnava","Okresný súd Žilina"];
+function pravnaFormaPoznamka(spol){
+  return spol
+    ? "Appka skryje to, čo platí len pre živnostníka (priznanie typu B, odvody, paušálne výdavky, odkladanie na daň z príjmov). Účtovníctvo vediete v inom programe — podklady mu dá Export a záloha."
+    : "Faktúry, výdavky, DPH, priznanie typu B a odvody živnostníka.";
+}
+// Prepnutie vo formulári: len zobrazenie polí. Uloží sa až tlačidlom, ako všetko.
+function nastPravnaFormaPrepni(){
+  const spol=val("set_pravnaForma")==="spolocnost";
+  const zr=document.getElementById("set_zivRegBox"), or=document.getElementById("set_orBox");
+  if(zr) zr.style.display=spol?"none":"";
+  if(or) or.style.display=spol?"":"none";
+  document.querySelectorAll(".len-szco").forEach(e=>{ e.style.display=spol?"none":""; });
+  const p=document.getElementById("set_pravnaFormaPozn"); if(p) p.textContent=pravnaFormaPoznamka(spol);
+}
+// Chýbajúci zápis v obchodnom registri (§ 3a ObZ) — veta pre človeka alebo "".
+// Živnostník nedostane nič: číslo živnostenského registra zákon na faktúre nežiada.
+function orZapisChyba(m, S){
+  if(!jeSpolocnost({settings:S||{}})) return "";
+  m=m||{};
+  const chyba=[["orSud","registrový súd"],["orOddiel","oddiel"],["orVlozka","číslo vložky"]]
+    .filter(([k])=>!String(m[k]||"").trim()).map(([,n])=>n);
+  if(!chyba.length) return "";
+  return "Faktúre spoločnosti chýba zápis v obchodnom registri (§ 3a Obchodného zákonníka): "+chyba.join(", ")+". "
+    +"Doplňte ho v Nastavenia a dáta → Firemné údaje (tlačidlo „Doplniť z registra“ ho vyplní samo); faktúra sa potom vytlačí aj odošle s ním.";
+}
+// Pred PDF: neblokuje (PDF môže človek potrebovať hneď), ale musí vedieť, že
+// doklad nemá povinnú náležitosť. Rovnaký vzor ako `potvrdIbanPreTlac`.
+function potvrdOrZapisPreTlac(){
+  const chyba=orZapisChyba((firmaData||{}).meta, (firmaData||{}).settings);
+  if(!chyba) return true;
+  return confirm(chyba+"\n\nOK = vytvoriť PDF aj tak · Zrušiť = najprv doplním zápis");
+}
+// Súd, oddiel a vložka z odpovede RPO (`sourceRegister`). Register vracia históriu
+// — platí záznam bez `validTo` s najnovším `validFrom`. Číslo „Sro/12345/B“
+// (niekde „Sro 12345/B“) sa delí na oddiel a vložku.
+function rpoPlatnyZaznam(pole){
+  if(!Array.isArray(pole) || !pole.length) return "";
+  const dnes=new Date().toISOString().slice(0,10);
+  const platne=pole.filter(x=>x && (!x.validTo || String(x.validTo).slice(0,10)>=dnes));
+  const k=(platne.length?platne:pole).slice().sort((a,b)=>String(b.validFrom||"").localeCompare(String(a.validFrom||"")))[0];
+  const v=k && (k.value!=null ? k.value : k);
+  return String((v && typeof v==="object") ? (v.value||"") : (v||"")).trim();
+}
+function rpoRegister(r){
+  const sr=(r||{}).sourceRegister||null;
+  if(!sr) return null;
+  const nazov=String(((sr.value||{}).value)||"");
+  const kod=String(((sr.value||{}).code)||"");
+  const druh=(kod==="1" || /obchodn/i.test(nazov)) ? "or" : (kod==="2" || /živnost/i.test(nazov)) ? "zr" : "";
+  const urad=rpoPlatnyZaznam(sr.registrationOffices), cislo=rpoPlatnyZaznam(sr.registrationNumbers);
+  const out={druh, urad, cislo, oddiel:"", vlozka:""};
+  if(druh==="or"){
+    const m=cislo.match(/^\s*([A-Za-zÁ-ž]+)\s*[\/\s]\s*(.+)$/);
+    if(m){ out.oddiel=m[1]; out.vlozka=m[2].trim(); }
+  }
+  return out;
 }
 // IBAN — kontrolné číslice podľa ISO 13616 (mod 97): prvé štyri znaky idú na
 // koniec, písmená sa nahradia číslami (A=10 … Z=35) a zvyšok po delení 97 musí
@@ -21178,6 +21362,10 @@ function ibanFirmyChyba(m){
 // Pred PDF s QR kódom. Neblokuje: PDF môže človek potrebovať hneď, ale musí
 // vedieť, že účet na ňom je zlý a QR kód na ňom nebude (`generujPayBySquareQR`).
 function potvrdIbanPreTlac(){
+  // Tu aj zápis v obchodnom registri (č. 257): všetky tri cesty k PDF faktúry
+  // (stiahnuť, poslať, záloha) už idú cez túto bránu — druhá brána vedľa by sa
+  // na jednom z miest zabudla.
+  if(!potvrdOrZapisPreTlac()) return false;
   const chyba=ibanFirmyChyba((firmaData||{}).meta);
   if(!chyba) return true;
   return confirm(chyba+"\n\n"+
@@ -21286,6 +21474,12 @@ async function ulozNastavenia(){
   if(document.getElementById("set_tel")) firmaData.meta.tel=val("set_tel")||"";
   if(document.getElementById("set_email")) firmaData.meta.email=val("set_email")||"";
   if(document.getElementById("set_zivReg")) firmaData.meta.zivReg=val("set_zivReg")||"";
+  // Firemný režim (č. 257). Údaje ostávajú v dátach aj po prepnutí späť — skrýva
+  // sa zobrazenie, nič sa nemaže (živnostník, ktorý založí s. r. o., má obe).
+  if(document.getElementById("set_pravnaForma")) firmaData.settings.pravnaForma=(val("set_pravnaForma")==="spolocnost")?"spolocnost":"";
+  if(document.getElementById("set_orSud")) firmaData.meta.orSud=String(val("set_orSud")||"").trim();
+  if(document.getElementById("set_orOddiel")) firmaData.meta.orOddiel=String(val("set_orOddiel")||"").trim();
+  if(document.getElementById("set_orVlozka")) firmaData.meta.orVlozka=String(val("set_orVlozka")||"").trim();
   if(document.getElementById("set_ico")) firmaData.meta.ico=val("set_ico").replace(/\s/g,"")||"";
   if(document.getElementById("set_nazov")) firmaData.meta.nazov=val("set_nazov")||"";
   if(document.getElementById("set_adresa")) firmaData.meta.adresa=val("set_adresa")||"";
@@ -24311,7 +24505,9 @@ function xkBuild(X, volby){
   const DAV=uctovnaDavka(V); wb._davka=DAV;
   // --- Daňová evidencia: hárok na rok ---
   const danRoky=[...new Set([...(D.faktury||[]).map(f=>String(f.datum||f.vystavenie||"").slice(0,4)),...(D.vydavky||[]).map(x=>String(x.datum||"").slice(0,4))].filter(y=>y&&y.length===4))].sort();
-  (danRoky.length?danRoky:[String(new Date().getFullYear())]).filter(chceRok).forEach(rok=>{
+  // Hárok „Daňová evidencia“ je výpočet dane a odvodov FO — spoločnosti ho export
+  // nedáva, účtovníctvo a daň PO rieši jej program (č. 257).
+  (danRoky.length?danRoky:[String(new Date().getFullYear())]).filter(chceRok).filter(()=>!jeSpolocnost()).forEach(rok=>{
     const head=["Mesiac","Fakt. bez DPH","Odpis auta","Ostatné nákl.","Náklady spolu","Čiastk. základ","Zdravotné","Preddavok ZP","Daň","Predd. daň","Sociálne","Odvody+daň","Odložiť","Čistý príjem"];
     const aoa=[[xkCell("Daňová evidencia "+rok,S.title)],[xkCell((D.meta&&D.meta.nazov||"")+" · IČO "+(D.meta&&D.meta.ico||""),S.sub)],[],head.map(h=>xkCell(h,S.hdr))];
     const t={}; head.slice(1).forEach((_,k)=>t[k]=0);
@@ -24650,7 +24846,7 @@ function kartaPlanu(p){
     <div class="cenKarta ${jeAkt?'akt':''}" style="--_c:${p.farba}">
       ${jeAkt?`<div class="cenAktBadge">Váš plán</div>`:''}
       <div class="cenNazov">${p.nazov}</div>
-      <div class="cenPopis">${p.popis}</div>
+      <div class="cenPopis">${(jeSpolocnost() && p.kod==="standard") ? "Faktúry, výdavky, banka a kniha jázd — bez agendy platiteľa DPH" : p.popis}</div>
       <div class="cenCena">${p.cenaMes===0?'<b>Zdarma</b>':(()=>{ const c=cenaDvojmo(cena);
         return `<b>${c.velka}</b><span>${zaObdobie}</span><span class="dph">${c.jednotka} · ${c.mala}</span>`; })()}</div>
       ${uspora>0?`<div class="cenUspora">ušetríte ${uspora} %</div>`:'<div class="cenUspora" style="visibility:hidden">.</div>'}
@@ -24660,7 +24856,7 @@ function kartaPlanu(p){
         ${riadok(lim.bankaImporty?`${lim.bankaImporty} importy výpisu`:"Bankový výpis bez obmedzenia", true)}
         ${riadok("Kalendár daňových termínov", true)}
         ${riadok("Kniha jázd, majetok, dokumenty", p.moduly.includes("jazdy"))}
-        ${riadok("Daňové priznanie typ B", p.moduly.includes("priznanieB"))}
+        ${jeSpolocnost() ? "" : riadok("Daňové priznanie typ B", p.moduly.includes("priznanieB"))}
         ${riadok("DPH — priznanie a kontrolný výkaz", p.moduly.includes("dph"))}
         ${riadok("DPH pri registrácii podľa § 7a — priznanie a súhrnný výkaz", p.moduly.includes("dph") || !!p.dphPre7a)}
         ${riadok("Príjem e-faktúr Peppol", true)}
@@ -24760,6 +24956,8 @@ function zobrazCennik(modul){
       // odomkol rok 2027. Predvolený je `priznanieZaRok()`, teda tá istá
       // funkcia, podľa ktorej sa riadi kalendár aj odklad; druhá odpoveď na
       // tú istú otázku by sa s ňou rozišla (kap. 16).
+      // Spoločnosti priznanie FO nepatrí — doplnok sa jej neponúka (č. 257).
+      if(jeSpolocnost()) return "";
       const rokAkt = (typeof priznanieZaRok==="function") ? priznanieZaRok() : new Date().getFullYear()-1;
       const volby = [rokAkt, rokAkt-1, rokAkt-2];
       const kupene = kupenePriznanieRoky();
@@ -29614,9 +29812,20 @@ function odkazRiadka(p){
 // Vracia aj `chyba`: zoznam toho, čo dokladu chýba na doručenie. XML sa vyrobí
 // aj tak — kto ho chce len vidieť, nech ho má — ale odoslanie sa na tom musí
 // zastaviť, inak by chyba prišla najavo až odmietnutím u poštára.
+// Zápis v obchodnom registri do e-faktúry (č. 257): UBL BT-33 „Seller additional
+// legal information“ (`CompanyLegalForm`), ISDOC `RegisterIdentification/Preformatted`.
+// Vetu skladá JEDINÁ funkcia — `orZapisText` vo faktura_pdf.js, tá istá ako na PDF.
+// Kým modul nie je načítaný, element sa vynechá (je nepovinný) a modul sa načíta;
+// odoslanie sieťou naň čaká (`faktOdosliSietou`). Druhá kópia vety by sa rozišla.
+function orZapisVetaEfaktura(m){
+  if(!jeSpolocnost()) return "";
+  if(!_fakturaPdfModul){ fakturaPdfModul().catch(e=>console.error("faktura_pdf.js sa nenačítal:", e)); return ""; }
+  return _fakturaPdfModul.orZapisText(m, "sk") || "";
+}
 function efakturaXml(idx){
   const f=(firmaData.faktury||[])[idx]; const m=firmaData.meta||{};
   if(!f) return null;
+  const orVeta=orZapisVetaEfaktura(m);
   const s=faktSumy(f);
   // ŽIADNY `||0.23`. `faktSadzba` po oprave 91.3 vracia nulu legitímne
   // (neplatiteľ DPH, oslobodené plnenie) a `0||0.23` z nej spravilo 23 % —
@@ -29751,7 +29960,8 @@ function efakturaXml(idx){
       </cac:PartyTaxScheme>`:""}
       <cac:PartyLegalEntity>
         <cbc:RegistrationName>${ubl(m.nazov||"")}</cbc:RegistrationName>
-        <cbc:CompanyID>${ubl(String(m.ico||"").replace(/\s/g,""))}</cbc:CompanyID>
+        <cbc:CompanyID>${ubl(String(m.ico||"").replace(/\s/g,""))}</cbc:CompanyID>${orVeta?`
+        <cbc:CompanyLegalForm>${ubl(orVeta)}</cbc:CompanyLegalForm>`:""}
       </cac:PartyLegalEntity>
     </cac:Party>
   </cac:AccountingSupplierParty>
@@ -29807,7 +30017,8 @@ function efakturaXml(idx){
   if(!odbEndpoint) chyba.push("DIČ alebo IČ DPH odberateľa (úprava faktúry)");
   // `ibanChyba` nie je v `chyba`: XML sa s ním vyrobiť dá a doručiteľ ho
   // prevezme — zlý je účet, na ktorý odberateľ zaplatí.
-  return { xml, cislo:String(f.cislo||""), prijemca:odbEndpoint, odosielatel:dodEndpoint, chyba, ibanChyba:ibanFirmyChyba(m) };
+  return { xml, cislo:String(f.cislo||""), prijemca:odbEndpoint, odosielatel:dodEndpoint, chyba, ibanChyba:ibanFirmyChyba(m),
+    orChyba:orZapisChyba(m, firmaData.settings) };
 }
 function exportEFakturaUBL(idx){
   const v=efakturaXml(idx); if(!v) return;
@@ -30866,6 +31077,8 @@ async function faktOdosliSietou(idx){
   const uz=faktOdoslana(f);
   // Výnimka je nedoručiteľná: ten istý doklad znova, keď sa odberateľ zaregistruje (č. 81).
   if(uz && !faktOdoslatZnova(f)){ alert("🔒 "+faktZamokVeta(uz)+"\n\nTen istý doklad sa druhýkrát neposiela. Opraviť sa dá dobropisom alebo ťarchopisom."); return; }
+  // Spoločnosť: veta zápisu v OR ide z faktura_pdf.js — načítať pred zložením XML.
+  if(jeSpolocnost()){ try{ await fakturaPdfModul(); }catch(e){ console.error("faktura_pdf.js pred odoslaním:", e); } }
   const v=efakturaXml(idx);
   if(!v) return;
   if(v.chyba.length){
@@ -31014,7 +31227,12 @@ function peppolOknoHtml(){
     ? kontrola("✗",`<b>${esc(O.v.ibanChyba)}</b> Takto sa odoslať nedá — odberateľ by na účet nezaplatil a odoslanú faktúru už nezmeníte.
         Opravte IBAN v Nastavenia a dáta → Firemné údaje a faktúru odošlite znova.`)
     : "";
-  const mozeOdoslat = O.faza==="nahlad" && O.platny!==false && !O.v.ibanChyba;
+  // Zápis v obchodnom registri (§ 3a ObZ, č. 257) blokuje z toho istého dôvodu
+  // ako IBAN: odoslaný doklad sa už nezmení a doplnenie v Nastaveniach trvá minútu.
+  const orRiadok = O.v.orChyba
+    ? kontrola("✗",`<b>${esc(O.v.orChyba)}</b> Odoslaný doklad už nezmeníte — najprv doplňte zápis.`)
+    : "";
+  const mozeOdoslat = O.faza==="nahlad" && O.platny!==false && !O.v.ibanChyba && !O.v.orChyba;
   // Veta o zámku podľa siete, do ktorej doklad odíde — to isté pravidlo ako
   // zámok sám (`faktOdoslana`: sandbox nezamyká). Do 14. 9. 2026 okno
   // v sandboxe tvrdilo „faktúra sa zamkne“ (č. 81). Kým overenie príjemcu sieť
@@ -31042,6 +31260,7 @@ function peppolOknoHtml(){
     ${regRiadok}
     ${valRiadok}
     ${ibanRiadok}
+    ${orRiadok}
     <details style="margin-top:8px"><summary style="cursor:pointer;font-size:12px;color:var(--ink-soft)">Zobraziť XML, ktoré sa odošle</summary>
       <pre style="max-height:220px;overflow:auto;font-size:10.5px;background:var(--bg);padding:8px;border-radius:8px;white-space:pre-wrap;overflow-wrap:anywhere">${esc(O.v.xml)}</pre></details>
     <div class="ocr-hint" style="margin-top:10px">${vetaZamku}</div>
@@ -31052,7 +31271,7 @@ function peppolOknoHtml(){
 }
 async function faktPeppolOdosli(){
   if(!strazZapis("faktury")) return;
-  const O=_peppolOkno; if(!O || O.faza!=="nahlad" || O.platny===false || O.v.ibanChyba) return;
+  const O=_peppolOkno; if(!O || O.faza!=="nahlad" || O.platny===false || O.v.ibanChyba || O.v.orChyba) return;
   const f=(firmaData.faktury||[])[O.idx]; if(!f) return;
   const beh=behFirmy();
   // Zámok ešte raz: medzi otvorením okna a stlačením mohol doklad odísť
@@ -31302,6 +31521,7 @@ async function exportZalohaPDF(idx){
 // nie je to výzva na platbu, len cena a platnosť.
 async function exportPonukaPDF(idx){
   const p=(firmaData.ponuky||[])[idx]; if(!p){ alert("Cenová ponuka sa nenašla."); return; }
+  if(!potvrdOrZapisPreTlac()) return;   // ponuka je obchodná listina (§ 3a ObZ)
   const m=firmaData.meta||{}, S=firmaData.settings||{};
   const s=faktSumy(p);
   const FP=await fakturaPdfModul();
@@ -31466,6 +31686,7 @@ function isdocUcetZIbanu(iban){
 function isdocXml(idx){
   const f=firmaData.faktury[idx]; const m=firmaData.meta||{};
   const s=faktSumy(f);
+  const orVeta=orZapisVetaEfaktura(m);   // zápis v OR (spoločnosť, č. 257) — ISDOC RegisterIdentification
   const esc=xmlEsc;
   const n2=v=>(+v||0).toFixed(2);
   const sadzbaPct=Math.round(s.sadzba*100);
@@ -31514,7 +31735,8 @@ function isdocXml(idx){
       <PartyName><Name>${esc(m.nazov)}</Name></PartyName>
       <PostalAddress><StreetName>${esc(da.ulica)}</StreetName><BuildingNumber>${esc(da.cislo)}</BuildingNumber><CityName>${esc(da.mesto)}</CityName><PostalZone>${esc(da.psc)}</PostalZone><Country><IdentificationCode>SK</IdentificationCode><Name>${esc(isdocKrajinaNazov("SK"))}</Name></Country></PostalAddress>
       <PartyTaxScheme><CompanyID>${esc(m.icdph)}</CompanyID><TaxScheme>VAT</TaxScheme></PartyTaxScheme>${m.dic?`
-      <PartyTaxScheme><CompanyID>${esc(m.dic)}</CompanyID><TaxScheme>TIN</TaxScheme></PartyTaxScheme>`:""}
+      <PartyTaxScheme><CompanyID>${esc(m.dic)}</CompanyID><TaxScheme>TIN</TaxScheme></PartyTaxScheme>`:""}${orVeta?`
+      <RegisterIdentification><Preformatted>${esc(orVeta)}</Preformatted></RegisterIdentification>`:""}
    </Party></AccountingSupplierParty>
    <AccountingCustomerParty><Party>
       <PartyIdentification><ID>${esc(f.ico||"")}</ID></PartyIdentification>
@@ -38863,8 +39085,12 @@ function danoveTerminy(dnes, s, mesiacovDopredu){
     const dni=(dt-dnes)/86400000;
     if(dni>=0 && dni<=90) list.push({d:dt, typ:"dokument", nazov:"Platnosť: "+dok.nazov, detail:(dok.typ||"dokument")+" expiruje", auto:true});
   });
-  return list;
+  // Obchodná spoločnosť (č. 257): odvody SZČO, preddavky dane FO a priznanie FO
+  // jej nepatria. DPH, KV, daň z motorových vozidiel, e-faktúra a dokumenty áno.
+  // Filtruje sa na konci — jedno miesto pre kalendár, plochu aj zvonček.
+  return jeSpolocnost() ? list.filter(x=>!TERMIN_LEN_FO.includes(x.typ)) : list;
 }
+const TERMIN_LEN_FO=["zp","sp","dan","priznanie"];
 // Typy termínov: ikona a popis do legendy Kalendára. Jedna tabuľka — legenda
 // bola kópia ikon a chýbali v nej ★ 🏛 📄.
 const TERMIN_TYPY={dph:{ic:"%", popis:"DPH"}, zp:{ic:"⚕", popis:"zdravotné"}, sp:{ic:"◉", popis:"sociálne"},
@@ -43563,16 +43789,24 @@ function spustiOnboarding(){
   renderOnboarding();
 }
 
+// Kroky, ktoré sprievodca naozaj ukáže. Obchodná spoločnosť preskočí výdavky
+// (paušál) a nezdaniteľné časti — sú to otázky dane FO (č. 257).
+const OB_KROKY_LEN_SZCO=[3,4];
+function obKrokyZoznam(){
+  const vsetky=Array.from({length:OB_KROKOV},(_,i)=>i+1);
+  return (_ob && _ob.pravnaForma==="spolocnost") ? vsetky.filter(n=>!OB_KROKY_LEN_SZCO.includes(n)) : vsetky;
+}
 function renderOnboarding(){
   const v=document.getElementById("obView");
   const k=_ob.krok;
-  const segs=Array.from({length:OB_KROKOV},(_,i)=>{
-    const n=i+1; const cls=n<k?"done":(n===k?"now":"");
+  const zoz=obKrokyZoznam(), poradie=zoz.indexOf(k)+1;
+  const segs=zoz.map(n=>{
+    const cls=n<k?"done":(n===k?"now":"");
     return `<div class="seg ${cls}"></div>`;
   }).join("");
   v.innerHTML = `<div class="ob">
     <div class="ob-prog">${segs}</div>
-    <div class="ob-step">Krok ${k} z ${OB_KROKOV}</div>
+    <div class="ob-step">Krok ${poradie||k} z ${zoz.length}</div>
     <div class="ob-card">${obKrokObsah(k)}</div>
   </div>`;
   window.scrollTo(0,0);
@@ -43603,6 +43837,25 @@ function obKrokObsah(k){
       <div class="ob-field" style="background:var(--bg);border-radius:10px;padding:11px 13px">
         <div style="font-size:11.5px;color:var(--ink-soft)">DIČ a IČ DPH register neposkytuje — nájdete ich na svojich dokladoch. Po zadaní IČ DPH sa DIČ doplní automaticky. Na platiteľa DPH sa spýtame v ďalšom kroku.</div>
       </div>
+      <div class="ob-field"><label>Právna forma</label>
+        <div class="ob-opts">
+          <div class="ob-opt ${o.pravnaForma==='spolocnost'?'':'sel'}" onclick="obSetForma('')">
+            <div class="ri"></div><div class="ot"><b>Živnostník (SZČO)</b><span>Faktúry, výdavky, DPH, daňové priznanie typu B a odvody.</span></div>
+          </div>
+          <div class="ob-opt ${o.pravnaForma==='spolocnost'?'sel':''}" onclick="obSetForma('spolocnost')">
+            <div class="ri"></div><div class="ot"><b>Obchodná spoločnosť (s. r. o., a. s., …)</b><span>Faktúry a e-faktúry, doklady, banka, kniha jázd, DPH a kontrolný výkaz. Účtovníctvo vediete v inom programe — appka mu dá podklady.</span></div>
+          </div>
+        </div>
+      </div>
+      ${o.pravnaForma==='spolocnost'?`
+      <div class="ob-field"><label>Zápis v obchodnom registri — registrový súd</label>
+        <input id="ob_orSud" list="ob_orSudy" value="${esc(o.orSud||'')}" placeholder="napr. Mestský súd Bratislava III">
+        <datalist id="ob_orSudy">${OR_SUDY.map(x=>`<option value="${esc(x)}">`).join("")}</datalist></div>
+      <div class="ob-row2">
+        <div class="ob-field"><label>Oddiel</label><input id="ob_orOddiel" value="${esc(o.orOddiel||'')}" placeholder="napr. Sro"></div>
+        <div class="ob-field"><label>Vložka č.</label><input id="ob_orVlozka" value="${esc(o.orVlozka||'')}" placeholder="napr. 12345/B"></div>
+      </div>
+      <div class="ob-hint" style="margin-top:-6px;margin-bottom:12px">Faktúra spoločnosti musí niesť zápis v obchodnom registri (§ 3a Obchodného zákonníka). Tlačidlo Doplniť ho vyplní z registra.</div>`:''}
       ${obNav(1, !!o.nazov || true)}`;
   }
   if(k===2){
@@ -43721,11 +43974,16 @@ function obKrokObsah(k){
         <div class="sr"><span>Firma</span><b>${esc(o2.nazov||'—')}</b></div>
         ${o2.ico?`<div class="sr"><span>IČO</span><b>${esc(o2.ico)}</b></div>`:''}
         <div class="sr"><span>DPH</span><b>${o2.platca?'Platiteľ DPH':'Neplatiteľ'}</b></div>
+        ${o2.pravnaForma==='spolocnost'?`
+        <div class="sr"><span>Právna forma</span><b>Obchodná spoločnosť</b></div>
+        <div class="sr"><span>Obchodný register</span><b>${esc([o2.orSud, o2.orOddiel&&('oddiel '+o2.orOddiel), o2.orVlozka&&('vložka č. '+o2.orVlozka)].filter(Boolean).join(', ')||'doplníte v Nastaveniach')}</b></div>
+      </div>
+      <div class="ob-lead" style="font-size:12.5px">Appka firme vystavuje faktúry a e-faktúry, eviduje doklady, páruje banku, vedie knihu jázd, DPH a kontrolný výkaz. Účtovníctvo vediete v inom programe — podklady mu dá Export a záloha (XML pre POHODU, ISDOC, Excel). Priznanie typu B, odvody a paušál živnostníka sa firme nezobrazujú.</div>`:`
         <div class="sr"><span>Výdavky</span><b>${vydTxt}</b></div>
         <div class="sr"><span>NČZD na manžela/-ku</span><b>${o2.manzel?'áno':'nie'}</b></div>
         <div class="sr"><span>Deti (bonus)</span><b>${detiTxt}</b></div>
       </div>
-      <div class="ob-lead" style="font-size:12.5px">Appka vedie daňovú evidenciu podľa § 6 ods. 11 zákona o dani z príjmov — pre SZČO postačuje a nič ďalšie netreba nastavovať. Daňové konštanty pre rok 2026 (sadzby, NČZD, minimálne odvody, zdravotné 16 %) sú predvyplnené. Nájdete a upravíte ich v Nastaveniach.</div>
+      <div class="ob-lead" style="font-size:12.5px">Appka vedie daňovú evidenciu podľa § 6 ods. 11 zákona o dani z príjmov — pre SZČO postačuje a nič ďalšie netreba nastavovať. Daňové konštanty pre rok 2026 (sadzby, NČZD, minimálne odvody, zdravotné 16 %) sú predvyplnené. Nájdete a upravíte ich v Nastaveniach.</div>`}
       <div class="ob-nav">
         <button class="back" onclick="obKrok(${5})">← Späť</button>
         <button class="next" onclick="obDokonci()">Vytvoriť firmu a začať →</button>
@@ -43766,6 +44024,9 @@ function obUlozAktualne(){
     if(g("ob_adresa")!==null) _ob.adresa=g("ob_adresa");
     if(g("ob_dic")!==null) _ob.dic=g("ob_dic");
     if(g("ob_icdph")!==null) _ob.icdph=g("ob_icdph");
+    if(g("ob_orSud")!==null) _ob.orSud=g("ob_orSud").trim();
+    if(g("ob_orOddiel")!==null) _ob.orOddiel=g("ob_orOddiel").trim();
+    if(g("ob_orVlozka")!==null) _ob.orVlozka=g("ob_orVlozka").trim();
   }
   if(_ob.krok===2){
     if(g("ob_sadzbaDPH")!==null) _ob.sadzbaDPH=+g("ob_sadzbaDPH");
@@ -43774,8 +44035,22 @@ function obUlozAktualne(){
   if(_ob.krok===4 && g("ob_manzelPrijem")!==null) _ob.manzelPrijem=+g("ob_manzelPrijem")||0;
 }
 
-function obDalej(){ obUlozAktualne(); if(_ob.krok<OB_KROKOV){ _ob.krok++; renderOnboarding(); } }
-function obPredch(){ obUlozAktualne(); if(_ob.krok>1){ _ob.krok--; renderOnboarding(); } }
+function obDalej(){ obUlozAktualne(); if(_ob.krok<OB_KROKOV){ _ob.krok++; obPreskocNeplatne(1); renderOnboarding(); } }
+function obPredch(){ obUlozAktualne(); if(_ob.krok>1){ _ob.krok--; obPreskocNeplatne(-1); renderOnboarding(); } }
+// Krok, ktorý sa spoločnosti netýka, sa preskočí v smere pohybu (č. 257).
+function obPreskocNeplatne(smer){
+  const zoz=obKrokyZoznam();
+  while(!zoz.includes(_ob.krok) && _ob.krok>1 && _ob.krok<OB_KROKOV) _ob.krok+=smer;
+}
+// Právna forma: najprv uložiť rozpísané polia kroku 1 — prekreslenie by ich zahodilo.
+function obSetForma(v){ obUlozAktualne(); _ob.pravnaForma=(v==="spolocnost")?"spolocnost":""; renderOnboarding(); }
+// Zápis v registri z odpovede RPO (rpoRegister): obchodný register → spoločnosť
+// so súdom, oddielom a vložkou; živnostenský → SZČO s číslom ŽR.
+function obPouziRegister(R){
+  if(!R) return;
+  if(R.druh==="or"){ _ob.pravnaForma="spolocnost"; _ob.orSud=R.urad||""; _ob.orOddiel=R.oddiel||""; _ob.orVlozka=R.vlozka||""; }
+  else if(R.druh==="zr"){ _ob.pravnaForma=""; _ob.zivReg=R.cislo||""; }
+}
 
 // IČO → RPO (znovupoužije existujúcu logiku doplnFirmuPodlaICO cez dočasné polia)
 // našeptávač firiem v onboardingu (podľa názvu, s debounce)
@@ -43833,6 +44108,7 @@ function obVyberFirmu(i){
   const v=_obNasepData[i]; if(!v) return;
   _ob.nazov=v.nazov||""; _ob.ico=v.ico||""; _ob.adresa=v.adresa||""; _ob.dic=v.dic||"";
   if(v.icdph){ _ob.icdph=v.icdph; _ob.platca=true; }
+  obPouziRegister(v.register);
   document.getElementById("ob_nasep").style.display="none";
   renderOnboarding();
 }
@@ -43868,6 +44144,7 @@ async function obDoplnICO(){
     if(F.adresa)_ob.adresa=F.adresa;
     if(F.dic)_ob.dic=F.dic;
     if(F.icdph){ _ob.icdph=F.icdph; _ob.platca=true; }
+    obPouziRegister(F.register);
     renderOnboarding();
     const s2=document.getElementById("ob_icoStav");
     if(s2){ s2.textContent="✓ Údaje doplnené z registra. Skontrolujte ich."; s2.className="ob-hint ok"; }
@@ -43913,8 +44190,13 @@ function obNovaFirma(){
     // deti (bonus)
     deti: (o.deti||[]).filter(d=>d.vek!=null).map(d=>({vek:+d.vek||0}))
   });
+  // Firemný režim (č. 257): právna forma a zápis v registri z kroku 1.
+  const spol=o.pravnaForma==="spolocnost";
+  if(spol){ s.pravnaForma="spolocnost"; s.nczdManzel=false; s.nczdManzelPrijem=0; s.deti=[]; }
+  const zapis = spol ? {orSud:o.orSud||"", orOddiel:o.orOddiel||"", orVlozka:o.orVlozka||""}
+                     : (o.zivReg ? {zivReg:o.zivReg} : {});
   return {
-    meta:{ nazov:o.nazov||"Moja firma", ico:o.ico||"", adresa:o.adresa||"", dic:o.dic||"", icdph:((o.platca===true || o.platca==="7a")?o.icdph:"")||"" },
+    meta:Object.assign({ nazov:o.nazov||"Moja firma", ico:o.ico||"", adresa:o.adresa||"", dic:o.dic||"", icdph:((o.platca===true || o.platca==="7a")?o.icdph:"")||"" }, zapis),
     settings:s,
     faktury:[], vydavky:[], jazdy:[], vypis:[], vykazy:[], majetok:[],
     // `dovolenka` je MAPA po rokoch (`{"2026":{narok:25,…}}`), nie pole —
