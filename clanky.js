@@ -22,7 +22,8 @@
 
 // Edge funkcia si ju overuje. Keby esm.sh podal starú kópiu súboru, nasadenie
 // spadne s hláškou namiesto toho, aby ticho generovalo stránky starou čističkou.
-export const VERZIA = "3";
+// 4 = porovnajClanky / zoradClanky (poradie článkov, admin_51, spec 141.3).
+export const VERZIA = "4";
 
 // ── Čo smie prejsť ─────────────────────────────────────────────────────────
 // Kľúč = tag, hodnota = povolené atribúty. Čo tu nie je, vypadne.
@@ -249,6 +250,34 @@ ${zdroj ? `<div class="cl-zdroj">Zdroj: <a href="${esc(zdroj)}" target="_blank" 
 </div>`;
 }
 
+// ── Poradie článkov ────────────────────────────────────────────────────────
+// JEDINÉ pravidlo poradia pre appku (zoznam, pás v module, zvonček), landing,
+// admin aj zoznam na webe (Roman 27. 9. 2026: „spoločné poradie článkov pre
+// web aj appku, nový článok navrch“, ROZHODNUTIA č. 245, spec 141.3):
+//   1. `poradie` vzostupne — nastavuje ho admin šípkami (RPC clanky_poradie)
+//      a nový zverejnený článok dostane v databáze 1 (trigger, admin_51),
+//   2. článok bez poradia ide za očíslované,
+//   3. potom `publikovane` zostupne (najnovší hore — pôvodné pravidlo).
+// Databáza sa na poradie nepýta nikde: `order` v dotaze by bol druhý zápis
+// toho istého pravidla a raz by sa rozišiel s týmto (kap. 16).
+function cisloPoradia(c) {
+  const p = c && c.poradie;
+  return Number.isInteger(p) && p > 0 ? p : Infinity;
+}
+function casPublikovania(c) {
+  const t = Date.parse(c && c.publikovane);
+  return Number.isNaN(t) ? 0 : t;
+}
+export function porovnajClanky(a, b) {
+  const pa = cisloPoradia(a), pb = cisloPoradia(b);
+  if (pa !== pb) return pa < pb ? -1 : 1;
+  return casPublikovania(b) - casPublikovania(a);
+}
+// Vracia NOVÉ pole; vstup nemení (appka drží pôvodné pole aj v cache).
+export function zoradClanky(clanky) {
+  return Array.isArray(clanky) ? clanky.slice().sort(porovnajClanky) : [];
+}
+
 // ── Výber článku pre modul ─────────────────────────────────────────────────
 // Kontextové pole sa kreslí len vtedy, keď je čo ukázať. Trvalý prvok, ktorý
 // väčšinou hlási „nič", miesto nezaberá — preto táto funkcia vracia null
@@ -263,6 +292,7 @@ export function vyberPreModul(clanky, modul, skryte, docasne) {
     Array.isArray(c.moduly) && c.moduly.includes(modul) && !s.has(c.id) && !d.has(c.id)
   );
   if (!vhodne.length) return null;
-  vhodne.sort((a, b) => String(b.publikovane || "").localeCompare(String(a.publikovane || "")));
+  // Pás v module berie prvý článok v tom istom poradí ako zoznam (141.3).
+  vhodne.sort(porovnajClanky);
   return vhodne[0];
 }

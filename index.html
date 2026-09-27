@@ -892,7 +892,8 @@ function goApp(mode){
 }
 
 // ═══ ČLÁNKY ═══
-// Tri najnovšie priamo cez Supabase REST — bez knižnice. Landing dnes žiadnu
+// Prvé tri v spoločnom poradí priamo cez Supabase REST — bez knižnice
+// (clanky.js je náš modul s pravidlom poradia, nie knižnica). Landing dnes žiadnu
 // nemá a ťahať kvôli trom perexom celé supabase-js by bolo drahšie než tento
 // jeden fetch. Kľúč je publikovateľný (anon) a číta len zverejnené články,
 // o zvyšok sa stará RLS.
@@ -907,12 +908,19 @@ function clEsc(s){
   return String(s==null?"":s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 }
 
-fetch(SUPABASE_URL + "/rest/v1/clanky?select=slug,nazov,perex,publikovane,zmenene"
-      + "&zverejneny=eq.true&order=publikovane.desc&limit=3", {
-  headers: { apikey: SUPABASE_KEY, Authorization: "Bearer " + SUPABASE_KEY },
-})
-  .then(r => r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status)))
-  .then(zoz => {
+// Poradie je to isté ako v appke a v zozname na webe — robí ho zoradClanky
+// z clanky.js (č. 245, spec 141.3). Preto sa načítajú všetky zverejnené (sú
+// ich desiatky, nie tisíce) a tri sa vyberú až po zoradení; `order` a `limit`
+// v dotaze by boli druhý zápis toho istého pravidla. Modul aj dáta idú naraz.
+Promise.all([
+  import("/clanky.js"),
+  fetch(SUPABASE_URL + "/rest/v1/clanky?select=slug,nazov,perex,poradie,publikovane,zmenene"
+        + "&zverejneny=eq.true", {
+    headers: { apikey: SUPABASE_KEY, Authorization: "Bearer " + SUPABASE_KEY },
+  }).then(r => r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))),
+])
+  .then(([C, vsetky]) => {
+    const zoz = Array.isArray(vsetky) ? C.zoradClanky(vsetky).slice(0, 3) : null;
     if (!Array.isArray(zoz) || !zoz.length) return;
     document.getElementById("clankyZoz").innerHTML = zoz.map(c => `
       <a class="cl-kus" href="/clanky/${clEsc(c.slug)}.html">
@@ -922,7 +930,8 @@ fetch(SUPABASE_URL + "/rest/v1/clanky?select=slug,nazov,perex,publikovane,zmenen
       </a>`).join("");
     document.getElementById("clankySekcia").hidden = false;
 
-    // Pás pod hero nesie najnovší článok. Kým nie je čo ukázať, ostáva skrytý.
+    // Pás pod hero nesie prvý článok v spoločnom poradí (nový je navrchu,
+    // admin môže pripnúť dôležitý). Kým nie je čo ukázať, ostáva skrytý.
     const prvy = zoz[0];
     if (prvy) {
       const pas = document.getElementById("heroClanok");

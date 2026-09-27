@@ -166,6 +166,10 @@ tr.chce td{background:#fff5e6}
   .clStav.zv{background:#e1f3ea;color:var(--accent2)}
   .clStav.ko{background:#fff0e0;color:var(--warn)}
   .clWeb{font-size:11.5px;color:var(--soft)}
+  /* poradie článkov (spec 141.3) — šípky pri zverejnených, farby len z tokenov */
+  .clAkcie{display:flex;gap:4px;justify-content:flex-end;flex-wrap:wrap}
+  .clAkcie .rowbtn:disabled{opacity:.4;cursor:default;border-color:var(--line)}
+  .clCislo{color:var(--soft);font-weight:600;margin-right:4px}
   select{width:100%;background:var(--bg);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:10px 12px;font-size:14px}
 
   @media(max-width:720px){ .kpis{grid-template-columns:repeat(2,1fr)} .hide-sm{display:none} }
@@ -347,6 +351,7 @@ tr.chce td{background:#fff5e6}
                 title="Prerobí stránky všetkých zverejnených článkov, zoznam aj sitemap — po zmene vzhľadu">↻ Prerobiť stránky</button>
       </div>
       <div class="body">
+        <div id="clPoradieStav" class="hint hidden" role="status" aria-live="polite"></div>
         <div id="clLoading" class="loading">Načítavam články…</div>
         <table id="clTable" class="hidden">
           <thead><tr>
@@ -1353,25 +1358,99 @@ async function nacitajClanky(){
         prazdne=document.getElementById("clEmpty");
   load.classList.remove("hidden"); tab.classList.add("hidden"); prazdne.classList.add("hidden");
 
-  const { data, error } = await sb.from("clanky").select("*").order("zmenene", { ascending:false });
+  const { data, error } = await sb.from("clanky").select("*");
+  let C = null, chybaModulu = "";
+  try{ C = await clModul(); }catch(e){ chybaModulu = e.message || String(e); }
   load.classList.add("hidden");
-  if(error){
-    console.error("clanky:", error.message);
-    prazdne.textContent = "Načítanie článkov zlyhalo: " + error.message;
+  if(error || !C){
+    const text = error ? error.message : "clanky.js sa nenačítal: " + chybaModulu;
+    console.error("clanky:", text);
+    prazdne.textContent = "Načítanie článkov zlyhalo: " + text;
     prazdne.classList.remove("hidden");
     return;
   }
-  clZoznam = data || [];
+  // Rovnako ako appka, landing aj zoznam na webe: zverejnené v spoločnom
+  // poradí (zoradClanky z clanky.js, č. 245, spec 141.3), pod nimi koncepty
+  // od naposledy upraveného. Admin musí ukazovať to poradie, ktoré šípky menia.
+  const vsetky = data || [];
+  clZoznam = C.zoradClanky(vsetky.filter(c => c.zverejneny)).concat(
+    vsetky.filter(c => !c.zverejneny)
+      .sort((a, b) => String(b.zmenene || "").localeCompare(String(a.zmenene || ""))));
   if(!clZoznam.length){
     prazdne.textContent = "Zatiaľ žiadny článok.";
     prazdne.classList.remove("hidden");
     return;
   }
-  document.getElementById("clBody").innerHTML = clZoznam.map(clRiadok).join("");
+  const zverejneneIds = clZoznam.filter(c => c.zverejneny).map(c => c.id);
+  document.getElementById("clBody").innerHTML = clZoznam.map(c => clRiadok(c, zverejneneIds)).join("");
   tab.classList.remove("hidden");
 }
 
-function clRiadok(c){
+// ── poradie článkov (spec 141.3, č. 245) ──
+// Šípky pri zverejnených. Poradie sa uloží hneď a celé naraz: RPC
+// clanky_poradie prečísluje zverejnené 1…n v jednej transakcii a odmietne,
+// keď zoznam v tomto okne nesedí s databázou (medzitým pribudol článok).
+// Web sa prerobí RAZ, až chvíľu po poslednom presune — každé prerobenie je
+// commit do main a prestavba GitHub Pages; päť klikov nemá byť päť commitov.
+const CL_WEB_ODKLAD_MS = 4000;
+let clPoradieBezi = false, clWebCasovac = null;
+
+function clPoradieTlacidla(id, poz, n){
+  const b = (kam, znak, popis, vypnute) =>
+    `<button class="rowbtn" title="${popis}" aria-label="${popis}" ${vypnute ? "disabled" : ""}
+       onclick="clPresun('${esc(id)}','${kam}')">${znak}</button>`;
+  return b("hore", "↑", "Posunúť vyššie", poz === 0)
+       + b("dole", "↓", "Posunúť nižšie", poz === n - 1)
+       + b("navrch", "Navrch", "Presunúť na prvé miesto", poz === 0);
+}
+
+function clStav(text, chyba){
+  const el = document.getElementById("clPoradieStav");
+  el.textContent = text;
+  el.classList.toggle("warn", !!chyba);
+  el.classList.toggle("hidden", !text);
+}
+
+async function clPresun(id, kam){
+  if(clPoradieBezi) return;
+  const ids = clZoznam.filter(c => c.zverejneny).map(c => c.id);
+  const i = ids.indexOf(id);
+  const j = kam === "navrch" ? 0 : kam === "hore" ? i - 1 : i + 1;
+  if(i < 0 || j < 0 || j >= ids.length || j === i) return;
+  ids.splice(i, 1);
+  ids.splice(j, 0, id);
+  clPoradieBezi = true;
+  clStav("Ukladám poradie…");
+  try{
+    const { error } = await sb.rpc("clanky_poradie", { p_ids: ids });
+    if(error) throw new Error(error.message);
+    await nacitajClanky();
+    clNaplanujWeb();
+  }catch(e){
+    console.error("clanky_poradie:", e.message);
+    clStav("Poradie sa neuložilo: " + e.message + " Zoznam je načítaný znova — skús to ešte raz.", true);
+    await nacitajClanky();
+  }finally{
+    clPoradieBezi = false;
+  }
+}
+
+// Po zmene poradia admin zavolá prerobenie webu sám (clanok-publikuj, akcia
+// obnov) — inak by zoznam na webe ostal v starom poradí a nikto by si to
+// nevšimol, lebo appka by už ukazovala nové.
+function clNaplanujWeb(){
+  clearTimeout(clWebCasovac);
+  clStav("Poradie uložené — appka ho načíta pri ďalšom otvorení. Zoznam na webe prerobím o "
+    + (CL_WEB_ODKLAD_MS / 1000) + " s; ďalší presun čakanie predĺži.");
+  clWebCasovac = setTimeout(() => { clWebCasovac = null; clPublikuj(null, "obnov", true); }, CL_WEB_ODKLAD_MS);
+}
+
+// Zatvorenie panela počas odkladu by nechalo web v starom poradí.
+window.addEventListener("beforeunload", (e) => {
+  if(clWebCasovac){ e.preventDefault(); e.returnValue = ""; }
+});
+
+function clRiadok(c, zverejneneIds){
   const moduly = (c.moduly||[]).map(m => CL_MODULY[m] || m).join(", ") || "—";
   const caka = c.zverejneny && c.publikovane && new Date(c.publikovane) > new Date();
   const stav = c.zverejneny
@@ -1381,12 +1460,14 @@ function clRiadok(c){
   // dá ľahko prehliadnuť — a práve ten treba vidieť.
   const web = (!c.zverejneny && c.staticka)
     ? `<div class="clWeb">stránka na webe ostáva</div>` : "";
+  const ids = zverejneneIds || [];
+  const poz = c.zverejneny ? ids.indexOf(c.id) : -1;
   return `<tr>
-    <td><b>${esc(c.nazov)}</b><div class="clWeb">/clanky/${esc(c.slug)}.html</div></td>
+    <td>${poz >= 0 ? `<span class="clCislo">${poz + 1}.</span>` : ""}<b>${esc(c.nazov)}</b><div class="clWeb">/clanky/${esc(c.slug)}.html</div></td>
     <td class="hide-sm">${esc(moduly)}</td>
     <td>${stav}${web}</td>
     <td class="hide-sm">${String(c.zmenene||"").slice(0,10)}</td>
-    <td class="r"><button class="rowbtn" onclick="otvorClanok('${esc(c.id)}')">Upraviť</button></td>
+    <td class="r"><div class="clAkcie">${poz >= 0 ? clPoradieTlacidla(c.id, poz, ids.length) : ""}<button class="rowbtn" onclick="otvorClanok('${esc(c.id)}')">Upraviť</button></div></td>
   </tr>`;
 }
 
@@ -1671,17 +1752,34 @@ async function ulozClanok(zverejnit){
   // Zoznam na webe aj sitemap sa prerábajú vždy — aj pri uložení konceptu,
   // ktorý článok zo zoznamu odoberá.
   await clPublikuj(id, zverejnit ? "publikuj" : "obnov");
+
+  // Nový zverejnený článok dá navrch databáza (trigger clanky_navrch_trg,
+  // admin_51) — v tej istej transakcii ako uloženie, takže sa nestane, že by
+  // článok vyšiel a na prvé miesto sa nedostal. Admin to len povie.
+  if(zverejnit && !(povodny && povodny.zverejneny) && !err.textContent)
+    hlaska.textContent += " Nový článok je navrchu zoznamu v appke aj na webe — poradie zmeníš šípkami v zozname.";
 }
 
-async function clPublikuj(id, akcia){
+// `zPoradia` = volanie po presune šípkou (clNaplanujWeb): výsledok ide do
+// stavového riadku nad zoznamom, nie do okna článku ani do alertu.
+async function clPublikuj(id, akcia, zPoradia){
   const err = document.getElementById("clErr");
   const hlaska = document.getElementById("clHlaska");
-  const doModalu = document.getElementById("clModal").classList.contains("on");
+  const doModalu = !zPoradia && document.getElementById("clModal").classList.contains("on");
   if(doModalu) hlaska.textContent = "Zapisujem na web…";
+  // Každá akcia prerobí zoznam aj sitemap, takže čakajúce prerobenie po presune
+  // šípkou je týmto vybavené — druhý commit by bol zbytočný.
+  const aPoradie = zPoradia || !!clWebCasovac;
+  if(clWebCasovac){ clearTimeout(clWebCasovac); clWebCasovac = null; }
+  if(aPoradie) clStav("Prerábam zoznam na webe v novom poradí…");
 
   try{
     const tok = await ziskajToken();
-    if(!tok){ if(doModalu) err.textContent = CHYBA_SESSION; return; }
+    if(!tok){
+      if(doModalu) err.textContent = CHYBA_SESSION;
+      if(aPoradie) clStav("Web sa neprerobil: " + CHYBA_SESSION + " Poradie je uložené, po prihlásení klikni ↻ Prerobiť stránky.", true);
+      return;
+    }
     const res = await fetch(SUPABASE_URL + "/functions/v1/clanok-publikuj", {
       method: "POST",
       headers: { "Content-Type":"application/json", "Authorization":"Bearer "+tok },
@@ -1691,24 +1789,32 @@ async function clPublikuj(id, akcia){
     if(!res.ok){ throw new Error(r.chyba || ("HTTP " + res.status)); }
 
     await nacitajClanky();
+    if(aPoradie) clStav("Poradie je aj na webe — zoznam článkov prerobený"
+      + (r.commit ? " (commit " + String(r.commit).slice(0, 7) + ")" : "")
+      + ". Prejaví sa do minúty (GitHub Pages sa prestavuje).");
     // Tlačidlo mimo modálu (Prerobiť zoznam) nemá kam písať hlášku. Bez tohto
     // by úspech vyzeral presne ako nefunkčné tlačidlo — a to je horšie než
     // chyba, lebo sa nedá odlíšiť od „nič sa nestalo".
-    if(!doModalu) alert("Stránky článkov, zoznam aj sitemap prerobené.\n\n"
+    if(!doModalu && !zPoradia) alert("Stránky článkov, zoznam aj sitemap prerobené.\n\n"
       + "Commit je v repozitári, na webe sa prejaví do minúty.");
     if(doModalu){
+      // Najprv znova otvoriť, až potom hláška: otvorClanok hlášku aj chybu
+      // maže. Kým sa nečakalo, zmazala ju hneď v ďalšej mikroúlohe a veta
+      // o oneskorení Pages sa nikdy neukázala (nájdené 27. 9. 2026).
+      if(clEditId) await otvorClanok(clEditId);
       // GitHub Pages sa prestavuje desiatky sekúnd. Bez tejto vety Roman obnoví
       // stránku, uvidí 404 a bude hľadať chybu, ktorá nie je.
       hlaska.textContent = akcia === "zmaz"
         ? "Stránka zmazaná z webu. Prejaví sa to do minúty."
         : "Hotovo. Na webe sa zmena prejaví do minúty (GitHub Pages sa prestavuje).";
-      if(clEditId) otvorClanok(clEditId);
     }
   }catch(e){
     console.error("clanok-publikuj:", e.message);
+    if(aPoradie) clStav("Prerobenie webu zlyhalo: " + e.message
+      + " Poradie je uložené v databáze — zopakuj tlačidlom ↻ Prerobiť stránky.", true);
     if(doModalu) err.textContent = "Zápis na web zlyhal: " + e.message +
       " — článok je uložený v databáze, publikovanie sa dá zopakovať.";
-    else alert("Prerobenie zoznamu zlyhalo: " + e.message);
+    else if(!zPoradia) alert("Prerobenie zoznamu zlyhalo: " + e.message);
   }
 }
 

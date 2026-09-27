@@ -6926,7 +6926,8 @@ function zbierNotifikacie(){
   // ── nové odborné články ──
   // Ohlasujú sa len tie z posledných dvoch mesiacov a najviac tri. Zvonček je
   // na veci, ktoré niečo znamenajú; dvadsať riadkov s článkami by ho zaplavilo
-  // a naučilo preskakovať aj termíny.
+  // a naučilo preskakovať aj termíny. Ktoré tri, určuje spoločné poradie
+  // (CLANKY je zoradené cez zoradClanky, spec 141.3) — nový článok je navrchu.
   try{
     CLANKY.filter(c => dni(c.publikovane) > -60).slice(0,3).forEach(c=>{
       out.push({kluc:"clanok:"+c.id, ic:"📘", nal:"info",
@@ -10095,7 +10096,7 @@ function renderAppModul(id){
 //
 //  Návrh: dev/docs/NAVRH_CLANKY.md
 // ═══════════════════════════════════════════════════
-let CLANKY=[];                 // zverejnené, najnovšie hore
+let CLANKY=[];                 // zverejnené, v poradí zoradClanky (clanky.js, spec 141.3)
 let _clModul=null;             // clanky.js, načítaný lenivo
 let _clOtvoreny=null;          // id článku v čítačke; null = zoznam
 let _clNaposledy=null;         // ktorý článok už bol vykreslený — aby sa neskákalo na začiatok
@@ -10130,17 +10131,22 @@ function clankyNacitaj(){
     .catch(e=>console.error("clanky.js sa nenačítal:", e.message||e));
   if(!sb) return Promise.resolve();
   return sb.from("clanky")
-    .select("id,slug,nazov,perex,telo,putac,moduly,obrazok,zdroj_nazov,zdroj_url,publikovane,zmenene")
+    .select("id,slug,nazov,perex,telo,putac,moduly,obrazok,zdroj_nazov,zdroj_url,poradie,publikovane,zmenene")
     .eq("zverejneny", true)
-    .order("publikovane", { ascending:false })
     .then(({data, error})=>{
       // Ticho zhltnutá chyba vyzerá presne ako „žiadne články" — a to je stav,
       // ktorý tu bude bežný, takže by ju nikto nikdy nenašiel.
       if(error){ console.error("clanky:", error.message); return; }
-      CLANKY=data||[];
-      try{ localStorage.setItem(CL_CACHE, JSON.stringify(CLANKY)); }catch(_){}
-      clankyPrekresli();
-      try{ renderNotifBadge(); }catch(_){}
+      // Poradie robí zoradClanky z clanky.js — jedno pravidlo pre appku, web
+      // aj admin (č. 245, spec 141.3). Dotaz sa na poradie nepýta: order v ňom
+      // by bol druhý zápis pravidla. Zoradené CLANKY berie zoznam, pás v module
+      // aj zvonček; do cache ide tiež zoradené.
+      return clankyModul().then(C=>C.zoradClanky(data||[]), ()=>data||[]).then(zoznam=>{
+        CLANKY=zoznam;
+        try{ localStorage.setItem(CL_CACHE, JSON.stringify(CLANKY)); }catch(_){}
+        clankyPrekresli();
+        try{ renderNotifBadge(); }catch(_){}
+      });
     });
 }
 
