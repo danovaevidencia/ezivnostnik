@@ -499,6 +499,7 @@ async function studioPoskytovatel(){
     const { data, error } = await sb.functions.invoke("kampan-posli", { body: { akcia: "poskytovatel" } });
     if(error || !data || !data.posta) return { ok: false, dovod: "poskytovateľ sa nedá overiť (kampan-posli nepozná akciu „poskytovatel“)" };
     if(data.posta === "test") return { ok: false, dovod: "poskytovateľ nie je nastavený (KAMPAN_POSTA = test)" };
+    if(data.nastaveny === false) return { ok: false, dovod: "poskytovateľ " + data.posta + " nemá kľúč alebo odosielateľa (KAMPAN_KLUC, KAMPAN_ODOSIELATEL)" };
     return { ok: true, posta: data.posta };
   }catch(e){ return { ok: false, dovod: "poskytovateľ sa nedá overiť: " + e.message }; }
 }
