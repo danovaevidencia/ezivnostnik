@@ -14,6 +14,8 @@ let _kampane = [], _kampanOtvorena = null;
 const KAMP_STAVY = { rozpisana:"rozpísaná", bezi:"beží", pozastavena:"pozastavená", dokoncena:"dokončená" };
 async function nacitajKampane(){
   const body = document.getElementById("kampBody");
+  // Výber adresátov zo skupiny, odozva a denný plán sú v admin_kontakty.js (admin_53).
+  if(typeof kontKampanBlok !== "function" && typeof adminSkript === "function") await adminSkript("admin_kontakty.js");
   const { data, error } = await sb.rpc("kampan_prehlad");
   if(error){ body.innerHTML = '<div class="loading">Chyba načítania: ' + esc(error.message) + "</div>"; return; }
   _kampane = (data && data.kampane) || [];
@@ -24,6 +26,7 @@ async function nacitajKampane(){
       + ((data && data.odhlasenia) || 0) + "</b>"
     + (log.length ? "<br>" + log.slice(0, 5).map(l => esc(new Date(l.cas).toLocaleString("sk-SK")) + " — " + esc(l.akcia) + " " + esc(JSON.stringify(l.podrobnosti || {}))).join("<br>") : "")
     + "</div>";
+  if(_kampanOtvorena && typeof kontKampanDetail === "function") kontKampanDetail(_kampanOtvorena);
 }
 function kampanRiadok(k){
   const otvorena = _kampanOtvorena === k.id;
@@ -55,7 +58,8 @@ function kampanFormular(k){
       + '<button class="btn" onclick="kampanStav(' + k.id + ',\'' + (k.stav === "bezi" ? "pozastavena" : "bezi") + '\')">' + (k.stav === "bezi" ? "Pozastaviť" : "Spustiť") + "</button>"
       + '<button class="btn" onclick="kampanDavka(' + k.id + ')"' + (k.stav === "bezi" ? "" : " disabled") + ">Poslať dávku</button>"
       + "</div>"
-    + '<div class="field"><label>Import adresátov — CSV s hlavičkou email,meno,ico,source_url,source_seen_at</label>'
+    + (typeof kontKampanBlok === "function" ? kontKampanBlok(k) : "")
+    + '<div class="field"><label>Import adresátov — CSV s hlavičkou email,meno,ico,source_url,source_seen_at (núdzovo; bežne vyber zo skupiny)</label>'
       + '<textarea id="kampCsv" rows="4" placeholder="email,meno,ico,source_url"></textarea></div>'
     + '<button class="btn" onclick="kampanImport(' + k.id + ')">Importovať</button>'
     + '<div id="kampSprava" style="font-size:13px;min-height:18px"></div></div>';
@@ -135,7 +139,8 @@ function kampanFormularRucne(k, p){
       + '<button class="btn" style="width:auto" onclick="kampanPriprav(' + k.id + ')"' + (k.stav === "bezi" ? "" : " disabled") + ">Pripraviť e-maily</button>"
       + "</div>"
     + '<div id="kampRucne"></div>'
-    + '<div class="field"><label>Import adresátov — CSV s hlavičkou email,meno,ico,source_url,source_seen_at</label>'
+    + (typeof kontKampanBlok === "function" ? kontKampanBlok(k) : "")
+    + '<div class="field"><label>Import adresátov — CSV s hlavičkou email,meno,ico,source_url,source_seen_at (núdzovo; bežne vyber zo skupiny)</label>'
       + '<textarea id="kampCsv" rows="4" placeholder="email,meno,ico,source_url"></textarea></div>'
     + '<button class="btn" style="width:auto" onclick="kampanImport(' + k.id + ')">Importovať</button>'
     + '<div id="kampSprava" style="font-size:13px;min-height:18px"></div></div>';
@@ -233,7 +238,8 @@ async function kampanPriprav(id){
     const d = await kampanVolaj({ kampan: id, akcia: "priprav", pocet: +pocet });
     _rucnePripravene = (d.emaily || []).map(e => Object.assign({ kampan: id }, e));
     kampanRucneVykresli();
-    kampanSprava("Pripravených " + _rucnePripravene.length + " · dnes odoslaných " + d.dnes + "/" + d.limit + (d.dovod ? " (" + d.dovod + ")" : ""));
+    kampanSprava("Pripravených " + _rucnePripravene.length + " · dnes odoslaných " + d.dnes + "/" + d.limit + (d.dovod ? " (" + d.dovod + ")" : "")
+      + (typeof kontVyradeneText === "function" ? kontVyradeneText(d.vyradene) : ""));
   }catch(e){ kampanSprava("Chyba: " + e.message, true); }
 }
 function kampanRucneVykresli(){
@@ -335,6 +341,7 @@ async function kampanDavka(id){
   if(!confirm("Naozaj odoslať " + pocet + " e-mailov kampane „" + (k.nazov || "") + "“? Odoslané sa nedá vziať späť.")) return;
   const { data, error } = await sb.functions.invoke("kampan-posli", { body: { kampan: id, pocet: +pocet } });
   if(error || (data && data.chyba)) kampanSprava("Chyba: " + ((data && data.chyba) || error.message), true);
-  else kampanSprava("Odoslané " + data.odoslane + (data.chyby ? ", chyby " + data.chyby : "") + " · dnes spolu " + data.dnes + "/" + data.limit + (data.dovod ? " (" + data.dovod + ")" : ""));
+  else kampanSprava("Odoslané " + data.odoslane + (data.chyby ? ", chyby " + data.chyby : "") + " · dnes spolu " + data.dnes + "/" + data.limit + (data.dovod ? " (" + data.dovod + ")" : "")
+    + (typeof kontVyradeneText === "function" ? kontVyradeneText(data.vyradene) : ""));
   nacitajKampane();
 }
