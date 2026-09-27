@@ -57,6 +57,7 @@ function kampanFormular(k){
       + '<button class="btn" onclick="kampanSkuska(' + k.id + ')">Poslať skúšku sebe</button>'
       + '<button class="btn" onclick="kampanStav(' + k.id + ',\'' + (k.stav === "bezi" ? "pozastavena" : "bezi") + '\')">' + (k.stav === "bezi" ? "Pozastaviť" : "Spustiť") + "</button>"
       + '<button class="btn" onclick="kampanDavka(' + k.id + ')"' + (k.stav === "bezi" ? "" : " disabled") + ">Poslať dávku</button>"
+      + kampanStudioTlacidlo(k)
       + "</div>"
     + (typeof kontKampanBlok === "function" ? kontKampanBlok(k) : "")
     + '<div class="field"><label>Import adresátov — CSV s hlavičkou email,meno,ico,source_url,source_seen_at (núdzovo; bežne vyber zo skupiny)</label>'
@@ -65,18 +66,30 @@ function kampanFormular(k){
     + '<div id="kampSprava" style="font-size:13px;min-height:18px"></div></div>';
 }
 function kampanOtvor(id){ _kampanOtvorena = (_kampanOtvorena === id ? null : id); nacitajKampane(); }
+// Štúdio kampane (náhľad desktop/mobil, spôsob, prevzatie šablóny, skúška
+// sebe) v novom okne toho istého adminu — jedno prihlásenie (č. 252).
+function kampanStudioTlacidlo(k){
+  return '<button class="btn" style="width:auto" onclick="window.open(\'admin.html#studio/k' + k.id + '\',\'_blank\')">Štúdio v novom okne ↗</button>';
+}
 function kampanSprava(text, zle){
   const el = document.getElementById("kampSprava");
   if(el){ el.textContent = text; el.style.color = zle ? "var(--neg)" : "var(--accent2)"; }
 }
+// Nová kampaň = sprievodca v okne (spec 141.4): názov, cieľová skupina,
+// šablóna z knižnice, spôsob odosielania ako prepínač s vysvetlením
+// (predvolene ručne — hromadnú studenú poštu podmienky poskytovateľov
+// zakazujú, č. 191), denný limit a utm_campaign. Do 27. 9. 2026 to boli
+// prompt/confirm („OK = ručná · Zrušiť = hromadná“). Okno žije v
+// admin_studio.js — ten istý renderer vyrobí telo kampane zo šablóny.
 async function kampanNova(){
-  const nazov = prompt("Názov kampane:");
-  if(!nazov) return;
-  // Hromadná studená pošta cez poskytovateľa je zakázaná ich podmienkami
-  // (spec 132.13) — predvolená je preto ručná kampaň.
-  const rucna = confirm("Ručná kampaň (osobné e-maily jednotlivo z vlastnej schránky)?\n\nOK = ručná · Zrušiť = hromadná cez poskytovateľa");
-  const { error } = await sb.rpc("kampan_uloz", { p: { nazov, sposob: rucna ? "rucne" : "hromadne" } });
-  if(error) alert("Chyba: " + error.message); else nacitajKampane();
+  try{
+    await adminSkript("admin_studio.js");
+    await studioSprievodca();
+  }catch(e){
+    console.error("sprievodca kampane:", e);
+    const el = document.getElementById("kampBody");
+    if(el) el.insertAdjacentHTML("afterbegin", '<div class="hint warn">Sprievodca sa nenačítal: ' + esc(e.message) + "</div>");
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -137,6 +150,7 @@ function kampanFormularRucne(k, p){
       + '<button class="btn" style="width:auto" onclick="kampanNahlad(' + k.id + ')">Náhľad</button>'
       + '<button class="btn" style="width:auto" onclick="kampanStav(' + k.id + ',\'' + (k.stav === "bezi" ? "pozastavena" : "bezi") + '\')">' + (k.stav === "bezi" ? "Pozastaviť" : "Spustiť") + "</button>"
       + '<button class="btn" style="width:auto" onclick="kampanPriprav(' + k.id + ')"' + (k.stav === "bezi" ? "" : " disabled") + ">Pripraviť e-maily</button>"
+      + kampanStudioTlacidlo(k)
       + "</div>"
     + '<div id="kampRucne"></div>'
     + (typeof kontKampanBlok === "function" ? kontKampanBlok(k) : "")
@@ -182,9 +196,13 @@ function kampanSablonaRozober(zdroj){
   if(/\son[a-z]+\s*=/i.test(telo)) chyby.push("obsahuje obsluhu udalosti (on…=)");
   if(/href\s*=\s*"\s*javascript:/i.test(telo)) chyby.push("obsahuje odkaz javascript:");
   if(/<style/i.test(s)) chyby.push("blok <style> Gmail pri vložení zahodí — štýly patria inline do atribútu style");
+  // Obrázky z nášho webu alebo z verejného bucketu kampaní (č. 247, admin_52).
+  // Tú istú adresu bucketu drží STUDIO_BUCKET v admin_studio.js.
+  const povoleneObrazky = ["https://ezivnostnik.eu/", "https://jriuljhmacgvxyrptbme.supabase.co/storage/v1/object/public/kampane/"];
+  if(/\{cena:/.test(telo)) chyby.push("nedoplnená cena {cena:…} — ceny dopĺňa štúdio z podmienok");
   (telo.match(/<img\b[^>]*>/gi) || []).forEach(img => {
     const src = (img.match(/\ssrc\s*=\s*"([^"]*)"/i) || [])[1] || "";
-    if(!src.startsWith("https://ezivnostnik.eu/")) chyby.push("obrázok mimo ezivnostnik.eu: " + (src || "(bez src)"));
+    if(src.includes("..") || !povoleneObrazky.some(p => src.startsWith(p))) chyby.push("obrázok mimo ezivnostnik.eu a bucketu kampaní: " + (src || "(bez src)"));
     if(!/\salt\s*=/i.test(img)) chyby.push("obrázok bez alt: " + src);
   });
   if(telo.length > 100000) chyby.push("telo má " + telo.length + " znakov — Gmail dlhé správy skracuje");
