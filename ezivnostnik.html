@@ -784,6 +784,21 @@ h1,h2,h3,h4,.chead,.wbig,.sbox .sn,.sp-title b,.splittitle{text-wrap:balance}
 @media(min-width:720px){ .cenUct{grid-template-columns:1fr 260px;align-items:center} }
 .cenUct>div:first-child b{display:block;font-size:14px;color:var(--ink);margin-bottom:4px}
 .cenUct>div:first-child span{display:block;font-size:12.5px;color:var(--ink-soft);line-height:1.65}
+/* Kalkulačka Účtovníka (kap. 145): názov | [−] N [+] | cena za kus. Na 390 px
+   ostáva v jednom riadku — názov sa zalomí, počítadlo a cena nie. */
+.cenUctVolba{margin-top:10px;border:1px solid var(--line-soft);border-radius:10px;padding:4px 10px}
+.cenUctRiadok{display:grid;grid-template-columns:1fr auto 64px;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--line-soft);font-size:13px;color:var(--ink)}
+.cenUctRiadok small{display:block;font-size:11.5px;color:var(--ink-soft)}
+.cenUctKrok{display:inline-flex;align-items:center;gap:6px}
+.cenUctKrok .abtn{min-width:34px;min-height:34px;padding:0 8px;font-size:16px;line-height:1}
+.cenUctKrok b{min-width:22px;text-align:center;font-size:14px}
+.cenUctCena{text-align:right;font-size:12.5px;color:var(--ink-soft);white-space:nowrap}
+.cenUct>div:first-child .cenUctPozn{display:block;font-size:12px;color:var(--ink-soft);line-height:1.6;padding:8px 0 4px}
+/* Miesto klienta u účtovníka v Nastaveniach → Predplatné (kap. 145) */
+.uctMiesto{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:10px;font-size:12.5px;line-height:1.55;color:var(--ink)}
+.uctMiestoAkcie{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.uctMiestoAkcie .abtn{flex:1 1 150px}
+.uctMiestoPozor{background:var(--sfc-warn);border-left:3px solid var(--warn);border-radius:0 8px 8px 0;padding:8px 10px;margin-top:8px}
 .cenDoplnok{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;border:1px dashed var(--line);border-radius:12px;padding:12px 14px;margin-top:14px}
 .cenDoplnok>div:first-child{flex:1 1 190px;min-width:0}
 .cenDoplnok b{display:block;font-size:13.5px;color:var(--ink)}
@@ -2247,7 +2262,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.27-RF";  // KROS: prírastok bez nových faktúr nestiahne adresár; GIFy šablón kampaní
+const APP_VERZIA = "2026.09.27-RG";  // Účtovník: cena podľa klientov so stropom, miesto klienta (kap. 145)
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -2798,31 +2813,32 @@ const PLANY = {
   // Stripe by boli hotové a zákazník by zaplatil za zamknuté moduly bez
   // jedinej hlášky. Preto plán musí byť v cenníku skôr, než sa začne predávať.
   //
-  // CENA JE STUPŇOVITÁ (9. 9. 2026). Jedna plochá cena za desať firiem
-  // pýtala od účtovníka s dvomi klientmi to isté čo od účtovníka s desiatimi.
-  // Tri tiery: do 2 / do 5 / do 10 IČO za 19,80 / 24,00 / 32,00 € bez DPH.
+  // CENA PODĽA KLIENTOV SO STROPOM (27. 9. 2026, spec kap. 145, č. 263).
+  // Tiery 2 / 5 / 10 IČO (9. 9. 2026) rátali každého klienta ako platiteľa
+  // s odosielaním e-faktúr a mali pevnú časť ~17 €. Teraz účtovník platí
+  // ZÁKLAD = plán vlastnej firmy (Neplatiteľ alebo Platiteľ DPH podľa jej DPH)
+  // a MIESTA pre klientov: neplatiteľ 2,00 €, platiteľ 4,00 € (s DPH); spolu
+  // najviac 29,90 € s neobmedzeným počtom neplatiteľov a 8 platiteľmi, každý
+  // ďalší platiteľ 4,00 €; najviac 50 firiem. Vzorec je `uctovnikPolozky`.
   //
-  // `cenaMes` je VSTUPNÝ tier — to, čo karta ukazuje, kým si človek nevyberie
-  // inak, a to, čo dostane volajúci, ktorý tier neposlal. Radšej najmenšia
-  // kapacita než najväčšia: kto zaplatí za dve firmy, nemá dostať desať.
+  // Plán vlastnej firmy ostáva `uctovnik` (Roman: „nemeň“) — základ je len
+  // cena. Klient dostane plán podľa MIESTA, ktoré mu účtovník pridelí
+  // (`uctovnik_prirad_klienta`, admin_54): neplatiteľ `standard`, platiteľ
+  // `profi`. Zaplatené miesta drží server v `uct_neplatitelia` /
+  // `uct_platitelia` a vynucuje ich pri pridelení; prístup do firmy (pozvánka)
+  // je zadarmo a limit nemá.
   //
-  // Zaplatenú kapacitu drží server v `firma_config.firmy_limit` a od migrácie
-  // admin_38 ju aj VYNUCUJE (`prijmi_pozvanku` vracia `limit_firiem`).
-  // `limity.firmy` je tu len základ pre prípad, že konfigurácia nie je
-  // načítaná — preto vstupné dve, nie desať.
-  //
-  // Predošlá plochá cena 26,90 € skončila bez prechodného obdobia: v deň
-  // zmeny nebolo aktívne ANI JEDNO predplatné (overené dotazom do
-  // `firma_config`), takže nebolo koho zdražiť ani komu čo oznamovať.
+  // `cenaMes` je vstupná cena karty (základ Neplatiteľ bez klientov); karta
+  // ukazuje sumu podľa zvolených počtov. Ceny sú S DPH, netto sa dopočíta.
   uctovnik: {
     kod:"uctovnik", nazov:"Účtovník", farba:"#6b4fa8",
-    cenaMes:24.35, cenaRok:269,
-    // Ceny sú S DPH, rovnako ako všade v cenníku; netto sa dopočíta.
-    // 24,35 = 19,80 bez DPH · 29,52 = 24,00 · 39,36 = 32,00
-    tiery:[{firmy:2, cenaMes:24.35},{firmy:5, cenaMes:29.52},{firmy:10, cenaMes:39.36}],
-    popis:"Vy účtujete, klient nahráva doklady. Jeden účet, dve role.",
-    limity:{ faktury:0, odberatelia:0, doklady:0, bankaImporty:0, ulozisko:0, firmy:2 },
-    peppolOdosielanie:true,   // za toľko IČO, koľko je zaplatené (firmy_limit, admin_38)
+    cenaMes:7.90, cenaRok:269,
+    klienti:{ neplatitel:2.00, platitel:4.00, strop:29.90, platiteliaVStrope:8, maxFiriem:50 },
+    popis:"Platíte svoj plán a za každého klienta podľa toho, či je platiteľ DPH. Klient za svoj prístup neplatí nič.",
+    limity:{ faktury:0, odberatelia:0, doklady:0, bankaImporty:0, ulozisko:0 },
+    // Vlastná firma účtovníka odosiela ako doteraz; klientom rozhoduje miesto
+    // (plán `standard` odosielanie nemá — stráži edge funkcia `postar`).
+    peppolOdosielanie:true,
     moduly:["faktury","vykazy","pohladavky","vydavky","banka","kalendar",
             "jazdy","majetok","dokumenty","dovolenka","knihy","priznania","priznanieB","dph"]
   }
@@ -2832,11 +2848,58 @@ const DOPLNKY = {
   priznanieB: { kod:"priznanieB", nazov:"Daňové priznanie typ B", cena:7.90,
                 popis:"Jednorazové odomknutie priznania za jeden rok" }
 };
+// ── Účtovník: cena podľa klientov so stropom (spec kap. 145, č. 263) ─────────
+// cena = min(základ + 2,00·N + 4,00·min(P, 8), 29,90) + 4,00·max(P − 8, 0)
+// PRVÁ KÓPIA vzorca (karta cenníka) — druhá je v stripe-checkout a tá ide do
+// Stripe. Zhodu nad mriežkou N × P × základ stráži test_uctovnik_klienti; jedno
+// pravidlo na dvoch miestach sa inak rozíde (kap. 16). Ceny základu sa čítajú
+// z PLANY, nie druhýkrát. `polozky` = lookup keys cien v Stripe s počtom.
+function uctovnikPolozky(zaklad, n0, p0){
+  const K=PLANY.uctovnik.klienti;
+  const r2=x=>Math.round(x*100)/100;
+  const n=Math.max(0, Math.floor(+n0||0)), p=Math.max(0, Math.floor(+p0||0));
+  const plan = zaklad==="profi" ? "profi" : "standard";
+  const bezStropu = r2(PLANY[plan].cenaMes + K.neplatitel*n + K.platitel*Math.min(p, K.platiteliaVStrope));
+  const nad = Math.max(p-K.platiteliaVStrope, 0);
+  if(bezStropu >= K.strop){
+    const polozky=[{kluc:"uctovnik_strop_mesacne", pocet:1}];
+    if(nad) polozky.push({kluc:"uctovnik_klient_platitel_mesacne", pocet:nad});
+    return {zaklad:plan, neplatitelia:n, platitelia:p, strop:true, polozky, spolu:r2(K.strop + K.platitel*nad)};
+  }
+  const polozky=[{kluc:plan+"_mesacne", pocet:1}];
+  if(n) polozky.push({kluc:"uctovnik_klient_neplatitel_mesacne", pocet:n});
+  if(p) polozky.push({kluc:"uctovnik_klient_platitel_mesacne", pocet:p});
+  return {zaklad:plan, neplatitelia:n, platitelia:p, strop:false, polozky, spolu:bezStropu};
+}
+// Základ = plán vlastnej firmy podľa jej DPH (stav dnes). O cene rozhoduje server
+// (`zakladUctovnika` v stripe-checkout, to isté pravidlo ako `dphRegistracia`);
+// tu je len na kartu. Cenník sa kupuje z vlastnej firmy — predplatné mení len
+// vlastník (č. 95), takže otvorená firma je tá, z ktorej sa platí.
+function uctovnikZaklad(){ return (typeof jePlatcaDPH==="function" && jePlatcaDPH()) ? "profi" : "standard"; }
+// Kapacita a pridelení klienti prihláseného účtovníka (admin_54 `uctovnik_prehlad`).
+// Miesta patria účtovníkovi, nie otvorenej firme — appka ich preto nepočíta
+// z `firmyZoznam`, pýta sa servera. `null` = nenačítané alebo lokálny režim.
+let uctPrehlad=null;
+async function nacitajUctPrehlad(){
+  if(localMode || !sb) return null;
+  try{
+    const {data, error} = await sb.rpc("uctovnik_prehlad");
+    if(error) throw error;
+    uctPrehlad = (data && data.ok) ? data : null;
+  }catch(e){ console.error("uctovnik_prehlad:", e); uctPrehlad=null; }
+  return uctPrehlad;
+}
+function uctPridelene(){
+  const k=(uctPrehlad && uctPrehlad.klienti) || [];
+  const n=k.filter(x=>x.miesto==="neplatitel").length;
+  return {neplatitelia:n, platitelia:k.length-n, firmy:k};
+}
+const sklonKlient=(n, jeden, dvaStyri, viac)=> n===1 ? jeden : (n>=2 && n<=4 ? dvaStyri : viac);
 // ── Ceny s DPH aj bez DPH ─────────────────────────────────────────────────
 // V PLANY aj DOPLNKY sú sumy S DPH: to je, čo odíde z účtu a čo dostane Stripe.
 // Netto sa DOPOČÍTAVA, nikdy nezapisuje druhýkrát — dve čísla vedľa seba sa raz
 // rozídu (kap. 16). Prepočet dáva presne tie čísla, ktoré sú v cenníku myslené:
-// 7,90 → 6,42 · 12,18 → 9,90 · 24,35 → 19,80 · 29,52 → 24,00 · 39,36 → 32,00.
+// 7,90 → 6,42 · 12,18 → 9,90 · klient 2,00 → 1,63 · 4,00 → 3,25 · strop 29,90 → 24,31.
 //
 // Sadzba je NAŠA, dodávateľova. NIE `settings.sadzbaDPH` — tá patrí firme
 // používateľa a s naším cenníkom nemá spoločné nič; platiteľ so zníženou
@@ -2877,11 +2940,9 @@ function planFirmy(){
 }
 // limit = 0 znamená neobmedzene
 function limitPlanu(kluc){
-  // Počet spravovaných firiem je jediný limit, ktorý sa dokupuje: účtovník má
-  // v základe desať a ďalšie do dvadsiatich za príplatok. Zaplatenú výšku drží
-  // server v `firma_config.firmy_limit`, cenník len základ.
-  if(kluc==="firmy" && firmaConfig && +firmaConfig.firmy_limit>0)
-    return +firmaConfig.firmy_limit;
+  // Limit spravovaných firiem od kap. 145 neexistuje: prístup do firmy je
+  // zadarmo, platí sa MIESTO, ktoré účtovník klientovi pridelí — a to stráži
+  // server (`uctovnik_prirad_klienta`, admin_54).
   const p=planFirmy();
   return (p.limity&&p.limity[kluc])||0;
 }
@@ -3598,23 +3659,10 @@ async function spracujPozvanku(){
   try{
     const { data:{ user } } = await sb.auth.getUser();
     if(!user) return false;                 // prihlásenie prebehne a zavolá sa znova
-    // Limit spravovaných firiem. Od migrácie admin_38 ho vynucuje SERVER
-    // (`prijmi_pozvanku` vracia `limit_firiem`), takže táto kontrola už nie je
-    // jediná — je len rýchlejšia a povie to skôr, bez okrúhlej cesty na server.
-    // Musela sa presunúť práve teraz: kým na limite viseli len funkcie, obídenie
-    // cez konzolu bolo nepríjemnosťou; keď na ňom visí CENA tieru, je to zľava.
-    //
-    // Pri štarte beží `spracujPozvanku` SÚBEŽNE s `nacitajFirmu`, takže zoznam
-    // firiem ani konfigurácia nemusia byť načítané. Vtedy sa nekontroluje nič
-    // a je to vidieť v konzole — tichý priechod by tvrdil, že limit sedí, hoci
-    // sa nemeral (kap. 45.5: prázdny výsledok vyzerá ako výsledok).
-    if(firmaConfig && firmyZoznam.length){
-      if(!skontrolujLimit("firmy","Pozvánku prijmete, keď sa miesto uvoľní alebo si limit navýšite.")){
-        return false;
-      }
-    }else{
-      console.warn("prijatie pozvánky: limit spravovaných firiem sa neoveril — konfigurácia ešte nebola načítaná");
-    }
+    // Limit spravovaných firiem pri prijatí pozvánky od kap. 145 nie je (D4):
+    // prístup do firmy je zadarmo — aj do firmy, ktorá si plán platí sama.
+    // Platí sa MIESTO, ktoré účtovník klientovi pridelí v jeho firme
+    // (`uctPriradMiesto`), a to stráži server.
     const { data, error } = await sb.rpc("prijmi_pozvanku", { p_token:t });
     // Odložený token sa zahadzuje aj pri neúspechu — inak by sa neplatná
     // pozvánka pokúšala prijať pri každom ďalšom štarte appky.
@@ -3627,16 +3675,10 @@ async function spracujPozvanku(){
       expirovana:"Platnosť pozvánky uplynula. Požiadajte o novú.",
       iny_email:"Pozvánka je vystavená na inú e-mailovú adresu. Prihláste sa účtom, na ktorý prišla.",
       ste_vlastnik:"Túto firmu už vlastníte.",
-      limit_firiem:"Spravujete plný počet firiem, ktorý máte zaplatený. Pozvánku prijmete, keď sa miesto uvoľní alebo si navýšite plán.",
       neprihlaseny:"Najprv sa prihláste."
     };
     if(!data || !data.ok){
-      let hlaska=HLASKY[data&&data.chyba]||"Pozvánku sa nepodarilo prijať.";
-      // Čísla zo servera, nie z appky: keď sa obidva zdroje rozídu, platí ten,
-      // ktorý pozvánku odmietol. Bez nich by hláška tvrdila „plný počet“ a človek
-      // by nevedel, či je to päť alebo desať.
-      if(data && data.chyba==="limit_firiem" && data.limit) hlaska+=" Spravujete "+data.pocet+" z "+data.limit+".";
-      alert(hlaska); return false;
+      alert(HLASKY[data&&data.chyba]||"Pozvánku sa nepodarilo prijať."); return false;
     }
     alert("Prístup k firme bol udelený ("+(ROLY_POPIS[data.rola]||data.rola)+").");
     await nacitajFirmu(data.firma_id);
@@ -6690,6 +6732,17 @@ function zbierNotifikacie(){
         detail:"Od "+(zm.od?fmtDatum(String(zm.od).slice(0,10)):"konca obdobia")+" budete mať "+nazov+".",
         akcia:()=>zobrazCennik()});
     }
+    // Účtovník vo firme klienta: platiteľ DPH na mieste neplatiteľa (kap. 145 D6).
+    // Plán `standard` nemá DPH ani odosielanie — klient by od januára 2027
+    // nevedel poslať e-faktúru a nikto by nevedel prečo.
+    if(typeof mojaRolaVFirme==="function" && mojaRolaVFirme()==="uctovnik"
+       && firmaConfig && firmaConfig.uctovnik_miesto==="neplatitel"
+       && typeof jePlatcaDPH==="function" && jePlatcaDPH()){
+      out.push({kluc:"uct:miesto:"+(firmaId||""), ic:"⚠", nal:"warn",
+        nazov:"Klient je platiteľ DPH na mieste neplatiteľa",
+        detail:"Nemôže odosielať e-faktúry ani podávať DPH. Preraďte ho v Nastaveniach → Predplatné.",
+        akcia:()=>otvorApp("data")});
+    }
     // ── po importe výpisu: čo ostalo na človeka (kap. 79.4) ──
     //
     // Zvonček je jediné miesto, kam sa človek pozerá bez toho, aby niečo
@@ -7293,6 +7346,11 @@ function renderHomeStrip(){
     popis = dni <= 0 ? "expirovalo" : (dni <= 30 ? "ešte " + dni + " dní" : "");
   } else {
     popis = "bez obmedzení";
+  }
+  // Klient vidí, kto mu plán platí (kap. 145) — inak by „Platiteľ DPH“ s dátumom
+  // účtovníkovho predplatného vyzeral ako jeho vlastné predplatné.
+  if(kod !== "free" && typeof planHradiUctovnik==="function" && planHradiUctovnik()){
+    popis = (popis ? popis + " · " : "") + "hradí účtovník";
   }
 
   const varovanie = (dni !== null && dni <= 7);
@@ -20746,7 +20804,7 @@ function dmKopiruj(){
 // stránkou stráži test_pravne, takže nová verzia dokumentu bez úpravy tu
 // sadu zhodí.
 const DOKUMENTY={
-  podmienky:{url:"podmienky.html",     n:"Obchodné podmienky",      verzia:"1.7"},
+  podmienky:{url:"podmienky.html",     n:"Obchodné podmienky",      verzia:"1.8"},
   sukromie: {url:"sukromie.html",      n:"Ochrana osobných údajov", verzia:"1.19"},
   zmazanie: {url:"zmazanie-uctu.html", n:"Zmazanie účtu a údajov"},
 };
@@ -21004,6 +21062,7 @@ function appData(){
         ${dni!==null&&dni<=7&&dni>0?`<div style="background:var(--sfc-warn);border-left:3px solid var(--warn);border-radius:0 8px 8px 0;padding:9px 12px;margin-bottom:10px;font-size:12px;line-height:1.5">
           Predplatné sa čoskoro obnoví. Ak ste ho zrušili, po ${fmtDatum(doKedy.toISOString().slice(0,10))} prejdete na plán Free.
         </div>`:''}
+        ${uctovnikMiestoHtml()}
         <button class="abtn ${aktualnyPlan()==='free'?'pri':''}" onclick="zobrazCennik()" style="width:100%">
           ${aktualnyPlan()==='free'?'Zobraziť plány a ceny':'Zmeniť plán'}
         </button>
@@ -25439,25 +25498,61 @@ function spracujNavratZPlatby(){
 // Premenná ostáva (`false` napevno), lebo na ňu visí výpočet ceny aj popisu
 // obdobia. Vrátiť ročné plány = zapnúť prepínač späť, nie prepisovať cenník.
 const cennikRocne = false;
-// Vybraný tier Účtovníka. Je to globál, lebo kartu prekresľuje `onchange`
-// zvonku — a prekresliť sa musí LEN ona. `innerHTML` na celom tele modálu by
-// zhodilo posun a človek by po každom prepnutí hľadal, kde bol.
-let cennikTierFiriem = 2;
-function uctTiery(){ return PLANY.uctovnik.tiery || [{firmy:PLANY.uctovnik.limity.firmy, cenaMes:PLANY.uctovnik.cenaMes}]; }
-function uctTier(){ const z=uctTiery(); return z.find(x=>x.firmy===cennikTierFiriem) || z[0]; }
-function cennikTier(v){
-  cennikTierFiriem = +v || uctTiery()[0].firmy;
-  const k=document.getElementById("cenUctKarta");
-  if(k) k.innerHTML = kartaPlanu(PLANY.uctovnik);
+// Počty klientov na karte Účtovníka (spec kap. 145). Globál, lebo kartu
+// prekresľujú tlačidlá [−]/[+] zvonku — a prekresliť sa musí LEN ona:
+// `innerHTML` na celom tele modálu by zhodilo posun a človek by po každom
+// kliknutí hľadal, kde bol.
+let cennikUctN = 2, cennikUctP = 0;
+// Predvoľba: aspoň toľko, koľko má účtovník pridelené (menej sa predplatiť
+// nedá — server to odmietne), a toľko, koľko má zaplatené; nový účtovník
+// začína príkladom s dvomi neplatiteľmi.
+function cennikUctPredvol(){
+  const pr=uctPridelene(), kap=uctPrehlad||{};
+  const maKapacitu = kap.kapacita_neplatitelia!=null || kap.kapacita_platitelia!=null;
+  cennikUctN = Math.max(pr.neplatitelia, +kap.kapacita_neplatitelia||0);
+  cennikUctP = Math.max(pr.platitelia, +kap.kapacita_platitelia||0);
+  if(!maKapacitu && !pr.firmy.length && aktualnyPlan()!=="uctovnik"){ cennikUctN=2; cennikUctP=0; }
 }
-// Karta je hore, mimo `zobrazCennik`, aby ju vedel prekresliť aj `cennikTier`.
+function cennikUctZmen(druh, o){
+  const K=PLANY.uctovnik.klienti, pr=uctPridelene();
+  if(druh==="n") cennikUctN = Math.max(pr.neplatitelia, cennikUctN + o);
+  else           cennikUctP = Math.max(pr.platitelia,   cennikUctP + o);
+  // poistka 50 firiem v jednom účte (145.2) — viac je individuálna dohoda
+  if(cennikUctN + cennikUctP > K.maxFiriem){
+    if(druh==="n") cennikUctN = K.maxFiriem - cennikUctP; else cennikUctP = K.maxFiriem - cennikUctN;
+  }
+  cennikUctPrekresli();
+}
+function cennikUctPrekresli(){
+  const k=document.getElementById("cenUctKarta"); if(k) k.innerHTML = kartaPlanu(PLANY.uctovnik);
+  const v=document.getElementById("cenUctVolba"); if(v) v.innerHTML = cennikUctVolbaHtml();
+}
+// Kalkulačka vedľa karty: základ, dve počítadlá, strop. Sumy s DPH — účtovníci
+// bývajú neplatitelia; karta pod ňou ukazuje súčet podľa čitateľa (`cenaDvojmo`).
+function cennikUctVolbaHtml(){
+  const K=PLANY.uctovnik.klienti, U=uctovnikPolozky(uctovnikZaklad(), cennikUctN, cennikUctP);
+  const zak=PLANY[U.zaklad], pr=uctPridelene();
+  const krok=(druh, pocet, nazov, cena, pozn, min)=>`<div class="cenUctRiadok">
+      <span>${nazov}${pozn?`<small>${pozn}</small>`:""}</span>
+      <span class="cenUctKrok"><button type="button" class="abtn" aria-label="Menej" ${pocet<=min?"disabled":""} onclick="cennikUctZmen('${druh}',-1)">−</button><b>${pocet}</b><button type="button" class="abtn" aria-label="Viac" onclick="cennikUctZmen('${druh}',1)">+</button></span>
+      <span class="cenUctCena">× ${eurCena(cena)}</span>
+    </div>`;
+  return `<div class="cenUctRiadok"><span>Vaša firma — ${esc(zak.nazov)}</span><span></span><span class="cenUctCena">${eurCena(zak.cenaMes)}</span></div>
+    ${krok("n", U.neplatitelia, "Klienti neplatitelia DPH", K.neplatitel, "", pr.neplatitelia)}
+    ${krok("p", U.platitelia, "Klienti platitelia DPH", K.platitel, "vrátane odosielania e-faktúr", pr.platitelia)}
+    <div class="cenUctPozn">Najviac <b>${eurCena(K.strop)}</b> mesačne — v tom neobmedzene klientov neplatiteľov
+      a ${K.platiteliaVStrope} platiteľov. Každý ďalší platiteľ ${eurCena(K.platitel)}.${U.strop?" <b>Ste na strope.</b>":""}
+      Viac než ${K.maxFiriem} firiem v jednom účte? Ozvite sa na ${esc(SAAS_DODAVATEL.email)}.</div>`;
+}
+// Karta je hore, mimo `zobrazCennik`, aby ju vedeli prekresliť aj počítadlá
+// klientov (`cennikUctPrekresli`).
 function kartaPlanu(p){
     const akt=aktualnyPlan();
     const jeAkt = p.kod===akt;
-    // Účtovník sa predáva po tieroch, takže cena aj počet firiem idú z vybraného
-    // tieru, nie z plánu. Ostatné plány tier nemajú a `tier` ostáva null.
-    const tier = p.kod==="uctovnik" ? uctTier() : null;
-    const cena = cennikRocne ? p.cenaRok : (tier ? tier.cenaMes : p.cenaMes);
+    // Účtovník sa platí podľa klientov (kap. 145), takže cena ide zo zvolených
+    // počtov, nie z plánu. Ostatné plány klientov nemajú a `U` ostáva null.
+    const U = p.kod==="uctovnik" ? uctovnikPolozky(uctovnikZaklad(), cennikUctN, cennikUctP) : null;
+    const cena = cennikRocne ? p.cenaRok : (U ? U.spolu : p.cenaMes);
     const zaObdobie = cennikRocne ? "/rok" : "/mesiac";
     const uspora = (p.cenaMes>0 && cennikRocne) ? Math.round((1-(p.cenaRok/(p.cenaMes*12)))*100) : 0;
     const lim=p.limity;
@@ -25481,7 +25576,7 @@ function kartaPlanu(p){
         ${riadok("DPH pri registrácii podľa § 7a — priznanie a súhrnný výkaz", p.moduly.includes("dph") || !!p.dphPre7a)}
         ${riadok("Príjem e-faktúr Peppol", true)}
         ${riadok("Odosielanie e-faktúr Peppol", !!p.peppolOdosielanie)}
-        ${(tier?tier.firmy:lim.firmy)?riadok(`Až ${tier?tier.firmy:lim.firmy} firiem klientov v jednom účte`, true):""}
+        ${U?riadok(`Klienti: ${U.neplatitelia} ${sklonKlient(U.neplatitelia,"neplatiteľ","neplatitelia","neplatiteľov")}, ${U.platitelia} ${sklonKlient(U.platitelia,"platiteľ","platitelia","platiteľov")} DPH`, true):""}
       </div>
       ${(()=>{
         const zm = cakajucaZmena();
@@ -25489,13 +25584,24 @@ function kartaPlanu(p){
         if(zm && zm.plan===p.kod){
           return `<button class="abtn" disabled style="width:100%;opacity:.5">Naplánované</button>`;
         }
-        if(jeAkt){
-          return `<button class="abtn" disabled style="width:100%;opacity:.5">Aktívny plán</button>`;
-        }
         // Nevlastník vidí, čo by sa dalo urobiť, ale stlmené — `stripe-checkout`
         // by ho odmietol 403 (ROZHODNUTIA č. 95). Kto môže, povie veta nad cenníkom.
         const smie = smiemMenitPredplatne();
         const stlmene = (text)=>`<button class="abtn" disabled style="width:100%;opacity:.5" title="${esc(PREDPLATNE_LEN_VLASTNIK)}">${text}</button>`;
+        const klientiArg = U ? `{neplatitelia:${U.neplatitelia},platitelia:${U.platitelia}}` : "null";
+        if(jeAkt){
+          // Aktívny Účtovník mení POČET klientov — to isté predplatné, iné položky.
+          // Zaplatené počty pozná len server (`uctovnik_prehlad`); kým nie sú
+          // načítané, tlačidlo sa neponúka (nevieme, či by šlo o zmenu).
+          const kap = uctPrehlad || {};
+          const znamy = kap.kapacita_neplatitelia!=null || kap.kapacita_platitelia!=null || kap.kapacita_legacy!=null;
+          const rovnake = U && (+kap.kapacita_neplatitelia||0)===U.neplatitelia && (+kap.kapacita_platitelia||0)===U.platitelia;
+          if(U && znamy && !rovnake){
+            const text = `Zmeniť na ${U.neplatitelia} + ${U.platitelia} klientov`;
+            return smie ? `<button class="abtn pri" style="width:100%;--_c:${p.farba}" onclick="spustiPredplatne('uctovnik','mes',null,${klientiArg})">${text}</button>` : stlmene(text);
+          }
+          return `<button class="abtn" disabled style="width:100%;opacity:.5">Aktívny plán</button>`;
+        }
         if(p.cenaMes===0){
           // Free pri bežiacom predplatnom = zrušenie ku koncu obdobia
           if(akt==="free") return `<button class="abtn" disabled style="width:100%;opacity:.5">Základný plán</button>`;
@@ -25506,7 +25612,7 @@ function kartaPlanu(p){
         const jeZmena = akt!=="free";
         const text = jeZmena ? `Prejsť na ${p.nazov}` : `Predplatiť ${p.nazov}`;
         if(!smie) return stlmene(text);
-        return `<button class="abtn pri" style="width:100%;--_c:${p.farba}" onclick="spustiPredplatne('${p.kod}','${cennikRocne?'rok':'mes'}',null,${tier?tier.firmy:'null'})">${text}</button>`;
+        return `<button class="abtn pri" style="width:100%;--_c:${p.farba}" onclick="spustiPredplatne('${p.kod}','${cennikRocne?'rok':'mes'}',null,${klientiArg})">${text}</button>`;
       })()}
     </div>`;
 }
@@ -25519,12 +25625,17 @@ function zobrazCennik(modul){
     : "";
   const lenVlastnik = smiemMenitPredplatne() ? ""
     : `<div class="nv-plan"><span aria-hidden="true">🔒</span><span>${esc(PREDPLATNE_LEN_VLASTNIK)}</span></div>`;
-  // Predvolí sa najmenší tier, ktorý pokryje to, čo účtovník UŽ spravuje.
-  // Ponúknuť „do 2 firiem“ niekomu so siedmimi klientmi znamená predať plán,
-  // pri ktorom mu server odmietne najbližšiu pozvánku.
-  const uzSpravuje = typeof vyuzitieLimitu==="function" ? vyuzitieLimitu("firmy") : 0;
-  const sedi = uctTiery().find(x=>x.firmy>=uzSpravuje);
-  cennikTierFiriem = (sedi||uctTiery()[uctTiery().length-1]).firmy;
+  // Počty klientov sa predvolia podľa toho, čo účtovník už pridelil a zaplatil
+  // (menej sa predplatiť nedá — server by to odmietol). Prehľad zo servera sa
+  // dočíta na pozadí a karta sa prekreslí sama.
+  cennikUctPredvol();
+  // Pýta sa len ten, koho sa to týka: účtovník alebo ten, kto má prístup do
+  // cudzej firmy. Bežný živnostník pri otvorení cenníka server nevolá.
+  const mozeBytUcto = aktualnyPlan()==="uctovnik"
+    || (typeof firmyZoznam!=="undefined" && (firmyZoznam||[]).some(f=>f.mojaRola && f.mojaRola!=="vlastnik"));
+  if(mozeBytUcto && !uctPrehlad && !localMode && sb){
+    nacitajUctPrehlad().then(()=>{ if(document.getElementById("cenUctKarta")){ cennikUctPredvol(); cennikUctPrekresli(); } });
+  }
   const html=`${poznamka}${lenVlastnik}
     ${(()=>{ const zm=cakajucaZmena(); if(!zm) return "";
       const kedy = zm.od ? fmtDatum(String(zm.od).slice(0,10)) : "koncom obdobia";
@@ -25544,7 +25655,7 @@ function zobrazCennik(modul){
     ${(()=>{
       // Účtovník má inú cieľovú skupinu než zvyšok cenníka, preto stojí bokom
       // a nie ako štvrtá karta v rade. Živnostník, ktorý hľadá plán pre seba,
-      // by inak porovnával 26,90 € s 11,90 € a nechápal, za čo je ten rozdiel.
+      // by inak porovnával cenu za klientov so svojou a nechápal rozdiel.
       //
       // Firme, ktorej plán hradí účtovník, sa ponuka nezobrazuje vôbec —
       // `spustiPredplatne` ju síce zastaví, ale ponúkať niekomu kúpu toho, čo
@@ -25553,18 +25664,14 @@ function zobrazCennik(modul){
       return `
     <div class="cenUct">
       <div>
-        <b>Vediete účtovníctvo viacerým živnostníkom?</b>
-        <span>Jeden účet a v ňom firmy vašich klientov.
-        Vy robíte DPH, priznania a párovanie s bankou, klient fakturuje a nahráva doklady.
-        Klientovi sa plán aktivuje sám a neplatí zaň nič.
-        Potrebujete viac než ${uctTiery()[uctTiery().length-1].firmy} firiem? Ozvite sa na ${SAAS_DODAVATEL.email}.</span>
-        <label style="display:block;margin-top:9px;font-size:12.5px;color:var(--ink)">Koľko firiem klientov?
-          <select id="cenUctTier" onchange="cennikTier(this.value)"
-                  style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:13px;margin-left:6px">
-            ${uctTiery().map(x=>`<option value="${x.firmy}"${x.firmy===cennikTierFiriem?" selected":""}>do ${x.firmy} IČO</option>`).join("")}
-          </select>
-        </label>
-        ${uzSpravuje>0?`<span style="margin-top:5px">Práve spravujete ${uzSpravuje} ${uzSpravuje===1?"firmu":(uzSpravuje<5?"firmy":"firiem")} klientov.</span>`:""}
+        <b>Vediete účtovníctvo klientom?</b>
+        <span>Platíte svoj plán a za každého klienta podľa toho, či je platiteľ DPH.
+        Vy robíte DPH, priznania a párovanie s bankou, klient fakturuje a nahráva doklady —
+        za svoj prístup neplatí nič. Plán klientovi pridelíte v jeho firme
+        (Nastavenia → Predplatné) jedným ťuknutím.</span>
+        <div id="cenUctVolba" class="cenUctVolba">${cennikUctVolbaHtml()}</div>
+        ${(()=>{ const pr=uctPridelene(); const s=pr.neplatitelia+pr.platitelia; return s>0
+          ? `<span style="margin-top:5px">Klientom máte pridelených ${s} ${sklonKlient(s,"miesto","miesta","miest")}: ${pr.neplatitelia} ${sklonKlient(pr.neplatitelia,"neplatiteľ","neplatitelia","neplatiteľov")}, ${pr.platitelia} ${sklonKlient(pr.platitelia,"platiteľ","platitelia","platiteľov")}.</span>` : ""; })()}
       </div>
       <div id="cenUctKarta">${kartaPlanu(PLANY.uctovnik)}</div>
     </div>`;
@@ -26076,13 +26183,115 @@ function chybajuceFakturacneUdaje(){
 function planHradiUctovnik(){
   return /^uctovnik:/.test(String((firmaConfig && firmaConfig.plan_zdroj) || ""));
 }
-
+// ── Miesto klienta u účtovníka (spec kap. 145, admin_54) ─────────────────────
+// Blok v Nastaveniach → Predplatné firmy. Účtovník tu klientovi pridelí,
+// preradí alebo odoberie miesto; vlastník firmy vidí, kto mu plán platí.
+// Dovtedy väzbu klient–účtovník (`plan_zdroj`) zapisovalo len ručné SQL,
+// hoci cenník sľuboval „klientovi sa plán aktivuje sám“ (145.4 D3).
+let _uctPrehladNacitava=false;
+function uctovnikMiestoHtml(){
+  if(localMode || !sb || !firmaId) return "";
+  const rola = mojaRolaVFirme();
+  const cfg = firmaConfig || {};
+  const K = PLANY.uctovnik.klienti;
+  // Klient pridelený pred kap. 145 miesto nemá — dostával plán účtovníka,
+  // teda rozsah platiteľa (`uctovnik_prehlad` ho rovnako vedie ako platiteľa).
+  const miesto = cfg.uctovnik_miesto || (planHradiUctovnik() ? "platitel" : null);
+  const nazovMiesta = m => m==="neplatitel" ? "neplatiteľa DPH" : "platiteľa DPH";
+  const box = (obsah)=>`<div class="uctMiesto">${obsah}</div>`;
+  const doKedy = cfg.plan_do ? fmtDatum(String(cfg.plan_do).slice(0,10)) : "";
+  const platca = typeof jePlatcaDPH==="function" && jePlatcaDPH();
+  if(rola==="uctovnik"){
+    if(!uctPrehlad){
+      if(!_uctPrehladNacitava){
+        _uctPrehladNacitava=true;
+        nacitajUctPrehlad().then(()=>{ _uctPrehladNacitava=false; if(uctPrehlad && modulNaObrazovke()==="data") appData(); });
+      }
+      return box(`<span class="csub">Načítavam miesta vašich klientov…</span>`);
+    }
+    const moje = uctPridelene().firmy.some(x=>x.firma_id===firmaId);
+    if(moje){
+      // D6: firma je podľa nastavení platiteľ, ale má miesto neplatiteľa. Appka
+      // to hlási, nepreradí sama — je to zmena ceny, ktorú platí účtovník.
+      const nesulad = miesto==="neplatitel" && platca;
+      const druhe = miesto==="neplatitel" ? "platitel" : "neplatitel";
+      return box(`<b>Plán tejto firmy hradíte vy</b> · miesto ${nazovMiesta(miesto)}
+        ${nesulad?`<div class="uctMiestoPozor">Firma je podľa nastavení platiteľ DPH, ale má miesto neplatiteľa — nemôže odosielať e-faktúry ani podávať DPH. Preraďte ju na miesto platiteľa (+${eurCena(K.platitel-K.neplatitel)} mesačne).</div>`:""}
+        <div class="uctMiestoAkcie">
+          <button class="abtn ${nesulad?'pri':''}" onclick="uctPriradMiesto('${druhe}')">Preradiť na miesto ${nazovMiesta(druhe)}</button>
+          <button class="abtn" onclick="uctOdoberMiesto()">Odobrať z môjho plánu</button>
+        </div>`);
+    }
+    if(planHradiUctovnik()) return box(`Plán tejto firmy hradí iný účtovník.`);
+    if(cfg.stripe_sub_id) return box(`Firmu spravujete, plán si klient platí sám.`);
+    const odporucane = platca ? "platitel" : "neplatitel";
+    return box(`<b>Plán tejto firmy môžete hradiť vy</b> — klient potom neplatí nič.
+      <div class="uctMiestoAkcie">
+        <button class="abtn ${odporucane==='neplatitel'?'pri':''}" onclick="uctPriradMiesto('neplatitel')">Miesto neplatiteľa · ${eurCena(K.neplatitel)}</button>
+        <button class="abtn ${odporucane==='platitel'?'pri':''}" onclick="uctPriradMiesto('platitel')">Miesto platiteľa · ${eurCena(K.platitel)}</button>
+      </div>
+      <div class="csub">Miesta si predplácate v cenníku (Účtovník), tu ich len rozdeľujete.</div>`);
+  }
+  if(planHradiUctovnik()){
+    return box(`Plán <b>${esc(planFirmy().nazov)}</b> hradí váš účtovník${doKedy?` do ${esc(doKedy)}`:""}.
+      ${rola==="vlastnik"?`<div class="uctMiestoAkcie"><button class="abtn" onclick="uctOdoberMiesto()">Ukončiť hradenie účtovníkom</button></div>`:""}`);
+  }
+  return "";
+}
+const UCT_MIESTO_HLASKY={
+  neprihlaseny:"Najprv sa prihláste.",
+  nezname_miesto:"Neznámy druh miesta.",
+  nie_ucto:"Plán môže prideliť len účtovník, ktorého klient do firmy pozval s rolou Účtovník.",
+  klient_plati_sam:"Táto firma si platí plán sama. Miesto jej pridelíte, keď klient svoje predplatné zruší a to dobehne.",
+  iny_uctovnik:"Plán tejto firmy už hradí iný účtovník.",
+  bez_planu:"Na pridelenie miesta potrebujete plán Účtovník — predplaťte si ho v cenníku.",
+  limit_50:"V jednom účte môžete mať najviac 50 firiem klientov. Viac je individuálna dohoda — ozvite sa na podporu.",
+  nic_na_odobratie:"Táto firma nemá miesto u účtovníka."
+};
+async function uctPriradMiesto(miesto){
+  if(localMode || !sb || !firmaId) return;
+  const beh=behFirmy();
+  try{
+    const {data, error}=await sb.rpc("uctovnik_prirad_klienta", {p_firma_id:beh.koren, p_miesto:miesto});
+    if(error) throw error;
+    if(!data || !data.ok){
+      const ch=data&&data.chyba;
+      if(ch==="bez_miesta"){
+        const druh = data.miesto==="neplatitel" ? "neplatiteľov" : "platiteľov";
+        if(confirm("Nemáte voľné miesto — "+druh+" máte zaplatených "+data.kapacita+" a obsadených "+data.obsadene+".\n\nPridať miesto v cenníku?")) zobrazCennik();
+        return;
+      }
+      alert(UCT_MIESTO_HLASKY[ch] || "Miesto sa nepodarilo prideliť."); return;
+    }
+  }catch(e){ console.error("uctovnik_prirad_klienta:", e); alert("Miesto sa nepodarilo prideliť: "+(e.message||e)); return; }
+  await nacitajUctPrehlad();
+  if(!beh.platny()) return;
+  await nacitajFirmaConfig(beh.koren);
+  renderHomeStrip(); renderLauncher();
+  if(modulNaObrazovke()==="data") appData();
+}
+async function uctOdoberMiesto(){
+  if(localMode || !sb || !firmaId) return;
+  const doKedy = firmaConfig && firmaConfig.plan_do ? fmtDatum(String(firmaConfig.plan_do).slice(0,10)) : "konca obdobia";
+  if(!confirm("Plán tejto firmy prestane hradiť účtovník.\n\nPlán beží do "+doKedy+", potom firma prejde na Free — dáta sa nemažú. Pokračovať?")) return;
+  const beh=behFirmy();
+  try{
+    const {data, error}=await sb.rpc("uctovnik_odober_klienta", {p_firma_id:beh.koren});
+    if(error) throw error;
+    if(!data || !data.ok){ alert(UCT_MIESTO_HLASKY[data&&data.chyba] || "Miesto sa nepodarilo odobrať."); return; }
+  }catch(e){ console.error("uctovnik_odober_klienta:", e); alert("Miesto sa nepodarilo odobrať: "+(e.message||e)); return; }
+  await nacitajUctPrehlad();
+  if(!beh.platny()) return;
+  await nacitajFirmaConfig(beh.koren);
+  renderHomeStrip(); renderLauncher();
+  if(modulNaObrazovke()==="data") appData();
+}
 // `rok` sa posiela len pri jednorazovom doplnku — hovorí, ZA KTORÝ rok sa
 // priznanie odomyká. Dovtedy sa neposielal a `aktivuj_plan` dosadil aktuálny
 // kalendárny rok; v marci by to odomklo rok, ktorý sa ešte nepodáva.
-// `tier` = koľko firiem klientov si účtovník kupuje (2 / 5 / 10). Pri ostatných
-// plánoch je null a edge funkcia ho ignoruje.
-async function spustiPredplatne(plan, obdobie, rok, tier){
+// `klienti` = {neplatitelia, platitelia} — koľko miest pre klientov si účtovník
+// kupuje (kap. 145). Pri ostatných plánoch je null a edge funkcia ho ignoruje.
+async function spustiPredplatne(plan, obdobie, rok, klienti){
   if(localMode || !sb || !firmaId){ alert("Predplatné je dostupné len v prihlásenom (cloud) režime."); return; }
   // Server nevlastníka odmietne 403 až po otázkach; povedať to hneď (č. 95).
   if(!smiemMenitPredplatne()){ alert(PREDPLATNE_LEN_VLASTNIK); return; }
@@ -26090,8 +26299,8 @@ async function spustiPredplatne(plan, obdobie, rok, tier){
   // stráže by klient zaplatil za to, čo už má — a zistil by to až na výpise.
   if(planHradiUctovnik()){
     alert("Plán tejto firmy hradí váš účtovník.\n\n"
-      + "Kupovať vlastné predplatné netreba. Ak chcete spoluprácu ukončiť a platiť si sami, "
-      + "povedzte to najprv účtovníkovi — po odobraní firmy zo svojho plánu si predplatné kúpite tu.");
+      + "Kupovať vlastné predplatné netreba. Ak si chcete platiť sami, ukončite hradenie účtovníkom "
+      + "v Nastaveniach → Predplatné — keď plán dobehne, predplatné si kúpite tu.");
     return;
   }
 
@@ -26138,7 +26347,7 @@ async function spustiPredplatne(plan, obdobie, rok, tier){
       body:JSON.stringify({ plan, obdobie:obdobie||"mes", firma_id:beh.koren,
                             navrat_url:location.origin+location.pathname,
                             rok: rok ? String(rok) : null,
-                            tier: tier || null })
+                            klienti: klienti || null })
     });
     const r=await res.json().catch(()=>({}));
 
@@ -26162,6 +26371,19 @@ async function spustiPredplatne(plan, obdobie, rok, tier){
       renderHomeStrip(); renderLauncher();
       if(typeof zobrazFirmu==="function") zobrazFirmu();
       const kedy = r.ucinnost_od ? fmtDatum(String(r.ucinnost_od).slice(0,10)) : "koncom obdobia";
+      // Zmena POČTU klientov v pláne Účtovník (kap. 145) — plán ostáva.
+      if(r.klienti){
+        await nacitajUctPrehlad();
+        const k=r.klienti;
+        const zlozenie = k.neplatitelia+" "+sklonKlient(k.neplatitelia,"neplatiteľ","neplatitelia","neplatiteľov")
+          +" a "+k.platitelia+" "+sklonKlient(k.platitelia,"platiteľ","platitelia","platiteľov")+" DPH";
+        alert(r.kapacita==="po_zaplateni"
+          ? "✓ Počet klientov sa mení na "+zlozenie+" ("+eurCena(k.spolu)+" mesačne).\n\n"
+            +"Doplatok za zvyšok obdobia práve strhávame z karty. Nové miesta pribudnú hneď po jeho zaplatení — zvyčajne do minúty."
+          : "✓ Počet klientov je "+zlozenie+".\n\n"
+            +"Čo pribudlo, môžete klientom prideliť hneď. Zníženie a nová cena "+eurCena(k.spolu)+" platia od "+kedy+".");
+        return;
+      }
       if(r.plan==="free"){
         alert("Predplatné bolo zrušené.\n\nVáš plán ostáva aktívny do "+kedy+
               ", potom prejdete na Free. Nič vám už nestrhneme.");

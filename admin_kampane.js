@@ -113,7 +113,7 @@ const SABLONA_UCTOVNICI = {
     "– odosielanie e-faktúr v pláne Platiteľ DPH za 9,90 € bez DPH mesačne,",
     "– faktúry, výdavky, banka, kniha jázd, DPH aj daňové priznanie typu B.",
     "",
-    "Pre vás je určený plán Účtovník: firmy klientov spravujete z jedného účtu (2, 5 alebo 10 firiem, od 19,80 € bez DPH mesačne). Klient vás do svojej firmy pozve sám a podklady za celý rok vám odovzdá v jednom súbore Excel.",
+    "Pre vás je určený plán Účtovník: firmy klientov spravujete z jedného účtu — platíte svoj plán a za každého klienta 1,63 € (neplatiteľ DPH) alebo 3,25 € (platiteľ DPH) bez DPH mesačne, spolu najviac 24,31 € bez DPH. Klient vás do svojej firmy pozve sám a podklady za celý rok vám odovzdá v jednom súbore Excel.",
     "",
     "Aplikáciu si môžete hneď pozrieť v ukážke bez registrácie:",
     "https://ezivnostnik.eu/?do=ukazka&utm_source=email&utm_medium=osobne&utm_campaign=uctovnici",

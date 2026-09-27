@@ -58,13 +58,13 @@ const STUDIO_CENY_POLIA = {
   neplatitel_s_dph:  "Neplatiteľ DPH — s DPH",
   platitel:          "Platiteľ DPH — bez DPH",
   platitel_s_dph:    "Platiteľ DPH — s DPH",
-  ucto_od:           "Účtovník od (najmenší tier) — bez DPH",
-  ucto_2:            "Účtovník do 2 firiem — bez DPH",
-  ucto_5:            "Účtovník do 5 firiem — bez DPH",
-  ucto_10:           "Účtovník do 10 firiem — bez DPH",
-  ucto_2_s_dph:      "Účtovník do 2 firiem — s DPH",
-  ucto_5_s_dph:      "Účtovník do 5 firiem — s DPH",
-  ucto_10_s_dph:     "Účtovník do 10 firiem — s DPH",
+  // Účtovník od kap. 145: svoj plán + miesto za klienta, spolu najviac strop.
+  ucto_klient_n:       "Účtovník — klient neplatiteľ DPH — bez DPH",
+  ucto_klient_n_s_dph: "Účtovník — klient neplatiteľ DPH — s DPH",
+  ucto_klient_p:       "Účtovník — klient platiteľ DPH — bez DPH",
+  ucto_klient_p_s_dph: "Účtovník — klient platiteľ DPH — s DPH",
+  ucto_strop:          "Účtovník — spolu najviac — bez DPH",
+  ucto_strop_s_dph:    "Účtovník — spolu najviac — s DPH",
   priznanie_b_s_dph: "Daňové priznanie typ B (jednorazovo) — s DPH",
 };
 
@@ -109,27 +109,27 @@ function studioCeny(podmienky){
   const ceny = {}, chyby = [];
   const S = "(\\d+,\\d\\d) €";
   const najdi = (vzor, popis) => { const m = t.match(new RegExp(vzor)); if(!m) chyby.push("v podmienkach sa nenašlo: " + popis); return m; };
-  const bez = najdi("Bez DPH ide o " + S + " mesačne pri pláne Neplatiteľ DPH, " + S + " mesačne pri pláne Platiteľ DPH a "
-    + S + ", " + S + " alebo " + S + " mesačne pri pláne Účtovník", "veta „Bez DPH ide o …“");
+  const bez = najdi("Bez DPH ide o " + S + " mesačne pri pláne Neplatiteľ DPH, " + S + " mesačne pri pláne Platiteľ DPH a pri pláne Účtovník "
+    + S + " za klienta neplatiteľa, " + S + " za klienta platiteľa a najviac " + S + " spolu", "veta „Bez DPH ide o …“");
   const nep = najdi(" Neplatiteľ DPH " + S + " / mesiac", "riadok Neplatiteľ DPH v tabuľke cien");
   const pla = najdi(" Platiteľ DPH " + S + " / mesiac", "riadok Platiteľ DPH v tabuľke cien");
-  const uct = najdi(" Účtovník " + S + " / mesiac \\(do 2 firiem\\) " + S + " / mesiac \\(do 5 firiem\\) " + S + " / mesiac \\(do 10 firiem\\)",
+  const uct = najdi("\\+ " + S + " / mesiac za každého klienta neplatiteľa DPH \\+ " + S + " / mesiac za každého klienta platiteľa DPH spolu najviac " + S + " / mesiac",
     "riadok Účtovník v tabuľke cien");
   const dpb = najdi(" Daňové priznanie typ B " + S + " jednorazovo", "doplnok Daňové priznanie typ B");
   const e = x => x + " €";
   if(bez){
     ceny.neplatitel = e(bez[1]); ceny.platitel = e(bez[2]);
-    ceny.ucto_2 = e(bez[3]); ceny.ucto_5 = e(bez[4]); ceny.ucto_10 = e(bez[5]); ceny.ucto_od = e(bez[3]);
+    ceny.ucto_klient_n = e(bez[3]); ceny.ucto_klient_p = e(bez[4]); ceny.ucto_strop = e(bez[5]);
   }
   if(nep) ceny.neplatitel_s_dph = e(nep[1]);
   if(pla) ceny.platitel_s_dph = e(pla[1]);
-  if(uct){ ceny.ucto_2_s_dph = e(uct[1]); ceny.ucto_5_s_dph = e(uct[2]); ceny.ucto_10_s_dph = e(uct[3]); }
+  if(uct){ ceny.ucto_klient_n_s_dph = e(uct[1]); ceny.ucto_klient_p_s_dph = e(uct[2]); ceny.ucto_strop_s_dph = e(uct[3]); }
   if(dpb) ceny.priznanie_b_s_dph = e(dpb[1]);
   // Suma s DPH / 1,23 musí dať sumu bez DPH (na cent). Inak podmienky
   // hovoria dve rôzne ceny a e-mail by jednu z nich sľúbil.
   const cislo = x => +String(x).replace(" €", "").replace(",", ".");
-  [["neplatitel", "neplatitel_s_dph"], ["platitel", "platitel_s_dph"], ["ucto_2", "ucto_2_s_dph"],
-   ["ucto_5", "ucto_5_s_dph"], ["ucto_10", "ucto_10_s_dph"]].forEach(([b, s]) => {
+  [["neplatitel", "neplatitel_s_dph"], ["platitel", "platitel_s_dph"], ["ucto_klient_n", "ucto_klient_n_s_dph"],
+   ["ucto_klient_p", "ucto_klient_p_s_dph"], ["ucto_strop", "ucto_strop_s_dph"]].forEach(([b, s]) => {
     if(ceny[b] && ceny[s] && Math.abs(cislo(ceny[s]) / 1.23 - cislo(ceny[b])) > 0.006)
       chyby.push("podmienky si protirečia: " + ceny[s] + " s DPH nie je " + ceny[b] + " bez DPH (" + b + ")");
   });
