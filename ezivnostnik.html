@@ -2247,7 +2247,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.27-RE";  // Export pre KROS odkrytý pre všetkých
+const APP_VERZIA = "2026.09.27-RF";  // KROS: prírastok bez nových faktúr nestiahne adresár; GIFy šablón kampaní
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -24984,9 +24984,11 @@ function davkaDoKrosTxt(davka, volby){
   }
 
   // ── súbor: každý typ údajov vlastným R00; T04 pred T01 ──
+  // Partneri idú len s faktúrami: prírastok bez nových faktúr nesmie stiahnuť
+  // súbor so samotným adresárom a hlásiť ✓ (kolo 145 H, č. 264).
   const vety=[];
-  if(partneri.length){ vety.push("R00\tT04"); vety.push(...partneri); }
   const t01=[...vydane, ...dosle];
+  if(partneri.length && t01.length){ vety.push("R00\tT04"); vety.push(...partneri); }
   if(t01.length){ vety.push("R00\tT01"); t01.forEach(r=>vety.push(...r)); }
   if(!vety.length) nalez("pozor","Nič na export pre KROS","Vo zvolenom období nie je žiadna faktúra pre KROS.","");
   const text=vety.length?vety.join("\r\n")+"\r\n":"";
@@ -25082,7 +25084,10 @@ function exportKrosTxt(ciel){
     const davka=krosDavka(ciel);
     const R=davkaDoKrosTxt(davka, krosVolby(ciel));
     const P=R.pocty;
-    if(!R.text) return hlas("Pre KROS nie je čo exportovať — vo zvolenom období nie je žiadna faktúra"+(P.uzVKros?" (nové doklady od posledného exportu nie sú; zmenené: "+P.uzVKros+")":"")+".", false);
+    if(!R.text){
+      if(davka.prirastok) return hlas("Nič nové na odoslanie do "+KROS_CIELE[ciel].n+" — od posledného exportu nepribudla žiadna faktúra, súbor sa nestiahol."+(P.uzVKros?" Zmenené po exporte (zapíšte ručne; zmenené: "+P.uzVKros+").":""), true);
+      return hlas("Pre KROS nie je čo exportovať — vo zvolenom období nie je žiadna faktúra"+(P.uzVKros?" (nové doklady od posledného exportu nie sú; zmenené: "+P.uzVKros+")":"")+".", false);
+    }
     const nm=((firmaData.meta&&firmaData.meta.nazov)||"export").replace(/[^\w.-]+/g,"_")+"_kros_"+ciel+"_"+new Date().toISOString().slice(0,10)+".txt";
     downloadBlob(new Blob([R.bajty],{type:"text/plain;charset=windows-1250"}), nm);
     // Záznam až po stiahnutí. Odtlačky len dokladov, ktoré v KROS naozaj sú
