@@ -134,8 +134,9 @@ async function kontImport(){
 }
 function kontUprac(){
   kontPotvrdenie("kontUpracPotvrd", "Zmazať natrvalo kontakty a adresátov po lehote? Nedá sa vrátiť (odhlásenia ostanú).", async () => {
-    const { data, error } = await sb.rpc("kontakty_uprac", { p_len_pocet: false });
+    const { data: d, error } = await sb.rpc("kontakty_uprac", { p_len_pocet: false });
     if(error){ kontSprava("kontUpracSprava", "Chyba: " + error.message, true); return; }
+    const data = d || {};
     await nacitajKontakty();
     kontSprava("kontUpracSprava", "Zmazané: kontakty " + ((data.kontakty_neoslovene || 0) + (data.kontakty_po_lehote || 0))
       + ", adresáti kampaní " + ((data.adresati_neoslovene || 0) + (data.adresati_po_lehote || 0)) + ".");
@@ -175,7 +176,7 @@ async function odhlHladaj(){
       + Object.keys(KONT_DOVODY).map(k => esc(KONT_DOVODY[k].split(" ")[0]) + " " + (pd[k] || 0)).join(" · ") + "</div>"
     + (!r.length ? '<div class="empty">' + (h.trim() ? "Nič sa nenašlo." : "Zoznam je prázdny.") + "</div>"
       : '<div style="overflow-x:auto"><table><thead><tr><th>Kľúč</th><th>Dôvod</th><th>Kedy</th></tr></thead><tbody>'
-        + r.map(x => '<tr><td class="mono" style="word-break:break-all">' + esc(x.kluc) + "</td><td>" + esc(KONT_DOVODY[x.dovod] || x.dovod) + "</td><td>" + esc(kontCas(x.cas)) + "</td></tr>").join("")
+        + r.map(x => '<tr><td class="mono" style="overflow-wrap:anywhere">' + esc(x.kluc) + "</td><td>" + esc(KONT_DOVODY[x.dovod] || x.dovod) + "</td><td>" + esc(kontCas(x.cas)) + "</td></tr>").join("")
         + "</tbody></table></div>"
         + (r.length >= 200 ? '<div class="muted" style="padding:6px 18px">Zobrazených 200 najnovších — zúž hľadanie.</div>' : ""));
 }
@@ -197,7 +198,9 @@ function odhlPridaj(){
 // Vkladá sa do detailu kampane (admin_kampane.js → kampanFormular*).
 function kontKampanBlok(k){
   const id = k.id;
-  return '<details open style="border:1px solid var(--line);border-radius:10px;padding:8px 12px">'
+  // min-width:0 — formulár kampane je mriežka a jej položka by sa inak
+  // roztiahla na šírku tabuľky adresátov (orezané na mobile, zmerané 27. 9.).
+  return '<details open style="border:1px solid var(--line);border-radius:10px;padding:8px 12px;min-width:0">'
     + '<summary style="cursor:pointer;font-weight:700">Adresáti zo skupiny</summary>'
     + '<div class="muted" style="margin:6px 0 8px">Výber z Kontaktov a skupín. Odhlásení sa nevyberú nikdy, oslovení v inej kampani najskôr po '
       + KONT_LEHOTA_DNI + " dňoch, čakajúci v inej bežiacej kampani tiež nie.</div>"
@@ -213,7 +216,7 @@ function kontKampanBlok(k){
       + '<button class="rowbtn" onclick="kontVyber(' + id + ',true)">Spočítať</button>'
       + '<button class="rowbtn" onclick="kontVyber(' + id + ',false)">Pridať do kampane</button></div>'
     + '<div id="kvSprava" style="font-size:13px;min-height:18px;margin-top:6px"></div></details>'
-    + '<div id="kontVysl"><div class="loading" style="padding:14px">Načítavam výsledky…</div></div>';
+    + '<div id="kontVysl" style="min-width:0"><div class="loading" style="padding:14px">Načítavam výsledky…</div></div>';
 }
 function kontFilter(){
   const v = id => (document.getElementById(id) || {}).value || "";
@@ -322,7 +325,7 @@ function kontAdresatiTabulka(kampan, rucna){
     + '<div class="muted" style="margin-bottom:6px">Odpoveď zapíš jedným klikom, keď príde do schránky. Nezáujem a nedoručené zapíšu adresu do Odhlásení.</div>'
     + '<div id="kontOdpPotvrd"></div>'
     + '<div style="overflow-x:auto;max-height:520px;overflow-y:auto;border:1px solid var(--line);border-radius:8px" data-scroll><table><thead><tr><th>Adresát</th><th>Stav</th><th>Odoslané</th><th>Pripomienka</th><th>Odpoveď</th>' + (rucna ? "<th></th>" : "") + "</tr></thead><tbody>"
-    + r.map(x => "<tr><td><div style=\"word-break:break-all\">" + esc(x.email) + '</div><div class="email">' + esc([x.firma, x.mesto].filter(Boolean).join(" · ")) + "</div></td>"
+    + r.map(x => "<tr><td><div style=\"overflow-wrap:anywhere\">" + esc(x.email) + '</div><div class="email">' + esc([x.firma, x.mesto].filter(Boolean).join(" · ")) + "</div></td>"
       + "<td>" + esc(KONT_STAVY[x.stav] || x.stav) + (x.chyba ? '<div class="email">' + esc(x.chyba) + "</div>" : "") + "</td>"
       + "<td>" + esc(kontDen(x.odoslane_o)) + "</td><td>" + esc(kontDen(x.pripomenute_o)) + "</td><td>" + select(x) + "</td>"
       + (rucna ? '<td><button class="rowbtn" onclick="kontNahlad(' + kampan + "," + x.id + ')">Náhľad</button></td>' : "") + "</tr>").join("")
