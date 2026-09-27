@@ -21558,10 +21558,25 @@ function parseDPFO(xmlText){
   const rokEl=obd && obd.getElementsByTagName("rok")[0];
   const rok=rokEl ? rokEl.textContent.trim() : "";
   if(!/^\d{4}$/.test(rok) || !doc.getElementsByTagName("tabulka1")[0]) return null;
-  let prijmyPodn=0, vydavkyPodn=0;
-  const t1r10=doc.getElementsByTagName("t1r10")[0];
-  if(t1r10){ const s1=t1r10.getElementsByTagName("s1")[0], s2=t1r10.getElementsByTagName("s2")[0];
-    prijmyPodn=s1?parseFloat(s1.textContent)||0:0; vydavkyPodn=s2?parseFloat(s2.textContent)||0:0; }
+  // Celá tabuľka č. 1 (N1b, kolo 141 D): r1–r9 druhy príjmov § 6 ods. 1 a 2,
+  // r10 ich súčet, r11 prenájom, r12 použitie diela, r13 súčet r11 a r12.
+  // Riadky len z elementu tabulka1 — t1r1 až t1r6 majú aj tabulka1a a tabulka1b.
+  // Hľadanie cez celý dokument vráti prvý výskyt: kým v tabulka1 riadok je, je to
+  // on, ale v súbore, kde chýba (neúplný alebo cudzí export), by sa tichou
+  // zámenou načítal riadok z tabuľky 1a.
+  const tab1=doc.getElementsByTagName("tabulka1")[0];
+  const tabulka1={};
+  for(let i=1;i<=13;i++){
+    let el=null;
+    for(let j=0;j<tab1.childNodes.length;j++){ const c=tab1.childNodes[j]; if(c.nodeName==="t1r"+i){ el=c; break; } }
+    const s=k=>{ const x=el && el.getElementsByTagName(k)[0]; const q=x?parseFloat(x.textContent):NaN; return isNaN(q)?0:q; };
+    tabulka1[i]={s1:s("s1"), s2:s("s2")};
+  }
+  let sucetS1=0, sucetS2=0;
+  for(let i=1;i<=9;i++){ sucetS1+=tabulka1[i].s1; sucetS2+=tabulka1[i].s2; }
+  const prijmyPodn=tabulka1[10].s1 || r2(sucetS1), vydavkyPodn=tabulka1[10].s2 || r2(sucetS2);
+  // riadky druhov s príjmom — živnosť r2, slobodné povolanie r3, § 6 ods. 2 r5 až r9…
+  const riadkyPrijmu=[]; for(let i=1;i<=9;i++) if(tabulka1[i].s1>0) riadkyPrijmu.push(i);
   const poistnePreddavky=n("vydavkyPoistPar6ods11_ods1a2");
   const ciastkZaklad=n("r41")||(n("r39")-n("r40"));
   const S=firmaData.settings||{};
@@ -21577,6 +21592,9 @@ function parseDPFO(xmlText){
     prijmy: n("r39")||prijmyPodn,
     vydavky: n("r40")||vydavkyPodn,
     zaklad: n("r41"),
+    tabulka1, riadkyPrijmu,
+    prijmyPrenajom: tabulka1[11].s1, prijmyDielo: tabulka1[12].s1,
+    prijmy6ods3a4: n("r58")||tabulka1[13].s1, zaklad6ods3a4: n("r65")||n("r60"),
     zakladPoOdvodoch: n("r72")||n("r41"),
     zakladDane: n("r72"),
     nezdanitCast: n("r73"),
@@ -21787,8 +21805,21 @@ function pbVypocet(rok){
   const darRaw=darPct?r2(danPoBonuse*darPct):0;
   const darSuma=darRaw>=3?darRaw:0;
   const r39v=r2(prijmy+najomZdan);
+  // Výdavky § 6 ods. 1 a 2 VRÁTANE poistného — to, čo ide do tabuľky č. 1, r. 10,
+  // stĺ. 2 (kolo 141 D). Pri paušále je to vzorec eFormulára FS DPFOBv25:
+  // min(min(60 % príjmov; strop) + poistné; príjmy). Pri skutočných výdavkoch
+  // celá suma aj nad príjmami: rozdiel je daňová strata (r. 42 a r. 46), predtým
+  // ju r. 40 ticho zrezal na výšku príjmov.
+  const vydavky16=pausalne ? r2(Math.min(vydavky, prijmy)) : r2(R.vydavkySkutSpolu+R.odvodyRok);
+  const strata16=pausalne ? 0 : r2(Math.max(0, vydavky16-prijmy));
+  // r45 = r41 − r42 (r43/r44 len v podvojnom účtovníctve); r55 = r45 − odpočet
+  // straty (appka ho nerobí); r57 = r55 − r56 (odpočet § 30c/30e/30ca, appka nerobí).
+  // Tlačivo z r57 skladá r72 (= r38 + r57) aj r92 (= r57 − r91), preto nesmie
+  // ostať prázdny, keď sú r72 a r92 vyplnené.
+  const r45v=r2(Math.max(0, zaklad6-strata16));
   return {
-    rok, pausalne, progresia, prijmy, vydavky, odvody:R.odvodyRok,
+    rok, pausalne, progresia, prijmy, vydavky, odvody:R.odvodyRok, vydavky16, strata16,
+    socRok:R.socRok, zpRok:R.zpRok,
     zaklad, zaklad5, zaklad6, zakladCelkom, zamPrijmy, zamDohody, zamPoistne, zamZrazenaDan,
     najomPrijmy, najomZaklad, kapZaklad, ostPrijmy, ostVydavky, zaklad8, dan6, dan7, dan8, danCelkom,
     zakladRocny, nczd, zakladZniz, darSuma,
@@ -21796,7 +21827,8 @@ function pbVypocet(rok){
     // NČZD sa rozpisuje: r73 daňovník, r74 manžel, r75 III. pilier; r77 = súčet (export).
     // §7/§8 sa zdaňujú samostatne 19 % (r80/r81/r90). Overené proti reálnemu podaniu FS a dpfo_b2025.xsd.
     r:{ r36:zamPrijmy, r36a:zamDohody, r37:zamPoistne, r38:zaklad5,
-        r39:r39v, r40:r2(r39v-zaklad6), r41:zaklad6, r72:zakladCelkom,
+        r39:r39v, r40:r2(r39v-zaklad6+strata16), r41:zaklad6, r42:strata16, r45:r45v, r46:strata16,
+        r55:r45v, r57:r45v, r72:zakladCelkom,
         r73:Droc.nczdVlastna, r74:Droc.nczdManzel, r75:Droc.nczd3pilier,
         r69:ostPrijmy, r70:ostVydavky, r71:zaklad8, r80:zaklad8, r81:dan8, r90:dan8,
         r91:nczdZvysok, r92:zaklad6Zniz, r94:zaklad6Zniz, r95:r39v,
@@ -21858,6 +21890,22 @@ function pbKontroly(rok){
     if((S.darNNO&&S.darNNO.aktivny)||(S.darRodic&&S.darRodic.aktivny)||(+Dr.pov.r152>0))
       upoz.push("Dodatočné priznanie: už poukázaný podiel dane sa neupravuje (§ 50 ods. 10, § 50aa ods. 8). Ak bol vyšší než 2 % alebo 3 % z novej dane, rozdiel sa pripočíta v r. 140; pri poukázaní rodičom sa preplatok upravuje podľa § 50aa ods. 8.");
   }
+  // 1d) Časti, ktoré tlačivo DPFOBv25 zdaňuje inak, než ich appka dnes počíta
+  // (kolo 141 D, poučenie DPFOBv25 bod 4 a riadky 78 a 80): § 5 po NČZD (r. 78),
+  // § 6 ods. 3 a 4 (r. 65) a § 8 (r. 71) tvoria spolu základ podľa § 4 ods. 1
+  // písm. a) v r. 80 so sadzbou 19 %/25 %. Appka prenájom pripočítava k podnikaniu
+  // (r. 39, 15 %) a zostatok § 5 po NČZD nezdaňuje vôbec. Kým sa výpočet neopraví,
+  // nesmie to prejsť ticho — číslo by vyzeralo ako normálne.
+  if((+v.najomPrijmy||0)>0)
+    blok.push(`Prenájom (§ 6 ods. 3): tlačivo za rok ${rok} ho vedie v tabuľke č. 1, r. 11 a v r. 58 až 65 a zdaňuje ho 19 % v r. 80 spolu so zamestnaním a ostatnými príjmami. Appka ho zatiaľ pripočítava k príjmom z podnikania (r. 39) a zdaňuje 15 % — túto časť priznania upravte na portáli FS alebo s poradcom.`);
+  const r78=r2(Math.max(0, (+v.zaklad5||0)-r2(Math.min(+v.nczd||0, +v.zakladCelkom||0))));
+  if(r78>0)
+    blok.push(`Zamestnanie (§ 5): po odpočítaní nezdaniteľnej časti zostáva ${eur(r78)} (r. 78), ktoré sa zdaňuje 19 % v r. 80. Appka tento zostatok zatiaľ do dane nezapočíta — daň by vyšla nižšia, než má byť. Výpočet dane upravte na portáli FS alebo s poradcom.`);
+  // Príloha č. 4: pri vyplnenom poistnom pod tabuľkou č. 1 sa vypĺňa aj r. 14
+  // (preddavky na ZP patriace k roku). Zaplatené v roku (r. 13) appka má,
+  // rozdelenie na „patriace k roku“ nie — nevymýšľa ho.
+  if((+v.zpRok||0)>0 && (+v.prijmy||0)>0)
+    upoz.push(`Príloha č. 4, r. 14 (preddavky na zdravotné poistenie patriace k roku ${rok}) appka nevypĺňa — r. 11 a r. 13 sú vyplnené zo zaplatených odvodov. Doplňte r. 14 na portáli FS podľa zdravotnej poisťovne.`);
   // 2) Hotovostný princíp — prelom rokov (príjem sa počíta podľa úhrady, nie vystavenia)
   let von=0, dovnutra=0; const nespar=[];
   fakt.forEach(f=>{
@@ -21903,6 +21951,21 @@ let pbRok=new Date().getFullYear(), pbKrok=0;
 // Len raz: keď si potom klikne na zamknutý rok, má tam zostať.
 let _pbRokZvoleny=false;
 // ═══ NÁHĽAD PRIZNANIA FO TYP B — replika formulára FS s číslami riadkov ═══
+// Názvy riadkov tabuľky č. 1 (DPFOBv25) pre náhľady — vygenerovaný návrh aj
+// načítané priznanie. Ukazujú sa len riadky s hodnotou.
+const PB_T1_NAZVY={1:"poľnohospodárstvo (§ 6 ods. 1 písm. a)", 2:"živnosť (§ 6 ods. 1 písm. b)",
+  3:"podnikanie podľa osobitných predpisov (písm. c)", 4:"spoločník v. o. s. (písm. d)",
+  5:"dielo a umelecký výkon (§ 6 ods. 2 písm. a)", 6:"činnosť, ktorá nie je živnosťou (písm. b)",
+  7:"znalec, tlmočník (písm. c)", 8:"sprostredkovateľ (písm. d)", 9:"šport (písm. e)",
+  10:"spolu r. 1 až 9", 11:"prenájom (§ 6 ods. 3)", 12:"použitie diela (§ 6 ods. 4)", 13:"spolu r. 11 a 12"};
+function pbTab1Html(T){
+  const eur2=x=>(+x||0).toFixed(2).replace(".",",");
+  const riadky=Object.keys(PB_T1_NAZVY).filter(i=>T && T[i] && ((+T[i].s1||0) || (+T[i].s2||0)));
+  if(!riadky.length) return "";
+  return `<div class="pbf-sec">Tabuľka č. 1 – príjmy a výdavky podľa § 6 (príjmy / výdavky)</div>`+riadky.map(i=>`
+    <div class="pbf-r ${i==="10"||i==="13"?"sub":""}"><span class="pbf-rn">t1 r. ${i}</span><span class="pbf-rp">${PB_T1_NAZVY[i]}</span>
+      <span class="pbf-rv">${eur2(T[i].s1)} € / ${(+T[i].s2||0)?eur2(T[i].s2)+" €":"—"}</span></div>`).join("");
+}
 function pbNahladFormular(rok){
   const V=pbVypocet(rok);
   const m=firmaData.meta||{};
@@ -21939,9 +22002,11 @@ function pbNahladFormular(rok){
     ${rr("38","Čiastkový základ dane (r. 36 − r. 37)", R.r38, "sub")}`:""}
 
     <div class="pbf-sec">VI. oddiel – Príjmy z podnikania (§ 6)</div>
+    ${pbTab1Html(pbTabulka1(V).T)}
     ${rr("39","Príjmy z podnikania a inej samostatnej zárobkovej činnosti", R.r39)}
     ${rr("40","Výdavky "+(V.pausalne?"(paušálne "+Math.round(pausalVydavky(V.prijmy, rok).sadzba*100)+" % + odvody)":"(skutočné + odpisy)"), R.r40)}
     ${rr("41","Čiastkový základ dane (r. 39 − r. 40)", R.r41, "sub")}
+    ${(+R.r42)?rr("42","Strata (r. 40 − r. 39) — prenáša sa do r. 46", R.r42):""}
 
     ${(+R.r71||+R.r80)?`<div class="pbf-sec">VIII. oddiel – Ostatné príjmy (§ 8)</div>
     ${rr("69","Príjmy (napr. predaj majetku)", R.r69)}
@@ -22005,6 +22070,7 @@ function priznanieNahladFormular(rok){
       <div class="pbf-irow"><span>Zdroj</span><b>${esc(P.zdroj||"import XML")}</b></div>
     </div>
     <div class="pbf-sec">VI. oddiel – Príjmy z podnikania (§ 6)</div>
+    ${pbTab1Html(P.tabulka1)}
     ${rr("39","Príjmy z podnikania", P.prijmy)}
     ${rr("40","Výdavky", P.vydavky)}
     ${rr("41","Čiastkový základ dane", P.zaklad, "sub")}
@@ -22242,10 +22308,80 @@ function pbDanovnikSekcia(rok){
     <div style="font-size:11.5px;color:var(--ink-soft)">Dátum narodenia sa nevypĺňa — riadok 02 je len pre daňovníka, ktorý nemá DIČ ani rodné číslo.</div>
   </div>`;
 }
+// ═══ DRUH PRÍJMU § 6 ods. 1 a 2 — riadok tabuľky č. 1 (kolo 141 D) ═══
+// Tabuľka č. 1 tlačiva DPFOBv25 (eFormulár FS form.621, dev/opravy/kolo141_D.md):
+//   r1 § 6 ods. 1 písm. a) poľnohospodárstvo · r2 písm. b) živnosť · r3 písm. c)
+//   podnikanie podľa osobitných predpisov · r4 písm. d) spoločník v. o. s.
+//   r5 ods. 2 písm. a) dielo a umelecký výkon (len pri dohode podľa § 43 ods. 14)
+//   r6 písm. b) činnosti, ktoré nie sú živnosťou ani podnikaním · r7 písm. c)
+//   znalci a tlmočníci · r8 písm. d) sprostredkovatelia mimo živnosti · r9 písm. e) šport
+//   r10 spolu r1 až r9 → r39 a r40 · r11 prenájom (ods. 3) · r12 použitie diela
+//   (ods. 4) · r13 spolu r11 a r12 → r58 a r59.
+// Ponúkajú sa len druhy, ktoré appka počíta rovnako ako živnosť: paušál § 6 ods. 10
+// platí pre celé § 6 ods. 1 a 2 a poisťovne rátajú zo spoločného základu.
+// Vynechané: r1 a r4 (iné pravidlá), r5 a r9 (zrážková daň, športové zmluvy).
+const PB_DRUH_PRIJMU={
+  zivnost:{riadok:2, nazov:"Živnosť", par:"§ 6 ods. 1 písm. b)", popis:"podnikanie na živnostenský list"},
+  osobitne:{riadok:3, nazov:"Slobodné povolanie", par:"§ 6 ods. 1 písm. c)", popis:"podnikanie podľa osobitných predpisov, napr. lekár, advokát, architekt, veterinár, daňový poradca — oprávnenie od komory, nie živnostenský list"},
+  ods2b:{riadok:6, nazov:"Iná samostatná zárobková činnosť", par:"§ 6 ods. 2 písm. b)", popis:"činnosť, ktorá nie je živnosťou ani podnikaním podľa osobitných predpisov"},
+  ods2c:{riadok:7, nazov:"Znalec alebo tlmočník", par:"§ 6 ods. 2 písm. c)", popis:"činnosť znalca alebo tlmočníka podľa osobitného predpisu"},
+  ods2d:{riadok:8, nazov:"Sprostredkovateľ", par:"§ 6 ods. 2 písm. d)", popis:"sprostredkovanie, ktoré nie je živnosťou"},
+};
+// Druh sa mení rok čo rok (lekár prejde zo živnosti na licenciu), preto je zapísaný
+// po rokoch v settings.pbDruhPrijmuRoky. Rok bez zápisu preberie najbližší
+// predošlý zapísaný rok, inak živnosť — a UI povie, odkiaľ hodnota je.
+function pbDruhPrijmu(rok){
+  const Z=((((firmaData&&firmaData.settings)||{}).pbDruhPrijmuRoky)||{}), R=String(rok);
+  if(PB_DRUH_PRIJMU[Z[R]]) return Object.assign({kluc:Z[R], zdroj:"zapis"}, PB_DRUH_PRIJMU[Z[R]]);
+  const pred=Object.keys(Z).filter(r=>r<R && PB_DRUH_PRIJMU[Z[r]]).sort().pop();
+  if(pred) return Object.assign({kluc:Z[pred], zdroj:"predosly", zRoka:pred}, PB_DRUH_PRIJMU[Z[pred]]);
+  return Object.assign({kluc:"zivnost", zdroj:"predvolene"}, PB_DRUH_PRIJMU.zivnost);
+}
+function pbNastavDruhPrijmu(rok, hodnota){
+  if(!strazZapis("priznanieB")){ appPriznanieB(); return; }   // výber sa vráti na uloženú hodnotu
+  if(!PB_DRUH_PRIJMU[hodnota]) return;
+  const S=firmaData.settings=firmaData.settings||{};
+  S.pbDruhPrijmuRoky=Object.assign({}, S.pbDruhPrijmuRoky, {[String(rok)]:hodnota});
+  poZmene(); appPriznanieB();
+}
+// Tabuľka č. 1 z výpočtu priznania. Príjmy § 6 ods. 1 a 2 idú do riadku druhu
+// a do súčtu r10; výdavky pri skutočných výdavkoch do riadku aj do r10, pri
+// paušále len úhrnom do r10 vrátane poistného (poučenie DPFOBv25, tabuľka č. 1).
+// Prenájom (r11, r13) sa tu zámerne nevypĺňa — appka ho zatiaľ vedie v r. 39,
+// kontrola to hlási (pbKontroly).
+function pbTabulka1(v){
+  const D=pbDruhPrijmu(v.rok), T={};
+  for(let i=1;i<=13;i++) T[i]={s1:0, s2:0};
+  T[D.riadok].s1=r2(v.prijmy);
+  if(!v.pausalne) T[D.riadok].s2=r2(v.vydavky16);
+  T[10]={s1:r2(v.prijmy), s2:r2(v.vydavky16)};
+  return {druh:D, T};
+}
+function pbDruhPrijmuSekcia(v){
+  const D=pbDruhPrijmu(v.rok), w=zam("priznanieB");
+  const odkial = D.zdroj==="predosly" ? `Prevzaté z roka ${D.zRoka} — ak sa v roku ${v.rok} nič nezmenilo, netreba nič robiť.`
+    : D.zdroj==="predvolene" ? "Predvolená je živnosť." : `Zapísané pre rok ${v.rok}.`;
+  return `<div style="margin:0 0 12px;padding:10px 12px;border-radius:10px;border:1px solid var(--line)">
+    <div class="mfield" style="margin-bottom:6px"><label>Druh príjmu v roku ${v.rok}</label>
+      <select${w} onchange="pbNastavDruhPrijmu(${v.rok},this.value)">
+        ${Object.keys(PB_DRUH_PRIJMU).map(k=>`<option value="${k}" ${D.kluc===k?'selected':''}>${PB_DRUH_PRIJMU[k].nazov} — ${PB_DRUH_PRIJMU[k].par}</option>`).join("")}
+      </select></div>
+    <div style="font-size:11.5px;color:var(--ink-soft)">${esc(D.popis.charAt(0).toUpperCase()+D.popis.slice(1))}. Príjmy idú do tabuľky č. 1, riadok ${D.riadok}. ${odkial}</div>
+    ${D.kluc!=="zivnost"?`<div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px">Paušálne výdavky, odvody aj daň sa počítajú rovnako ako pri živnosti — zákon ich viaže na všetky príjmy podľa § 6 ods. 1 a 2 spolu a z toho istého základu počíta vymeriavací základ Sociálna aj zdravotná poisťovňa. Či vám povinnosť platiť poistné vznikla (napr. popri zamestnaní), appka neposudzuje — overte si to v poisťovni.</div>`:""}
+    ${D.kluc==="ods2b"?`<div style="font-size:11.5px;color:var(--accent-deep);margin-top:6px">⚠ Osobná asistencia má navyše prílohu č. 4, riadky 1 až 7 — tie appka nevypĺňa, doplňte ich na portáli FS.</div>`:""}
+    <details style="margin-top:6px;font-size:11.5px;color:var(--ink-soft)"><summary style="cursor:pointer">Iné druhy príjmov, ktoré appka nevypĺňa</summary>
+      <div style="margin-top:6px;line-height:1.5">
+        <b>Autorské honoráre</b> (§ 6 ods. 2 písm. a) a ods. 4): ak vám z nich vyplácateľ zrazil osobitnú daň, do priznania sa neuvádzajú — daň je tým vybavená. Do priznania patria len pri písomnej dohode podľa § 43 ods. 14, že sa daň nezrazí; riadok 5 alebo 12 tabuľky č. 1 potom doplňte na portáli FS.<br>
+        <b>Šport</b> (§ 6 ods. 2 písm. e), <b>poľnohospodárstvo</b> (§ 6 ods. 1 písm. a) a <b>spoločník v. o. s.</b> (písm. d) majú vlastné pravidlá a appka ich nevypĺňa.<br>
+        Príjmy z viacerých druhov naraz appka dá všetky do vybraného riadku — rozdelenie doplňte na portáli FS.
+      </div></details>
+  </div>`;
+}
 function pbKrokObsah(krok, v, S){
   if(krok===0){
     const PV=pausalVydavky(v.prijmy, v.rok), pctP=Math.round(PV.sadzba*100);
     return `<h2 style="font-size:16px;margin-bottom:12px">Príjmy a výdavky ${v.rok}</h2>
+      ${pbDruhPrijmuSekcia(v)}
       <div class="mfield" style="margin-bottom:12px"><label>Spôsob výdavkov</label>
         <select${zam("priznanieB")} onchange="zapisVydavkyRezim(this.value,${v.rok});appPriznanieB()">
           <option value="skutocne" ${!v.pausalne?'selected':''}>Skutočné výdavky (z evidencie + odpis)</option>
@@ -22253,7 +22389,7 @@ function pbKrokObsah(krok, v, S){
         </select>
         <div style="font-size:11.5px;color:var(--ink-soft);margin-top:4px">Platí pre rok ${v.rok} — je to ten istý výber ako v Nastaveniach.${pausalMoznyVRoku(v.rok)?'':` V roku ${v.rok} ste boli platiteľom DPH po celý rok, paušál nie je možný.`}</div></div>
       ${(S.pbPausalne!==undefined && !(S.vydavkyRezimRoky||{})[String(v.rok)])?`<div class="csub" style="margin:-4px 0 12px;color:var(--accent-deep)">⚠ Voľba sa tu predtým ukladala naraz pre všetky roky (${S.pbPausalne?"paušál":"skutočné výdavky"}). Teraz platí pre každý rok zvlášť a pre rok ${v.rok} ešte nie je zapísaná — vyberte ju.</div>`:""}
-      ${pbRiadok("Príjmy z podnikania", v.prijmy, "r39")}
+      ${pbRiadok("Príjmy — "+pbDruhPrijmu(v.rok).nazov.toLowerCase()+" (tab. 1, r. "+pbDruhPrijmu(v.rok).riadok+")", v.prijmy, "r39")}
       ${pbRiadok("Výdavky"+(v.pausalne?` (paušál ${pctP} % + odvody)`:" (skutočné + odpis)"), v.vydavky, "r40")}
       ${pbRiadok("Zaplatené odvody (ZP+SP)", v.odvody)}
       ${pbRiadok("Čiastkový základ dane", v.zaklad, "r41", true)}
@@ -22359,6 +22495,11 @@ function pbExportXml(){
   }
   const r77sum=(+(v.r.r73)||0)+(+(v.r.r74)||0)+(+(v.r.r75)||0);
   const dN=S.darNNO||{}, dR=S.darRodic||{}, rA=dR.a||{}, rB=dR.b||{};
+  // Tabuľka č. 1 a údaje pod ňou (kolo 141 D). Predtým išla celá prázdna, hoci ju
+  // podľa poučenia vypĺňa každý s daňovou evidenciou alebo paušálom a Sociálna
+  // poisťovňa z riadkov 1 až 10 počíta vymeriavací základ.
+  const T1=pbTabulka1(v).T, t1=(i,s)=>n(T1[i][s]);
+  const jeP6=(+v.prijmy||0)>0 || (+v.vydavky16||0)>0;
   const xml=`<?xml version="1.0" encoding="UTF-8"?>
 <dokument>
   <hlavicka>
@@ -22390,7 +22531,12 @@ function pbExportXml(){
       <obec>${esc(m.obec||'')}</obec>
       <stat>${esc(m.stat||'Slovenská republika')}</stat>
     </adresaTrvPobytu>
-    <nerezident>0</nerezident>
+    <nerezident>
+      <nerezident>0</nerezident>
+      <datumOd></datumOd>
+      <datumDo></datumDo>
+      <TIN></TIN>
+    </nerezident>
     <prepojeniePar2>0</prepojeniePar2>
     <adresaObvPobytu>
       <ulica></ulica>
@@ -22460,9 +22606,43 @@ function pbExportXml(){
         <m11>0</m11>
         <m12>0</m12>
       </dieta>
+      <dieta>
+        <priezviskoMeno></priezviskoMeno>
+        <rodneCislo></rodneCislo>
+        <m00>0</m00>
+        <m01>0</m01>
+        <m02>0</m02>
+        <m03>0</m03>
+        <m04>0</m04>
+        <m05>0</m05>
+        <m06>0</m06>
+        <m07>0</m07>
+        <m08>0</m08>
+        <m09>0</m09>
+        <m10>0</m10>
+        <m11>0</m11>
+        <m12>0</m12>
+      </dieta>
+      <dieta>
+        <priezviskoMeno></priezviskoMeno>
+        <rodneCislo></rodneCislo>
+        <m00>0</m00>
+        <m01>0</m01>
+        <m02>0</m02>
+        <m03>0</m03>
+        <m04>0</m04>
+        <m05>0</m05>
+        <m06>0</m06>
+        <m07>0</m07>
+        <m08>0</m08>
+        <m09>0</m09>
+        <m10>0</m10>
+        <m11>0</m11>
+        <m12>0</m12>
+      </dieta>
     </r33>
-    <r33a></r33a>
-    <uplatnujemPar33Ods8></uplatnujemPar33Ods8>
+    <r33a>0</r33a>
+    <uplatnujemPar33Ods8>0</uplatnujemPar33Ods8>
     <r34>
       <priezviskoMeno></priezviskoMeno>
       <rodneCislo></rodneCislo>
@@ -22479,9 +22659,9 @@ function pbExportXml(){
       <m10>0</m10>
       <m11>0</m11>
       <m12>0</m12>
-      <druhaOsobaPodalaDPvSR></druhaOsobaPodalaDPvSR>
-      <dokladRocZuct></dokladRocZuct>
-      <dokladVyskaDane></dokladVyskaDane>
+      <druhaOsobaPodalaDPvSR>0</druhaOsobaPodalaDPvSR>
+      <dokladRocZuct>0</dokladRocZuct>
+      <dokladVyskaDane>0</dokladVyskaDane>
     </r34>
     <r34a></r34a>
     <r35>
@@ -22497,65 +22677,65 @@ function pbExportXml(){
     <r38>${n(v.r.r38)}</r38>
     <tabulka1>
       <t1r1>
-        <s1></s1>
-        <s2></s2>
+        <s1>${t1(1,"s1")}</s1>
+        <s2>${t1(1,"s2")}</s2>
       </t1r1>
       <t1r2>
-        <s1></s1>
-        <s2></s2>
+        <s1>${t1(2,"s1")}</s1>
+        <s2>${t1(2,"s2")}</s2>
       </t1r2>
       <t1r3>
-        <s1></s1>
-        <s2></s2>
+        <s1>${t1(3,"s1")}</s1>
+        <s2>${t1(3,"s2")}</s2>
       </t1r3>
       <t1r4>
-        <s1></s1>
-        <s2></s2>
+        <s1>${t1(4,"s1")}</s1>
+        <s2>${t1(4,"s2")}</s2>
       </t1r4>
       <t1r5>
-        <s1></s1>
-        <s2></s2>
+        <s1>${t1(5,"s1")}</s1>
+        <s2>${t1(5,"s2")}</s2>
       </t1r5>
       <t1r6>
-        <s1></s1>
-        <s2></s2>
+        <s1>${t1(6,"s1")}</s1>
+        <s2>${t1(6,"s2")}</s2>
       </t1r6>
       <t1r7>
-        <s1></s1>
-        <s2></s2>
+        <s1>${t1(7,"s1")}</s1>
+        <s2>${t1(7,"s2")}</s2>
       </t1r7>
       <t1r8>
-        <s1></s1>
-        <s2></s2>
+        <s1>${t1(8,"s1")}</s1>
+        <s2>${t1(8,"s2")}</s2>
       </t1r8>
       <t1r9>
-        <s1></s1>
-        <s2></s2>
+        <s1>${t1(9,"s1")}</s1>
+        <s2>${t1(9,"s2")}</s2>
       </t1r9>
       <t1r10>
-        <s1></s1>
-        <s2></s2>
+        <s1>${t1(10,"s1")}</s1>
+        <s2>${t1(10,"s2")}</s2>
       </t1r10>
       <t1r11>
-        <s1></s1>
-        <s2></s2>
+        <s1>${t1(11,"s1")}</s1>
+        <s2>${t1(11,"s2")}</s2>
       </t1r11>
       <t1r12>
-        <s1></s1>
-        <s2></s2>
+        <s1>${t1(12,"s1")}</s1>
+        <s2>${t1(12,"s2")}</s2>
       </t1r12>
       <t1r13>
-        <s1></s1>
-        <s2></s2>
+        <s1>${t1(13,"s1")}</s1>
+        <s2>${t1(13,"s2")}</s2>
       </t1r13>
     </tabulka1>
     <mikrodanovnikPar2w>0</mikrodanovnikPar2w>
-    <vydavkyPar6ods11_ods1a2>0</vydavkyPar6ods11_ods1a2>
+    <vydavkyPar6ods11_ods1a2>${b(jeP6 && !v.pausalne)}</vydavkyPar6ods11_ods1a2>
     <vydavkyPar6ods11_ods3>0</vydavkyPar6ods11_ods3>
     <vydavkyPar6ods11_ods4>0</vydavkyPar6ods11_ods4>
-    <vydavkyPar6ods10_ods1a2>0</vydavkyPar6ods10_ods1a2>
+    <vydavkyPar6ods10_ods1a2>${b(jeP6 && v.pausalne)}</vydavkyPar6ods10_ods1a2>
     <vydavkyPar6ods10_ods4>0</vydavkyPar6ods10_ods4>
-    <vydavkyPoistPar6ods11_ods1a2></vydavkyPoistPar6ods11_ods1a2>
+    <vydavkyPoistPar6ods11_ods1a2>${jeP6?n(v.odvody):""}</vydavkyPoistPar6ods11_ods1a2>
     <uplatnujemPar17ods17_ods1a2>0</uplatnujemPar17ods17_ods1a2>
     <uplatnujemPar17ods17_ods3a4>0</uplatnujemPar17ods17_ods3a4>
     <ukoncujemUplatnovaniePar17ods17_ods1a2>0</ukoncujemUplatnovaniePar17ods17_ods1a2>
@@ -22599,11 +22779,11 @@ function pbExportXml(){
     <r39>${n(v.r.r39)}</r39>
     <r40>${n(v.r.r40)}</r40>
     <r41>${n(v.r.r41)}</r41>
-    <r42></r42>
+    <r42>${n(v.r.r42)}</r42>
     <r43></r43>
     <r44></r44>
-    <r45></r45>
-    <r46></r46>
+    <r45>${n(v.r.r45)}</r45>
+    <r46>${n(v.r.r46)}</r46>
     <r47>
       <rok>2020</rok>
       <udaje>
@@ -22648,9 +22828,9 @@ function pbExportXml(){
     <r53></r53>
     <r54></r54>
     <r54a></r54a>
-    <r55></r55>
+    <r55>${n(v.r.r55)}</r55>
     <r56></r56>
-    <r57></r57>
+    <r57>${n(v.r.r57)}</r57>
     <r58></r58>
     <r59></r59>
     <r60></r60>
@@ -22872,18 +23052,18 @@ function pbExportXml(){
     <r149>0</r149>
     <r150></r150>
     <r151>
+      <ico>${esc(dN.aktivny?(dN.ico||''):'')}</ico>
       <splnam3per>${b(dN.aktivny&&dN.treProcenta)}</splnam3per>
       <neuplatnujemPar50>${b(!dN.aktivny)}</neuplatnujemPar50>
-      <ico>${esc(dN.aktivny?(dN.ico||''):'')}</ico>
       <obchodneMeno>
-        <riadok>${esc(dN.aktivny?(dN.nazov||''):'')}</riadok>
+        <riadok>${esc(dN.aktivny?String(dN.nazov||'').slice(0,37):'')}</riadok>
+        <riadok>${esc(dN.aktivny?String(dN.nazov||'').slice(37,74):'')}</riadok>
       </obchodneMeno>
       <suhlasSoZaslanim>${b(dN.aktivny&&dN.suhlas)}</suhlasSoZaslanim>
     </r151>
     <r152>${n(v.r.r152)}</r152>
     <r153>
       <neuplatnujemPar50aa>${b(!dR.aktivny)}</neuplatnujemPar50aa>
-      <bolZverenyDoStarostlivosti>${b(dR.aktivny&&dR.zvereny)}</bolZverenyDoStarostlivosti>
       <rodicA>
         <rodneCislo>${esc(dR.aktivny?(rA.rc||''):'')}</rodneCislo>
         <priezvisko>${esc(dR.aktivny?(rA.priezvisko||''):'')}</priezvisko>
@@ -22894,6 +23074,7 @@ function pbExportXml(){
         <priezvisko>${esc(dR.aktivny?(rB.priezvisko||''):'')}</priezvisko>
         <meno>${esc(dR.aktivny?(rB.meno||''):'')}</meno>
       </rodicB>
+      <bolZverenyDoStarostlivosti>${b(dR.aktivny&&dR.zvereny)}</bolZverenyDoStarostlivosti>
     </r153>
     <osobitneZaznamy>
       <uvadza>0</uvadza>
@@ -23198,9 +23379,9 @@ function pbExportXml(){
       <pr8></pr8>
       <pr9></pr9>
       <pr10></pr10>
-      <pr11></pr11>
+      <pr11>${jeP6?n(v.socRok):""}</pr11>
       <pr12></pr12>
-      <pr13></pr13>
+      <pr13>${jeP6?n(v.zpRok):""}</pr13>
       <pr14></pr14>
       <pr15></pr15>
       <priPrimoch6ods1a2VediemPU>0</priPrimoch6ods1a2VediemPU>
