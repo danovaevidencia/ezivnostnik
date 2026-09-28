@@ -495,7 +495,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/data-predplatne-2.d.2443c104.webp",
+   "subor": "navody/data-predplatne-2.d.8eddc78e.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
