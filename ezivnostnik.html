@@ -2262,7 +2262,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.09.27-RG";  // Účtovník: cena podľa klientov so stropom, miesto klienta (kap. 145)
+const APP_VERZIA = "2026.10.03-RH";  // Inštalácia na Androide vedie do Google Play, na počítači QR kód (č. 268)
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -7272,58 +7272,84 @@ function _prehliadac(){
   return "iny";
 }
 
+// Appka pre Android na Google Play (č. 268). Rovnaká adresa je na úvodnej
+// stránke (sekcia #android, test_landing_play).
+const PLAY_URL = "https://play.google.com/store/apps/details?id=eu.ezivnostnik.app";
+function jeAndroid(){ return /Android/i.test((navigator && navigator.userAgent) || ""); }
+
 // hlavná akcia tlačidla „Nainštalovať"
 async function nainstalujApp(){
-  // 1) natívny dialóg (Chrome, Edge) — najspoľahlivejšia cesta
-  if(_pwaPrompt){
-    try{
-      _pwaPrompt.prompt();
-      const v = await _pwaPrompt.userChoice;
-      _pwaPrompt = null;
-      if(v && v.outcome==="accepted"){ try{ localStorage.setItem("ez_nainstalovana","1"); }catch(_){} }
-      renderHomeStrip();
-      return;
-    }catch(_){}
+  // V obale je appka nainštalovaná z definície — ponuka sa tam nekreslí, ale
+  // keby ju niečo zavolalo, Play ani PWA tam nepatria.
+  if(jeNativnyObal()) return;
+  // 0) Android v prehliadači → Google Play (od 3. 10. 2026). Appka z Play
+  //    meria jazdu aj pri zhasnutom displeji, PWA nie — a obíde aj chybu
+  //    Samsung Internetu s Play Protect nižšie. Nová karta: Chrome odovzdá
+  //    adresu obchodu Play a appka ostane otvorená.
+  if(jeAndroid()){
+    // Bez príznaku „noopener“: s ním window.open vracia vždy null a záloha
+    // by presmerovala aj appku. Opener sa odpojí ručne.
+    const w = window.open(PLAY_URL, "_blank");
+    if(w){ try{ w.opener = null; }catch(_){} }
+    else location.href = PLAY_URL;
+    return;
   }
-  // 2) inak návod podľa prehliadača
   const p = _prehliadac();
-  let telo = "";
-  if(p==="samsung"){
-    telo = `
-      <div style="background:var(--sfc-warn);border-left:3px solid var(--warn);border-radius:0 9px 9px 0;padding:11px 13px;margin-bottom:14px;font-size:13px;line-height:1.6">
-        <b>V Samsung Internete inštaláciu neodporúčame.</b> Prehliadač má známu chybu — Google Play Protect
-        označí appku za nebezpečnú hláškou „vytvorená pre staršiu verziu Androidu". S appkou to nesúvisí,
-        je to chyba na strane prehliadača.
-      </div>
-      <div style="font-size:13.5px;line-height:1.7">
-        <b>Riešenie:</b> otvorte <b>ezivnostnik.eu</b> v <b>Chrome</b> a tam dajte
-        <b>⋮ → Pridať na plochu / Nainštalovať aplikáciu</b>.<br><br>
-        Po nainštalovaní môžete Samsung Internet ďalej používať ako svoj bežný prehliadač —
-        appka bude fungovať samostatne.
-      </div>`;
-  } else if(p==="ios" || p==="ios-iny"){
-    telo = `<div style="font-size:13.5px;line-height:1.7">
+  // 1) iPhone — appka v App Store nie je, ostáva plocha zo Safari
+  if(p==="ios" || p==="ios-iny"){
+    openModal("Nainštalovať do telefónu", `<div style="font-size:13.5px;line-height:1.7">
         Na iPhone otvorte túto stránku v <b>Safari</b> a ťuknite na
         <b>Zdieľať (⬆) → Pridať na plochu</b>.<br><br>
         Appka sa potom otvára ako samostatná ikona, bez adresného riadka.
-      </div>`;
-  } else if(p==="firefox"){
-    telo = `<div style="font-size:13.5px;line-height:1.7">
-        Vo Firefoxe ťuknite na <b>⋮ → Nainštalovať</b>.<br><br>
-        Ak tam možnosť nie je, otvorte <b>ezivnostnik.eu</b> v <b>Chrome</b> — tam inštalácia funguje spoľahlivo.
-      </div>`;
-  } else {
-    telo = `<div style="font-size:13.5px;line-height:1.7">
-        V menu prehliadača (<b>⋮</b> alebo <b>···</b>) vyberte
-        <b>Nainštalovať aplikáciu</b> alebo <b>Pridať na plochu</b>.<br><br>
-        Ak možnosť nevidíte, skúste <b>Chrome</b> — tam je inštalácia najspoľahlivejšia.
-      </div>`;
+      </div>
+      <div style="margin-top:14px;font-size:12px;color:var(--ink-soft);line-height:1.6">
+        Dáta ostávajú tie isté — je to tá istá appka, len bez adresného riadka.
+      </div>`, null);
+    return;
   }
-  openModal("Nainštalovať do telefónu", telo + `
-    <div style="margin-top:14px;font-size:12px;color:var(--ink-soft);line-height:1.6">
-      Nainštalovaná appka sa otvára na celú obrazovku, má vlastnú ikonu a načíta sa rýchlejšie.
-      Dáta ostávajú tie isté — je to tá istá appka, len bez adresného riadka.
-    </div>`, null);
+  // 2) Počítač: do telefónu cez QR kód na Google Play; ak prehliadač vie
+  //    nainštalovať aj do počítača (Chrome, Edge), ponúkne sa druhé tlačidlo.
+  openModal("Nainštalovať do telefónu", `<div style="font-size:13.5px;line-height:1.7">
+      <b>Android:</b> naskenujte QR kód fotoaparátom telefónu — otvorí sa eživnostník na Google Play.
+      Prihlásite sa tým istým účtom a máte tie isté údaje.
+    </div>
+    <div id="playQr" style="width:188px;height:188px;margin:14px auto 6px;display:grid;place-items:center;background:#fff;border:1px solid var(--line);border-radius:12px;font-size:12px;color:var(--ink-soft)">QR kód sa načítava…</div>
+    <div style="text-align:center"><a href="${PLAY_URL}" target="_blank" rel="noopener" style="font-size:13px;font-weight:600;color:var(--brand)">Otvoriť Google Play →</a></div>
+    <div style="margin-top:14px;font-size:12.5px;color:var(--ink-soft);line-height:1.6">
+      <b>iPhone:</b> otvorte <b>ezivnostnik.eu</b> v Safari a dajte <b>Zdieľať (⬆) → Pridať na plochu</b>.
+    </div>
+    ${_pwaPrompt ? `<button class="abtn" style="width:100%;margin-top:14px" onclick="nainstalujPwa()">💻 Nainštalovať do tohto počítača</button>` : ""}`, null);
+  playQrDoOkna();
+}
+// QR kód adresy Play tou istou knižnicou ako QR na faktúre (qrcode@1.5.4) —
+// žiadna druhá kópia obrázka v appke. Keď sa knižnica nenačíta (bez siete),
+// ostane odkaz pod ním.
+async function playQrDoOkna(){
+  const el = document.getElementById("playQr");
+  if(!el) return;
+  try{
+    const QRMod = await import("https://esm.sh/qrcode@1.5.4");
+    const QRCode = QRMod.default || QRMod;
+    const url = await QRCode.toDataURL(PLAY_URL, { margin:1, width:180, errorCorrectionLevel:"M" });
+    const ciel = document.getElementById("playQr");
+    if(ciel) ciel.innerHTML = `<img src="${url}" width="180" height="180" alt="QR kód: eživnostník na Google Play" style="display:block">`;
+  }catch(e){
+    console.error("QR kód na Google Play:", e);
+    const ciel = document.getElementById("playQr");
+    if(ciel) ciel.textContent = "QR kód sa nepodarilo načítať — použite odkaz nižšie.";
+  }
+}
+// Inštalácia webovej appky do počítača natívnym dialógom (Chrome, Edge).
+async function nainstalujPwa(){
+  if(!_pwaPrompt) return;
+  try{
+    _pwaPrompt.prompt();
+    const v = await _pwaPrompt.userChoice;
+    _pwaPrompt = null;
+    if(v && v.outcome==="accepted"){ try{ localStorage.setItem("ez_nainstalovana","1"); }catch(_){} }
+    closeModal();
+    renderHomeStrip();
+  }catch(e){ console.error("inštalácia do počítača:", e); }
 }
 
 // pás pod pozdravom: aktuálny plán (vždy) + inštalácia (kým nie je nainštalovaná)
@@ -7371,7 +7397,7 @@ function renderHomeStrip(){
     </button>`;
 
   if(!jeNainstalovana()){
-    html += `<button class="hchip ${_pwaPrompt ? "pri" : ""}" onclick="nainstalujApp()"
+    html += `<button class="hchip ${_pwaPrompt || jeAndroid() ? "pri" : ""}" onclick="nainstalujApp()"
               title="Nainštalovať eživnostník do telefónu">⬇ Nainštalovať do telefónu</button>`;
   }
   // O funkcii treba raz povedať — inak ju nájde len ten, kto omylom otvorí
