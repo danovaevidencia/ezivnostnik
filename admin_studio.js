@@ -49,6 +49,7 @@ const STUDIO_CIELE = {
   web:         { n: "Web — úvodná stránka",          cesta: "" },
   cennik:      { n: "Cenník na webe",                cesta: "", kotva: "cennik" },
   clanky:      { n: "Zoznam článkov",                cesta: "clanky/" },
+  akcia:       { n: "Podmienky akcie 3 mesiace zadarmo", cesta: "akcia.html" },   // kap. 147
   email:       { n: "E-mail info@ezivnostnik.eu",    mailto: "info@ezivnostnik.eu" },
 };
 
