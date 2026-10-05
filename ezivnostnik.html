@@ -2262,7 +2262,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.10.05-RK";  // Výpis po notifikácii nezakladá druhý výdavok (väzba zdrojPohyb sa presmeruje, spárovaný pohyb výdavok má)
+const APP_VERZIA = "2026.10.05-RL";  // Spätná väzba v menu účtu (spec kap. 148, F1), zásady 1.20
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -20831,7 +20831,7 @@ function dmKopiruj(){
 // sadu zhodí.
 const DOKUMENTY={
   podmienky:{url:"podmienky.html",     n:"Obchodné podmienky",      verzia:"1.8"},
-  sukromie: {url:"sukromie.html",      n:"Ochrana osobných údajov", verzia:"1.19"},
+  sukromie: {url:"sukromie.html",      n:"Ochrana osobných údajov", verzia:"1.20"},
   zmazanie: {url:"zmazanie-uctu.html", n:"Zmazanie účtu a údajov"},
 };
 // Záznam súhlasu k účtu (ROZHODNUTIA č. 52). Zmluva vzniká vytvorením účtu
@@ -30244,9 +30244,14 @@ async function ulozCezObal(blob, nazov){
 // kópií faktúry v Stiahnutých). Pás nad spodnou lištou je vidieť všade.
 function oznamUlozenySubor(kde){
   cloudMsg("Uložené do priečinka "+kde, "ok");
+  oznamPas("✓ Uložené: "+kde+" — nájdete ho v aplikácii Súbory (Stiahnuté).");
+}
+// Prchavý pás nad spodnou lištou — jeden pre všetky krátke potvrdenia
+// (uloženie súboru, odoslaná spätná väzba). Viditeľný na každej obrazovke.
+function oznamPas(text){
   let p=document.getElementById("ulozenePruh");
   if(!p){ p=document.createElement("div"); p.id="ulozenePruh"; p.className="offline-pruh"; p.setAttribute("role","status"); document.body.appendChild(p); }
-  p.textContent="✓ Uložené: "+kde+" — nájdete ho v aplikácii Súbory (Stiahnuté).";
+  p.textContent=text;
   clearTimeout(p._t);
   p._t=setTimeout(()=>{ if(p.parentNode) p.parentNode.removeChild(p); }, 6000);
 }
@@ -38361,6 +38366,8 @@ function otvorUctoMenu(btn){
     ${TB_CIARA}
     <button onclick="uctoVyber('zakryte')" style="${TB_POLOZKA}">${jeZakryte()?"◉ Odkryť čísla":"◎ Zakryť čísla"}</button>
     ${TB_CIARA}
+    <button onclick="uctoVyber('spatnaVazba')" style="${TB_POLOZKA}">💬 Spätná väzba<div style="font-size:11.5px;color:var(--ink-soft);margin-top:2px">hodnotenie, návrh, otázka, chyba</div></button>
+    ${TB_CIARA}
     <button onclick="uctoVyber('nastavenia')" style="${TB_POLOZKA}">⚙ Nastavenia a dáta</button>
     ${TB_CIARA}
     <button onclick="uctoVyber('zaloha')" style="${TB_POLOZKA}">↧ Stiahnuť zálohu</button>
@@ -38387,12 +38394,162 @@ function uctoVyber(co){
   if(co==="zakryte"){ prepniZakrytie(); return; }
   // Účet bez firmy (onboarding) nemá Nastavenia — zmazanie účtu je preto aj tu (N1).
   if(co==="zmazatUcet"){ gdprMojeZmazanie(); return; }
+  if(co==="spatnaVazba"){ otvorSpatnuVazbu(); return; }
   if(co==="nastavenia") otvorApp("data");
   else if(co==="zaloha") exportFirmu();
   else if(co==="odhlasit"){
     // Odhlásenie je nezvratné v tom zmysle, že neuložené zmeny zmiznú.
     if(firmaDirty && !confirm("Máte neuložené zmeny. Naozaj sa odhlásiť?")) return;
     doLogout();
+  }
+}
+
+// ═══ SPÄTNÁ VÄZBA (spec kap. 148, č. 270) ═══════════════════════════════════
+// Okno z menu účtu: hodnotenie (CSAT 1–5), návrh, otázka, chyba. Zápis ide
+// LEN cez RPC spatna_vazba_odoslat — plán, rolu a dni od registrácie dopĺňa
+// server, od appky ide len biely zoznam technických údajov (spatnaVazbaMeta).
+// Účtové dáta (sumy, partneri, čísla dokladov) do metadát nejdú nikdy.
+// Pri chybe ostane okno otvorené aj s textom — bez offline fronty (č. 270).
+const SV_TYPY={
+  hodnotenie:{ic:"⭐", n:"Ohodnotiť"},
+  navrh:     {ic:"💡", n:"Navrhnúť", ph:"Čo by vám uľahčilo prácu?"},
+  otazka:    {ic:"❓", n:"Opýtať sa", ph:"Na čo sa chcete opýtať?"},
+  chyba:     {ic:"🐞", n:"Nahlásiť chybu", ph:"Čo ste robili, čo sa stalo a čo ste čakali?"}
+};
+const SV_MAX=2000;
+let _sv=null;
+function spatnaVazbaMeta(){
+  let obal="web";
+  try{
+    if(window.EzSubor || window.AndroidGeo) obal="android";
+    else if(window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) obal="pwa";
+  }catch(_){}
+  const w=window.innerWidth||0;
+  return {
+    verzia: APP_VERZIA,
+    zariadenie: w<768 ? "mobil" : (w<1100 ? "tablet" : "desktop"),
+    obal,
+    tema: (typeof jeTmavy==="function" && jeTmavy()) ? "tmava" : "svetla",
+    obrazovka: (typeof aktualnaApp==="string" && aktualnaApp) ? aktualnaApp : "plocha"
+  };
+}
+// Čistá funkcia: overí vstup a zostaví parameter RPC (stráži test_spatna_vazba).
+function spatnaVazbaData(s){
+  const typ=s && SV_TYPY[s.typ] ? s.typ : "";
+  if(!typ) return {ok:false, chyba:"Vyberte, čo nám chcete povedať."};
+  const text=String(s.text||"").trim();
+  if(text.length>SV_MAX) return {ok:false, chyba:"Text je dlhší ako "+SV_MAX+" znakov."};
+  const skore=+s.skore;
+  if(typ==="hodnotenie" && !(skore>=1 && skore<=5 && Math.round(skore)===skore))
+    return {ok:false, chyba:"Vyberte hodnotenie 1 až 5."};
+  if(typ!=="hodnotenie" && text.length<3) return {ok:false, chyba:"Napíšte, prosím, aspoň pár slov."};
+  const modul=(s.modul && APPS[s.modul]) ? s.modul : null;
+  return {ok:true, p:{
+    typ, skore: typ==="hodnotenie" ? skore : null,
+    text: text || null, modul,
+    kontakt_ok: typ==="otazka" || typ==="chyba" || !!s.kontakt,
+    firma_id: firmaId || null,
+    meta: spatnaVazbaMeta()
+  }};
+}
+function otvorSpatnuVazbu(typ){
+  const m=(typeof aktualnaApp==="string" && APPS[aktualnaApp]) ? aktualnaApp : "";
+  _sv={typ: SV_TYPY[typ] ? typ : "hodnotenie", skore:null, modul:m, text:"", kontakt:false, odosiela:false, chyba:""};
+  svVykresli();
+}
+function svBezServera(){ return demoMode || localMode || !sb; }
+function svVykresli(){
+  let o=document.getElementById("svOkno");
+  const karta=o && o.querySelector(".modalcard");
+  const posun=karta ? karta.scrollTop : 0;
+  if(!o){ o=document.createElement("div"); o.id="svOkno"; o.className="modal on"; document.body.appendChild(o); }
+  const s=_sv, T=SV_TYPY[s.typ];
+  const mail=`<a href="mailto:podpora@ezivnostnik.eu" style="color:var(--brand)">podpora@ezivnostnik.eu</a>`;
+  let telo;
+  if(svBezServera()){
+    telo=`<p style="margin-bottom:10px">V ${demoMode?"ukážke":"režime bez účtu"} sa spätná väzba neposiela.</p>
+      <p>Napíšte nám na ${mail} — každú správu čítame.</p>`;
+  } else {
+    const typy=Object.keys(SV_TYPY).map(k=>`<button class="aabtn${k===s.typ?" pri":""}" style="justify-content:center" onclick="svNastav('typ','${k}')" aria-pressed="${k===s.typ}">${SV_TYPY[k].ic} ${SV_TYPY[k].n}</button>`).join("");
+    const modulN=s.modul && APPS[s.modul] ? APPS[s.modul].n : "";
+    const hodnotenie=s.typ!=="hodnotenie" ? "" : `
+      <div style="font-weight:600;margin:14px 0 8px">${modulN?"Ako ste spokojní s modulom "+esc(modulN)+"?":"Ako ste spokojní s eživnostníkom?"}</div>
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px">${[1,2,3,4,5].map(i=>`<button class="aabtn${s.skore===i?" pri":""}" style="justify-content:center;font-size:16px;font-weight:700" onclick="svNastav('skore',${i})" aria-pressed="${s.skore===i}">${i}</button>`).join("")}</div>
+      <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--ink-soft);margin-top:4px"><span>veľmi nespokojný</span><span>veľmi spokojný</span></div>`;
+    const moduly=Object.keys(APPS).filter(k=>k!=="superdash" && (typeof modulPovolenyPreModul!=="function" || modulPovolenyPreModul(k)))
+      .map(k=>`<option value="${k}"${k===s.modul?" selected":""}>${esc(APPS[k].n)}</option>`).join("");
+    const povinnyKontakt=s.typ==="otazka" || s.typ==="chyba";
+    telo=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">${typy}</div>
+      ${hodnotenie}
+      <label style="display:block;font-size:12.5px;font-weight:600;margin:14px 0 4px" for="svModul">Týka sa</label>
+      <select id="svModul" onchange="svUlozVstupy()"><option value="">Celá aplikácia</option>${moduly}</select>
+      <label style="display:block;font-size:12.5px;font-weight:600;margin:14px 0 4px" for="svText">${s.typ==="hodnotenie"?"Chcete niečo dodať? (nepovinné)":"Text"}</label>
+      <textarea id="svText" rows="5" maxlength="${SV_MAX}" placeholder="${esc(T.ph||"Čo by sme mohli urobiť lepšie?")}" oninput="svPocitadlo()" style="width:100%;box-sizing:border-box">${esc(s.text)}</textarea>
+      <div style="display:flex;justify-content:space-between;gap:8px;font-size:11.5px;color:var(--ink-soft);margin-top:4px">
+        <span>Nepíšte sem rodné čísla, čísla účtov ani heslá.</span><span id="svPocet">${s.text.length}/${SV_MAX}</span></div>
+      <label style="display:flex;gap:8px;align-items:flex-start;margin-top:12px;font-size:13px">
+        <input type="checkbox" id="svKontakt"${povinnyKontakt||s.kontakt?" checked":""}${povinnyKontakt?" disabled":""} onchange="svUlozVstupy()" style="margin-top:2px">
+        <span>Môžete ma kontaktovať e-mailom${povinnyKontakt?`<br><span style="color:var(--ink-soft);font-size:12px">Pri ${s.typ==="otazka"?"otázke":"chybe"} vždy — odpovieme na e-mail, ktorým sa prihlasujete.</span>`:""}</span></label>
+      ${s.chyba?`<div class="cloudmsg err" style="margin-top:12px">${esc(s.chyba)}</div>`:""}`;
+  }
+  o.innerHTML=`<div class="modalcard" role="dialog" aria-labelledby="svNadpis">
+    <div class="modalhd"><h3 id="svNadpis">💬 Spätná väzba</h3>
+      <button class="modalx" onclick="svZavri()" title="Zavrieť">✕</button></div>
+    <div class="modalbd" style="font-size:13.5px;line-height:1.55">${telo}</div>
+    <div class="modalft"><button class="abtn" onclick="svZavri()">${svBezServera()?"Zavrieť":"Zrušiť"}</button>
+      ${svBezServera()?"":`<button class="abtn pri" onclick="svOdoslat()"${s.odosiela?" disabled":""}>${s.odosiela?"Odosielam…":"Odoslať"}</button>`}</div>
+  </div>`;
+  // Prekreslenie (zmena typu, skóre) nesmie okno posunúť na začiatok.
+  const k2=o.querySelector(".modalcard"); if(k2) k2.scrollTop=posun;
+  oknoVrstvy();
+}
+function svUlozVstupy(){
+  if(!_sv) return;
+  const t=document.getElementById("svText"), m=document.getElementById("svModul"), k=document.getElementById("svKontakt");
+  if(t) _sv.text=t.value;
+  if(m) _sv.modul=m.value;
+  if(k && !k.disabled) _sv.kontakt=k.checked;
+}
+function svPocitadlo(){
+  const t=document.getElementById("svText"), p=document.getElementById("svPocet");
+  if(t && p) p.textContent=t.value.length+"/"+SV_MAX;
+}
+function svNastav(k, v){
+  svUlozVstupy();
+  _sv[k]=v; _sv.chyba="";
+  if(k==="typ" && v!=="hodnotenie") _sv.skore=null;
+  svVykresli();
+}
+function svZavri(){
+  const o=document.getElementById("svOkno");
+  if(o) o.remove();
+  _sv=null;
+  oknoVrstvy();
+}
+async function svOdoslat(){
+  if(!_sv || _sv.odosiela || svBezServera()) return;
+  svUlozVstupy();
+  const d=spatnaVazbaData(_sv);
+  if(!d.ok){ _sv.chyba=d.chyba; svVykresli(); return; }
+  _sv.odosiela=true; _sv.chyba=""; svVykresli();
+  try{
+    const { error }=await sb.rpc("spatna_vazba_odoslat", { p:d.p });
+    if(error) throw error;
+    const typ=_sv.typ;
+    svZavri();
+    oznamPas(typ==="otazka" ? "✓ Ďakujeme — odpovieme na e-mail, ktorým sa prihlasujete."
+      : typ==="chyba" ? "✓ Ďakujeme za nahlásenie — pozrieme sa na to a ozveme sa."
+      : "✓ Ďakujeme za spätnú väzbu.");
+  }catch(e){
+    // Chyba sa ukáže v okne a text v ňom ostane (č. 270: bez offline fronty).
+    console.error("Spätná väzba sa neodoslala:", e);
+    if(!_sv) return;
+    const sprava=String((e && e.message) || e);
+    _sv.odosiela=false;
+    _sv.chyba = /privela/.test(sprava) ? "Dnes ste nám poslali veľa správ. Skúste to zajtra, alebo napíšte na podpora@ezivnostnik.eu."
+      : (typeof chybaChybajuciObjektDb==="function" && chybaChybajuciObjektDb(e)) ? "Spätná väzba ešte nie je zapnutá. Napíšte nám, prosím, na podpora@ezivnostnik.eu."
+      : "Nepodarilo sa odoslať: "+sprava+". Text ostal v okne — skúste to znova.";
+    svVykresli();
   }
 }
 
