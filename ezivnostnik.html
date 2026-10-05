@@ -2262,7 +2262,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.10.04-RI";  // Akcia 3 mesiace zadarmo: kódy podľa zdroja, podmienky akcie (kap. 147)
+const APP_VERZIA = "2026.10.05-RJ";  // Uloženie súboru v obale hlási pás nad lištou (PDF faktúry „nerobilo nič“), chyba PDF sa ukáže
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -30231,7 +30231,19 @@ async function ulozCezObal(blob, nazov){
   }
   const kde=EzSubor.dokonci();
   if(!kde) throw new Error("zápis do úložiska zlyhal");
+  oznamUlozenySubor(kde);
+}
+// Obal súbor uloží do Stiahnutých a nič neotvorí. `#cloudMsg` je len na
+// obrazovke Export a záloha — pri PDF faktúry sa hláška nemala kam zapísať
+// a vyzeralo to, že tlačidlo nefunguje (5. 10. 2026: desať ťuknutí = desať
+// kópií faktúry v Stiahnutých). Pás nad spodnou lištou je vidieť všade.
+function oznamUlozenySubor(kde){
   cloudMsg("Uložené do priečinka "+kde, "ok");
+  let p=document.getElementById("ulozenePruh");
+  if(!p){ p=document.createElement("div"); p.id="ulozenePruh"; p.className="offline-pruh"; p.setAttribute("role","status"); document.body.appendChild(p); }
+  p.textContent="✓ Uložené: "+kde+" — nájdete ho v aplikácii Súbory (Stiahnuté).";
+  clearTimeout(p._t);
+  p._t=setTimeout(()=>{ if(p.parentNode) p.parentNode.removeChild(p); }, 6000);
 }
 
 // ── PRIJATIE E-FAKTÚRY: parsovanie UBL 2.1 XML (povinné prijímať od 2027) ──
@@ -32425,8 +32437,15 @@ async function exportFakturaPDF(idx){
     try{ const url=await dokladUrl(f.originalSubor); if(url){ window.open(url,"_blank"); return; } }catch(_){}
   }
   if(!potvrdIbanPreTlac()) return;
-  const sub=await fakturaPdfSubor(idx);
-  downloadBlob(sub.blob || sub.doc.output("blob"), sub.nazov);
+  // Volá sa z onclick bez await — výnimka by skončila len v konzole a tlačidlo
+  // by „nerobilo nič“. Chyba tvorby PDF sa preto ukáže človeku.
+  try{
+    const sub=await fakturaPdfSubor(idx);
+    downloadBlob(sub.blob || sub.doc.output("blob"), sub.nazov);
+  }catch(e){
+    console.error("PDF faktúry:", e);
+    alert("PDF faktúry sa nepodarilo vytvoriť: "+(e && e.message || e));
+  }
 }
 // ── POSLAŤ FAKTÚRU (č. 229, 23. 9. 2026) ─────────────────────────────────────
 // Do QI sa faktúra dala len stiahnuť; každá fakturačka ju vie poslať. Na
