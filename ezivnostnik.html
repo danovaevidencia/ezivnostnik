@@ -2262,7 +2262,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.10.05-RJ";  // Uloženie súboru v obale hlási pás nad lištou (PDF faktúry „nerobilo nič“), chyba PDF sa ukáže
+const APP_VERZIA = "2026.10.05-RK";  // Výpis po notifikácii nezakladá druhý výdavok (väzba zdrojPohyb sa presmeruje, spárovaný pohyb výdavok má)
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -29727,11 +29727,16 @@ function prenesStavPohybu(zo, na){
   // Odkiaľ pohyb prišiel prvýkrát. V Banke to vysvetľuje, prečo bol vidieť
   // skôr, než dorazil výpis, a v spore o dátum hovorí, ktorý je ktorý.
   na.zNotifikacie={datum:zo.datum, banka:zo.banka||"", emailId:zo.emailId||""};
-  // Výdavok vytvorený z pohybu si pamätá jeho `id`. Väzba sa nikde nečíta, ale
-  // ukazovať na pohyb, ktorý už neexistuje, je presne ten druh tichej siroty,
-  // ktorý sa hľadá najhoršie.
-  const staryId=zo.id||zo.datum+zo.suma;
-  (firmaData.vydavky||[]).forEach(v=>{ if(v.vypisId===staryId) v.vypisId=na.id; });
+  // Výdavok vytvorený z pohybu si pamätá jeho `id` — dnes v `zdrojPohyb`
+  // (staršie záznamy vo `vypisId`). Väzbu ČÍTA `pohybMaVydavok`: kým sa
+  // presmerúvalo len `vypisId`, výpis po notifikácii nevidel výdavok svojho
+  // pohybu a automatika založila druhý (5. 10. 2026: daň, DPH a dve platby
+  // VšZP dvakrát — raz `mail_…`, raz `sba:…`).
+  const staryId=txId(zo), novyId=txId(na);
+  (firmaData.vydavky||[]).forEach(v=>{
+    if(v.vypisId===staryId) v.vypisId=novyId;
+    if(v.zdrojPohyb===staryId) v.zdrojPohyb=novyId;
+  });
 }
 
 // Spoločné pre ručný výber aj pre doklad prijatý e-mailom — inak by sa dve
@@ -43025,7 +43030,12 @@ function vydavokZPohybuNavrh(tx){
 // Bol už z tohto pohybu doklad vytvorený? Chráni pred dvojitým zaevidovaním.
 function pohybMaVydavok(tx){
   const id=txId(tx);
-  return (firmaData.vydavky||[]).some(x=>x.zdrojPohyb===id);
+  const vyd=firmaData.vydavky||[];
+  if(vyd.some(x=>x.zdrojPohyb===id)) return true;
+  // Pohyb spárovaný s existujúcim výdavkom je zaevidovaný, aj keď väzba
+  // `zdrojPohyb` chýba alebo ukazuje na staré ID (notifikácia → výpis).
+  // Druhá poistka k presmerovaniu v `prenesStavPohybu`.
+  return (tx.uhrady||[]).some(u=>u.typ==="vydavok" && vyd.some(x=>dokladKluc(x)===String(u.cislo)));
 }
 function vytvorVydavokZPohybu(txIdVal, prepisKategoria, prepisZaRok, naKontrolu){
   if(!strazZapis("banka")) return null;
