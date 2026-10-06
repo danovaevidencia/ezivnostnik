@@ -2262,7 +2262,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.10.06-RM";  // Spätná väzba F2: výzvy po úlohe, Moje príspevky, odpoveď (spec 148.14), zásady 1.21
+const APP_VERZIA = "2026.10.06-RN";  // Spätná väzba: vstupy z návodov, chybových hlášok a Nastavení (spec 148.15)
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -10092,7 +10092,8 @@ function nvZoznamHtml(N){
   return `<div class="nv-uvod">Krátke návody s ukážkou obrazovky. Najprv len to podstatné —
     podrobnosti si otvoríte, keď ich budete potrebovať.</div>`
     +((skupiny || ostatne) ? skupiny+(ostatne ? `<div class="nv-sk">Ostatné</div><div class="card nv-zoznam">${ostatne}</div>` : "")
-      : `<div class="card"><div class="csub">Zatiaľ tu nie je žiadny návod.</div></div>`);
+      : `<div class="card"><div class="csub">Zatiaľ tu nie je žiadny návod.</div></div>`)
+    +nvOtazkaHtml("");
 }
 // Vrstva 1: na čo je modul a zoznam úloh.
 function nvModulHtml(id, m){
@@ -10105,7 +10106,8 @@ function nvModulHtml(id, m){
     <div class="nv-hlava"><h3>${esc(a.n)}</h3><p>${nvText(m.uvod)}</p></div>
     ${nvPlanPoznamkaHtml(id)}
     <div class="card nv-zoznam">${ulohy}</div>
-    <div class="nv-pata">${nvOtvorModulHtml(id)}</div>`;
+    <div class="nv-pata">${nvOtvorModulHtml(id)}</div>
+    ${nvOtazkaHtml(id)}`;
 }
 // Vrstvy 2 a 3: ukážka, kroky, podrobnosti.
 function nvUlohaHtml(id, m, u){
@@ -10125,7 +10127,13 @@ function nvUlohaHtml(id, m, u){
       +podrobnosti.map(p=>`<details class="card nv-det"><summary>${esc(p.nadpis)}</summary>
         <div class="nv-dtelo">${nvText(p.html)}</div></details>`).join("") : ""}
     <div class="nv-pata">${nvOtvorModulHtml(id)}${dalsia
-      ? `<button class="aabtn" onclick="otvorNavod('${id}','${dalsia.id}')">Ďalej: ${esc(dalsia.nazov)} ›</button>` : ""}</div>`;
+      ? `<button class="aabtn" onclick="otvorNavod('${id}','${dalsia.id}')">Ďalej: ${esc(dalsia.nazov)} ›</button>` : ""}</div>
+    ${nvOtazkaHtml(id, u.id)}`;
+}
+// Spätná väzba z návodu (148.15): kto odpoveď nenašiel, opýta sa rovno tu.
+function nvOtazkaHtml(id, uloha){
+  return `<div class="csub" style="margin:14px 2px 4px;text-align:center">Nenašli ste odpoveď? `
+    +svOdkazHtml(`svZNavodu('${id}'${uloha?`,'${uloha}'`:""})`, "Opýtajte sa nás")+`</div>`;
 }
 // Pohyblivá ukážka: snímky krokov sa striedajú a na každej pulzuje krúžok
 // okolo prvku, na ktorý sa ťuká. Krok bez snímky v ukážke chýba, v zozname nie.
@@ -21113,6 +21121,12 @@ function appData(){
         ${jeNainstalovana()?'':`<button class="abtn" onclick="nainstalujApp()" style="width:100%;margin-top:8px">⬇ Nainštalovať do telefónu</button>`}
       </div>`; })()}
       <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:14px">
+        <div style="font-size:12px;color:var(--ink-soft);margin-bottom:6px;font-weight:600">Spätná väzba</div>
+        <div class="csub" style="margin-bottom:10px;line-height:1.55">Otázka, návrh alebo chyba — každú správu čítame a odpovieme.</div>
+        <button class="abtn" onclick="otvorSpatnuVazbu('otazka')" style="width:100%;margin-bottom:8px">💬 Napísať nám</button>
+        ${svBezServera()?"":`<button class="abtn" onclick="otvorSpatnuVazbu('moje')" style="width:100%">📋 Moje príspevky a odpovede</button>`}
+      </div>
+      <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:14px">
         <div style="font-size:12px;color:var(--ink-soft);margin-bottom:9px;font-weight:600">Vaše dáta (GDPR)</div>
         <button class="abtn" onclick="gdprMojExport()" style="width:100%;margin-bottom:8px">📦 Stiahnuť všetky moje dáta (JSON)</button>
         <button class="abtn" onclick="gdprMojeZmazanie()" style="width:100%;border-color:var(--neg);color:var(--neg)">🗑 Zmazať môj účet a všetky dáta</button>
@@ -21526,10 +21540,12 @@ async function ulozNastavenia(){
       try{
         const { data, error } = await sb.rpc("ico_obsadene", { p_ico: noveIco });
         if(!error && data === true){
-          alert("IČO "+noveIco+" už používa iný účet.\n\n"+
+          // Spätná väzba rovno odtiaľto (148.15) — inak by človek musel e-mail opisovať.
+          if(confirm("IČO "+noveIco+" už používa iný účet.\n\n"+
                 "Na jedno IČO môže byť založený len jeden účet. Ak ste si omylom "+
                 "vytvorili dva, prihláste sa do toho pôvodného alebo nás kontaktujte "+
-                "na podpora@ezivnostnik.eu.");
+                "na podpora@ezivnostnik.eu.\n\nChcete nám napísať hneď z appky?"))
+            otvorSpatnuVazbu("otazka", { modul:"data", text:"IČO "+noveIco+" je obsadené iným účtom. " });
           return;
         }
       }catch(_){ /* kontrola je pomôcka, nie podmienka — index podrží */ }
@@ -31368,13 +31384,13 @@ function peppolKartaHtml(){
         ${zverejneny?peppolNavodHtml(dic, false):""}`, "var(--warn)");
     case "pozastavena":
       return karta(`<b>Firma je v sieti Peppol pozastavená</b>
-        <div class="csub" style="margin-top:5px">Napíšte nám na <b>podpora@ezivnostnik.eu</b>, preveríme to s poskytovateľom.</div>`, "var(--warn)");
+        <div class="csub" style="margin-top:5px">Napíšte nám na <b>podpora@ezivnostnik.eu</b>, preveríme to s poskytovateľom.</div><div style="margin-top:8px">${svOdkazHtml("otvorSpatnuVazbu('otazka',{modul:'efaktury'})", "Napísať nám priamo z appky")}</div>`, "var(--warn)");
     case "caka_na_priradenie":
       return karta(`<b>Výber prišiel, firmu sme ešte nepriradili</b>
         <div class="csub" style="margin-top:5px">E-mail zadaný pri výbere na portáli Finančnej správy sa nezhoduje s e-mailom vášho účtu ani firmy, takže ju nevieme priradiť automaticky. Napíšte nám na <b>podpora@ezivnostnik.eu</b> z e-mailu, ktorý ste pri výbere zadali. Faktúry, ktoré medzitým prídu, bezpečne uchováme.</div>`);
     case "konflikt":
       return karta(`<b>Toto DIČ je v sieti priradené inej firme</b>
-        <div class="csub" style="margin-top:5px">Ak ide o omyl, napíšte nám na <b>podpora@ezivnostnik.eu</b>.</div>`, "var(--warn)");
+        <div class="csub" style="margin-top:5px">Ak ide o omyl, napíšte nám na <b>podpora@ezivnostnik.eu</b>.</div><div style="margin-top:8px">${svOdkazHtml("otvorSpatnuVazbu('otazka',{modul:'efaktury'})", "Napísať nám priamo z appky")}</div>`, "var(--warn)");
     case "caka_na_vyber":
       return karta(`<b>Čakáme na potvrdenie výberu od Finančnej správy</b>
         <div class="csub" style="margin-top:5px">Zvyčajne to trvá pár minút. Ak sa do dňa nič nezmení, skontrolujte, či ste vybrali subjekt s DIČ ${esc(dic)} a zadali e-mail, ktorým sa prihlasujete sem.</div>
@@ -38480,10 +38496,13 @@ function spatnaVazbaData(s){
   }};
 }
 // `typ` = "moje" otvorí rovno zoznam vlastných príspevkov (zo zvončeka).
-function otvorSpatnuVazbu(typ){
-  const naObr=modulNaObrazovke();
+// `o` = {modul, text} — vstup z návodu alebo z chybovej hlášky predvyplní, čoho
+// sa správa týka; človek text vidí a môže ho zmeniť skôr, než odíde (148.15).
+function otvorSpatnuVazbu(typ, o){
+  const naObr=(o && o.modul) || modulNaObrazovke();
   const m=(naObr && APPS[naObr]) ? naObr : "";
-  _sv={typ: SV_TYPY[typ] ? typ : "hodnotenie", skore:null, modul:m, text:"", kontakt:false, odosiela:false, chyba:"",
+  _sv={typ: SV_TYPY[typ] ? typ : "hodnotenie", skore:null, modul:m,
+    text:String((o && o.text) || "").slice(0, SV_MAX), kontakt:false, odosiela:false, chyba:"",
     pohlad:"nova", moje:null, mojeChyba:""};
   if(typ==="moje" && !svBezServera()) svMoje(); else svVykresli();
 }
@@ -38584,6 +38603,24 @@ async function svOdoslat(){
       : "Nepodarilo sa odoslať: "+sprava+". Text ostal v okne — skúste to znova.";
     svVykresli();
   }
+}
+
+// ── Ďalšie vstupy (spec 148.15): návod, chybová hláška, Nastavenia ────────
+// Z návodu: otázka k modulu, text nesie názov návodu, aby sme vedeli, kde
+// človek odpoveď nenašiel.
+function svZNavodu(modul, uloha){
+  const m=window.NAVODY && window.NAVODY.moduly && window.NAVODY.moduly[modul];
+  const u=m && uloha && (m.ulohy||[]).find(x=>x.id===uloha);
+  const nazov=u ? u.nazov : (APPS[modul] ? APPS[modul].n : "");
+  otvorSpatnuVazbu("otazka", { modul, text: nazov ? "Návod „"+nazov+"“: " : "" });
+}
+// Z chybovej hlášky: nahlásenie chyby s textom hlášky (to, čo človek práve
+// videl na obrazovke — nič navyše z dát firmy).
+function svZoZnenia(hlaska, modul){
+  otvorSpatnuVazbu("chyba", { modul, text: hlaska ? "Appka hlásila: „"+String(hlaska).trim()+"“\n\nČo som práve robil(a): " : "" });
+}
+function svOdkazHtml(onclick, text){
+  return `<button type="button" onclick="${onclick}" style="background:none;border:0;padding:0;color:var(--brand);font:inherit;font-weight:600;text-decoration:underline;cursor:pointer">${esc(text)}</button>`;
 }
 
 // ── Moje príspevky a odpovede (F2, spec 148.14) ────────────────────────────
@@ -45025,7 +45062,22 @@ async function otvorDokladSubor(cesta){
 // nemusia prejsť skôr, než ich používateľ uvidí — a 23 z nich nesie sumu
 // („Faktúra na … uložená"). Filtruje sa priamo tu, na jedinom mieste, kadiaľ
 // všetky idú.
-function cloudMsg(t,type){ const m=document.getElementById("cloudMsg"); if(m){ m.textContent=(typeof jeZakryte==="function"&&jeZakryte())?zakriText(t):t; m.className="cloudmsg "+type; } }
+function cloudMsg(t,type){ const m=document.getElementById("cloudMsg"); if(m){ m.textContent=(typeof jeZakryte==="function"&&jeZakryte())?zakriText(t):t; m.className="cloudmsg "+type;
+  if(type==="err") svNahlasenieKHlaske(m); } }
+// Pri chybovej hláške odkaz „Nahlásiť problém“ (spec 148.15). Do okna ide text
+// hlášky tak, ako je na obrazovke (aj so zakrytými číslami), nič iné.
+function svNahlasenieKHlaske(el){
+  if(!el || typeof el.appendChild!=="function" || typeof document.createElement!=="function") return;
+  if(typeof svBezServera==="function" && svBezServera()) return;
+  // Bez siete by správa aj tak neodišla — hláška vtedy hovorí o pripojení.
+  if(typeof navigator!=="undefined" && navigator.onLine===false) return;
+  const hlaska=el.textContent;
+  const b=document.createElement("button");
+  b.type="button"; b.textContent="Nahlásiť problém";
+  b.style.cssText="background:none;border:0;padding:0;margin-left:8px;color:inherit;font:inherit;font-weight:700;text-decoration:underline;cursor:pointer";
+  b.onclick=()=>svZoZnenia(hlaska, modulNaObrazovke());
+  el.appendChild(b);
+}
 function setSync(s){
   const c=document.getElementById("syncChip");
   if(!c) return;
