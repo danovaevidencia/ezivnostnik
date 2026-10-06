@@ -2262,7 +2262,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.10.06-RN";  // Spätná väzba: vstupy z návodov, chybových hlášok a Nastavení (spec 148.15)
+const APP_VERZIA = "2026.10.06-RO";  // OP Verteco v1.8: zmazanie účtu a firma v sieti Peppol, admin Peppol (spec 149)
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -20857,8 +20857,8 @@ function dmKopiruj(){
 // stránkou stráži test_pravne, takže nová verzia dokumentu bez úpravy tu
 // sadu zhodí.
 const DOKUMENTY={
-  podmienky:{url:"podmienky.html",     n:"Obchodné podmienky",      verzia:"1.8"},
-  sukromie: {url:"sukromie.html",      n:"Ochrana osobných údajov", verzia:"1.21"},
+  podmienky:{url:"podmienky.html",     n:"Obchodné podmienky",      verzia:"1.9"},
+  sukromie: {url:"sukromie.html",      n:"Ochrana osobných údajov", verzia:"1.22"},
   zmazanie: {url:"zmazanie-uctu.html", n:"Zmazanie účtu a údajov"},
 };
 // Záznam súhlasu k účtu (ROZHODNUTIA č. 52). Zmluva vzniká vytvorením účtu
@@ -26921,11 +26921,71 @@ async function gdprMojExport(){
   }catch(e){ if(msg){msg.textContent="Chyba: "+e.message;} }
 }
 
-async function gdprMojeZmazanie(){
+// Zmazanie účtu a sieť Peppol (OP Verteco v1.8 bod 7.6, spec 149.2): firma,
+// ktorú sme do siete zapojili, sa zmazaním účtu u Verteca nezmaže. Pred
+// potvrdením sa preto opýtame, čo s ňou — uvoľniť (predvolené: príjem ostane
+// zachovaný a Verteco subjekt vyzve vybrať si poskytovateľa), alebo odhlásiť.
+// Server (`gdpr`) zapíše voľbu do fronty ukončení PRED zmazaním čohokoľvek.
+function gdprHlas(){
   const msg=document.getElementById("gdprMsg");
   // Z menu účtu počas onboardingu Nastavenia nie sú a `gdprMsg` neexistuje —
   // výsledok (hlavne chyba) by inak nebolo kde vidieť.
-  const hlas=(t)=>{ if(msg) msg.textContent=t; else if(!/…$/.test(t)) alert(t); };
+  return (t)=>{ if(msg) msg.textContent=t; else if(!/…$/.test(t)) alert(t); };
+}
+async function gdprPeppolStav(){
+  const _tok=await ziskajToken();
+  if(!_tok) throw new Error(CHYBA_SESSION);
+  const res=await fetch(SUPABASE_URL+"/functions/v1/gdpr",{
+    method:"POST", headers:{"Content-Type":"application/json","Authorization":"Bearer "+_tok},
+    body:JSON.stringify({akcia:"peppol_stav"})
+  });
+  const r=await res.json().catch(()=>({}));
+  // Starší server akciu nepozná — nemá ani frontu ukončení, nie je sa čo pýtať.
+  if(res.status===400 && /neznáma akcia/.test(String(r.error||""))) return [];
+  if(!res.ok || !r.ok) throw new Error(r.error||("HTTP "+res.status));
+  return Array.isArray(r.firmy) ? r.firmy : [];
+}
+async function gdprMojeZmazanie(){
+  const hlas=gdprHlas();
+  if(!gdprBezServera()){
+    let firmy;
+    hlas("Zisťujem stav e-faktúr…");
+    try{ firmy=await gdprPeppolStav(); }
+    catch(e){
+      // Bez odpovede nevieme, či firma v sieti je — zmazať naslepo by ju tam nechalo.
+      console.error("gdpr peppol_stav:", e);
+      hlas("Stav e-faktúr sa nepodarilo zistiť ("+e.message+"). Účet sme nezmazali — skúste to znova.");
+      return;
+    }
+    hlas("");
+    if(firmy.length){ gdprPeppolOkno(firmy); return; }
+  }
+  await gdprZmazanieVykonaj(null);
+}
+function gdprPeppolOkno(firmy){
+  const zoznam=firmy.map(f=>`<li><b>${esc(f.nazov||"firma")}</b> · DIČ ${esc(f.dic)}</li>`).join("");
+  openModal("Zmazanie účtu — e-faktúry", `<div style="font-size:13.5px;line-height:1.6">
+      <p style="margin:0 0 8px">Táto firma prijíma e-faktúry v sieti Peppol cez eživnostník:</p>
+      <ul style="margin:0 0 10px 18px;padding:0">${zoznam}</ul>
+      <p style="margin:0 0 10px"><b>Od 1. 1. 2027 musí e-faktúry prijímať každý podnikateľ.</b> Čo urobíme s firmou v sieti po zmazaní účtu?</p>
+      <label style="display:flex;gap:8px;align-items:flex-start;margin:0 0 10px;cursor:pointer">
+        <input type="radio" name="gdprPeppolSposob" value="uvolnit" checked style="margin-top:4px">
+        <span><b>Uvoľniť (odporúčame)</b><br><span class="csub">Príjem e-faktúr ostane zachovaný najviac 30 dní a certifikovaný poskytovateľ Verteco vás vyzve vybrať si nového poskytovateľa.</span></span>
+      </label>
+      <label style="display:flex;gap:8px;align-items:flex-start;margin:0 0 10px;cursor:pointer">
+        <input type="radio" name="gdprPeppolSposob" value="odregistrovat" style="margin-top:4px">
+        <span><b>Odhlásiť zo siete</b><br><span class="csub">Do 3 pracovných dní prestanete e-faktúry cez sieť Peppol prijímať, kým si nevyberiete iného poskytovateľa na portáli Finančnej správy.</span></span>
+      </label>
+      <div class="csub">E-faktúry, ktoré už máte v aplikácii, si pred zmazaním stiahnite exportom.</div>
+    </div>`, ()=>{
+      const v=(document.querySelector('input[name="gdprPeppolSposob"]:checked')||{}).value;
+      const sposob = v==="odregistrovat" ? "odregistrovat" : "uvolnit";
+      // Okno sa zavrie, potvrdenia zmazania idú až po ňom.
+      setTimeout(()=>gdprZmazanieVykonaj(sposob), 0);
+    }, null, null, "Pokračovať k zmazaniu");
+}
+async function gdprZmazanieVykonaj(peppolSposob){
+  const hlas=gdprHlas();
   if(!confirm("Naozaj chcete natrvalo zmazať svoj účet a VŠETKY dáta? Túto akciu nie je možné vrátiť.\n\nOdporúčame si najprv stiahnuť export.")) return;
   if(!confirm("Posledné potvrdenie: účet a všetky faktúry, výdavky a záznamy budú nenávratne zmazané. Pokračovať?")) return;
   if(gdprBezServera()){
@@ -26938,11 +26998,15 @@ async function gdprMojeZmazanie(){
     if(!_tok){ hlas(CHYBA_SESSION); return; }
     const res=await fetch(SUPABASE_URL+"/functions/v1/gdpr",{
       method:"POST", headers:{"Content-Type":"application/json","Authorization":"Bearer "+_tok},
-      body:JSON.stringify({akcia:"zmazat"})
+      body:JSON.stringify(peppolSposob ? {akcia:"zmazat", peppol_sposob:peppolSposob} : {akcia:"zmazat"})
     });
     const r=await res.json().catch(()=>({}));
     if(!res.ok || !r.ok){ hlas("Zmazanie zlyhalo: "+(r.error||res.status)); return; }
-    alert("Váš účet a všetky dáta boli zmazané. Ďakujeme, že ste eživnostník používali.");
+    const zm=r.zmazane||{};
+    const peppolVeta = zm.peppol_ukoncenia
+      ? "\n\nFirmu v sieti Peppol "+(zm.peppol_sposob==="odregistrovat" ? "odhlásime" : "uvoľníme")+" do 3 pracovných dní."
+      : "";
+    alert("Váš účet a všetky dáta boli zmazané. Ďakujeme, že ste eživnostník používali."+peppolVeta);
     await sb.auth.signOut(); location.reload();
   }catch(e){ hlas("Chyba: "+e.message); }
 }
@@ -31304,7 +31368,7 @@ async function peppolPrijimamInde(ano){
   }
   if(peppolEfakturyOtvorene()) appEfaktury();
 }
-// Informácia podľa bodu 4.4 a prílohy A OP sprostredkovania Verteco v1.7
+// Informácia podľa bodu 4.4 a prílohy A OP sprostredkovania Verteco v1.7 (bez zmeny vo v1.8)
 // (21. 9. 2026, požiadavka Finančnej správy): v mieste aktivácie doručovacej
 // služby musí byť trvalo vidieť, kto je zmluvný partner a kto za službu
 // zodpovedá. Aktivácia je výber na portáli FS (návod nižšie) a prepínače
