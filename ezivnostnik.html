@@ -2262,7 +2262,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.10.05-RL";  // Spätná väzba v menu účtu (spec kap. 148, F1), zásady 1.20
+const APP_VERZIA = "2026.10.06-RM";  // Spätná väzba F2: výzvy po úlohe, Moje príspevky, odpoveď (spec 148.14), zásady 1.21
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -4086,6 +4086,8 @@ function zobrazFirmu(){
   // Články tiež na pozadí. Sú to verejné dáta a plocha ich nepotrebuje —
   // keď dorazia neskôr, obrazovka sa prekreslí sama.
   clankyNacitaj();
+  // Odpovede na spätnú väzbu — raz za reláciu, pre zvonček (spec 148.14).
+  if(typeof svNacitajOdpovede==="function") svNacitajOdpovede();
 }
 let _zdielaneSkusene=false;
 
@@ -6956,6 +6958,19 @@ function zbierNotifikacie(){
       detail:cakajuceVeta(),
       akcia:()=>otvorCakajuce()});
   }catch(e){ console.error("zvonček — schránka:", e); }
+
+  // ── odpoveď na spätnú väzbu (spec 148.14) ──
+  // Patrí účtu, nie firme; zmizne, keď človek otvorí Moje príspevky
+  // (spatna_vazba_videl). Kľúč nesie id odpovedí — nová odpoveď sa ozve znova.
+  try{
+    if(typeof _svOdpovede!=="undefined" && _svOdpovede.length){
+      const n=_svOdpovede.length, prva=String(_svOdpovede[0].odpoved||"");
+      out.push({kluc:"sv:odpoved:"+_svOdpovede.map(x=>x.id).join(","), ic:"💬", nal:"info",
+        nazov:n===1 ? "Odpovedali sme na vašu spätnú väzbu" : "Odpovedali sme na "+n+" vaše príspevky",
+        detail:prva.length>90 ? prva.slice(0,90)+"…" : prva,
+        akcia:()=>otvorSpatnuVazbu("moje")});
+    }
+  }catch(e){ console.error("zvonček — spätná väzba:", e); }
 
   // ── meškajúce faktúry (všetky, nielen dve) ──
   try{
@@ -13228,6 +13243,8 @@ function feModal(idx, nova, kluc){
     // ale nie potichu. Platí pre každý doklad z editora vrátane ponuky (obchodná listina).
     const _orChyba=orZapisChyba(firmaData.meta, firmaData.settings);
     if(_orChyba) alert((jeZaloha?"Zálohová faktúra":jePonuka?"Cenová ponuka":"Faktúra")+" je uložená.\n\n"+_orChyba);
+    // Výzva po úlohe (spec 148.14) — len nová ostrá faktúra, nie záloha ani ponuka.
+    if(nova && !jeZaloha && !jePonuka) svVyzva("faktura_vystavena", "faktury");
   },
   nova?null:()=>{
     const _f=POLE()[idx]||{};
@@ -20831,7 +20848,7 @@ function dmKopiruj(){
 // sadu zhodí.
 const DOKUMENTY={
   podmienky:{url:"podmienky.html",     n:"Obchodné podmienky",      verzia:"1.8"},
-  sukromie: {url:"sukromie.html",      n:"Ochrana osobných údajov", verzia:"1.20"},
+  sukromie: {url:"sukromie.html",      n:"Ochrana osobných údajov", verzia:"1.21"},
   zmazanie: {url:"zmazanie-uctu.html", n:"Zmazanie účtu a údajov"},
 };
 // Záznam súhlasu k účtu (ROZHODNUTIA č. 52). Zmluva vzniká vytvorením účtu
@@ -23847,7 +23864,8 @@ ${pbR33Xml(v)}
 </dokument>`;
   if(typeof pbUlozPodanie==="function") pbUlozPodanie(pbRok, xml, v);
   downloadBlob(new Blob([xml],{type:"application/xml"}), "dpfo_b_"+pbRok+"_navrh.xml");
-  setTimeout(()=>alert("XML návrh priznania B "+pbRok+" stiahnutý (štruktúra podľa reálne prijatého podania FS). Skontrolujte a podajte cez portál FS. Nenahrádza daňového poradcu."),100);
+  setTimeout(()=>{ alert("XML návrh priznania B "+pbRok+" stiahnutý (štruktúra podľa reálne prijatého podania FS). Skontrolujte a podajte cez portál FS. Nenahrádza daňového poradcu.");
+    svVyzva("priznanie_b", "priznanieB"); },100);
 }
 // ═══ ARCHÍV VYGENEROVANÝCH PODANÍ B ═══
 // Pri exporte sa uloží snímka XML + kľúčové čísla ku konkrétnemu roku (ako pri DPH),
@@ -24752,6 +24770,7 @@ function exportPohodaXml(){
     if(typeof davkaZapisExport==="function") davkaZapisExport("pohoda", davka);
     if(stav){ stav.textContent="✓ Pohoda XML hotový ("+(davka.vydavky||[]).length+" dokladov, "+(davka.banka||[]).length+" pohybov). V POHODE: Súbor → Dátová komunikácia → XML import/export."; stav.className="cloudmsg ok"; }
     if(typeof analytikaUdalost==="function") analytikaUdalost("export");
+    svVyzva("export_uctovnikovi", "zaloha");
   }catch(e){ console.error(e); if(stav){ stav.textContent="Chyba pri exporte: "+e.message; stav.className="cloudmsg err"; } }
 }
 // ═══════════════════════════════════════════════════════════════
@@ -25195,6 +25214,7 @@ function exportKrosTxt(ciel){
     // Tá istá anonymná udalosť „export“ ako XLSX a POHODA (č. 189) — nič z firmy.
     if(krosCielStav(ciel)==="zapnuty" && typeof analytikaUdalost==="function") analytikaUdalost("export");
     hlas(t, true);
+    if(krosCielStav(ciel)==="zapnuty") svVyzva("export_uctovnikovi", "zaloha");
   }catch(e){ console.error(e); hlas("Chyba pri exporte pre KROS: "+e.message, false); }
 }
 function xkBuild(X, volby){
@@ -27066,6 +27086,7 @@ function exportVsetkoXlsx(){
       if(wb._davka && typeof davkaZapisExport==="function") davkaZapisExport("xlsx", wb._davka);
       if(stav){ stav.textContent="✓ "+(wb._davka&&wb._davka.prirastok?"Prírastok":"Kompletný export")+" hotový ("+wb.SheetNames.length+" hárkov). Zapamätané — nabudúce môžete stiahnuť len to, čo pribudlo."; stav.className="cloudmsg ok"; }
       analytikaUdalost("export");
+      svVyzva("export_uctovnikovi", "zaloha");
     }catch(e){ console.error(e); if(stav){ stav.textContent="Chyba pri exporte: "+e.message; stav.className="cloudmsg err"; } }
   }).catch(()=>{ if(stav){ stav.textContent="Knižnicu na export sa nepodarilo načítať. Skontrolujte pripojenie."; stav.className="cloudmsg err"; } });
 }
@@ -30198,6 +30219,7 @@ function importujVypisText(text, nazovSuboru, parsedVopred, volby){
     + chybaTxt
     + (infoCasti.length ? "\n\n"+infoCasti.join("\n") : ""));
   povedz(hlaskaImportu);
+  if(nove.length) svVyzva("vypis_importovany", "banka");
   return nove.length;
 }
 
@@ -32257,6 +32279,8 @@ async function faktPeppolOdosli(){
     if(odmietnuta) O.chyba={ message:"Sieť doklad odmietla"+(r.detail?" ("+r.detail+")":"")+".", odmietnuta:true };
     poZmene();
     obnovPoEditacii("faktury");
+    // Výzva počká, kým človek okno s výsledkom zavrie (svVyzva).
+    if(!odmietnuta && !(r&&r.sandbox)) svVyzva("efaktura_odoslana", "faktury");
   }catch(e){
     console.error("postar/odosli zlyhalo:", e);
     O.chyba=e;
@@ -35160,6 +35184,7 @@ function uzavriMesiac(mk){
   };
   poZmene();
   if(typeof appUzavierka==="function") appUzavierka();
+  svVyzva("uzavierka_mesiaca", "uzavierka");
 }
 
 function odomkniMesiac(mk){
@@ -35384,6 +35409,7 @@ function dphStiahni(typ, mk){
     const S=dphSumare(dphZberObdobie(mk));
     dphUlozPodanie(mk, xml, dphDruhPodania(mk), S.danovaPovinnost);
   }
+  svVyzva("dph_export", "dph");
 }
 // ═══════════════════════════════════════════════════════════════
 //  DODATOČNÉ PODANIE
@@ -38453,11 +38479,13 @@ function spatnaVazbaData(s){
     meta: spatnaVazbaMeta()
   }};
 }
+// `typ` = "moje" otvorí rovno zoznam vlastných príspevkov (zo zvončeka).
 function otvorSpatnuVazbu(typ){
   const naObr=modulNaObrazovke();
   const m=(naObr && APPS[naObr]) ? naObr : "";
-  _sv={typ: SV_TYPY[typ] ? typ : "hodnotenie", skore:null, modul:m, text:"", kontakt:false, odosiela:false, chyba:""};
-  svVykresli();
+  _sv={typ: SV_TYPY[typ] ? typ : "hodnotenie", skore:null, modul:m, text:"", kontakt:false, odosiela:false, chyba:"",
+    pohlad:"nova", moje:null, mojeChyba:""};
+  if(typ==="moje" && !svBezServera()) svMoje(); else svVykresli();
 }
 function svBezServera(){ return demoMode || localMode || !sb; }
 function svVykresli(){
@@ -38468,9 +38496,12 @@ function svVykresli(){
   const s=_sv, T=SV_TYPY[s.typ];
   const mail=`<a href="mailto:podpora@ezivnostnik.eu" style="color:var(--brand)">podpora@ezivnostnik.eu</a>`;
   let telo;
+  const prepni=svBezServera() ? "" : `<div style="text-align:right;margin:-4px 0 10px"><button onclick="${s.pohlad==="moje"?"svNastav('pohlad','nova')":"svMoje()"}" style="background:none;border:0;padding:4px 0;color:var(--brand);font:inherit;font-size:13px;font-weight:600;cursor:pointer">${s.pohlad==="moje"?"← Nová správa":"📋 Moje príspevky"+(_svOdpovede.length?` <span class="badge" style="background:var(--neg);color:#fff;border-radius:9px;padding:0 6px;font-size:11px">${_svOdpovede.length}</span>`:"")}</button></div>`;
   if(svBezServera()){
     telo=`<p style="margin-bottom:10px">V ${demoMode?"ukážke":"režime bez účtu"} sa spätná väzba neposiela.</p>
       <p>Napíšte nám na ${mail} — každú správu čítame.</p>`;
+  } else if(s.pohlad==="moje"){
+    telo=prepni+svMojeHtml(s);
   } else {
     const typy=Object.keys(SV_TYPY).map(k=>`<button class="aabtn${k===s.typ?" pri":""}" style="justify-content:center" onclick="svNastav('typ','${k}')" aria-pressed="${k===s.typ}">${SV_TYPY[k].ic} ${SV_TYPY[k].n}</button>`).join("");
     const modulN=s.modul && APPS[s.modul] ? APPS[s.modul].n : "";
@@ -38481,7 +38512,7 @@ function svVykresli(){
     const moduly=Object.keys(APPS).filter(k=>k!=="superdash" && (typeof modulPovolenyPreModul!=="function" || modulPovolenyPreModul(k)))
       .map(k=>`<option value="${k}"${k===s.modul?" selected":""}>${esc(APPS[k].n)}</option>`).join("");
     const povinnyKontakt=s.typ==="otazka" || s.typ==="chyba";
-    telo=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">${typy}</div>
+    telo=`${prepni}<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">${typy}</div>
       ${hodnotenie}
       <label style="display:block;font-size:12.5px;font-weight:600;margin:14px 0 4px" for="svModul">Týka sa</label>
       <select id="svModul" onchange="svUlozVstupy()" style="width:100%;box-sizing:border-box"><option value="">Celá aplikácia</option>${moduly}</select>
@@ -38498,8 +38529,8 @@ function svVykresli(){
     <div class="modalhd"><h3 id="svNadpis">💬 Spätná väzba</h3>
       <button class="modalx" onclick="svZavri()" title="Zavrieť">✕</button></div>
     <div class="modalbd" style="font-size:13.5px;line-height:1.55">${telo}</div>
-    <div class="modalft"><button class="abtn" onclick="svZavri()">${svBezServera()?"Zavrieť":"Zrušiť"}</button>
-      ${svBezServera()?"":`<button class="abtn pri" onclick="svOdoslat()"${s.odosiela?" disabled":""}>${s.odosiela?"Odosielam…":"Odoslať"}</button>`}</div>
+    <div class="modalft"><button class="abtn" onclick="svZavri()">${svBezServera()||s.pohlad==="moje"?"Zavrieť":"Zrušiť"}</button>
+      ${svBezServera()||s.pohlad==="moje"?"":`<button class="abtn pri" onclick="svOdoslat()"${s.odosiela?" disabled":""}>${s.odosiela?"Odosielam…":"Odoslať"}</button>`}</div>
   </div>`;
   // Prekreslenie (zmena typu, skóre) nesmie okno posunúť na začiatok.
   const k2=o.querySelector(".modalcard"); if(k2) k2.scrollTop=posun;
@@ -38553,6 +38584,217 @@ async function svOdoslat(){
       : "Nepodarilo sa odoslať: "+sprava+". Text ostal v okne — skúste to znova.";
     svVykresli();
   }
+}
+
+// ── Moje príspevky a odpovede (F2, spec 148.14) ────────────────────────────
+// Odpoveď z adminu príde e-mailom (pri súhlase s kontaktom) a vždy aj sem —
+// zvonček ju hlási, kým ju človek neuvidí. Zoznam ide cez spatna_vazba_moje
+// (bez admin stĺpcov) a výzvy po úlohe v ňom nie sú.
+let _svOdpovede=[], _svOdpovedeNacitane=false;
+const SV_STAVY={nove:"Prijaté", precitane:"Prečítané", planovane:"Plánujeme", vo_vyvoji:"Robíme na tom",
+  hotove:"Hotové", zamietnute:"Nebudeme robiť", zodpovedane:"Zodpovedané"};
+async function svNacitajOdpovede(){
+  if(_svOdpovedeNacitane || svBezServera() || typeof sb.rpc!=="function") return;
+  _svOdpovedeNacitane=true;
+  try{
+    const { data, error }=await sb.rpc("spatna_vazba_moje");
+    if(error) throw error;
+    _svOdpovede=(Array.isArray(data)?data:[]).filter(x=>x && x.odpoved && !x.odpoved_videna);
+    if(_svOdpovede.length && typeof renderNotifBadge==="function") renderNotifBadge();
+  }catch(e){
+    // Zvonček len nebude hlásiť odpoveď; v okne sa zoznam načíta znova.
+    if(typeof jeSietovaChyba==="function" && jeSietovaChyba(e)) console.warn("spätná väzba — odpovede (bez siete):", e);
+    else console.error("spätná väzba — odpovede:", e);
+  }
+}
+async function svMoje(){
+  if(!_sv) return;
+  _sv.pohlad="moje"; _sv.moje=null; _sv.mojeChyba="";
+  svVykresli();
+  try{
+    const { data, error }=await sb.rpc("spatna_vazba_moje");
+    if(error) throw error;
+    if(!_sv) return;
+    _sv.moje=Array.isArray(data)?data:[];
+    // Videné = otvoril zoznam s odpoveďou. Zápis zlyhá len pred migráciou
+    // admin_58 — zvonček potom hlási ďalej, chyba ide do konzoly.
+    if(_sv.moje.some(x=>x.odpoved && !x.odpoved_videna)){
+      sb.rpc("spatna_vazba_videl").then(({error:e2})=>{ if(e2) console.error("spätná väzba — videné:", e2); });
+      _svOdpovede=[];
+      if(typeof renderNotifBadge==="function") renderNotifBadge();
+    }
+  }catch(e){
+    console.error("spätná väzba — moje príspevky:", e);
+    if(!_sv) return;
+    _sv.mojeChyba="Príspevky sa nepodarilo načítať: "+String((e && e.message) || e);
+  }
+  if(_sv && _sv.pohlad==="moje") svVykresli();
+}
+function svMojeHtml(s){
+  if(s.mojeChyba) return `<div class="cloudmsg err">${esc(s.mojeChyba)}</div>`;
+  if(!s.moje) return `<p style="color:var(--ink-soft)">Načítavam…</p>`;
+  if(!s.moje.length) return `<p style="color:var(--ink-soft)">Zatiaľ ste nám nič neposlali.</p>`;
+  return s.moje.map(x=>{
+    const T=SV_TYPY[x.typ]||{ic:"💬", n:x.typ};
+    const kedy=x.vytvorene ? fmtDatum(String(x.vytvorene).slice(0,10)) : "";
+    const modul=x.modul && APPS[x.modul] ? APPS[x.modul].n : "celá aplikácia";
+    const nova=x.odpoved && !x.odpoved_videna;
+    return `<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--ink-soft)">
+        <span>${T.ic} ${esc(T.n)}${x.skore!=null?" · "+esc(x.skore)+"/5":""} · ${esc(modul)}</span><span>${esc(kedy)}</span></div>
+      ${x.text?`<div style="white-space:pre-wrap;margin-top:6px">${esc(String(x.text).slice(0,400))}${String(x.text).length>400?"…":""}</div>`:""}
+      <div style="font-size:12px;margin-top:6px"><b>${esc(SV_STAVY[x.stav]||x.stav)}</b></div>
+      ${x.odpoved?`<div style="margin-top:8px;padding:9px 11px;border-radius:8px;background:var(--paper-2, rgba(0,0,0,.04));border-left:3px solid ${nova?"var(--neg)":"var(--brand)"}">
+        <div style="font-size:12px;font-weight:600;margin-bottom:3px">${nova?"Nová odpoveď":"Odpoveď"}${x.odpovedane?" · "+esc(fmtDatum(String(x.odpovedane).slice(0,10))):""}</div>
+        <div style="white-space:pre-wrap">${esc(x.odpoved)}</div></div>`:""}
+    </div>`;
+  }).join("");
+}
+
+// ── Výzva po úlohe — náročnosť (CES, F2, spec 148.14) ──────────────────────
+// Po dokončenej úlohe sa pás nad lištou opýta „Ako ľahko sa vám to podarilo?“.
+// Číslo sa uloží hneď po kliku; pri 1–3 môže človek doplniť značky a text
+// (spatna_vazba_doplnit, do hodiny). NIKDY neotravovať (148.1): nie pri prvom
+// použití úlohy, jedna výzva za 14 dní, tá istá úloha raz za 90 dní, dvakrát
+// „Teraz nie“ = 180 dní ticho; nie v ukážke, bez účtu ani v roli Náhľad.
+// Počas pilotu (SV_PILOT) 3 a 30 dní. Stav je len v tomto zariadení
+// (localStorage eziv_sv_vyzvy, zásady 1.21) — nič z neho neodchádza.
+const SV_PILOT=true;
+const SV_UDALOSTI={faktura_vystavena:"Vystavenie faktúry", vypis_importovany:"Nahratie výpisu", dph_export:"Výkaz DPH",
+  priznanie_b:"Daňové priznanie", efaktura_odoslana:"Odoslanie e-faktúry", export_uctovnikovi:"Export pre účtovníka",
+  uzavierka_mesiaca:"Uzávierka mesiaca"};
+const SV_ZNACKY={nezrozumitelne:"nezrozumiteľné", pomale:"pomalé", nefunguje:"nefunguje", chyba_funkcia:"chýba mi funkcia",
+  zly_vypocet:"zlý výpočet", mobil:"na mobile zle", ine:"iné"};
+let _svVyzva=null;
+// Čistá funkcia: smie sa výzva ukázať? Vracia aj nový stav — zapisuje volajúci.
+function svVyzvaRozhodni(st, udalost, teraz, pilot){
+  const D=864e5, z=(st && typeof st==="object") ? st : {};
+  const s={pocty:Object.assign({}, z.pocty), posledne:Object.assign({}, z.posledne),
+    posledna:+z.posledna||0, odmietnute:+z.odmietnute||0, ticho:+z.ticho||0};
+  s.pocty[udalost]=(+s.pocty[udalost]||0)+1;
+  const smie = s.pocty[udalost]>=2                                   // nie pri prvom použití
+    && teraz>=s.ticho                                                // po 2× „Teraz nie“
+    && teraz-s.posledna >= (pilot?3:14)*D                            // akákoľvek výzva
+    && teraz-(+s.posledne[udalost]||0) >= (pilot?30:90)*D;           // tá istá úloha
+  if(smie){ s.posledna=teraz; s.posledne[udalost]=teraz; }
+  return {smie, stav:s};
+}
+// „Teraz nie“ dvakrát za sebou = 180 dní ticho; hodnotenie počítadlo vynuluje.
+function svVyzvaOdmietni(st, teraz){
+  const s=Object.assign({}, st||{});
+  s.odmietnute=(+s.odmietnute||0)+1;
+  if(s.odmietnute>=2){ s.ticho=teraz+180*864e5; s.odmietnute=0; }
+  return s;
+}
+function svVyzvaStav(){
+  try{ return JSON.parse(localStorage.getItem("eziv_sv_vyzvy")||"null"); }catch(_){ return null; }
+}
+function svVyzvaUloz(s){
+  try{ localStorage.setItem("eziv_sv_vyzvy", JSON.stringify(s)); }catch(_){}
+}
+// Čistá funkcia: parameter RPC výzvy (stráži test_spatna_vazba).
+function svVyzvaData(udalost, modul, skore){
+  return { typ:"hodnotenie", zdroj:"kontext", udalost, skore,
+    modul:(modul && APPS[modul]) ? modul : null, firma_id:firmaId||null, meta:spatnaVazbaMeta() };
+}
+function svVyzva(udalost, modul){
+  try{
+    if(!SV_UDALOSTI[udalost] || svBezServera() || _svVyzva) return;
+    if(typeof mojaRolaVFirme==="function" && mojaRolaVFirme()==="nahlad") return;
+    const r=svVyzvaRozhodni(svVyzvaStav(), udalost, Date.now(), SV_PILOT);
+    svVyzvaUloz(r.stav);
+    if(!r.smie) return;
+    _svVyzva={udalost, modul, skore:null, id:null, tagy:[], faza:"otazka"};
+    svVyzvaCakaj(0);
+  }catch(e){ console.error("výzva spätnej väzby:", e); }
+}
+// Výzva nevojde do otvoreného okna ani cez pás „Uložené“ — počká, najviac 2 min.
+function svVyzvaCakaj(n){
+  if(!_svVyzva) return;
+  const zaneprazdnene=document.querySelector(".modal.on") || document.getElementById("ulozenePruh");
+  if(zaneprazdnene && n<80){ setTimeout(()=>svVyzvaCakaj(n+1), 1500); return; }
+  if(zaneprazdnene){ _svVyzva=null; return; }
+  setTimeout(svVyzvaVykresli, 900);
+}
+function svVyzvaVykresli(){
+  const v=_svVyzva;
+  let p=document.getElementById("svVyzvaPas");
+  if(!v){ if(p) p.remove(); return; }
+  if(!p){ p=document.createElement("div"); p.id="svVyzvaPas"; p.className="offline-pruh"; p.setAttribute("role","dialog");
+    p.setAttribute("aria-label","Krátka otázka"); p.style.padding="11px 14px"; document.body.appendChild(p); }
+  const tl="background:rgba(255,255,255,.12);color:inherit;border:1px solid rgba(255,255,255,.28);border-radius:8px;font:inherit;cursor:pointer";
+  const zavri=`<button onclick="${v.faza==="otazka"?"svVyzvaTerazNie()":"svVyzvaZavri()"}" style="background:none;border:0;color:inherit;opacity:.75;font:inherit;font-size:12px;cursor:pointer;padding:2px 0">${v.faza==="otazka"?"Teraz nie":"✕"}</button>`;
+  let h;
+  if(v.faza==="otazka"){
+    h=`<div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline"><b style="font-size:13.5px">Ako ľahko sa vám to podarilo?</b>${zavri}</div>
+      <div style="font-size:11.5px;opacity:.75;margin-top:1px">${esc(SV_UDALOSTI[v.udalost])}</div>
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-top:8px">${[1,2,3,4,5].map(i=>`<button onclick="svVyzvaSkore(${i})" style="${tl};min-height:40px;font-size:15px;font-weight:700"${v.odosiela?" disabled":""}>${i}</button>`).join("")}</div>
+      <div style="display:flex;justify-content:space-between;font-size:11px;opacity:.75;margin-top:3px"><span>veľmi ťažko</span><span>veľmi ľahko</span></div>`;
+  } else if(v.faza==="doplnit"){
+    h=`<div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline"><b style="font-size:13.5px">Ďakujeme. Čo vám to sťažilo?</b>${zavri}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">${Object.keys(SV_ZNACKY).map(k=>`<button onclick="svVyzvaZnacka('${k}')" aria-pressed="${v.tagy.includes(k)}" style="${tl};padding:5px 10px;font-size:12px${v.tagy.includes(k)?";background:var(--paper);color:var(--ink)":""}">${esc(SV_ZNACKY[k])}</button>`).join("")}</div>
+      <textarea id="svVyzvaText" rows="2" maxlength="${SV_MAX}" placeholder="Chcete dodať pár slov? (nepovinné — nepíšte sem rodné čísla ani čísla účtov)" style="width:100%;box-sizing:border-box;margin-top:8px;font:inherit;font-size:13px;padding:7px 9px;border-radius:8px;border:0">${esc(v.text||"")}</textarea>
+      ${v.chyba?`<div style="font-size:12px;margin-top:6px;color:#ffb4a8">${esc(v.chyba)}</div>`:""}
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px"><button onclick="svVyzvaZavri()" style="${tl};padding:7px 12px;border-color:transparent;background:none">Preskočiť</button><button onclick="svVyzvaDoplnit()" style="${tl};padding:7px 14px;font-weight:700"${v.odosiela?" disabled":""}>${v.odosiela?"Odosielam…":"Odoslať"}</button></div>`;
+  } else {
+    h=`<div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline"><span>${esc(v.sprava||"✓ Ďakujeme.")}</span>${zavri}</div>`;
+  }
+  p.innerHTML=h;
+  clearTimeout(p._t);
+  // Nevšímaná otázka po chvíli zmizne — to nie je „Teraz nie“.
+  p._t=setTimeout(svVyzvaZavri, v.faza==="otazka" ? 30000 : v.faza==="doplnit" ? 180000 : 3000);
+}
+function svVyzvaZavri(){
+  const p=document.getElementById("svVyzvaPas");
+  if(p){ clearTimeout(p._t); p.remove(); }
+  _svVyzva=null;
+}
+function svVyzvaTerazNie(){
+  svVyzvaUloz(svVyzvaOdmietni(svVyzvaStav(), Date.now()));
+  svVyzvaZavri();
+}
+function svVyzvaZnacka(k){
+  const v=_svVyzva; if(!v || !SV_ZNACKY[k]) return;
+  const t=document.getElementById("svVyzvaText"); if(t) v.text=t.value;
+  v.tagy = v.tagy.includes(k) ? v.tagy.filter(x=>x!==k) : v.tagy.concat([k]);
+  svVyzvaVykresli();
+}
+async function svVyzvaSkore(i){
+  const v=_svVyzva; if(!v || v.odosiela) return;
+  v.odosiela=true; svVyzvaVykresli();
+  try{
+    const { data, error }=await sb.rpc("spatna_vazba_odoslat", { p:svVyzvaData(v.udalost, v.modul, i) });
+    if(error) throw error;
+    const st=svVyzvaStav()||{}; st.odmietnute=0; svVyzvaUloz(st);
+    if(_svVyzva!==v) return;
+    v.odosiela=false; v.skore=i; v.id=data||null;
+    v.faza = i<=3 && v.id ? "doplnit" : "hotovo";
+  }catch(e){
+    console.error("výzva spätnej väzby sa neuložila:", e);
+    if(_svVyzva!==v) return;
+    v.odosiela=false; v.faza="hotovo"; v.sprava="Odpoveď sa nepodarilo uložiť — nevadí, ďakujeme.";
+  }
+  svVyzvaVykresli();
+}
+async function svVyzvaDoplnit(){
+  const v=_svVyzva; if(!v || v.odosiela || !v.id) return;
+  const t=document.getElementById("svVyzvaText"); if(t) v.text=t.value;
+  const text=String(v.text||"").trim();
+  if(!text && !v.tagy.length){ svVyzvaZavri(); return; }
+  v.odosiela=true; v.chyba=""; svVyzvaVykresli();
+  try{
+    const { data, error }=await sb.rpc("spatna_vazba_doplnit", { p:{ id:v.id, tagy:v.tagy, text:text||null } });
+    if(error) throw error;
+    if(_svVyzva!==v) return;
+    v.odosiela=false; v.faza="hotovo";
+    v.sprava = data===false ? "Doplniť sa už nedalo (po hodine). Napíšte nám cez Spätnú väzbu v menu účtu." : "✓ Ďakujeme — pomôže nám to.";
+  }catch(e){
+    // Text ostane v páse — ako v okne spätnej väzby (č. 270).
+    console.error("doplnenie spätnej väzby:", e);
+    if(_svVyzva!==v) return;
+    v.odosiela=false; v.chyba="Nepodarilo sa odoslať: "+String((e && e.message) || e);
+  }
+  svVyzvaVykresli();
 }
 
 function rychlyDoklad(zdroj){
