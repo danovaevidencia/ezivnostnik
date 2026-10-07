@@ -14,13 +14,15 @@
 //    (admin_vyber) — preposiela vždy peppol-fs-webhook.
 //  · W1: tajomstvo webhooku FS sa overí na uložených volaniach skôr, než sa
 //    nastaví (peppol_fs_over_tajomstvo — nič neukladá, nič neprepošle).
+//  · Čerpanie (spec 149.6, W7): odhad za mesiac z GET /resellers/me/billing
+//    cez edge peppol-portal (admin_cerpanie) — až na klik, volá Verteco.
 //  Žiadne alert/confirm: nezvratný krok má potvrdenie priamo pod tlačidlom.
 // ═══════════════════════════════════════════════════════════════════════════
 
 const PP_DOVOD = { zrusenie_uctu:"zrušenie účtu", bez_uctu:"výber bez účtu (30 dní)", admin:"rozhodnutie admina",
-  porusenie:"porušenie podmienok", odchod_subjektu:"subjekt odišiel k inému" };
+  porusenie:"porušenie podmienok", odchod_subjektu:"subjekt odišiel (k Vertecu priamo / inému)" };
 const PP_SPOSOB = { uvolnit:"uvoľniť", odregistrovat:"odregistrovať", ziadny:"—" };
-let _ppAdm = { data: null, chyba: "", potvrd: "", tajomstvo: null, tajomstvoChyba: "", sprava: "" };
+let _ppAdm = { data: null, chyba: "", potvrd: "", tajomstvo: null, tajomstvoChyba: "", sprava: "", cerpanie: null, cerpanieChyba: "", cerpanieBezi: false };
 
 function ppDatum(x){ return x ? new Date(String(x).length === 10 ? x + "T12:00:00" : x).toLocaleDateString("sk-SK") : "–"; }
 function ppCas(x){ return x ? new Date(x).toLocaleString("sk-SK", { day:"numeric", month:"numeric", year:"numeric", hour:"2-digit", minute:"2-digit" }) : "–"; }
@@ -136,8 +138,36 @@ function ppKresli(){
     + ppVyberyHtml()
     + '<h3 style="margin:22px 0 8px">Firmy v sieti bez účtu</h3>'
     + ppNesparovaneHtml()
+    + '<h3 style="margin:22px 0 8px">Čerpanie u Verteca (odhad za mesiac)</h3>'
+    + ppCerpanieHtml()
     + '<h3 style="margin:22px 0 8px">Tajomstvo webhooku FS (W1)</h3>'
     + ppTajomstvoHtml();
+}
+
+// Odhad čerpania: platí sa za firmu, ktorá v mesiaci odoslala aspoň 1 doklad
+// (2 € bez DPH); príjem je zadarmo. Zostatok kreditu API nevracia — konzola.
+const PP_MODEL = { per_company:"za firmu", per_document:"za doklad", per_company_client:"platí klient" };
+function ppEur(c){ return (Number(c || 0) / 100).toLocaleString("sk-SK", { style:"currency", currency:"EUR" }); }
+function ppCerpanieHtml(){
+  const c = _ppAdm.cerpanie;
+  const tl = '<button class="rowbtn" onclick="ppNacitajCerpanie()"' + (_ppAdm.cerpanieBezi ? " disabled" : "") + '>' + (_ppAdm.cerpanieBezi ? "Načítavam…" : c ? "Obnoviť" : "Načítať od Verteca") + "</button>";
+  if(_ppAdm.cerpanieChyba) return '<div class="hint" style="border-left-color:var(--neg)">Nenačítalo sa: ' + esc(_ppAdm.cerpanieChyba) + "</div>" + tl;
+  if(!c) return '<div class="hint">Kredit dobiť do 31. 1. 2027 (K1, spec 149.15). Odhad dáva Verteco za aktuálny mesiac; zostatok kreditu je len v konzole.</div>' + tl;
+  const odhad = c.model === "per_document" ? c.perDocumentCents : c.perCompanyCents;
+  return '<table><tbody>'
+    + "<tr><td>Model</td><td><b>" + esc(PP_MODEL[c.model] || c.model || "–") + "</b>" + (c.pendingModel ? " → " + esc(PP_MODEL[c.pendingModel] || c.pendingModel) + " od " + esc(ppDatum(c.pendingFrom)) : "") + "</td></tr>"
+    + "<tr><td>Firmy, ktoré tento mesiac odoslali</td><td><b>" + esc(String(c.activeCompanies ?? "–")) + "</b></td></tr>"
+    + "<tr><td>Odoslané / prijaté doklady</td><td>" + esc(String(c.sentDocuments ?? "–")) + " / " + esc(String(c.receivedDocuments ?? "–")) + "</td></tr>"
+    + "<tr><td>Odhad za mesiac (bez DPH)</td><td><b>" + esc(ppEur(odhad)) + "</b>" + (c.model !== "per_document" ? ' <span style="color:var(--soft)">(za doklad by bolo ' + esc(ppEur(c.perDocumentCents)) + ")</span>" : "") + "</td></tr>"
+    + "</tbody></table>" + tl;
+}
+async function ppNacitajCerpanie(){
+  _ppAdm.cerpanieBezi = true; _ppAdm.cerpanieChyba = ""; ppKresli();
+  const { data, error } = await sb.functions.invoke("peppol-portal", { body: { akcia: "admin_cerpanie" } });
+  _ppAdm.cerpanieBezi = false;
+  if(error || !data || data.error){ const m = (data && data.error) || (error && error.message) || "bez odpovede"; console.error("admin_cerpanie:", m); _ppAdm.cerpanieChyba = m; }
+  else _ppAdm.cerpanie = data;
+  ppKresli();
 }
 
 function ppPotvrd(k){ _ppAdm.potvrd = k; _ppAdm.sprava = ""; ppKresli(); }
