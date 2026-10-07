@@ -7,8 +7,10 @@
 //  a adminPocet z admin.html.
 //
 //  · Ukončenia (bod 7.6): odregistrovať do 3 pracovných dní alebo uvoľniť.
-//    Vykonáva sa ručne v konzole Verteca; tu sa len zapíše „Vykonané“
-//    (peppol_ukoncenie_vykonane — raz, nedá sa vrátiť).
+//    Uvoľnenie robí server sám cez POST …/release (peppol-portal, krok 0,
+//    spec 149.17, admin_61) a zapíše ho ako „automaticky (Verteco release)“.
+//    Odregistrovanie a zlyhané uvoľnenie ide ručne v konzole Verteca; tu sa
+//    len zapíše „Vykonané“ (peppol_ukoncenie_vykonane — raz, nedá sa vrátiť).
 //  · Výbery z FS (bod 4.6): nepreposlaný výber musíme subjektu oznámiť.
 //    Preposlať / Odmietnuť a informovať ide cez edge peppol-portal
 //    (admin_vyber) — preposiela vždy peppol-fs-webhook.
@@ -44,6 +46,8 @@ async function nacitajPeppolAdmin(){
   ppKresli();
 }
 
+// Rovnaká podmienka ako krok 0 v peppol-portal (AUTO_POKUSOV = 3).
+function ppAutoBezi(x){ return !x.vykonane && x.sposob === "uvolnit" && !!x.company_id && (x.auto_pokusov || 0) < 3; }
 function ppUkonceniaHtml(){
   const u = (_ppAdm.data && _ppAdm.data.ukoncenia) || [];
   if(!u.length) return '<div class="hint">Žiadne ukončenie. Vznikne pri zrušení účtu s firmou v sieti, po 30 dňoch výberu bez účtu alebo odchodom firmy.</div>';
@@ -57,7 +61,9 @@ function ppUkonceniaHtml(){
             ? '<input id="ppPozn' + x.id + '" placeholder="poznámka (napr. uvoľnené v konzole)" style="width:100%;margin-bottom:6px">'
               + '<button class="btn" style="width:auto;padding:8px 14px" onclick="ppVykonane(' + x.id + ')">Potvrdiť: vykonané v konzole Verteca</button> '
               + '<button class="rowbtn" onclick="ppPotvrd(\'\')">Späť</button>'
-            : '<button class="btn" style="width:auto;padding:8px 14px" onclick="ppPotvrd(\'u' + x.id + '\')">Vykonané…</button>');
+            : (ppAutoBezi(x) ? '<div style="font-size:13px">⏳ uvoľní server automaticky</div>' : "")
+              + (x.auto_chyba ? '<div style="font-size:12px;color:var(--neg);margin-bottom:6px">Automatické uvoľnenie zlyhalo: ' + esc(x.auto_chyba) + (ppAutoBezi(x) ? " — skúsi znova" : " — urob ručne") + "</div>" : "")
+              + (ppAutoBezi(x) ? "" : '<button class="btn" style="width:auto;padding:8px 14px" onclick="ppPotvrd(\'u' + x.id + '\')">Vykonané…</button>'));
       return "<tr><td><b>" + esc(x.dic) + "</b><div style=\"font-size:12px;color:var(--soft)\">" + esc(x.obchodne_meno || "") + (x.company_id ? " · " + esc(x.company_id) : "") + "</div>"
         + (x.novy_vyber_po && !x.vykonane ? '<div style="font-size:12px;color:var(--warn)">⚠ nový výber z FS po žiadosti — over, či ukončiť</div>' : "") + "</td>"
         + "<td>" + esc(PP_DOVOD[x.dovod] || x.dovod) + '<div style="font-size:12px;color:var(--soft)">' + esc(ppCas(x.ziadane)) + "</div></td>"
@@ -131,7 +137,7 @@ function ppKresli(){
   if(_ppAdm.chyba && !_ppAdm.data){ telo.innerHTML = '<div class="hint" style="border-left-color:var(--neg)">Nenačítalo sa: ' + esc(_ppAdm.chyba) + " (beží admin_59?)</div>"; return; }
   telo.innerHTML = (_ppAdm.sprava ? '<div class="hint">' + esc(_ppAdm.sprava) + "</div>" : "")
     + '<h3 style="margin:4px 0 8px">Ukončenia v sieti Peppol</h3>'
-    + '<div class="hint">OP Verteco v1.8 bod 7.6: odregistrovať do 3 pracovných dní, alebo uvoľniť spod našej značky. Urob to v partnerskej konzole Verteca a potom označ „Vykonané“.</div>'
+    + '<div class="hint">OP Verteco v1.8 bod 7.6: odregistrovať do 3 pracovných dní, alebo uvoľniť spod našej značky. Uvoľnenie robí server sám (do 10 minút); odregistrovanie a zlyhané uvoľnenie urob v partnerskej konzole Verteca a potom označ „Vykonané“.</div>'
     + ppUkonceniaHtml()
     + '<h3 style="margin:22px 0 8px">Výbery z portálu FS</h3>'
     + '<div class="hint">Bod 4.6: nepreposlaný výber musíme subjektu oznámiť. Preposlanie je bezpečné aj pri zlom podpise — verifikačný údaj overuje Verteco.</div>'
