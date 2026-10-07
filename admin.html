@@ -563,6 +563,12 @@ tr.chce td{background:#fff5e6}
           bude článok len v sekcii Články a na webe.
         </div></div>
 
+      <div class="field hidden" id="clKategoriaPole"><label for="clKategoria">Kategória na webe</label>
+        <select id="clKategoria"></select>
+        <div class="clWeb" style="margin-top:5px">
+          Podľa nej sa článok dá vyfiltrovať na úvodnej stránke. Bez kategórie je len vo „Všetky“.
+        </div></div>
+
       <div class="field"><label>Zdroj — názov</label>
         <input id="clZdrojNazov" placeholder="Usmernenie FS SR k § 19 ods. 2 písm. l)"></div>
       <div class="field"><label>Zdroj — odkaz</label>
@@ -604,7 +610,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";  // ANON 
 let sb = null, currentUser = null, cfgFirmaId = null;
 // Verzia adminu = verzia appky pri nasadení. Pripája sa k súborom sekcií
 // (admin_kampane.js…), aby prehliadač nedržal starú kópiu z cache.
-const ADMIN_VERZIA = "2026.10.07-RQ";
+const ADMIN_VERZIA = "2026.10.07-RR";
 
 function init(){
   if(!SUPABASE_KEY || SUPABASE_KEY.startsWith("SEM_")){
@@ -1390,6 +1396,10 @@ const CL_MODULY = {
 };
 
 let CL = null, clEditId = null, clZoznam = [];
+// Stĺpec clanky.kategoria pribudol v admin_62 (spec 150). Kým nie je spustená,
+// riadky ho nemajú — výber sa neukáže a uloženie ho neposiela, inak by
+// PostgREST uloženie článku odmietol („column does not exist“).
+let clKategoriaStlpec = false;
 
 // Lenivo — panel sa nesmie zdržať kvôli modulu, ktorý väčšina návštev nepotrebuje.
 async function clModul(){ if(!CL) CL = await import("/clanky.js"); return CL; }
@@ -1414,6 +1424,7 @@ async function nacitajClanky(){
   // poradí (zoradClanky z clanky.js, č. 245, spec 141.3), pod nimi koncepty
   // od naposledy upraveného. Admin musí ukazovať to poradie, ktoré šípky menia.
   const vsetky = data || [];
+  clKategoriaStlpec = vsetky.some(c => Object.prototype.hasOwnProperty.call(c, "kategoria"));
   clZoznam = C.zoradClanky(vsetky.filter(c => c.zverejneny)).concat(
     vsetky.filter(c => !c.zverejneny)
       .sort((a, b) => String(b.zmenene || "").localeCompare(String(a.zmenene || ""))));
@@ -1540,6 +1551,12 @@ async function otvorClanok(id){
   // clPrepniHtml() by obsah preniesol späť z textarea a prepísal by ním telo,
   // ktoré sme práve načítali.
   clZobrazRezim(false);
+
+  const katPole = document.getElementById("clKategoriaPole");
+  katPole.classList.toggle("hidden", !clKategoriaStlpec);
+  document.getElementById("clKategoria").innerHTML = `<option value="">— bez kategórie —</option>`
+    + Object.entries(C.KATEGORIE || {}).map(([k,n]) =>
+      `<option value="${esc(k)}" ${c && c.kategoria === k ? "selected" : ""}>${esc(n)}</option>`).join("");
 
   document.getElementById("clModuly").innerHTML = Object.entries(CL_MODULY).map(([k,n]) =>
     `<label class="chk"><input type="checkbox" class="clMod" value="${esc(k)}"
@@ -1781,6 +1798,7 @@ async function ulozClanok(zverejnit){
     zverejneny:  !!zverejnit,
     publikovane: zverejnit ? (datum ? new Date(datum + "T08:00:00").toISOString() : new Date().toISOString()) : null,
   };
+  if(clKategoriaStlpec) zaznam.kategoria = document.getElementById("clKategoria").value || null;
 
   hlaska.textContent = "Ukladám…";
   let id = clEditId;

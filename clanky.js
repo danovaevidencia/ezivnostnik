@@ -278,6 +278,20 @@ export function zoradClanky(clanky) {
   return Array.isArray(clanky) ? clanky.slice().sort(porovnajClanky) : [];
 }
 
+// ── Kategórie článkov (spec 150, admin_62) ─────────────────────────────────
+// Kód → názov chipu na úvodnej stránke a voľby v editore adminu. Poradie je
+// poradie chipov. Kódy sú druhýkrát v `check` stĺpca `clanky.kategoria`
+// (admin_62_clanky_kategoria.sql) — zhodu stráži test_landing.js. Kategóriu
+// volí admin; z názvu článku sa neodvodzuje (odhad by sa tváril ako fakt).
+export const KATEGORIE = {
+  efaktura: "E-faktúra",
+  dph: "DPH",
+  odvody: "Odvody a daň",
+  auto: "Auto a jazdy",
+  priznanie: "Priznanie",
+  ostatne: "Ostatné",
+};
+
 // ── Výber článku pre modul ─────────────────────────────────────────────────
 // Kontextové pole sa kreslí len vtedy, keď je čo ukázať. Trvalý prvok, ktorý
 // väčšinou hlási „nič", miesto nezaberá — preto táto funkcia vracia null
