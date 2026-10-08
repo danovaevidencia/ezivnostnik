@@ -40,6 +40,16 @@
 
 export const PEPPOL_SCHEMA_SK = "0245";
 
+// Od tohto dňa ide faktúra za predplatné ako e-faktúra cez sieť Peppol
+// (zák. 385/2025). DO NEHO „klasika“: PDF s vloženým ISDOC (Roman 8. 10. 2026).
+// Po ňom PDF ostáva ako čitateľná kópia, ale BEZ ISDOC — druhý štruktúrovaný
+// doklad popri e-faktúre by si účtovný program mohol naimportovať dvakrát.
+// Jediné miesto pravidla pre appku aj server.
+export const EFAKTURA_POVINNA_OD = "2027-01-01";
+export function isdocDoPdf(vystavene) {
+  return String(vystavene || "").slice(0, 10) < EFAKTURA_POVINNA_OD;
+}
+
 // ── pomocné pravidlá (kópie appky, zhodu stráži test_efaktura_xml) ──────────
 export function xmlEsc(s) {
   return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
