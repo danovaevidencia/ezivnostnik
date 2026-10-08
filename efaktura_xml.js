@@ -49,6 +49,20 @@ export function efakturaSietou(vystavene) {
   return String(vystavene || "").slice(0, 10) >= EFAKTURA_POVINNA_OD;
 }
 
+// Prevádzkovateľ = dodávateľ faktúr za predplatné. Z TOHTO objektu skladá UBL
+// poštár (odoslanie sieťou) aj stripe-webhook (príloha e-mailu) — inak by
+// doklad v sieti a v e-maile mohol niesť iného dodávateľa. Appka má kópiu
+// `SAAS_DODAVATEL` a webhook `DODAVATEL` (kreslenie PDF); zhodu všetkých troch
+// stráži test_efaktura_xml. Adresa je podľa RPO (Stromová 6150/10).
+export const PREVADZKOVATEL = Object.freeze({
+  nazov: "Ing. Roman Slivka - agile management",
+  adresa: "Stromová 6150/10, 900 27 Bernolákovo",
+  ico: "56649797",
+  dic: "1122176264",
+  icdph: "SK1122176264",
+  iban: "SK59 5600 0000 0007 6001 1001",
+});
+
 // ── pomocné pravidlá (kópie appky, zhodu stráži test_efaktura_xml) ──────────
 export function xmlEsc(s) {
   return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
