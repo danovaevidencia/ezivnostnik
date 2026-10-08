@@ -2,9 +2,9 @@
 //  efaktura_xml.js — XML faktúry (ISDOC 6.0.1 a UBL Peppol BIS 3.0) z MODELU
 //
 //  Prečo samostatný modul (8. 10. 2026, krok 1 NAVRH_EFAKTURA_PREDPLATNE.md):
-//  faktúru za predplatné vystavuje SERVER (edge `stripe-webhook`) a do
-//  31. 12. 2026 ide ako PDF s vloženým ISDOC, od 1. 1. 2027 navyše ako
-//  e-faktúra UBL cez sieť Peppol. Appka má oba zapisovače (`isdocXml`,
+//  faktúru za predplatné vystavuje SERVER (edge `stripe-webhook`) a ide ako
+//  PDF s vloženým ISDOC; od 1. 1. 2027 k nemu pribudne e-faktúra UBL cez
+//  sieť Peppol. Appka má oba zapisovače (`isdocXml`,
 //  `efakturaXml` v ezivnostnik.html), ale čítajú globálne `firmaData` a server
 //  ich použiť nevie. Tu sú tie isté zapisovače nad ČISTÝM MODELOM — volajúci
 //  rozhodne všetko (kategória DPH, druh dokladu, adresy) a modul len píše.
@@ -40,14 +40,13 @@
 
 export const PEPPOL_SCHEMA_SK = "0245";
 
-// Od tohto dňa ide faktúra za predplatné ako e-faktúra cez sieť Peppol
-// (zák. 385/2025). DO NEHO „klasika“: PDF s vloženým ISDOC (Roman 8. 10. 2026).
-// Po ňom PDF ostáva ako čitateľná kópia, ale BEZ ISDOC — druhý štruktúrovaný
-// doklad popri e-faktúre by si účtovný program mohol naimportovať dvakrát.
-// Jediné miesto pravidla pre appku aj server.
+// Od tohto dňa ide faktúra za predplatné NAVYŠE ako e-faktúra cez sieť Peppol
+// (zák. 385/2025). PDF s vloženým ISDOC ostáva aj potom — e-faktúra len
+// pribudne, to, čo funguje, sa neruší (Roman 8. 10. 2026). Jediné miesto
+// dátumu pre appku aj server.
 export const EFAKTURA_POVINNA_OD = "2027-01-01";
-export function isdocDoPdf(vystavene) {
-  return String(vystavene || "").slice(0, 10) < EFAKTURA_POVINNA_OD;
+export function efakturaSietou(vystavene) {
+  return String(vystavene || "").slice(0, 10) >= EFAKTURA_POVINNA_OD;
 }
 
 // ── pomocné pravidlá (kópie appky, zhodu stráži test_efaktura_xml) ──────────
