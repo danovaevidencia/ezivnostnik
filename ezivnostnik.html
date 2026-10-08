@@ -25487,6 +25487,12 @@ function xkBuild(X, volby){
 // Stripe presmeruje späť s ?platba=ok alebo ?platba=zrusena
 function spracujNavratZPlatby(){
   const p=new URLSearchParams(location.search);
+  // Návrat zo Stripe portálu po zmene karty (`zmenitKartu`).
+  if(p.get("karta")==="ok"){
+    history.replaceState({}, "", location.pathname);
+    setTimeout(()=>alert("✓ Karta je zmenená. Ďalšie platby predplatného sa strhnú z novej karty."),400);
+    return;
+  }
   const stav=p.get("platba");
   if(!stav) return;
   // vyčisti URL, nech sa hláška neopakuje pri obnovení stránky
@@ -25736,6 +25742,7 @@ function zobrazCennik(modul){
       ${kartaPlanu(PLANY.profi)}
     </div>
     ${akciaKodHtml()}
+    ${kartaZmenaHtml()}
     ${(()=>{
       // Účtovník má inú cieľovú skupinu než zvyšok cenníka, preto stojí bokom
       // a nie ako štvrtá karta v rade. Živnostník, ktorý hľadá plán pre seba,
@@ -26847,6 +26854,37 @@ function zmenitNaFree(){
   if(!confirm("Zrušiť predplatné?\n\nVáš plán ostane aktívny do "+dokedy+
               ", potom prejdete na Free.\nNič vám už nestrhneme a o dáta neprídete.")) return;
   spustiPredplatne("free", null);
+}
+
+// Zmena platobnej karty (nález 8. 10. 2026): e-mail o zlyhanej platbe posiela
+// človeka „aktualizovať platbu“ do appky — a appka to nikde neponúkala. Len
+// vlastník a len pri bežiacom predplatnom v Stripe. Server (`stripe-checkout`,
+// akcia karta) presunie kartu z predplatného na zákazníka a otvorí Stripe
+// portál len so zmenou karty; plán sa nemení. Firma sa zachytí pred await
+// (č. 129) — po prepnutí sa portál cudzej firmy neotvorí.
+function kartaZmenaHtml(){
+  if(localMode || !smiemMenitPredplatne() || !firmaConfig || !firmaConfig.stripe_sub_id) return "";
+  return `<div class="nv-plan" style="margin-top:12px"><span aria-hidden="true">💳</span><span>Predplatné platíte kartou. Novú kartu zadáte na zabezpečenej stránke Stripe — plán ani dátum obnovy sa nemení.<br><button class="abtn" style="margin-top:8px" onclick="zmenitKartu()">Zmeniť platobnú kartu</button></span></div>`;
+}
+async function zmenitKartu(){
+  if(localMode || !sb || !firmaId) return;
+  if(!smiemMenitPredplatne()){ alert(PREDPLATNE_LEN_VLASTNIK); return; }
+  const beh=behFirmy();
+  try{
+    const _tok=await ziskajToken();
+    if(!_tok){ alert(CHYBA_SESSION); return; }
+    const res=await fetch(SUPABASE_URL+"/functions/v1/stripe-checkout",{
+      method:"POST", headers:{"Content-Type":"application/json","Authorization":"Bearer "+_tok},
+      body:JSON.stringify({ akcia:"karta", firma_id:beh.koren, navrat_url:location.origin+location.pathname })
+    });
+    const r=await res.json().catch(()=>({}));
+    if(!res.ok || !r.url){ alert("Stránku na zmenu karty sa nepodarilo otvoriť: "+(r.error||("HTTP "+res.status))); return; }
+    if(!beh.platny()){ alert("Medzitým ste otvorili inú firmu — kartu zmeníte, keď sa do pôvodnej firmy vrátite."); return; }
+    location.href=r.url;
+  }catch(e){
+    console.error("zmena karty:", e);
+    alert("Stránku na zmenu karty sa nepodarilo otvoriť: "+e.message);
+  }
 }
 
 // zrušenie naplánovanej zmeny — vráti predplatné do pôvodného stavu
