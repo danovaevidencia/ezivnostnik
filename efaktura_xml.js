@@ -380,7 +380,13 @@ ${lines}
 // na PDF; prepočet tu by vedel dať o cent iné DPH než doklad.
 export function modelEfakturySaas(r, dodavatel, opts = {}) {
   const D = dodavatel || {};
-  const sadzba = (+r.sadzba_dph || 0) / 100;
+  // `saas_faktury.sadzba_dph` je ZLOMOK (0.23, predvolená hodnota stĺpca aj to,
+  // čo zapisuje stripe-webhook) — rovnako ho číta `modelSaasFaktury` vo
+  // faktura_pdf.js. 8. 10. 2026 sa tu delil stovkou podľa ručne zloženej vzorky
+  // so sadzbou 23 a ISDOC by niesol 0 % (zistené pred prvou faktúrou).
+  // Hodnota nad 1 by bola percento — prevedie sa, nech sa z nej nestane 2300 %.
+  const s0 = +r.sadzba_dph || 0.23;
+  const sadzba = s0 > 1 ? s0 / 100 : s0;
   const zaklad = +r.zaklad || 0;
   return {
     doklad: "380",
