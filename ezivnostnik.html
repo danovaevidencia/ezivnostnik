@@ -25955,10 +25955,32 @@ async function autoZaevidujSaasFaktury(){
         await Promise.all(nahrate.map(c=>dokladZmazNahraty(c, "faktúry za predplatné na pozadí, medzitým iná firma")));
         return 0;
       }
-      if(n){ poZmene(); try{ renderNotifBadge(); }catch(_){} }
+      // e-faktúra tej istej faktúry, ktorá prišla sieťou skôr než výdavok
+      const prepojene = n ? saasPrepojEfaktury() : 0;
+      if(n || prepojene){ poZmene(); try{ renderNotifBadge(); }catch(_){} }
       return n;
     });
   }catch(e){ console.error("autoZaevidujSaasFaktury:", e); return 0; }
+}
+
+// ── Faktúra za predplatné aj ako e-faktúra zo siete (od 1. 1. 2027) ──
+// Server ju pošle e-mailom (PDF s ISDOC) AJ sieťou Peppol (NAVRH_EFAKTURA_
+// PREDPLATNE.md). Výdavok z nej zakladá `autoZaevidujSaasFaktury` priamo,
+// mimo ukladacej cesty — prepojenie z č. 234 (`ulozVydavok`) sa preto
+// nespustí a e-faktúra by ostala navždy „čakajúca“ v zvončeku aj na dlaždici.
+// Prepája sa v oboch poradiach: po zaevidovaní predplatného aj po prevzatí
+// e-faktúr. Len výdavok zo `saas_faktury` (`zdroj:"predplatne"`) a len pri
+// zhode podľa `efakturaZhodnaSVydavkom` (rovnaké číslo + suma alebo dodávateľ).
+function saasPrepojEfaktury(){
+  const d=firmaData||{};
+  const vyd=(d.vydavky||[]).filter(v=>v && v.zdroj==="predplatne" && !v.efakturaId);
+  if(!vyd.length || typeof efakturyCakajuce!=="function") return 0;
+  let n=0;
+  efakturyCakajuce().forEach(z=>{
+    const v=vyd.find(x=>!x.efakturaId && efakturaZhodnaSVydavkom(z, x));
+    if(v && efakturaPrepojSVydavkom(z, v)){ n++; zapisAutomat("efaktura", [dokladKluc(v)]); }
+  });
+  return n;
 }
 
 // je faktúra za predplatné už zaevidovaná vo výdavkoch?
@@ -31389,6 +31411,7 @@ async function peppolPrevezmiZoServera(beh){
   if(nove.length){
     if(!firmaData.efaktury) firmaData.efaktury=[];
     firmaData.efaktury.unshift(...nove);
+    saasPrepojEfaktury();   // faktúra za predplatné už je vo výdavkoch (od 1. 1. 2027)
     poZmene();
   }
   if(ulozene.length){
@@ -31824,6 +31847,7 @@ async function postarPrevezmiRaz(dokladId, beh){
   };
   if(!firmaData.efaktury) firmaData.efaktury=[];
   firmaData.efaktury.unshift(zaznam);
+  saasPrepojEfaktury();   // faktúra za predplatné už je vo výdavkoch (od 1. 1. 2027)
   poZmene();
   return zaznam;
 }
