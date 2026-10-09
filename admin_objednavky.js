@@ -20,6 +20,8 @@ function objDatum(x){ return x ? new Date(String(x).length === 10 ? x + "T12:00:
 // pri podvrhnutej notifikácii prídeme o jedno predplatné, nie o peniaze).
 function objPodozriva(o, dnes){
   if(o.stav !== "zaplatena" || o.overene_vypisom !== false || !o.prijate_dna) return false;
+  // výpis za deň pripísania je naimportovaný a platbu nemá (admin_68)
+  if(o.vypis_rozpor) return true;
   const d = new Date(o.prijate_dna + "T12:00:00");
   const hranica = new Date(d.getFullYear(), d.getMonth() + 2, 1);
   return (dnes || new Date()) >= hranica;
@@ -29,7 +31,7 @@ async function nacitajObjednavkyPrevod(){
   const telo = document.getElementById("objAdmBody");
   telo.innerHTML = '<div class="loading">Načítavam platby prevodom…</div>';
   const { data, error } = await sb.from("objednavky")
-    .select("id, vytvorene, stav, plan, suma, vs, splatnost, je_obnova, doplatok, prijate_dna, prijate_suma, sparoval, overene_vypisom, obdobie_od, obdobie_do, firmy(nazov)")
+    .select("id, vytvorene, stav, plan, suma, vs, splatnost, je_obnova, doplatok, prijate_dna, prijate_suma, sparoval, overene_vypisom, vypis_rozpor, obdobie_od, obdobie_do, firmy(nazov)")
     .eq("kanal", "prevod").order("vytvorene", { ascending: false }).limit(300);
   _objAdm = { data: data || [], chyba: error ? error.message : "" };
   vykresliObjednavkyPrevod();
@@ -49,7 +51,7 @@ function vykresliObjednavkyPrevod(){
       ? `<button class="btn" style="padding:3px 8px;font-size:11px" onclick="objSparuj('${esc(o.id)}')">Spárovať ručne…</button>
          <button class="btn" style="padding:3px 8px;font-size:11px" onclick="objZrus('${esc(o.id)}')">Zrušiť</button>`
       : (o.stav === "zaplatena" && o.overene_vypisom === false)
-        ? `<span class="email" style="color:${objPodozriva(o) ? "var(--neg)" : "inherit"}">${objPodozriva(o) ? "PODOZRIVÁ — výpis ju nepotvrdil" : "čaká na výpis"}</span>
+        ? `<span class="email" style="color:${objPodozriva(o) ? "var(--neg)" : "inherit"}">${o.vypis_rozpor ? "ROZPOR — výpis za ten deň platbu nemá" : objPodozriva(o) ? "PODOZRIVÁ — výpis ju nepotvrdil" : "čaká na výpis"}</span>
            <button class="btn" style="padding:3px 8px;font-size:11px" onclick="objOver('${esc(o.id)}')">Overené vo výpise</button>`
         : "";
     return `<tr>
@@ -63,7 +65,7 @@ function vykresliObjednavkyPrevod(){
       <td>${akcie}</td>
     </tr>`;
   };
-  telo.innerHTML = `<div class="email" style="margin-bottom:10px">Automatika páruje každých 15 minút, keď sedí VS aj suma. Ručne len to, čo nesedí — dátum = deň pripísania na účet.</div>
+  telo.innerHTML = `<div class="email" style="margin-bottom:10px">Automatika páruje každých 15 minút z notifikácií banky aj z Banky, keď sedí VS aj suma; platbu z notifikácie potvrdí mesačný výpis (keď ju výpis za ten deň nemá, je to rozpor a príde e-mail). Ručne len to, čo nesedí — dátum = deň pripísania na účet.</div>
     <table><thead><tr><th>Vytvorená</th><th>Firma</th><th>VS</th><th class="r">Suma</th><th>Stav</th><th></th></tr></thead>
     <tbody>${d.map(riadok).join("")}</tbody></table>`;
 }
