@@ -11013,7 +11013,7 @@ function vykazPosliOkno(i){
   openModal("Poslať odberateľovi", `
     <div class="mfield"><label>Komu</label><input id="vp_komu" type="email" value="${esc(ODB.email||"")}" placeholder="e-mail odberateľa (zákazkový list)"></div>
     <div class="mfield"><label>Predmet</label><input id="vp_predmet" value="${esc(M.predmet)}"></div>
-    <div class="mfield"><label>Text</label><textarea id="vp_text" rows="9" style="width:100%;font:inherit;font-size:13px">${esc(M.text)}</textarea></div>
+    <div class="mfield"><label>Text</label><textarea id="vp_text" rows="9" style="width:100%;border:1.5px solid var(--line);background:var(--bg);color:inherit;border-radius:10px;padding:10px 12px;font:inherit;font-size:13px;line-height:1.45;resize:vertical">${esc(M.text)}</textarea></div>
     <div style="font-size:12px;margin:4px 0 10px">
       <b>Prílohy</b><br>
       📄 Výkaz prác (PDF) · <span style="text-decoration:underline;cursor:pointer" onclick="exportVykazPdf(${i},'vykaz')">stiahnuť</span><br>
@@ -11185,10 +11185,12 @@ function appVykazy(){
         <span style="text-decoration:underline;cursor:pointer" onclick="event.stopPropagation();vykazOpravSporne(${i})">Zrušiť značku na týchto dňoch</span></div>` : "";
       // Stav: návrh → odoslaný → podpísaný → vyfakturovaný. Odoslaný a podpísaný
       // sa dajú prepnúť ťuknutím (protokol mohol odísť aj mimo appky).
-      const st=vykazStav(w), sti=VYKAZ_STAVY.findIndex(x=>x[0]===st);
+      const st=vykazStav(w);
       const pf=(kf&&(kf.stav==="ok"||kf.stav==="nesedi"))?kf.cislo:"";
       const stavHtml=`<div style="display:flex;gap:5px;flex-wrap:wrap;margin:0 0 8px" aria-label="Stav výkazu">${VYKAZ_STAVY.map(([k,n],j)=>{
-        const on=j<=sti, pole=k==="odoslany"?"odoslane":k==="podpisany"?"podpisany":"";
+        // ✓ len za to, čo sa naozaj stalo — vyfakturovaný výkaz netvrdí, že protokol odišiel
+        const pole=k==="odoslany"?"odoslane":k==="podpisany"?"podpisany":"";
+        const on=k==="navrh" || (pole ? !!w[pole] : st==="vyfakturovany");
         const dat=pole&&w[pole]?" "+fmtDatum(w[pole]).replace(/\s?\d{4}$/,""):(k==="vyfakturovany"&&pf?" "+esc(pf):"");
         return `<span class="apill" style="font-size:10.5px;${on?"background:var(--sfc-pos);color:var(--pos)":"background:var(--bg);color:var(--ink-soft)"}${pole?";cursor:pointer":""}"${pole?` onclick="event.stopPropagation();vykazOznacStav(${i},'${pole}')" title="Ťuknutím ${w[pole]?"zrušíte":"označíte"}"`:""}>${on?"✓ ":""}${n}${dat}</span>`;
       }).join("")}</div>`;
@@ -21920,7 +21922,7 @@ function appData(){
       <div style="font-size:11.5px;color:var(--ink-soft);margin:-6px 0 12px">Predvoľba pre nové výkazy. Jednotlivý výkaz si to môže prepnúť sám — zmluvy sa líšia.</div>
       <details style="margin:0 0 12px"><summary style="cursor:pointer;font-size:13px;font-weight:600">✉ E-mail k výkazu (šablóna)</summary>
         <div class="mfield" style="margin-top:8px"><label>Predmet</label><input id="set_vykazMailPredmet" value="${esc((d.settings||{}).vykazMailPredmet||'')}" placeholder="${esc(VYKAZ_MAIL_PREDMET)}"></div>
-        <div class="mfield"><label>Text</label><textarea id="set_vykazMailText" rows="8" style="width:100%;font:inherit;font-size:13px" placeholder="${esc(VYKAZ_MAIL_TEXT)}">${esc((d.settings||{}).vykazMailText||'')}</textarea></div>
+        <div class="mfield"><label>Text</label><textarea id="set_vykazMailText" rows="8" style="width:100%;border:1.5px solid var(--line);background:var(--bg);color:inherit;border-radius:10px;padding:10px 12px;font:inherit;font-size:13px;line-height:1.45;resize:vertical" placeholder="${esc(VYKAZ_MAIL_TEXT)}">${esc((d.settings||{}).vykazMailText||'')}</textarea></div>
         <div style="font-size:11.5px;color:var(--ink-soft)">Prázdne = predvolený text (sivý). Doplní sa: {zakazka} {projekt} {mesiac} {obdobie} {cld} {faktura} {suma} {splatnost} {odberatel} {meno}. E-mail s výkazom, protokolom a faktúrou v PDF otvoríte na karte výkazu tlačidlom „✉ Poslať odberateľovi“.</div>
       </details>
       <div class="mrow2">
@@ -41581,6 +41583,8 @@ function obnovPoEditacii(modul){
   const otvorene=modulNaObrazovke();
   if(otvorene==="pohladavky"){ appPohladavky(); return; }
   if(otvorene==="dph"){ appDPH(); return; }
+  // faktúra z výkazu: späť na výkazy — ďalší krok je „Poslať odberateľovi“
+  if(otvorene==="vykazy"){ appVykazy(); return; }
   if(modul==="faktury") appFaktury(); else appVydavky();
 }
 // ═══ STAV POHYBU — jediný slovník pre celú appku (kap. 47.4) ═══════════
