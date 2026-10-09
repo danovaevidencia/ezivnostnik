@@ -2262,7 +2262,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.10.09-SA";  // výkazy: import z kalendára → editor, zákazky, kontrola s faktúrou z položiek
+const APP_VERZIA = "2026.10.09-SB";  // výkazy: zákazkový list, faktúra z výkazu, stav, PDF výkazu a protokolu, e-mail s prílohami
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -5137,7 +5137,14 @@ function vratSadzbuZakon(kluc){
 function normaElektro(){ const S=firmaData.settings||{}; return +S.kjNormaElektro || +S.kjNormaElektrina || +S.spotrebaElKm100 || 18.1; }
 function normaPHM(){ const S=firmaData.settings||{}; return +S.kjNormaBenzin || +S.kjNormaPHM || 6; }
 function kjSeed(s){ let h=2166136261; for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619); } return ()=>{ h+=0x6D2B79F5; let t=h; t=Math.imul(t^(t>>>15),t|1); t^=t+Math.imul(t^(t>>>7),t|61); return ((t^(t>>>14))>>>0)/4294967296; }; }
-function isSviatok(d){ const sv=["1-1","6-1","1-5","8-5","5-7","29-8","1-9","15-9","1-11","17-11","24-12","25-12","26-12"]; return sv.includes(d.getDate()+"-"+(d.getMonth()+1)); }
+// Sviatok = deň pracovného pokoja podľa sadzby.js (`jeDenPracovnehoPokoja`):
+// jedno pravidlo s Veľkou nocou a výnimkami rokov. Dovtedy tu bol vlastný
+// zoznam bez Veľkého piatku a Veľkonočného pondelka (9. 10. 2026).
+function isSviatok(d){
+  try{ return jeDenPracovnehoPokoja(d); }
+  catch(e){ console.error("isSviatok: sadzby nedostupné", e);
+    const sv=["1-1","6-1","1-5","8-5","5-7","29-8","1-9","15-9","1-11","17-11","24-12","25-12","26-12"]; return sv.includes(d.getDate()+"-"+(d.getMonth()+1)); }
+}
 function isPracDen(d){ const dow=d.getDay(); return dow>=1&&dow<=5 && !isSviatok(d); }
 function pracovneDni(rok,mes){ const out=[]; const dni=new Date(rok,mes,0).getDate(); for(let i=1;i<=dni;i++){ const d=new Date(rok,mes-1,i); if(isPracDen(d)) out.push(d); } return out; }
 
@@ -6818,6 +6825,11 @@ function zbierNotifikacie(){
         akcia:()=>vystavZOpakovania(vzor.id)});
     });
   }catch(e){ console.error("pravidelné faktúry:", e); }
+
+  // ── výkazy: nevyfakturované, nepodpísané, chýbajúce (9. 10. 2026) ──
+  try{
+    if(modulPovolenyPreModul("vykazy")) vykazNotifikacie(dnes).forEach(x=>out.push(x));
+  }catch(e){ console.error("výkazy:", e); }
 
   // ── faktúry za predplatné ──
   try{
@@ -10759,7 +10771,7 @@ function buildVykazXlsx(w,X){
   rowHeights.push({hpt:20});
   rows.push([]);
   const rSchvalil=rows.length;
-  rows.push([cell("Za Odberateľa schválil: "+(S.odberatelSchvalil||""),sMetaL),cell("",sMetaL),cell("",sMetaL)]);
+  rows.push([cell("Za Odberateľa schválil: "+vykazOdberatel(w).schvalil,sMetaL),cell("",sMetaL),cell("",sMetaL)]);
   rows.push([]);
   const rPodpis=rows.length;
   rows.push([cell("Dátum a podpis: ________________________________________________",sMetaV),cell("",sMetaV),cell("",sMetaV)]);
@@ -10816,13 +10828,24 @@ function buildVykazDocx(w,D){
     new Paragraph(""),
     new Table({width:{size:100,type:WidthType.PERCENTAGE},rows}),
     new Paragraph(""),new Paragraph(""),
-    new Paragraph("Za Odberateľa schválil: "+(S.odberatelSchvalil||"")),
+    new Paragraph("Za Odberateľa schválil: "+vykazOdberatel(w).schvalil),
     new Paragraph(""),
     new Paragraph("Dátum a podpis: __________________________________"),
   ]}]});
   Packer.toBlob(doc).then(b=>downloadBlob(b,vykazSuborNazov("Vykaz_prac", w)+".docx"));
 }
 
+// Veta protokolu — jedna pre Word aj PDF (kúsky s tučným písmom pre Word).
+function vykazProtokolVeta(w){
+  const dni=vykazClovekodni(w), tarifa=vykazSadzba(w), suma=r2(dni*tarifa), NBSP=" ";
+  return [
+    {t:"Na základe uvedeného objednávateľ potvrdzuje prevzatie a akceptáciu poskytnutých služieb v rozsahu "},
+    {t:cldTxt(dni)+" človekodní", b:true},
+    {t:", v"+NBSP+"celkovej hodnote "},
+    {t:eur(suma).replace("€","Eur")+" bez DPH"},
+    {t:" (t. j. "+cldTxt(dni)+" človekodní ocenených jednotkovou cenou "+tarifa+" Eur bez DPH) za obdobie "+(w.obdobie||"")+"."},
+  ];
+}
 function exportProtokolDocx(idx){
   const w=firmaData.vykazy[idx]; if(!w){ alert("Výkaz sa nenašiel."); return; }
   ensureDocx().then(D=>buildProtokolDocx(w,D)).catch(()=>alert("DOCX knižnicu sa nepodarilo načítať. Skontrolujte pripojenie."));
@@ -10832,7 +10855,7 @@ function buildProtokolDocx(w,D){
   const {Document,Packer,Paragraph,TextRun,Table,TableRow,TableCell,WidthType,AlignmentType,BorderStyle,ImageRun}=D;
   const NBSP="\u00a0";
   const dni=vykazClovekodni(w);
-  const tarifa=+S.tarifa||+S.denTarifa||350;
+  const tarifa=vykazSadzba(w);   // jedno pravidlo (zákazkový list → Nastavenia)
   const suma=r2(dni*tarifa);
   const dnesSk=new Date().toLocaleDateString("sk-SK");
   // mesiac z jedného pravidla (vykazMesiac) — regex `(\d{2})[\/.](\d{4})`
@@ -10854,9 +10877,11 @@ function buildProtokolDocx(w,D){
     kids.push(new Paragraph("Podpis: .........................................."));
     return new TableCell({borders:noBorder,width:{size:50,type:WidthType.PERCENTAGE},children:kids});
   };
-  const objednavatel=S.odberatelNazov||"";   // bez fallbacku — cudzí odberateľ v cudzom doklade
-  const objAdresa=S.odberatelAdresa||"";
-  const objIco=S.odberatelIco||"";
+  // odberateľ zo zákazkového listu, inak z Nastavení — bez fallbacku na cudzí doklad
+  const ODB=vykazOdberatel(w);
+  const objednavatel=ODB.nazov;
+  const objAdresa=ODB.adresa;
+  const objIco=ODB.ico;
   const doc=new Document({sections:[{children:[
     new Paragraph({alignment:AlignmentType.CENTER,children:[new TextRun({text:nadpis,bold:true})]}),
     new Paragraph(""),
@@ -10869,22 +10894,165 @@ function buildProtokolDocx(w,D){
     cont("IČO: "+(m.ico||"")),
     cont("IČ DPH: "+(m.icdph||"")),
     new Paragraph(""),new Paragraph(""),
-    new Paragraph({alignment:AlignmentType.JUSTIFIED,children:[
-      new TextRun({text:"Na základe uvedeného objednávateľ potvrdzuje prevzatie a akceptáciu poskytnutých služieb v rozsahu "}),
-      new TextRun({text:cldTxt(dni)+" človekodní",bold:true}),
-      new TextRun({text:", v"+NBSP+"celkovej hodnote "}),
-      new TextRun({text:eur(suma).replace("€","Eur")+" bez DPH"}),
-      new TextRun({text:" (t. j. "+cldTxt(dni)+" človekodní ocenených jednotkovou cenou "+tarifa+" Eur bez DPH) za obdobie "+(w.obdobie||"")+"."}),
-    ]}),
+    new Paragraph({alignment:AlignmentType.JUSTIFIED,children:
+      vykazProtokolVeta(w).map(c=>new TextRun({text:c.t,bold:!!c.b}))}),
     new Paragraph(""),new Paragraph(""),new Paragraph(""),
     new Paragraph("V"+NBSP+"Bratislave, dňa "+dnesSk),
     new Paragraph(""),new Paragraph(""),
     new Table({width:{size:100,type:WidthType.PERCENTAGE},borders:{top:{style:BorderStyle.NONE},bottom:{style:BorderStyle.NONE},left:{style:BorderStyle.NONE},right:{style:BorderStyle.NONE},insideHorizontal:{style:BorderStyle.NONE},insideVertical:{style:BorderStyle.NONE}},rows:[new TableRow({children:[
-      sigCell("Za objednávateľa:",S.odberatelSchvalil||"",false),
+      sigCell("Za objednávateľa:",ODB.schvalil,false),
       sigCell("Za dodávateľa:",w.pracovnik||m.nazov||"",true),
     ]})]}),
   ]}]});
   Packer.toBlob(doc).then(b=>downloadBlob(b,vykazSuborNazov("Akceptacny_protokol", w)+".docx"));
+}
+
+// ═══ PDF výkazu a protokolu + e-mail odberateľovi (Roman 9. 10. 2026) ═══
+// Šablóna je vykresliPracovnyDoklad vo faktura_pdf.js (font a hlavička ako
+// faktúra). Údaje sú tie isté ako vo Worde: odberateľ a sadzba z jedného
+// pravidla (vykazOdberatel, vykazSadzba), veta protokolu z vykazProtokolVeta.
+function vykazPdfModel(w){
+  const m=firmaData.meta||{}, ODB=vykazOdberatel(w);
+  const riadky=(w.polozky||[]).slice().sort((a,b)=>String(a.datum||"").localeCompare(String(b.datum||""))).map(p=>{
+    const akt=Array.isArray(p.aktivity)&&p.aktivity.length?p.aktivity:(p.poznamka?[p.poznamka]:[]);
+    return { datum:fmtDatum(p.datum)+(p.znacka?" °":""), hodiny:p.znacka&&!(+p.hodiny)?"":String(+p.hodiny||0).replace(".",","),
+      cinnost:p.znacka&&!akt.length?"dovolenka":akt.join("; "), _tlmene:!!p.znacka };
+  });
+  return {
+    nadpis:"Výkaz prác", cislo:vykazMesiacText(vykazMesiac(w)),
+    meta:[["Zákazka",w.zakazka],["Projekt",w.projekt===VYKAZ_Z_KALENDARA?"":w.projekt],["Pracovník",w.pracovnik],["Obdobie",w.obdobie]],
+    strany:[{titulok:"Odberateľ", riadky:[ODB.nazov, ODB.adresa, ODB.ico?"IČO "+ODB.ico:""]},
+            {titulok:"Dodávateľ", riadky:[m.nazov, m.adresa, m.ico?"IČO "+m.ico:""]}],
+    stlpce:[{k:"datum",n:"Dátum",w:26},{k:"hodiny",n:"Hodiny",w:16,zar:"r"},{k:"cinnost",n:"Činnosť",w:100}],
+    riadky,
+    sucet:{datum:"Spolu", hodiny:String(vykazHodiny(w)).replace(".",","), cinnost:cldTxt(vykazClovekodni(w))+" človekodní"+(vykazMdRezim(w)==="hodiny"?" ("+cldTxt(vykazMdHodin(w))+" h = 1 čld)":"")},
+    podpisy:[{titulok:"Za odberateľa schválil", meno:ODB.schvalil}, {titulok:"Za dodávateľa", meno:w.pracovnik||m.nazov||"", podpis:true}],
+    pata:"Výkaz prác"+(w.zakazka?" · "+w.zakazka:"")+(w.obdobie?" · "+w.obdobie:""),
+  };
+}
+function vykazProtokolPdfModel(w){
+  const m=firmaData.meta||{}, ODB=vykazOdberatel(w), vm=vykazMesiac(w);
+  const dni=vykazClovekodni(w), tarifa=vykazSadzba(w);
+  return {
+    nadpis:"Akceptačný protokol", cislo:vm?vm.slice(5,7)+"/"+vm.slice(0,4):"",
+    meta:[["Zákazka",w.zakazka],["Projekt",w.projekt===VYKAZ_Z_KALENDARA?"":w.projekt],["Obdobie",w.obdobie]],
+    strany:[{titulok:"Objednávateľ", riadky:[ODB.nazov, ODB.adresa, ODB.ico?"IČO "+ODB.ico:"", ODB.icdph?"IČ DPH "+ODB.icdph:""]},
+            {titulok:"Dodávateľ", riadky:[m.nazov, m.adresa, m.ico?"IČO "+m.ico:"", m.icdph?"IČ DPH "+m.icdph:""]}],
+    odstavec:vykazProtokolVeta(w).map(c=>c.t).join(""),
+    suhrn:[["Rozsah", cldTxt(dni)+" človekodní"], ["Jednotková cena", eur(tarifa)+" / čld bez DPH"], ["Hodnota bez DPH", eur(r2(dni*tarifa))]],
+    miestoDatum:(m.obec?m.obec+", ":"")+fmtDatum(new Date().toISOString().slice(0,10)),
+    podpisy:[{titulok:"Za objednávateľa", meno:ODB.schvalil}, {titulok:"Za dodávateľa", meno:w.pracovnik||m.nazov||"", podpis:true}],
+    pata:"Akceptačný protokol"+(w.zakazka?" · "+w.zakazka:"")+(w.obdobie?" · "+w.obdobie:""),
+  };
+}
+async function vykazPdfSubor(w, druh){
+  const FP=await fakturaPdfModul();
+  await ensureJsPDF();
+  const { jsPDF }=window.jspdf;
+  const model=druh==="protokol" ? vykazProtokolPdfModel(w) : vykazPdfModel(w);
+  const podpisPng=(firmaData.settings||{}).podpisB64||null;
+  const doc=FP.vykresliPracovnyDoklad(jsPDF, model, { podpisPng });
+  return { blob:doc.output("blob"), nazov:vykazSuborNazov(druh==="protokol"?"Akceptacny_protokol":"Vykaz_prac", w)+".pdf" };
+}
+async function exportVykazPdf(i, druh){
+  const w=(firmaData.vykazy||[])[i]; if(!w) return;
+  try{ const s=await vykazPdfSubor(w, druh); downloadBlob(s.blob, s.nazov); }
+  catch(e){ console.error("PDF výkazu:", e); alert("PDF sa nepodarilo vytvoriť: "+(e&&e.message||e)); }
+}
+
+// Faktúra k výkazu: prepojená, inak jednoznačne nájdená faktúra mesiaca.
+function vykazFakturaIdx(w){
+  const F=firmaData.faktury||[], pf=vykazFakturaPrepojena(w);
+  if(pf) return F.indexOf(pf);
+  const kf=vykazKontrolaFaktury(w);
+  return (kf && (kf.stav==="ok"||kf.stav==="nesedi")) ? F.findIndex(f=>String(f.cislo)===String(kf.cislo)) : -1;
+}
+// Šablóna e-mailu (Nastavenia → Dokumenty a fakturácia). Zástupné polia sa
+// nahradia; chýbajúce (napr. faktúra ešte nie je) ostanú prázdne.
+const VYKAZ_MAIL_PREDMET="Výkaz prác {zakazka} za {mesiac}";
+const VYKAZ_MAIL_TEXT="Dobrý deň,\n\nv prílohe posielam výkaz prác a akceptačný protokol k zákazke {zakazka} za obdobie {obdobie} ({cld} človekodní) a faktúru č. {faktura} na sumu {suma} so splatnosťou {splatnost}.\n\nProsím o podpísanie protokolu.\n\nĎakujem\n{meno}";
+// „august 2026“ — do e-mailu a na PDF celé meno mesiaca, nie skratka zo zoznamov
+const VYKAZ_MESIACE=["január","február","marec","apríl","máj","jún","júl","august","september","október","november","december"];
+function vykazMesiacText(vm){ return /^\d{4}-\d{2}$/.test(String(vm||"")) ? VYKAZ_MESIACE[+vm.slice(5,7)-1]+" "+vm.slice(0,4) : ""; }
+function vykazMailPolia(w){
+  const m=firmaData.meta||{}, fi=vykazFakturaIdx(w), f=fi>=0?firmaData.faktury[fi]:null, vm=vykazMesiac(w);
+  return { zakazka:w.zakazka||"", projekt:w.projekt===VYKAZ_Z_KALENDARA?"":(w.projekt||""), mesiac:vykazMesiacText(vm),
+    obdobie:w.obdobie||"", cld:cldTxt(vykazClovekodni(w)), faktura:f?(f.cislo||""):"", suma:f?eur(+faktSumy(f).spolu||0):"",
+    splatnost:f&&f.splatnost?fmtDatum(f.splatnost):"", meno:w.pracovnik||m.nazov||"", odberatel:vykazOdberatel(w).nazov||"" };
+}
+function vykazMailText(w){
+  const S=firmaData.settings||{}, P=vykazMailPolia(w);
+  const dosad=t=>String(t||"").replace(/\{(\w+)\}/g,(x,k)=>k in P ? P[k] : x);
+  return { predmet:dosad(S.vykazMailPredmet||VYKAZ_MAIL_PREDMET), text:dosad(S.vykazMailText||VYKAZ_MAIL_TEXT) };
+}
+// .eml s hlavičkou X-Unsent: 1 — Outlook ho otvorí ako rozpísaný koncept
+// s prílohami (mailto: prílohu niesť nevie). Kódovanie base64, aby diakritika
+// prežila každý poštový program.
+function b64Utf8(s){ const b=new TextEncoder().encode(String(s)); let r=""; for(let i=0;i<b.length;i+=0x8000) r+=String.fromCharCode.apply(null, b.subarray(i,i+0x8000)); return btoa(r); }
+async function vykazEml(komu, predmet, text, prilohy){
+  const hr="ezivnostnik_"+Date.now().toString(36), CRLF="\r\n";
+  const zalom=s=>s.replace(/.{1,76}/g, x=>x+CRLF);
+  const hlav=x=>"=?UTF-8?B?"+b64Utf8(x)+"?=";
+  let out=["X-Unsent: 1", "To: "+String(komu||"").replace(/[\r\n]/g,""), "Subject: "+hlav(predmet), "MIME-Version: 1.0",
+    "Content-Type: multipart/mixed; boundary=\""+hr+"\"", "", "--"+hr,
+    "Content-Type: text/plain; charset=UTF-8", "Content-Transfer-Encoding: base64", "", zalom(b64Utf8(text))].join(CRLF);
+  for(const p of prilohy){
+    const buf=new Uint8Array(await p.blob.arrayBuffer()); let bin="";
+    for(let i=0;i<buf.length;i+=0x8000) bin+=String.fromCharCode.apply(null, buf.subarray(i,i+0x8000));
+    out+=CRLF+["--"+hr, "Content-Type: application/pdf; name=\""+p.nazov+"\"", "Content-Disposition: attachment; filename=\""+p.nazov+"\"",
+      "Content-Transfer-Encoding: base64", "", zalom(btoa(bin))].join(CRLF);
+  }
+  out+=CRLF+"--"+hr+"--"+CRLF;
+  return new Blob([out], {type:"message/rfc822"});
+}
+let _vykazPosli=null;
+function vykazPosliOkno(i){
+  const w=(firmaData.vykazy||[])[i]; if(!w) return;
+  const M=vykazMailText(w), ODB=vykazOdberatel(w), fi=vykazFakturaIdx(w);
+  _vykazPosli={i};
+  openModal("Poslať odberateľovi", `
+    <div class="mfield"><label>Komu</label><input id="vp_komu" type="email" value="${esc(ODB.email||"")}" placeholder="e-mail odberateľa (zákazkový list)"></div>
+    <div class="mfield"><label>Predmet</label><input id="vp_predmet" value="${esc(M.predmet)}"></div>
+    <div class="mfield"><label>Text</label><textarea id="vp_text" rows="9" style="width:100%;font:inherit;font-size:13px">${esc(M.text)}</textarea></div>
+    <div style="font-size:12px;margin:4px 0 10px">
+      <b>Prílohy</b><br>
+      📄 Výkaz prác (PDF) · <span style="text-decoration:underline;cursor:pointer" onclick="exportVykazPdf(${i},'vykaz')">stiahnuť</span><br>
+      📄 Akceptačný protokol (PDF) · <span style="text-decoration:underline;cursor:pointer" onclick="exportVykazPdf(${i},'protokol')">stiahnuť</span><br>
+      ${fi>=0?`🧾 Faktúra ${esc(firmaData.faktury[fi].cislo||"")} (PDF)`:`<span style="color:var(--ink-warn)">⚠ Faktúra k výkazu zatiaľ nie je — pošlú sa len výkaz a protokol.</span>`}
+    </div>
+    <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:10px">Šablónu textu zmeníte v Nastaveniach → Dokumenty a fakturácia. Po otvorení e-mailu sa výkaz označí ako odoslaný.</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="aabtn pri" style="flex:1;justify-content:center" onclick="vykazPosli('eml')">✉ Otvoriť v Outlooku</button>
+      ${navigator.share?`<button class="aabtn" style="flex:1;justify-content:center" onclick="vykazPosli('zdielat')">📤 Zdieľať</button>`:""}
+    </div>
+  `, null, null, "siroky");
+}
+async function vykazPosli(ako){
+  const i=_vykazPosli&&_vykazPosli.i, w=(firmaData.vykazy||[])[i]; if(!w) return;
+  const komu=(document.getElementById("vp_komu")||{}).value||"", predmet=(document.getElementById("vp_predmet")||{}).value||"", text=(document.getElementById("vp_text")||{}).value||"";
+  let prilohy;
+  try{
+    prilohy=[await vykazPdfSubor(w,"vykaz"), await vykazPdfSubor(w,"protokol")];
+    const fi=vykazFakturaIdx(w);
+    if(fi>=0){ const f=await fakturaPdfNaOdoslanie(fi); if(f===false) return; if(!f){ alert("PDF faktúry sa nepodarilo pripraviť — e-mail nepôjde bez nej. Skúste to znova."); return; } prilohy.push(f); }
+  }catch(e){ console.error("prílohy k výkazu:", e); alert("Prílohy sa nepodarilo pripraviť: "+(e&&e.message||e)); return; }
+  if(ako==="zdielat" && typeof File==="function" && navigator.share){
+    const subory=prilohy.map(p=>new File([p.blob], p.nazov, {type:"application/pdf"}));
+    if(navigator.canShare && navigator.canShare({files:subory})){
+      try{ await navigator.share({files:subory, title:predmet, text}); }
+      catch(e){ if(e && e.name==="AbortError") return; console.error("zdieľanie:", e); alert("Zdieľanie zlyhalo — skúste „Otvoriť v Outlooku“."); return; }
+      vykazPoslane(w); return;
+    }
+  }
+  const eml=await vykazEml(komu, predmet, text, prilohy);
+  downloadBlob(eml, vykazSuborNazov("Email", w)+".eml");
+  vykazPoslane(w);
+  cloudMsg("E-mail je stiahnutý ako .eml — otvorte ho, Outlook ukáže koncept so všetkými prílohami.", "ok");
+}
+function vykazPoslane(w){
+  // stav zapíše len ten, kto smie písať — náhľad e-mail poslať môže, stav nemení
+  if(!w.odoslane && mozemPisat("vykazy")){ w.odoslane=new Date().toISOString().slice(0,10); poZmene(); }
+  closeModal(); _vykazPosli=null; appVykazy();
 }
 
 // Mesiac, za ktorý je výkaz — mesiac, do ktorého padne VÄČŠINA dní výkazu;
@@ -10967,10 +11135,16 @@ function faktClovekodni(f){
 // poplach, a ten je drahší než žiadny.
 function vykazKontrolaFaktury(w){
   const dni=vykazClovekodni(w);
+  // Faktúra vystavená z výkazu je väzba, nie odhad — porovná sa presne ona.
+  const pf=vykazFakturaPrepojena(w);
+  if(pf){ const fd=faktClovekodni(pf); return {stav:Math.abs(fd-dni)<0.01?"ok":"nesedi", dni, faktDni:fd, cislo:pf.cislo, prepojena:true}; }
   const vm=vykazMesiac(w); if(!vm) return null;
-  const mesiaca=(firmaData.faktury||[]).filter(f=>faktMesiac(f)===vm && faktClovekodni(f)>0);
-  if(!mesiaca.length) return {stav:"chyba_faktura", dni, mesiac:vm};
   const zak=normTxt(w.zakazka).trim();
+  // Faktúra vystavená z INÉHO výkazu alebo pre inú zákazku nie je kandidát —
+  // inak by jediná faktúra mesiaca „vyfakturovala“ aj druhú zákazku.
+  const cudzia=f=>(f.zVykazu && f.zVykazu!==w.id) || (!!f.zakazka && !!zak && normTxt(f.zakazka).trim()!==zak);
+  const mesiaca=(firmaData.faktury||[]).filter(f=>faktMesiac(f)===vm && faktClovekodni(f)>0 && !cudzia(f));
+  if(!mesiaca.length) return {stav:"chyba_faktura", dni, mesiac:vm};
   const nesie=f=>!!zak && normTxt([f.popis, f.poznamka, f.zakazka, ...(f.polozky||[]).map(p=>(p.nazov||"")+" "+(p.popis||""))].join(" ")).includes(zak);
   const sZakazkou=mesiaca.filter(nesie);
   const kand = sZakazkou.length ? sZakazkou : mesiaca;
@@ -11009,7 +11183,17 @@ function appVykazy(){
         ⚠ ${sporne.length} ${sporne.length===1?"deň je označený":(sporne.length<5?"dni sú označené":"dní je označených")} ako dovolenka, ale ${sporne.length===1?"má":"majú"} zapísané hodiny (${cldTxt(sporne.reduce((a,p)=>a+(+p.hodiny||0),0))} h) aj činnosť.
         Hodiny sa počítajú do fakturácie — buď to nie je dovolenka, alebo tam tie hodiny nemajú byť.
         <span style="text-decoration:underline;cursor:pointer" onclick="event.stopPropagation();vykazOpravSporne(${i})">Zrušiť značku na týchto dňoch</span></div>` : "";
+      // Stav: návrh → odoslaný → podpísaný → vyfakturovaný. Odoslaný a podpísaný
+      // sa dajú prepnúť ťuknutím (protokol mohol odísť aj mimo appky).
+      const st=vykazStav(w), sti=VYKAZ_STAVY.findIndex(x=>x[0]===st);
+      const pf=(kf&&(kf.stav==="ok"||kf.stav==="nesedi"))?kf.cislo:"";
+      const stavHtml=`<div style="display:flex;gap:5px;flex-wrap:wrap;margin:0 0 8px" aria-label="Stav výkazu">${VYKAZ_STAVY.map(([k,n],j)=>{
+        const on=j<=sti, pole=k==="odoslany"?"odoslane":k==="podpisany"?"podpisany":"";
+        const dat=pole&&w[pole]?" "+fmtDatum(w[pole]).replace(/\s?\d{4}$/,""):(k==="vyfakturovany"&&pf?" "+esc(pf):"");
+        return `<span class="apill" style="font-size:10.5px;${on?"background:var(--sfc-pos);color:var(--pos)":"background:var(--bg);color:var(--ink-soft)"}${pole?";cursor:pointer":""}"${pole?` onclick="event.stopPropagation();vykazOznacStav(${i},'${pole}')" title="Ťuknutím ${w[pole]?"zrušíte":"označíte"}"`:""}>${on?"✓ ":""}${n}${dat}</span>`;
+      }).join("")}</div>`;
       return `<div class="card" style="margin-bottom:14px">
+        ${stavHtml}
         ${spornePas}
         ${kfPas}
         <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:6px;cursor:pointer" onclick="editVykaz(${i})">
@@ -11024,6 +11208,8 @@ function appVykazy(){
           <div class="sbox"><div class="sn" style="font-size:18px">${esc(w.pracovnik||"—")}</div><div class="sl">pracovník</div></div>
         </div>
         <div class="atool" style="margin-top:12px">
+          ${st!=="vyfakturovany"?`<button class="aabtn pri" onclick="event.stopPropagation();vykazVystavFakturu(${i})"${zam("faktury")}>🧾 Vystaviť faktúru</button>`:""}
+          <button class="aabtn${st==="vyfakturovany"&&!w.odoslane?" pri":""}" onclick="event.stopPropagation();vykazPosliOkno(${i})" title="Výkaz, protokol a faktúra v PDF v jednom e-maile">✉ Poslať odberateľovi</button>
           <button class="aabtn" onclick="event.stopPropagation();exportVykazDocx(${i})">↧ Výkaz (Word)</button> <button class="aabtn" onclick="event.stopPropagation();exportVykazXlsx(${i})">↧ Výkaz (XLSX)</button>
           <button class="aabtn" onclick="event.stopPropagation();exportProtokolDocx(${i})">↧ Akceptačný protokol (Word)</button>
         </div>
@@ -11069,6 +11255,7 @@ function editVykaz(idx){
   _vykazEdit={ idx, nova, w: nova
     ? {...vykazPredvolene(), obdobie:"", polozky:[]}
     : JSON.parse(JSON.stringify(d.vykazy[idx])) };
+  if(!nova && !_vykazEdit.w.od && !_vykazEdit.w.do){ const r=vykazObdobieRozsah(_vykazEdit.w); _vykazEdit.w.od=r.od; _vykazEdit.w.do=r.do; }
   renderVykazEditor();
 }
 
@@ -11078,6 +11265,199 @@ function editVykaz(idx){
 // zákazky; navrch predvolená z Nastavení (`zakazkaCislo`/`projektNazov`, ktoré
 // sa dovtedy len zapisovali a nečítal ich nikto).
 const VYKAZ_Z_KALENDARA="Výkaz z kalendára";   // starý názov importu — nepreberá sa
+
+// ── Zákazkový list (Dokumenty, Roman 9. 10. 2026) ───────────────────────────
+// Zákazka je dokument typu „Zákazkový list“: číslo, projekt, sadzba za
+// človekodeň a odberateľ (kto, IČO, adresa, kto schvaľuje, e-mail). Výkaz,
+// protokol aj faktúra si odtiaľ berú odberateľa a sadzbu — dovtedy boli
+// v Nastaveniach JEDNY pre celú firmu, takže s dvoma klientmi by protokol pre
+// druhého niesol meno prvého.
+const DOK_ZAKAZKOVY_LIST="Zákazkový list";
+function zakazkoveListy(){
+  return (firmaData.dokumenty||[]).filter(d=>d && d.typ===DOK_ZAKAZKOVY_LIST && d.zakazka && String(d.zakazka.cislo||"").trim());
+}
+// List k číslu zákazky — pri viacerých (dodatok, nové obdobie) ten, ktorý
+// platí k dátumu, inak najnovší.
+function zakazkovyList(cislo, datum){
+  const c=String(cislo||"").trim(); if(!c) return null;
+  const listy=zakazkoveListy().filter(d=>String(d.zakazka.cislo).trim()===c);
+  if(!listy.length) return null;
+  const den=String(datum||"").slice(0,10);
+  const platny=den ? listy.filter(d=>(!d.platnostOd||d.platnostOd<=den) && (!d.platnostDo||d.platnostDo>=den)) : [];
+  const zoz=(platny.length?platny:listy).slice().sort((a,b)=>String(b.pridane||"").localeCompare(String(a.pridane||"")));
+  return zoz[0];
+}
+function vykazPosledneDatum(w){
+  const d=(w.polozky||[]).map(p=>String(p.datum||"").slice(0,10)).filter(Boolean).sort();
+  return d.length ? d[d.length-1] : String(w.do||"").slice(0,10);
+}
+// Odberateľ výkazu (protokol, faktúra, e-mail): zo zákazkového listu,
+// inak z Nastavení (doterajšie správanie). Jedno pravidlo.
+function vykazOdberatel(w){
+  const z=zakazkovyList(w&&w.zakazka, w&&vykazPosledneDatum(w)), S=firmaData.settings||{};
+  if(z) return { nazov:z.partner||"", ico:z.zakazka.ico||"", icdph:z.zakazka.icdph||"", dic:z.zakazka.dic||"",
+    adresa:z.zakazka.adresa||"", schvalil:z.zakazka.schvalil||"", email:z.zakazka.email||"", zList:true };
+  return { nazov:S.odberatelNazov||"", ico:S.odberatelIco||"", icdph:"", dic:"", adresa:S.odberatelAdresa||"",
+    schvalil:S.odberatelSchvalil||"", email:"", zList:false };
+}
+// Sadzba za človekodeň — jedno pravidlo pre Word protokol, záznam protokolu,
+// import protokolu aj faktúru z výkazu. Dovtedy tri kópie s opačným poradím
+// `tarifa`/`denTarifa` a zálohou 350 vs 0 dávali rôzne sumy toho istého protokolu.
+function vykazSadzba(w){
+  const z=zakazkovyList(w&&w.zakazka, w&&vykazPosledneDatum(w)), S=firmaData.settings||{};
+  return +(z&&z.zakazka.sadzba) || +S.denTarifa || +S.tarifa || 0;
+}
+
+// ── Faktúra z výkazu (Roman 9. 10. 2026) ────────────────────────────────────
+// Výkaz dostane stabilné `id` (dovtedy ho nemal — väzba by stála na indexe,
+// ktorý sa mení zmazaním). Väzbu `w.faktura`/`w.fakturaId` zapíše až ULOŽENIE
+// faktúry (feModal) — Zrušiť ju nechá bez stopy, tak ako číslo faktúry.
+function vykazZaistiId(w){
+  if(!w.id) w.id="v"+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+  return w.id;
+}
+// Faktúra prepojená s výkazom — podľa id, inak podľa čísla (číslo sa dá
+// v editore prepísať, id nie). Zmazaná faktúra = žiadna väzba.
+function vykazFakturaPrepojena(w){
+  if(!w || (!w.fakturaId && !w.faktura)) return null;
+  const F=firmaData.faktury||[];
+  return (w.fakturaId && F.find(f=>f.id===w.fakturaId)) || (w.faktura && F.find(f=>String(f.cislo)===String(w.faktura))) || null;
+}
+// Posledný deň mesiaca výkazu — dátum dodania služby za mesiac.
+function vykazDodanie(w){
+  const vm=vykazMesiac(w); if(!vm) return "";
+  const den=new Date(+vm.slice(0,4), +vm.slice(5,7), 0).getDate();
+  return vm+"-"+String(den).padStart(2,"0");
+}
+// ── Obdobie od–do (Roman 9. 10. 2026) ──────────────────────────────────────
+// Editor má dva dátumy namiesto voľného textu. `w.obdobie` ostáva ako text
+// „1.5.2026 - 31.5.2026“ — čítajú ho exporty, protokol aj staršie dáta —
+// a skladá ho JEDINE vykazObdobieText z `w.od`/`w.do` (formát fmtDatum).
+function vykazObdobieText(od, doD){
+  const t=x=>/^\d{4}-\d{2}-\d{2}/.test(String(x||"")) ? fmtDatum(String(x).slice(0,10)) : "";
+  const a=t(od), b=t(doD);
+  return a&&b ? a+" - "+b : (a||b);
+}
+// Rozsah výkazu: uložené od/do, inak z textu obdobia, inak celý mesiac výkazu.
+function vykazObdobieRozsah(w){
+  if(w.od || w.do) return {od:String(w.od||"").slice(0,10), do:String(w.do||"").slice(0,10)};
+  const iso=(d,m,r)=>r+"-"+String(+m).padStart(2,"0")+"-"+String(+d).padStart(2,"0");
+  const m=String(w.obdobie||"").match(/(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})(?:.*?(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4}))?/);
+  if(m) return {od:iso(m[1],m[2],m[3]), do:m[4]?iso(m[4],m[5],m[6]):iso(m[1],m[2],m[3])};
+  const vm=vykazMesiac(w); if(!vm) return {od:"", do:""};
+  return {od:vm+"-01", do:vykazDodanie(w)};
+}
+// Predloha faktúry: ostatné náležitosti (druh plnenia, mena, jazyk, DPH) z
+// poslednej faktúry toho istého odberateľa — kópia cez faktKopiaPreNovu, aby
+// nič nededila (číslo, úhrada, Peppol). Odberateľ zo zákazkového listu má
+// prednosť; z Nastavení sa berie len do prázdnych polí.
+function vykazFakturaPredloha(w){
+  const ODB=vykazOdberatel(w), vm=vykazMesiac(w);
+  const ico=String(ODB.ico||"").replace(/\s/g,""), meno=normTxt(ODB.nazov).trim();
+  const tohoIste=f=>(ico && String(f.ico||"").replace(/\s/g,"")===ico) || (!ico && meno && normTxt(f.odberatel).trim()===meno);
+  const vzor=(firmaData.faktury||[]).filter(f=>tohoIste(f) && f.typ!=="dobropis")
+    .sort((a,b)=>String(faktDatumDodania(b)||"").localeCompare(String(faktDatumDodania(a)||"")))[0];
+  const k=vzor ? faktKopiaPreNovu(vzor) : (()=>{ const dnes=new Date().toISOString().slice(0,10);
+    const spl=new Date(); spl.setDate(spl.getDate()+(+((firmaData.settings||{}).splatnostDni)||14));
+    return {datum:dnes, vystavenie:dnes, splatnost:spl.toISOString().slice(0,10)}; })();
+  const pole=(kluc,hod)=>{ if(hod && (ODB.zList || !k[kluc])) k[kluc]=hod; };
+  pole("odberatel",ODB.nazov); pole("ico",ODB.ico); pole("icdph",ODB.icdph); pole("dic",ODB.dic); pole("adresa",ODB.adresa);
+  const dod=vykazDodanie(w); if(dod) k.dodanie=dod;
+  const obd=vm ? vm.slice(5,7)+"/"+vm.slice(0,4) : (w.obdobie||"");
+  const nazov=[w.projekt||"Služby", w.zakazka?"zákazka "+w.zakazka:"", obd].filter(Boolean).join(" · ");
+  k.polozky=[{ nazov, mn:vykazClovekodni(w), mj:"človekodeň", cena:vykazSadzba(w) }];
+  if(vzor && vzor.polozky && vzor.polozky[0]){
+    // sadzba DPH a podobné vlastnosti položky ostávajú zo vzoru
+    const p0=vzor.polozky[0]; Object.keys(p0).forEach(x=>{ if(!(x in k.polozky[0])) k.polozky[0][x]=p0[x]; });
+  }
+  delete k.bez; delete k.dph; delete k.spolu; delete k.sumyMena;   // sumy prepočíta editor z položiek
+  delete k.opakovanie; delete k.opravujeDoklad; delete k.zalohaId;
+  // Sadzba DPH je vlastnosť dokladu: zo vzoru len vtedy, keď firma bola vtedy
+  // v tom istom postavení ako dnes (vzor spred registrácie by niesol 0 %).
+  if(vzor && sadzbaDPHfirmy(vzor.datum)!==sadzbaDPHfirmy(k.datum)) delete k.sadzba;
+  if(w.zakazka) k.zakazka=w.zakazka; else delete k.zakazka;
+  k.zVykazu=vykazZaistiId(w);
+  return k;
+}
+function vykazVystavFakturu(i){
+  if(!strazZapis("faktury")) return;
+  const w=(firmaData.vykazy||[])[i]; if(!w) return;
+  const uz=vykazFakturaPrepojena(w);
+  if(uz && !confirm("K tomuto výkazu už je faktúra "+uz.cislo+". Vystaviť ďalšiu?")) return;
+  if(!vykazSadzba(w) && !confirm("Zákazka nemá sadzbu (zákazkový list v Dokumentoch ani Nastavenia) — položka bude s cenou 0. Pokračovať?")) return;
+  editFaktura(null, vykazFakturaPredloha(w));
+}
+// Volá ukladanie faktúry (feModal) — až po uložení vznikne väzba.
+function vykazPrepojFakturu(f){
+  const w=(firmaData.vykazy||[]).find(x=>x.id && x.id===f.zVykazu); if(!w) return;
+  w.faktura=f.cislo; w.fakturaId=f.id||"";
+}
+
+// ── Stav výkazu (Roman 9. 10. 2026) ─────────────────────────────────────────
+// návrh → protokol odoslaný (`w.odoslane`, zapíše „Poslať“ alebo ručne) →
+// podpísaný (`w.podpisany`, zapíše import podpísaného protokolu alebo ručne) →
+// vyfakturovaný (prepojená faktúra; pri starších výkazoch jednoznačne nájdená
+// faktúra mesiaca — rovnaké pravidlo ako kontrola čld, nie druhé).
+const VYKAZ_STAVY=[["navrh","Návrh"],["odoslany","Odoslaný"],["podpisany","Podpísaný"],["vyfakturovany","Vyfakturovaný"]];
+function vykazStav(w){
+  const kf=vykazKontrolaFaktury(w);
+  if(kf && (kf.stav==="ok" || kf.stav==="nesedi")) return "vyfakturovany";
+  if(w.podpisany) return "podpisany";
+  if(w.odoslane) return "odoslany";
+  return "navrh";
+}
+function vykazOznacStav(i, kluc){
+  if(!strazZapis("vykazy")) return;
+  const w=(firmaData.vykazy||[])[i]; if(!w || (kluc!=="odoslane" && kluc!=="podpisany")) return;
+  if(w[kluc]){
+    if(!confirm("Zrušiť označenie „"+(kluc==="odoslane"?"odoslaný":"podpísaný")+"“ z "+fmtDatum(w[kluc])+"?")) return;
+    delete w[kluc];
+  } else w[kluc]=new Date().toISOString().slice(0,10);
+  poZmene(); appVykazy();
+}
+// Zvonček: len minulý mesiac a len to, čo sa dá rozhodnúť — výkaz, ku ktorému
+// je za mesiac viac faktúr a nevie sa ktorá (`nejasne`), sa nehlási (falošný
+// poplach je drahší než žiadny). Každá položka zmizne sama, keď je vybavená.
+function vykazNotifikacie(dnes){
+  const out=[], d=dnes||new Date();
+  const pred=new Date(d.getFullYear(), d.getMonth()-1, 1);
+  const minuly=pred.getFullYear()+"-"+String(pred.getMonth()+1).padStart(2,"0");
+  const najstarsi=(()=>{ const x=new Date(d.getFullYear(), d.getMonth()-3, 1); return x.getFullYear()+"-"+String(x.getMonth()+1).padStart(2,"0"); })();
+  const vyk=firmaData.vykazy||[];
+  vyk.forEach(w=>{
+    const vm=vykazMesiac(w); if(!vm || vm>minuly || vm<najstarsi) return;
+    const meno=(w.zakazka||w.projekt||"výkaz")+" · "+mesiacLabel(vm);
+    const kluc=w.id||(vm+":"+(w.zakazka||""));
+    const kf=vykazKontrolaFaktury(w);
+    if(w.odoslane && !w.podpisany && !(kf && (kf.stav==="ok"||kf.stav==="nesedi"))){
+      const dni=Math.floor((d-new Date(w.odoslane))/86400000);
+      if(dni>=7) out.push({kluc:"vykaz:podpis:"+kluc, ic:"✍", nal:"info",
+        nazov:"Protokol "+meno+" ešte nie je podpísaný",
+        detail:"Odoslaný pred "+dni+" dňami. Podpísaný protokol načítate cez „Načítať upravený“, alebo ho na karte výkazu označte ako podpísaný.",
+        akcia:()=>otvorApp("vykazy")});
+    }
+    if(vm===minuly && kf && kf.stav==="chyba_faktura") out.push({kluc:"vykaz:faktura:"+kluc, ic:"🧾", nal:"info",
+      nazov:"Výkaz "+meno+" ešte nie je vyfakturovaný",
+      detail:cldTxt(vykazClovekodni(w))+" človekodní. Na karte výkazu „Vystaviť faktúru“ predvyplní odberateľa, sadzbu aj dátum dodania.",
+      akcia:()=>otvorApp("vykazy")});
+  });
+  // Zákazkový list platný v minulom mesiaci a výkaz za ten mesiac chýba —
+  // len prvých 10 dní mesiaca (vtedy sa výkazy píšu, neskôr by to bol šum).
+  if(d.getDate()<=10){
+    const od=minuly+"-01", doD=minuly+"-"+String(new Date(pred.getFullYear(), pred.getMonth()+1, 0).getDate()).padStart(2,"0");
+    const cisla=new Set();
+    zakazkoveListy().forEach(z=>{
+      if((z.platnostOd && z.platnostOd>doD) || (z.platnostDo && z.platnostDo<od)) return;
+      const c=String(z.zakazka.cislo).trim(); if(cisla.has(c)) return; cisla.add(c);
+      if(vyk.some(w=>String(w.zakazka||"").trim()===c && vykazMesiac(w)===minuly)) return;
+      out.push({kluc:"vykaz:chyba:"+c+":"+minuly, ic:"📋", nal:"info",
+        nazov:"Chýba výkaz "+c+" za "+mesiacLabel(minuly),
+        detail:"Zákazkový list "+(z.zakazka.projekt||z.nazov||"")+" v tom mesiaci platil. Výkaz založíte cez „＋ Nový výkaz“ alebo import z kalendára.",
+        akcia:()=>otvorApp("vykazy")});
+    });
+  }
+  return out;
+}
 function vykazPracovnikOsoba(){
   const S=firmaData.settings||{}, D=S.pbDanovnik||{};
   const meno=[D.titul, D.meno, D.priezvisko].filter(x=>String(x||"").trim()).join(" ").trim();
@@ -11090,8 +11470,15 @@ function vykazZakazky(){
     .forEach(({w})=>{ const z=String(w.zakazka||"").trim(); if(!z) return;
       mapa.set(z, { zakazka:z, projekt:w.projekt===VYKAZ_Z_KALENDARA?"":(w.projekt||""), pracovnik:w.pracovnik||"" }); });
   const zoz=[...mapa.values()].reverse();   // najnovšia zákazka prvá
+  // zákazkové listy: projekt z listu má prednosť pred výkazom; list bez
+  // výkazu sa pridá (novú zákazku tak netreba prvýkrát písať rukou)
+  zakazkoveListy().slice().sort((a,b)=>String(b.pridane||"").localeCompare(String(a.pridane||""))).forEach(d=>{
+    const c=String(d.zakazka.cislo).trim(), proj=String(d.zakazka.projekt||d.nazov||"");
+    const uz=zoz.find(x=>x.zakazka===c);
+    if(uz){ if(proj) uz.projekt=proj; } else zoz.push({ zakazka:c, projekt:proj, pracovnik:"" });
+  });
   const zs=String(S.zakazkaCislo||"").trim();
-  if(zs && !mapa.has(zs)) zoz.push({ zakazka:zs, projekt:String(S.projektNazov||""), pracovnik:"" });
+  if(zs && !zoz.some(x=>x.zakazka===zs)) zoz.push({ zakazka:zs, projekt:String(S.projektNazov||""), pracovnik:"" });
   return zoz;
 }
 // Hlavička nového výkazu (ručného aj z kalendára): posledná zákazka, inak
@@ -11141,7 +11528,11 @@ function vykazUlozHlavicku(){
   if(document.getElementById("m_projekt")) w.projekt=val("m_projekt");
   if(document.getElementById("m_zakazka")) w.zakazka=val("m_zakazka");
   if(document.getElementById("m_pracovnik")) w.pracovnik=val("m_pracovnik");
-  if(document.getElementById("m_obdobie")) w.obdobie=val("m_obdobie");
+  if(document.getElementById("m_od")){
+    w.od=val("m_od")||""; w.do=val("m_do")||"";
+    if(w.od && w.do && w.do<w.od){ const x=w.od; w.od=w.do; w.do=x; }   // prehodené dátumy
+    w.obdobie=vykazObdobieText(w.od, w.do);
+  }
 }
 function vykZmenMd(pole, hodnota){
   const w=_vykazEdit && _vykazEdit.w; if(!w) return;
@@ -11175,7 +11566,10 @@ function renderVykazEditor(){
         <datalist id="m_zakazky">${vykazZakazky().map(z=>`<option value="${esc(z.zakazka)}">${esc(z.projekt||"")}</option>`).join("")}</datalist></div>
       <div class="mfield"><label>Pracovník</label><input id="m_pracovnik" value="${esc(w.pracovnik||'')}"></div>
     </div>
-    <div class="mfield"><label>Obdobie</label><input id="m_obdobie" value="${esc(w.obdobie||'')}" placeholder="1.1.2026 - 31.1.2026"></div>
+    <div class="mrow2">
+      <div class="mfield"><label>Obdobie od</label><input id="m_od" type="date" value="${esc(String(w.od||'').slice(0,10))}"></div>
+      <div class="mfield"><label>Obdobie do</label><input id="m_do" type="date" value="${esc(String(w.do||'').slice(0,10))}"></div>
+    </div>
 
     <div class="mfield" style="margin-top:12px">
       <label>Ako sa počíta človekodeň</label>
@@ -11200,7 +11594,7 @@ function renderVykazEditor(){
 
     <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin:14px 0 8px">
       <b class="chead">Dni výkazu</b>
-      <span class="acol-muted" style="font-size:12px">${odprac.length} odpracovaných · ${hod} h${dovol.length?` · ${dovol.length} dovolenka`:''}</span>
+      <span class="acol-muted" style="font-size:12px">${odprac.length} odpracovaných · ${hod} h${dovol.length?` · ${dovol.length} dovolenka`:''}${(()=>{ const n=odprac.filter(p=>vykDenMimoPrace(p.datum)).length; return n?` · <span style="color:var(--ink-warn)">${n} cez víkend/sviatok</span>`:""; })()}</span>
     </div>
     ${sporne.length?`<div style="background:var(--sfc-warn);border-radius:8px;padding:8px 11px;margin-bottom:8px;font-size:12px;color:var(--neg)">
       ⚠ Dovolenka so zapísanou prácou: ${sporne.map(p=>esc(p.datum)).join(", ")}.
@@ -11227,6 +11621,7 @@ function renderVykazEditor(){
             </label>
             <button class="aabtn neg" style="padding:2px 7px;font-size:11px" onclick="vykZmazDen(${i})">✕</button>
           </div>
+          ${(()=>{ const z=vykDenMimoPrace(p.datum); return z&&!p.znacka?`<div style="font-size:11px;color:var(--ink-warn);margin:-2px 0 4px">⚠ ${esc(z)} — práca mimo pracovného dňa</div>`:""; })()}
           <input value="${esc((p.aktivity&&p.aktivity.join('; '))||p.poznamka||'')}" ${p.znacka&&!(p.aktivity&&p.aktivity.length)&&!p.poznamka?'disabled':''}
                  placeholder="${p.znacka?'dovolenka':'čo sa v ten deň robilo'}" onchange="vykZmen(${i},'aktivity',this.value)"
                  style="width:100%;border:1px solid var(--line);border-radius:7px;padding:5px 7px;font-size:12.5px">
@@ -11235,12 +11630,17 @@ function renderVykazEditor(){
     </div>
     <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
       <button class="aabtn" style="flex:1;justify-content:center" onclick="vykPridajDen()">＋ Pridať deň</button>
+      <button class="aabtn" style="justify-content:center" onclick="vykDoplnPracovneDni()" title="Doplní pracovné dni obdobia od–do, ktoré vo výkaze ešte nie sú (bez víkendov a sviatkov)">📆 Doplniť pracovné dni</button>
       ${poz.filter(p=>!p.znacka).length>1?`<button class="aabtn" style="justify-content:center" onclick="vykHromadneHodiny()" title="Nastaviť rovnaký počet hodín všetkým odpracovaným dňom">↕ Hodiny všetkým</button>`:''}
     </div>
     ${!nova?`<button class="aabtn" style="width:100%;justify-content:center;margin-top:8px" onclick="vykazNaProtokol()">→ Vytvoriť akceptačný protokol</button>`:''}
   `,
   ()=>{
     vykazUlozHlavicku();
+    // bez vyplneného obdobia ho určia dni (celý mesiac výkazu)
+    if(!w.od && !w.do && (w.polozky||[]).length){
+      const r=vykazObdobieRozsah({polozky:w.polozky}); w.od=r.od; w.do=r.do; w.obdobie=vykazObdobieText(w.od, w.do);
+    }
     vykazPrepocitaj(w);
     if(!firmaData.vykazy) firmaData.vykazy=[];
     if(nova) firmaData.vykazy.push(w); else firmaData.vykazy[idx]=w;
@@ -11289,16 +11689,48 @@ function vykHromadneHodiny(){
 }
 function vykPridajDen(){
   const w=_vykazEdit.w; const S=firmaData.settings||{};
+  vykazUlozHlavicku();   // obdobie od z poľa, nie z modelu
   let base;
   const posledny=(w.polozky||[]).map(p=>p.datum).filter(Boolean).sort().pop();
   if(posledny){ const m=String(posledny).match(/(\d{4})-(\d{2})-(\d{2})/);
     base=m?new Date(+m[1],+m[2]-1,+m[3],12,0,0):new Date(); }
+  else if(/^\d{4}-\d{2}-\d{2}$/.test(String(w.od||""))){ const [y,m,d]=w.od.split("-").map(Number); base=new Date(y,m-1,d-1,12,0,0); }   // prvý deň obdobia
   else { const n=new Date(); base=new Date(n.getFullYear(),n.getMonth(),n.getDate(),12,0,0); base.setDate(base.getDate()-1); }
   do{ base.setDate(base.getDate()+1); } while(!isPracDen(base));
   const iso=base.getFullYear()+"-"+String(base.getMonth()+1).padStart(2,"0")+"-"+String(base.getDate()).padStart(2,"0");
   if(!w.polozky) w.polozky=[];
   w.polozky.push({datum:iso, hodiny:+S.vykazPausalHodin||vykazMdHodin(w), aktivity:[], poznamka:""});
   vykazUlozHlavicku(); prekresliSoScrollom(renderVykazEditor);
+}
+// Víkend alebo deň pracovného pokoja → názov dňa, inak "". Práca v taký deň
+// je dovolená (Roman 9. 10. 2026), len sa na ňu upozorní.
+function vykDenMimoPrace(iso){
+  const m=String(iso||"").match(/^(\d{4})-(\d{2})-(\d{2})/); if(!m) return "";
+  const d=new Date(+m[1],+m[2]-1,+m[3],12,0,0);
+  if(isSviatok(d)) return "sviatok";
+  return d.getDay()===6 ? "sobota" : d.getDay()===0 ? "nedeľa" : "";
+}
+// Doplní pracovné dni obdobia od–do, ktoré vo výkaze ešte nie sú. Víkendy a
+// sviatky nedopĺňa; zapísané dni (aj víkendové) nechá tak, ako sú.
+function vykDoplnPracovneDni(){
+  const w=_vykazEdit && _vykazEdit.w; if(!w) return;
+  vykazUlozHlavicku();
+  if(!w.od || !w.do){ alert("Najprv vyplňte obdobie od a do — dni sa dopĺňajú v ňom."); return; }
+  const S=firmaData.settings||{}, uz=new Set((w.polozky||[]).map(p=>String(p.datum||"").slice(0,10)));
+  const [ry,rm,rd]=w.od.split("-").map(Number), koniec=w.do;
+  if(!w.polozky) w.polozky=[];
+  let pridane=0, preskocene=0;
+  for(let d=new Date(ry,rm-1,rd,12,0,0), k=0; k<400; d.setDate(d.getDate()+1), k++){
+    const iso=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+    if(iso>koniec) break;
+    if(vykDenMimoPrace(iso)){ preskocene++; continue; }
+    if(uz.has(iso)) continue;
+    w.polozky.push({datum:iso, hodiny:+S.vykazPausalHodin||vykazMdHodin(w), aktivity:[], poznamka:""});
+    pridane++;
+  }
+  w.polozky.sort((a,b)=>String(a.datum||"").localeCompare(String(b.datum||"")));
+  prekresliSoScrollom(renderVykazEditor);
+  cloudMsg(pridane ? "Doplnených "+pridane+" pracovných dní"+(preskocene?" · "+preskocene+" víkendových a sviatočných vynechaných":"")+"." : "Všetky pracovné dni obdobia už vo výkaze sú.", "ok");
 }
 function vykZmazDen(i){
   const w=_vykazEdit.w;
@@ -11323,8 +11755,9 @@ function vykazNaProtokol(){
   const w=vykazPrepocitaj(_vykazEdit.w);
   if(!w.dni){ alert("Výkaz nemá žiadny odpracovaný deň."); return; }
   const S=firmaData.settings||{}, M=firmaData.meta||{};
-  // nastavenie sa volá `denTarifa` (staršie dáta majú `tarifa`)
-  const tarifa=+S.denTarifa || +S.tarifa || 0;
+  // jedno pravidlo sadzby (zákazkový list → Nastavenia `denTarifa`/`tarifa`)
+  const tarifa=vykazSadzba(w);
+  const ODB=vykazOdberatel(w);
   const p={
     cislo:"", datum:new Date().toISOString().slice(0,10),
     obdobie:w.obdobie||"", pracovnik:w.pracovnik||M.nazov||"",
@@ -11335,8 +11768,8 @@ function vykazNaProtokol(){
     tarifa, suma:r2(w.cld*tarifa),
     dodavatel:M.nazov||"", dodavatelIco:M.ico||"", dodavatelIcDph:M.icdph||"",
     dodavatelAdresa:M.adresa||"",
-    objednavatel:S.odberatelNazov||"", objednavatelIco:S.odberatelIco||"",
-    objednavatelAdresa:S.odberatelAdresa||"", schvalil:S.odberatelSchvalil||"",
+    objednavatel:ODB.nazov, objednavatelIco:ODB.ico,
+    objednavatelAdresa:ODB.adresa, schvalil:ODB.schvalil, zakazka:w.zakazka||"",
     miesto:M.obec||"", text:""
   };
   // číslo z mesiaca výkazu (jedno pravidlo s Word protokolom), dátum = koniec obdobia
@@ -11356,11 +11789,36 @@ function vykazNaProtokol(){
 
 // ── ICS parser (kalendár) ──
 function icsUnesc(s){ return String(s||"").replace(/\\n/g,"\n").replace(/\\,/g,",").replace(/\\;/g,";").replace(/\\\\/g,"\\"); }
+// Časové pásmo (9. 10. 2026): `…T080000Z` je UTC a `TZID=America/New_York:…`
+// je čas v inom pásme — dovtedy sa obe brali ako bratislavský čas, takže
+// stretnutie z Google kalendára (exportuje v UTC) posunulo o 1–2 h a večerné
+// aj na iný deň. Prevod ide cez Intl na Europe/Bratislava; pásmo, ktoré Intl
+// nepozná (Outlook: „Central Europe Standard Time“), sa berie ako miestne.
+const ICS_TZ="Europe/Bratislava";
+function icsVPasme(utcMs, tz){
+  const p=new Intl.DateTimeFormat("en-CA",{timeZone:tz,year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).formatToParts(new Date(utcMs));
+  const g=t=>+(p.find(x=>x.type===t)||{}).value;
+  return {y:g("year"),mo:g("month"),d:g("day"),h:g("hour")%24,mi:g("minute")};
+}
 function icsDT(left, val){
+  val=String(val||"").trim();
   const allDay=/VALUE=DATE(?!-TIME)/i.test(left) || /^\d{8}$/.test(val);
   const m=val.match(/(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2}))?/);
   if(!m) return null;
-  const y=+m[1],mo=+m[2],d=+m[3],h=m[4]?+m[4]:0,mi=m[5]?+m[5]:0;
+  let y=+m[1],mo=+m[2],d=+m[3],h=m[4]?+m[4]:0,mi=m[5]?+m[5]:0;
+  if(!allDay && m[4]){
+    const tzm=String(left||"").match(/TZID=("?)([^";:]+)\1/i), tz=tzm?tzm[2].trim():"";
+    let utc=null;
+    if(/Z$/i.test(val)) utc=Date.UTC(y,mo-1,d,h,mi);
+    else if(tz && tz!==ICS_TZ){
+      try{
+        const wall=Date.UTC(y,mo-1,d,h,mi); let u=wall;
+        for(let k=0;k<2;k++){ const v=icsVPasme(u,tz); u=wall-(Date.UTC(v.y,v.mo-1,v.d,v.h,v.mi)-u); }
+        utc=u;
+      }catch(_){ utc=null; }   // pásmo mimo IANA = miestny čas (zámer, nie chyba)
+    }
+    if(utc!=null){ const v=icsVPasme(utc, ICS_TZ); y=v.y; mo=v.mo; d=v.d; h=v.h; mi=v.mi; }
+  }
   return {y,mo,d,h,mi,allDay,iso:`${y}-${String(mo).padStart(2,"0")}-${String(d).padStart(2,"0")}`};
 }
 function cleanMeetingName(s){
@@ -11792,21 +12250,29 @@ function vykazImportPotvrd(akoNovy){
 
   // Protokol: ukladá sa ako doklad o tom, čo odberateľ podpísal. Výkaz sa
   // ním neprepisuje — protokol nenesie jednotlivé dni, takže by sa stratili.
-  const S=firmaData.settings||{}, M=firmaData.meta||{};
-  const mes=(p.obdobie||"").match(/(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})/);
-  const tarifa=p.tarifa!=null?p.tarifa:(+S.denTarifa||+S.tarifa||0);
+  const M=firmaData.meta||{};
+  // Podpísaný protokol patrí k výkazu toho mesiaca (zákazka rozhodne pri
+  // viacerých) — odberateľ a sadzba z toho istého pravidla ako Word protokol
+  // a výkaz dostane stav „podpísaný“ (9. 10. 2026).
+  const wP=idx>=0 ? firmaData.vykazy[idx] : null;
+  const zakl=wP || {obdobie:p.obdobie||"", polozky:[]};
+  const ODB=vykazOdberatel(zakl);
+  const vm=vykazMesiac(wP || {obdobie:p.obdobie||"", polozky:[]});
+  const tarifa=p.tarifa!=null?p.tarifa:vykazSadzba(zakl);
   const zaznam={
-    cislo: mes?("Akceptačný protokol_"+String(+mes[2]).padStart(2,"0")+"_"+mes[3]):"",
+    cislo: vm?("Akceptačný protokol_"+vm.slice(5,7)+"_"+vm.slice(0,4)):"",
     datum: new Date().toISOString().slice(0,10),
-    obdobie:p.obdobie||"", pracovnik:M.nazov||"",
+    obdobie:p.obdobie||"", pracovnik:(wP&&wP.pracovnik)||M.nazov||"",
     dni:p.cld, tarifa, suma:p.suma!=null?p.suma:r2(p.cld*tarifa),
     dodavatel:M.nazov||"", dodavatelIco:M.ico||"", dodavatelIcDph:M.icdph||"",
     dodavatelAdresa:M.adresa||"",
-    objednavatel:S.odberatelNazov||"", objednavatelIco:S.odberatelIco||"",
-    objednavatelAdresa:S.odberatelAdresa||"", schvalil:p.schvalil||S.odberatelSchvalil||"",
+    objednavatel:ODB.nazov, objednavatelIco:ODB.ico,
+    objednavatelAdresa:ODB.adresa, schvalil:p.schvalil||ODB.schvalil,
+    zakazka:(wP&&wP.zakazka)||"",
     miesto:M.obec||"", text:"", _import:true
   };
   firmaData.protokoly.unshift(zaznam);
+  if(wP && !wP.podpisany) wP.podpisany=new Date().toISOString().slice(0,10);
   closeModal(); _vykImport=null; poZmene(); appVykazy();
   cloudMsg("Protokol načítaný: "+cldTxt(p.cld)+" človekodní"+(zaznam.suma?" · "+eur(zaznam.suma):"")+".","ok");
 }
@@ -11882,7 +12348,7 @@ function icsSprievodca(){
     // obdobie = celý mesiac výkazu (výkaz sa fakturuje za mesiac)
     const [r,mm]=_icsMesiac.split("-").map(Number);
     const od=_icsMesiac+"-01", doD=_icsMesiac+"-"+String(new Date(r, mm, 0).getDate()).padStart(2,"0");
-    const w={...vykazPredvolene(), obdobie:fmtDatum(od)+" - "+fmtDatum(doD), polozky};
+    const w={...vykazPredvolene(), od, do:doD, obdobie:vykazObdobieText(od, doD), polozky};
     vykazPrepocitaj(w);
     if(!firmaData.vykazy) firmaData.vykazy=[];
     firmaData.vykazy.push(w); poZmene(); appVykazy();
@@ -13361,6 +13827,8 @@ function feModal(idx, nova, kluc){
     // sa k zálohe nepriznal.
     if(nova && !f.id) f.id=novyIdDokladu();
     if(nova) POLE().push(f); else POLE()[idx]=f;
+    // Faktúra z výkazu: väzba vzniká až uložením (Zrušiť nenechá stopu).
+    if(nova && KLUC==="faktury" && f.zVykazu) vykazPrepojFakturu(f);
     // Checkbox „Uhradená" ide cez tie isté funkcie ako zoznam — žiadny priamy
     // zápis príznaku (kap. 45.2). Odškrtnutie ruší len ručné tvrdenie; úhradu
     // potvrdenú bankovým výpisom checkbox neprebije.
@@ -21439,7 +21907,8 @@ function appData(){
     <div class="card">
       <h2 style="font-size:16px;margin-bottom:4px">Dokumenty a fakturácia</h2>
       <div class="csub" style="margin-bottom:14px">Predvolené hodnoty pre faktúry a výkazy.</div>
-      <div class="mfield"><label>Cena za človekodeň (€)</label><input type="number" id="set_denTarifa" value="${esc((d.settings||{}).denTarifa||350)}"></div>
+      <div class="mfield"><label>Cena za človekodeň (€)</label><input type="number" id="set_denTarifa" value="${esc((d.settings||{}).denTarifa||(d.settings||{}).tarifa||'')}" placeholder="napr. 350">
+        <div style="font-size:11.5px;color:var(--ink-soft);margin-top:4px">Použije sa, keď zákazka nemá v Dokumentoch zákazkový list so sadzbou. Prázdne = appka si sadzbu nevymýšľa.</div></div>
       <div class="mrow2">
         <div class="mfield"><label>Človekodeň sa počíta</label>
           <select id="set_mdRezim">
@@ -21449,6 +21918,11 @@ function appData(){
         <div class="mfield"><label>Hodín na 1 človekodeň</label><input type="number" step="0.5" min="0.5" id="set_mdHodin" value="${esc((d.settings||{}).mdHodin||8)}"></div>
       </div>
       <div style="font-size:11.5px;color:var(--ink-soft);margin:-6px 0 12px">Predvoľba pre nové výkazy. Jednotlivý výkaz si to môže prepnúť sám — zmluvy sa líšia.</div>
+      <details style="margin:0 0 12px"><summary style="cursor:pointer;font-size:13px;font-weight:600">✉ E-mail k výkazu (šablóna)</summary>
+        <div class="mfield" style="margin-top:8px"><label>Predmet</label><input id="set_vykazMailPredmet" value="${esc((d.settings||{}).vykazMailPredmet||'')}" placeholder="${esc(VYKAZ_MAIL_PREDMET)}"></div>
+        <div class="mfield"><label>Text</label><textarea id="set_vykazMailText" rows="8" style="width:100%;font:inherit;font-size:13px" placeholder="${esc(VYKAZ_MAIL_TEXT)}">${esc((d.settings||{}).vykazMailText||'')}</textarea></div>
+        <div style="font-size:11.5px;color:var(--ink-soft)">Prázdne = predvolený text (sivý). Doplní sa: {zakazka} {projekt} {mesiac} {obdobie} {cld} {faktura} {suma} {splatnost} {odberatel} {meno}. E-mail s výkazom, protokolom a faktúrou v PDF otvoríte na karte výkazu tlačidlom „✉ Poslať odberateľovi“.</div>
+      </details>
       <div class="mrow2">
         <div class="mfield"><label>Číslo zákazky</label><input id="set_zakazka" value="${esc((d.settings||{}).zakazkaCislo||'')}"></div>
         <div class="mfield"><label>Názov projektu</label><input id="set_projekt" value="${esc((d.settings||{}).projektNazov||'')}"></div>
@@ -21732,8 +22206,11 @@ async function ulozNastavenia(){
   s.kjCenaElektro=num("set_kjCenaElektro",0.15);
   s.kjNormaBenzin=num("set_kjNormaBenzin",6);
   // dokumenty
-  s.denTarifa=num("set_denTarifa",350);
-  s.tarifa=s.denTarifa; // alias pre protokol
+  // Prázdne pole = 0, nie 350: vymyslená sadzba by prešla do protokolu ako fakt
+  // (vykazSadzba, 9. 10. 2026). Pole chýba (firemný režim skrýva kartu, nie
+  // vynecháva) — vtedy ostane, čo bolo.
+  if(document.getElementById("set_denTarifa")){ s.denTarifa=num("set_denTarifa",0); s.tarifa=s.denTarifa; } // alias pre protokol
+  if(document.getElementById("set_vykazMailPredmet")){ s.vykazMailPredmet=val("set_vykazMailPredmet").trim(); s.vykazMailText=val("set_vykazMailText").trim(); }
   if(document.getElementById("set_mdRezim")) s.mdRezim=(val("set_mdRezim")==="dni")?"dni":"hodiny";
   // Nula alebo prázdno by delili nulou — vtedy sa vracia predvolených 8.
   if(document.getElementById("set_mdHodin")) s.mdHodin=num("set_mdHodin",VYKAZ_MD_HODIN_DEF)||VYKAZ_MD_HODIN_DEF;
@@ -32956,21 +33433,31 @@ function fakturaSpravaText(f){
       +".\n\nĎakujem a prajem pekný deň.\n"+(m.nazov||"")+(m.telefon||m.tel?"\n"+(m.telefon||m.tel):"")
   };
 }
-async function zdielajFakturu(idx){
-  const f=(firmaData.faktury||[])[idx]; if(!f) return;
+// PDF faktúry na odoslanie — importovaný originál taký, aký je, inak naša
+// šablóna. Jedna cesta pre „Poslať faktúru“ aj e-mail k výkazu.
+// Vracia {blob, nazov}, null (chyba) alebo false (človek zrušil pri IBAN).
+async function fakturaPdfNaOdoslanie(idx){
+  const f=(firmaData.faktury||[])[idx]; if(!f) return null;
   let blob=null, nazov="faktura_"+(f.cislo||"export")+".pdf";
   try{
     if(f.originalSubor){
       const url=await dokladUrl(f.originalSubor);
       if(url){ const r=await fetch(url); if(r.ok) blob=await r.blob(); }
     } else {
-      if(!potvrdIbanPreTlac()) return;
+      if(!potvrdIbanPreTlac()) return false;
       const sub=await fakturaPdfSubor(idx);
       blob=sub.blob || new Blob([sub.doc.output("arraybuffer")],{type:"application/pdf"});
       nazov=sub.nazov;
     }
   }catch(e){ console.error("PDF na zdieľanie:", e); }
-  if(!blob){ alert("PDF faktúry sa nepodarilo pripraviť."); return; }
+  return blob ? {blob, nazov} : null;
+}
+async function zdielajFakturu(idx){
+  const f=(firmaData.faktury||[])[idx]; if(!f) return;
+  const pdf=await fakturaPdfNaOdoslanie(idx);
+  if(pdf===false) return;
+  if(!pdf){ alert("PDF faktúry sa nepodarilo pripraviť."); return; }
+  const {blob, nazov}=pdf;
   const sprava=fakturaSpravaText(f);
   const subor=(typeof File==="function") ? new File([blob], nazov, {type:"application/pdf"}) : null;
   if(subor && navigator.share && navigator.canShare && navigator.canShare({files:[subor]})){
@@ -44151,8 +44638,8 @@ function splitPickTmp(strana, id){
 // ═══ ZMLUVY A DOKUMENTY — evidencia dôležitých firemných dokumentov ═══
 // Dáta: firmaData.dokumenty = [{id, nazov, typ, partner, platnostOd, platnostDo, poznamka, subor, pridane}]
 // Súbory sa ukladajú do Supabase Storage (bucket "dokumenty"), JSON drží len odkaz.
-const DOK_TYPY=["Zmluva","Dodatok","Poistka","Certifikát","Živnostenský list","GDPR","Faktúra/doklad","Iné"];
-const DOK_TYP_IKONA={"Zmluva":"📄","Dodatok":"📑","Poistka":"🛡","Certifikát":"🎖","Živnostenský list":"🪪","GDPR":"🔒","Faktúra/doklad":"🧾","Iné":"📎"};
+const DOK_TYPY=["Zmluva","Dodatok","Zákazkový list","Poistka","Certifikát","Živnostenský list","GDPR","Faktúra/doklad","Iné"];
+const DOK_TYP_IKONA={"Zmluva":"📄","Dodatok":"📑","Zákazkový list":"📋","Poistka":"🛡","Certifikát":"🎖","Živnostenský list":"🪪","GDPR":"🔒","Faktúra/doklad":"🧾","Iné":"📎"};
 function dokEnsure(){ if(!Array.isArray(firmaData.dokumenty)) firmaData.dokumenty=[]; return firmaData.dokumenty; }
 function dokExpiracia(d){ // dni do expirácie, alebo null
   if(!d.platnostDo) return null;
@@ -44190,7 +44677,7 @@ function appDokumenty(){
           <div style="font-size:20px">${DOK_TYP_IKONA[d.typ]||'📎'}</div>
           <div style="min-width:0">
             <div class="acol-strong" style="display:flex;align-items:center;gap:6px">${esc(d.nazov)} ${expBadge}</div>
-            <div class="acol-muted">${esc(d.typ||'')}${d.partner?' · '+esc(d.partner):''}${d.platnostDo?' · platí do '+fmtDatum(d.platnostDo):''}</div>
+            <div class="acol-muted">${esc(d.typ||'')}${d.zakazka&&d.zakazka.cislo?' '+esc(d.zakazka.cislo):''}${d.partner?' · '+esc(d.partner):''}${d.platnostDo?' · platí do '+fmtDatum(d.platnostDo):''}</div>
           </div>
           <div style="color:var(--line);font-size:16px">›</div>
         </div>`;
@@ -44201,10 +44688,30 @@ function appDokumenty(){
 function dokPridaj(idx){
   if(!strazZapis("dokumenty")) return;
   const d = idx!=null ? dokEnsure()[idx] : {};
+  const zk=d.zakazka||{}, jeZL=d.typ===DOK_ZAKAZKOVY_LIST;
   openModal(idx!=null?"Upraviť dokument":"Nový dokument", `
     <div class="mfield"><label>Názov</label><input id="dok_nazov" value="${esc(d.nazov||'')}" placeholder="napr. Rámcová zmluva s odberateľom"></div>
-    <div class="mfield"><label>Typ</label><select id="dok_typ">${DOK_TYPY.map(t=>`<option ${d.typ===t?'selected':''}>${t}</option>`).join('')}</select></div>
-    <div class="mfield"><label>Partner / protistrana (nepovinné)</label><input id="dok_partner" value="${esc(d.partner||'')}" placeholder="napr. Obchodná spoločnosť, s.r.o."></div>
+    <div class="mfield"><label>Typ</label><select id="dok_typ" onchange="dokTypZmeneny()">${DOK_TYPY.map(t=>`<option ${d.typ===t?'selected':''}>${t}</option>`).join('')}</select></div>
+    <div class="mfield"><label>Partner / protistrana <span id="dok_partner_pozn">${jeZL?'(odberateľ)':'(nepovinné)'}</span></label><input id="dok_partner" list="dok_odb_list" onchange="dokOdberatelVybrany(this.value)" value="${esc(d.partner||'')}" placeholder="napr. Obchodná spoločnosť, s.r.o.">
+      <datalist id="dok_odb_list">${odberateliaHistoria().map(o=>`<option value="${esc(o.nazov)}"></option>`).join('')}</datalist></div>
+    <div id="dok_zak" style="display:${jeZL?'block':'none'};border-left:3px solid var(--line);padding-left:10px;margin:4px 0 10px">
+      <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:8px">Z tohto listu si výkaz, protokol aj faktúra vezmú odberateľa a sadzbu.</div>
+      <div class="mrow2">
+        <div class="mfield"><label>Číslo zákazky</label><input id="dok_zcislo" value="${esc(zk.cislo||'')}" placeholder="napr. Z-2026-014"></div>
+        <div class="mfield"><label>Sadzba € / človekodeň bez DPH</label><input id="dok_zsadzba" type="number" step="0.01" min="0" inputmode="decimal" value="${esc(zk.sadzba!=null?String(zk.sadzba):'')}"></div>
+      </div>
+      <div class="mfield"><label>Projekt</label><input id="dok_zprojekt" value="${esc(zk.projekt||'')}" placeholder="názov projektu do výkazu a protokolu"></div>
+      <div class="mrow2">
+        <div class="mfield"><label>IČO odberateľa</label><input id="dok_zico" inputmode="numeric" value="${esc(zk.ico||'')}"></div>
+        <div class="mfield"><label>DIČ</label><input id="dok_zdic" inputmode="numeric" value="${esc(zk.dic||'')}"></div>
+      </div>
+      <div class="mfield"><label>IČ DPH (nepovinné)</label><input id="dok_zicdph" value="${esc(zk.icdph||'')}"></div>
+      <div class="mfield"><label>Adresa odberateľa</label><input id="dok_zadresa" value="${esc(zk.adresa||'')}"></div>
+      <div class="mrow2">
+        <div class="mfield"><label>Za odberateľa schvaľuje</label><input id="dok_zschvalil" value="${esc(zk.schvalil||'')}" placeholder="meno"></div>
+        <div class="mfield"><label>E-mail na výkaz a faktúru</label><input id="dok_zemail" type="email" value="${esc(zk.email||'')}"></div>
+      </div>
+    </div>
     <div class="mrow2">
       <div class="mfield"><label>Platnosť od</label><input id="dok_od" type="date" value="${esc((d.platnostOd||'').slice(0,10))}"></div>
       <div class="mfield"><label>Platnosť do</label><input id="dok_do" type="date" value="${esc((d.platnostDo||'').slice(0,10))}"></div>
@@ -44221,6 +44728,17 @@ function dokPridaj(idx){
   });
   zamOkno("dokumenty");
 }
+function dokTypZmeneny(){
+  const jeZL=(document.getElementById("dok_typ")||{}).value===DOK_ZAKAZKOVY_LIST;
+  const z=document.getElementById("dok_zak"); if(z) z.style.display=jeZL?"block":"none";
+  const p=document.getElementById("dok_partner_pozn"); if(p) p.textContent=jeZL?"(odberateľ)":"(nepovinné)";
+}
+// Odberateľ z doterajších faktúr doplní IČO, DIČ, IČ DPH a adresu — len prázdne polia.
+function dokOdberatelVybrany(nazov){
+  const o=odberateliaHistoria().find(x=>x.nazov===String(nazov||"").trim()); if(!o) return;
+  [["dok_zico","ico"],["dok_zdic","dic"],["dok_zicdph","icdph"],["dok_zadresa","adresa"]].forEach(([id,k])=>{
+    const el=document.getElementById(id); if(el && !el.value.trim() && o[k]) el.value=o[k]; });
+}
 async function dokUloz(idx, f){
   const beh=behFirmy();
   const nazov=(document.getElementById("dok_nazov").value||"").trim();
@@ -44233,6 +44751,15 @@ async function dokUloz(idx, f){
   zaznam.platnostOd=document.getElementById("dok_od").value||"";
   zaznam.platnostDo=document.getElementById("dok_do").value||"";
   zaznam.poznamka=(document.getElementById("dok_pozn").value||"").trim();
+  if(zaznam.typ===DOK_ZAKAZKOVY_LIST){
+    const hod=id=>String((document.getElementById(id)||{}).value||"").trim();
+    const zk={ cislo:hod("dok_zcislo"), projekt:hod("dok_zprojekt"), sadzba:parseFloat(hod("dok_zsadzba").replace(",","."))||0,
+      ico:hod("dok_zico"), icdph:hod("dok_zicdph"), dic:hod("dok_zdic"), adresa:hod("dok_zadresa"),
+      schvalil:hod("dok_zschvalil"), email:hod("dok_zemail") };
+    // bez čísla by list nepatril k žiadnemu výkazu — identita nesmie byť prázdna
+    if(!zk.cislo){ alert("Zákazkový list potrebuje číslo zákazky — podľa neho si ho nájde výkaz."); return false; }
+    zaznam.zakazka=zk;
+  } else delete zaznam.zakazka;
   // nahraj súbor ak je vybraný
   // Nahradený súbor sa maže až po uložení nového odkazu (č. 88): zmazaný hneď
   // po nahratí a zlyhaný zápis nechali dokument v cloude ukazovať do prázdna.
@@ -44273,6 +44800,9 @@ function dokDetail(idx){
       ${d.partner?`<div class="arow" style="grid-template-columns:1fr 1fr"><div class="acol-muted">Partner</div><div style="text-align:right">${esc(d.partner)}</div></div>`:''}
       ${d.platnostOd?`<div class="arow" style="grid-template-columns:1fr 1fr"><div class="acol-muted">Platnosť od</div><div style="text-align:right">${fmtDatum(d.platnostOd)}</div></div>`:''}
       ${d.platnostDo?`<div class="arow" style="grid-template-columns:1fr 1fr"><div class="acol-muted">Platnosť do</div><div style="text-align:right">${fmtDatum(d.platnostDo)}${exp!=null?` (${exp<0?'expirovalo':exp===0?'dnes':'o '+exp+' dní'})`:''}</div></div>`:''}
+      ${d.zakazka?[["Číslo zákazky",d.zakazka.cislo],["Projekt",d.zakazka.projekt],["Sadzba",d.zakazka.sadzba?eur(d.zakazka.sadzba)+" / čld bez DPH":""],
+        ["IČO",d.zakazka.ico],["DIČ",d.zakazka.dic],["IČ DPH",d.zakazka.icdph],["Adresa",d.zakazka.adresa],["Schvaľuje",d.zakazka.schvalil],["E-mail",d.zakazka.email]]
+        .filter(x=>x[1]).map(x=>`<div class="arow" style="grid-template-columns:1fr 2fr"><div class="acol-muted">${x[0]}</div><div style="text-align:right">${esc(String(x[1]))}</div></div>`).join(''):''}
       ${d.poznamka?`<div class="arow" style="grid-template-columns:1fr 2fr"><div class="acol-muted">Poznámka</div><div style="text-align:right">${esc(d.poznamka)}</div></div>`:''}
       ${d.suborNazov?`<div class="arow" style="grid-template-columns:1fr 2fr"><div class="acol-muted">Súbor</div><div style="text-align:right">${esc(d.suborNazov)}</div></div>`:''}
     </div>

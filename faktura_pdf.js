@@ -961,3 +961,176 @@ export function vykresliZostavu(jsPDF, model, opts = {}) {
   paticka();
   return doc;
 }
+
+// ═══════════════════════════════════════════════════════════════
+//  VÝKAZ PRÁC A AKCEPTAČNÝ PROTOKOL (Roman 9. 10. 2026)
+//
+//  Dovtedy len Word/Excel — odberateľovi išiel súbor, ktorý sa dá prepísať,
+//  a e-mail s tromi prílohami (výkaz, protokol, faktúra) mal každú inak.
+//  Jedna šablóna na výšku pre oba doklady: hlavička ako faktúra, údaje,
+//  tabuľka (výkaz) alebo text so súhrnom (protokol), podpisy.
+//
+//  model = { nadpis, cislo, meta:[[popis, hodnota]],
+//            strany:[{titulok, riadky:[…]}],            // objednávateľ / dodávateľ
+//            stlpce:[{k,n,w,zar}], riadky:[{…}], sucet:{…},
+//            odstavec, suhrn:[[popis, hodnota]],
+//            miestoDatum, podpisy:[{titulok, meno, podpis:bool}], pata }
+//  opts.podpisPng = data URL obrázka podpisu dodávateľa (Nastavenia)
+// ═══════════════════════════════════════════════════════════════
+export function vykresliPracovnyDoklad(jsPDF, model, opts = {}) {
+  const doc = chranFont(new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" }));
+  const FONT = registrujFont(doc) ? "LibSans" : "helvetica";
+  const { INK, SOFT, MUTED, LINE, BRAND, BGSOFT, BIELA, AKCENT, LOGO2 } = PALETA;
+  const W = 210, H = 297, L = 16, R = W - 16, PATA = H - 12;
+  const setC = c => doc.setTextColor(c[0], c[1], c[2]);
+  const setF = c => doc.setFillColor(c[0], c[1], c[2]);
+  const setD = c => doc.setDrawColor(c[0], c[1], c[2]);
+  let strana = 0;
+
+  const hlavicka = () => {
+    strana++;
+    const y = 20, lsz = 10, ly = y - 7;
+    setF(BRAND); doc.roundedRect(L, ly, lsz, lsz, 2, 2, "F");
+    doc.setFont(FONT, "bold"); doc.setFontSize(12.5); setC(BIELA);
+    doc.text("e", L + lsz / 2 - 0.4, y - 0.2, { align: "center" });
+    setF(AKCENT); doc.roundedRect(L + lsz - 3.4, ly + 1.6, 1.5, 1.5, 0.35, 0.35, "F");
+    setF(LOGO2);  doc.roundedRect(L + lsz - 1.7, ly + 1.6, 1.5, 1.5, 0.35, 0.35, "F");
+    doc.roundedRect(L + lsz - 3.4, ly + 3.3, 1.5, 1.5, 0.35, 0.35, "F");
+    doc.setFont(FONT, "bold"); doc.setFontSize(16); setC(INK);
+    doc.text(model.nadpis || "", L + lsz + 5, y);
+    if (model.cislo) {
+      doc.setFont(FONT, "normal"); doc.setFontSize(9.5); setC(SOFT);
+      doc.text(String(model.cislo), R, y, { align: "right" });
+    }
+    setD(LINE); doc.setLineWidth(0.4); doc.line(L, y + 5, R, y + 5);
+    return y + 13;
+  };
+  const paticka = () => {
+    doc.setFont(FONT, "normal"); doc.setFontSize(7.3); setC(MUTED);
+    doc.text((model.pata || model.nadpis || "") , L, PATA);
+    doc.text("strana " + strana, (L + R) / 2, PATA, { align: "center" });
+    const label = "Vytvorené v ", url = "ezivnostnik.eu";
+    const wLabel = doc.getTextWidth(label), wUrl = doc.getTextWidth(url);
+    doc.text(label, R - wLabel - wUrl, PATA);
+    setC(BRAND); doc.text(url, R - wUrl, PATA);
+  };
+  const novaStrana = () => { paticka(); doc.addPage(); return hlavicka(); };
+
+  let y = hlavicka();
+
+  // údaje (projekt, zákazka, pracovník, obdobie)
+  (model.meta || []).filter(m => m && m[1] != null && String(m[1]) !== "").forEach(([p, v]) => {
+    doc.setFont(FONT, "bold"); doc.setFontSize(9.5); setC(SOFT);
+    doc.text(String(p), L, y);
+    doc.setFont(FONT, "normal"); setC(INK);
+    const lines = doc.splitTextToSize(String(v), R - L - 42);
+    lines.forEach((l, i) => doc.text(l, L + 42, y + i * 4.6));
+    y += Math.max(1, lines.length) * 4.6 + 1.2;
+  });
+
+  // zmluvné strany vedľa seba
+  const strany = (model.strany || []).filter(s => s && (s.riadky || []).some(Boolean));
+  if (strany.length) {
+    y += 3;
+    const sir = (R - L - 8) / strany.length;
+    let maxY = y;
+    strany.forEach((s, i) => {
+      const x = L + i * (sir + 8);
+      let yy = y;
+      doc.setFont(FONT, "bold"); doc.setFontSize(8); setC(MUTED);
+      doc.text(String(s.titulok || "").toUpperCase(), x, yy); yy += 5;
+      (s.riadky || []).filter(Boolean).forEach((r, j) => {
+        doc.setFont(FONT, j === 0 ? "bold" : "normal"); doc.setFontSize(j === 0 ? 10 : 9); setC(j === 0 ? INK : SOFT);
+        doc.splitTextToSize(String(r), sir).forEach(l => { doc.text(l, x, yy); yy += 4.4; });
+      });
+      maxY = Math.max(maxY, yy);
+    });
+    y = maxY + 4;
+  }
+
+  // tabuľka dní (výkaz) — činnosť sa zalamuje, riadok rastie
+  const stlpce = model.stlpce || [];
+  if (stlpce.length) {
+    y += 2;
+    const zadane = stlpce.reduce((a, s) => a + (+s.w || 0), 0) || 1;
+    const mierka = (R - L) / zadane;
+    const x0 = []; stlpce.reduce((x, s, i) => { x0[i] = x; return x + (+s.w || 0) * mierka; }, L);
+    const sirka = i => (+stlpce[i].w || 0) * mierka;
+    const hlavaTab = () => {
+      setF(BGSOFT); doc.rect(L, y - 4.4, R - L, 7, "F");
+      setD(LINE); doc.setLineWidth(0.3); doc.line(L, y + 2.6, R, y + 2.6);
+      doc.setFont(FONT, "bold"); doc.setFontSize(8.4); setC(SOFT);
+      stlpce.forEach((s, i) => { const pr = s.zar === "r";
+        doc.text(String(s.n || ""), pr ? x0[i] + sirka(i) - 1.5 : x0[i] + 1.5, y, { align: pr ? "right" : "left" }); });
+      y += 7.5;
+    };
+    hlavaTab();
+    const riadok = (r, tucne) => {
+      doc.setFont(FONT, tucne ? "bold" : "normal"); doc.setFontSize(tucne ? 9 : 8.8);
+      const bunky = stlpce.map((s, i) => doc.splitTextToSize(String(r[s.k] == null ? "" : r[s.k]), sirka(i) - 3));
+      const vys = Math.max(1, ...bunky.map(b => b.length)) * 4.1 + 1.6;
+      if (y + vys > PATA - 8) { y = novaStrana(); hlavaTab(); doc.setFont(FONT, tucne ? "bold" : "normal"); doc.setFontSize(tucne ? 9 : 8.8); }
+      setC(r._tlmene ? MUTED : INK);
+      bunky.forEach((b, i) => { const pr = stlpce[i].zar === "r";
+        b.forEach((l, k) => doc.text(l, pr ? x0[i] + sirka(i) - 1.5 : x0[i] + 1.5, y + k * 4.1, { align: pr ? "right" : "left" })); });
+      setD(LINE); doc.setLineWidth(tucne ? 0.5 : 0.15);
+      const yl = tucne ? y - 4.2 : y + vys - 4.2;
+      doc.line(L, yl, R, yl);
+      y += vys;
+    };
+    (model.riadky || []).forEach(r => riadok(r, false));
+    if (model.sucet) { y += 1; riadok(model.sucet, true); }
+    y += 4;
+  }
+
+  if (model.odstavec) {
+    doc.setFont(FONT, "normal"); doc.setFontSize(10); setC(INK);
+    const lines = doc.splitTextToSize(String(model.odstavec), R - L);
+    if (y + lines.length * 5 > PATA - 60) y = novaStrana();
+    y += 2;
+    lines.forEach(l => { doc.text(l, L, y); y += 5; });
+    y += 3;
+  }
+
+  // súhrn (protokol): rámček s číslami, ktoré sa fakturujú
+  const suhrn = (model.suhrn || []).filter(s => s && s[1] != null && String(s[1]) !== "");
+  if (suhrn.length) {
+    const vys = suhrn.length * 6 + 5;
+    if (y + vys > PATA - 50) y = novaStrana();
+    setF(BGSOFT); doc.roundedRect(L, y, R - L, vys, 2, 2, "F");
+    let yy = y + 6.5;
+    suhrn.forEach(([p, v], i) => {
+      const posl = i === suhrn.length - 1;
+      doc.setFont(FONT, "normal"); doc.setFontSize(9.5); setC(SOFT);
+      doc.text(String(p), L + 5, yy);
+      doc.setFont(FONT, "bold"); doc.setFontSize(posl ? 11 : 10); setC(posl ? BRAND : INK);
+      doc.text(String(v), R - 5, yy, { align: "right" });
+      yy += 6;
+    });
+    y += vys + 6;
+  }
+
+  // miesto, dátum a podpisy
+  const podpisy = model.podpisy || [];
+  if (model.miestoDatum || podpisy.length) {
+    if (y > PATA - 52) y = novaStrana();
+    y += 4;
+    if (model.miestoDatum) { doc.setFont(FONT, "normal"); doc.setFontSize(9.5); setC(INK); doc.text(String(model.miestoDatum), L, y); y += 10; }
+    const sir = (R - L - 10) / Math.max(1, podpisy.length);
+    podpisy.forEach((p, i) => {
+      const x = L + i * (sir + 10);
+      doc.setFont(FONT, "bold"); doc.setFontSize(9); setC(SOFT);
+      doc.text(String(p.titulok || ""), x, y);
+      doc.setFont(FONT, "normal"); doc.setFontSize(9.5); setC(INK);
+      doc.text(String(p.meno || ""), x, y + 5.5);
+      if (p.podpis && opts.podpisPng) {
+        try { doc.addImage(opts.podpisPng, "PNG", x, y + 8, 40, 17.7); } catch (e) { console.warn("podpis sa nevložil:", e); }
+      }
+      setD(MUTED); doc.setLineWidth(0.3); doc.line(x, y + 28, x + Math.min(sir, 75), y + 28);
+      doc.setFontSize(7.8); setC(MUTED); doc.text("dátum a podpis", x, y + 32);
+    });
+    y += 36;
+  }
+  paticka();
+  return doc;
+}
