@@ -606,6 +606,14 @@ export function modelSaasFaktury(f, dodavatel) {
   // dobropisy v appke (spec 100.2); riadok −1 × kladná cena, nadpis a odkaz
   // na opravovanú faktúru. Ten istý tvar nesie ISDOC/UBL (efaktura_xml.js).
   const dobropis = f.typ === "dobropis";
+  // Prevod (admin_67): faktúra až po pripísaní platby, deň pripísania je
+  // dátum úhrady. Obnova zaplatená pred začiatkom obdobia = platba vopred
+  // (§ 19 ods. 4 ZDPH) → dodanie je skorší z dvoch dátumov. To isté pravidlo
+  // je `dodanieSaas` v efaktura_xml.js; zhodu PDF = ISDOC = UBL stráži
+  // test_efaktura_xml.
+  const prevod = f.uhrada === "prevod";
+  const uhr = datumZoZaznamu(f.uhradene), od = datumZoZaznamu(f.obdobie_od || f.vystavene);
+  const dodanie = prevod && /^\d{4}-\d{2}-\d{2}$/.test(uhr) && /^\d{4}-\d{2}-\d{2}$/.test(od) && uhr < od ? uhr : od;
   return {
     ...(dobropis ? { nadpisDokladu: "DOBROPIS", podnadpis: "Opravuje faktúru č. " + (f.opravuje || "") } : {}),
     cislo: f.cislo,
@@ -613,8 +621,8 @@ export function modelSaasFaktury(f, dodavatel) {
       nazov: dodavatel.nazov, adresa: dodavatel.adresa,
       ico: dodavatel.ico, dic: dodavatel.dic, icdph: dodavatel.icdph,
       email: dodavatel.email, zivReg: dodavatel.zivReg,
-      // zámerne bez IBAN — faktúra je zaplatená kartou, výzva na prevod by
-      // zvádzala k druhej úhrade
+      // zámerne bez IBAN — faktúra je zaplatená (kartou aj prevodom vzniká až
+      // po platbe), výzva na prevod by zvádzala k druhej úhrade
       iban: null, swift: null,
     },
     odberatel: {
@@ -633,10 +641,14 @@ export function modelSaasFaktury(f, dodavatel) {
       // istý dátum nesie ISDOC aj UBL (efaktura_xml.js modelEfakturySaas).
       // Pri karte je to deň platby; pri obnove začiatok nového obdobia.
       // Priznanie B obdobie nemá → deň vystavenia.
-      dodanie: datumZoZaznamu(f.obdobie_od || f.vystavene),
-      splatnost: null,           // uhradené kartou, splatnosť nemá zmysel
+      dodanie,
+      splatnost: null,           // uhradené vopred, splatnosť nemá zmysel
     },
-    platba: { sposob: dobropis ? "Vrátené na platobnú kartu" : "Uhradené kartou", vs: null },
+    platba: {
+      sposob: dobropis ? "Vrátené na platobnú kartu"
+        : prevod ? "Uhradené prevodom" + (uhr ? " " + fmtDatum(uhr) : "") : "Uhradené kartou",
+      vs: prevod && f.vs ? String(f.vs) : null,
+    },
     // Celý popis ide do ODSEKU nad tabuľkou, nie do názvu položky: bunka má
     // 54 mm a `splitTextToSize(...)[0]` v šablóne berie len prvý riadok —
     // dlhý text by sa ticho odsekol uprostred slova.
@@ -650,6 +662,7 @@ export function modelSaasFaktury(f, dodavatel) {
     poznamka: dobropis
       // priznanie B obdobie nemá a predplatné nie je — veta o ukončení len pri predplatnom
       ? "Suma bola vrátená na platobnú kartu, ktorou bola faktúra " + (f.opravuje || "") + " uhradená." + (f.obdobie_od ? " Predplatné je ukončené." : "")
+      : prevod ? "Faktúra bola uhradená bankovým prevodom" + (uhr ? " " + fmtDatum(uhr) : "") + ". Neuhrádzajte ju znova."
       : "Faktúra bola uhradená platobnou kartou. Neuhrádzajte ju znova.",
   };
 }

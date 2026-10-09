@@ -410,14 +410,17 @@ export function modelEfakturySaas(r, dodavatel, opts = {}) {
   // (tak drží dobropisy celá appka — spec 100.2, `dobropisZaporne`), riadok má
   // množstvo −1 a KLADNÚ cenu (záporná jednotková cena = BR-27).
   const dobropis = r.typ === "dobropis";
+  // Prevod (admin_67): faktúra vzniká až po pripísaní platby — je zaplatená
+  // celá (PrepaidAmount = spolu, na úhradu 0), dátum úhrady = deň pripísania.
+  const prevod = (opts.platba || r.uhrada) === "prevod";
   return {
     doklad: dobropis ? "381" : "380",
     opravuje: dobropis ? String(r.opravuje || "") : "",
     cislo: String(r.cislo || ""),
     uuid: opts.uuid || uuidZTextu("saas:" + (r.cislo || "")),
     vystavene: datum(r.vystavene),
-    dodanie: datum(r.obdobie_od || r.vystavene),
-    splatnost: null,
+    dodanie: datum(dodanieSaas(r)),
+    splatnost: prevod && r.uhradene ? datum(r.uhradene) : null,
     mena: r.mena || "EUR",
     poznamka: r.popis || "",
     buyerRef: String(r.cislo || ""),
@@ -428,7 +431,19 @@ export function modelEfakturySaas(r, dodavatel, opts = {}) {
     riadky: [dobropis
       ? { nazov: r.popis || "Dobropis — predplatné eživnostník", mn: -1, mj: "mesiac", cena: Math.abs(zaklad) }
       : { nazov: r.popis || "Predplatné eživnostník", mn: 1, mj: "mesiac", cena: zaklad }],
-    sumy: { bez: zaklad, dph: +r.dph || 0, spolu: +r.spolu || 0 },
-    platba: { kod: opts.platba === "prevod" ? "30" : "48", vs: opts.vs || "", iban: D.iban },
+    sumy: { bez: zaklad, dph: +r.dph || 0, spolu: +r.spolu || 0, ...(prevod ? { prepaid: +r.spolu || 0 } : {}) },
+    platba: { kod: prevod ? "30" : "48", vs: opts.vs || r.vs || "", iban: D.iban },
   };
+}
+
+// Deň dodania (zdaniteľného plnenia) faktúry za predplatné. Pravidlo je prvý
+// deň predplatného (Roman 8. 10. 2026) — pri karte aj pri prvej platbe
+// prevodom je to deň platby. Obnova prevodom zaplatená PRED začiatkom obdobia
+// je platba vopred: daňová povinnosť vzniká jej prijatím (§ 19 ods. 4 ZDPH),
+// takže platí skorší z dvoch dátumov. Druhá kópia je vo faktura_pdf.js
+// (modelSaasFaktury) — zhodu PDF = ISDOC = UBL stráži test_efaktura_xml.
+export function dodanieSaas(r) {
+  const od = String(r.obdobie_od || r.vystavene || "").slice(0, 10);
+  const uhr = String(r.uhradene || "").slice(0, 10);
+  return r.uhrada === "prevod" && /^\d{4}-\d{2}-\d{2}$/.test(uhr) && /^\d{4}-\d{2}-\d{2}$/.test(od) && uhr < od ? uhr : (r.obdobie_od || r.vystavene);
 }

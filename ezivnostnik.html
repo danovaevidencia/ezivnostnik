@@ -2262,7 +2262,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.10.09-RX";  // podmienky 1.10: príjem e-faktúr vo Free (spec 150.6)
+const APP_VERZIA = "2026.10.09-RY";  // podmienky 1.11, zásady 1.24: predplatné prevodom (admin_67)
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -3016,6 +3016,9 @@ async function nacitajFirmaConfig(fid){
     if(error) firmaConfigChyba = error.message;
     else if(data) firmaConfig = data;
     else if(mojaRolaVFirme()!=="vlastnik") firmaConfigChyba = "konfigurácia firmy sa nevrátila";
+    // Čakajúca výzva na platbu prevodom (admin_67) — pre Predplatné aj cenník.
+    // Na pozadí: plán firmy na ňu nečaká.
+    nacitajPrevodCakajucu().catch(e=>console.error("čakajúca výzva:", e));
   }catch(e){
     if(beh.platny()) firmaConfigChyba = e.message;
     else console.error("nacitajFirmaConfig (medzitým iná firma):", e);
@@ -6729,7 +6732,8 @@ function zbierNotifikacie(){
         nazov:"Predplatné vypršalo", detail:"Prešli ste na plán Free.", akcia:()=>zobrazCennik()});
     } else if(doKonca!==null && doKonca<=7){
       out.push({kluc:"plan:expiruje:"+(firmaConfig&&firmaConfig.plan_do||""), ic:"⏳", nal:"warn",
-        nazov:"Predplatné sa čoskoro obnoví",
+        // prevod sa neobnovuje sám (admin_67) — človek musí zaplatiť výzvu
+        nazov:(firmaConfig&&firmaConfig.plan_kanal==="prevod") ? "Zaplaťte predplatné prevodom" : "Predplatné sa čoskoro obnoví",
         detail:"Ostáva"+(doKonca===1?"":"jú")+" "+doKonca+" "+
                (doKonca===1?"deň":doKonca<5?"dni":"dní")+".", akcia:()=>zobrazCennik()});
     }
@@ -12513,7 +12517,8 @@ async function importSaasJson(subor){
       ...(dobropis ? { opravujeDoklad:String(f.opravuje||""), druhOpravy:"dobropis" } : {}),
       // Platba kartou cez Stripe prebehla v deň vystavenia — faktúra je
       // uhradená hneď, inak by ju appka vykazovala ako pohľadávku.
-      zaplatena: true, datumUhrady: f.datum, sposobUhrady: "karta",
+      // prevod (admin_67): uhradené dňom pripísania; staršie exporty = karta v deň vystavenia
+      zaplatena: true, datumUhrady: f.uhradene || f.datum, sposobUhrady: f.uhrada==="prevod" ? "prevod" : "karta",
       zdroj: "saas",
     });
     uz.add(cislo); pridane.push(cislo); pridanych++;
@@ -20872,8 +20877,8 @@ function dmKopiruj(){
 // stránkou stráži test_pravne, takže nová verzia dokumentu bez úpravy tu
 // sadu zhodí.
 const DOKUMENTY={
-  podmienky:{url:"podmienky.html",     n:"Obchodné podmienky",      verzia:"1.10"},
-  sukromie: {url:"sukromie.html",      n:"Ochrana osobných údajov", verzia:"1.23"},
+  podmienky:{url:"podmienky.html",     n:"Obchodné podmienky",      verzia:"1.11"},
+  sukromie: {url:"sukromie.html",      n:"Ochrana osobných údajov", verzia:"1.24"},
   zmazanie: {url:"zmazanie-uctu.html", n:"Zmazanie účtu a údajov"},
 };
 // Záznam súhlasu k účtu (ROZHODNUTIA č. 52). Zmluva vzniká vytvorením účtu
@@ -21128,8 +21133,11 @@ function appData(){
           </div>
         </div>
         ${dni!==null&&dni<=7&&dni>0?`<div style="background:var(--sfc-warn);border-left:3px solid var(--warn);border-radius:0 8px 8px 0;padding:9px 12px;margin-bottom:10px;font-size:12px;line-height:1.5">
-          Predplatné sa čoskoro obnoví. Ak ste ho zrušili, po ${fmtDatum(doKedy.toISOString().slice(0,10))} prejdete na plán Free.
+          ${(firmaConfig||{}).plan_kanal==="prevod"
+            ? `Predplatné prevodom končí ${fmtDatum(doKedy.toISOString().slice(0,10))} a samo sa neobnoví. Zaplaťte výzvu na ďalší mesiac, inak prejdete na plán Free.`
+            : `Predplatné sa čoskoro obnoví. Ak ste ho zrušili, po ${fmtDatum(doKedy.toISOString().slice(0,10))} prejdete na plán Free.`}
         </div>`:''}
+        ${prevodBoxHtml()}
         ${uctovnikMiestoHtml()}
         <button class="abtn ${aktualnyPlan()==='free'?'pri':''}" onclick="zobrazCennik()" style="width:100%">
           ${aktualnyPlan()==='free'?'Zobraziť plány a ceny':'Zmeniť plán'}
@@ -25683,7 +25691,9 @@ function kartaPlanu(p){
           const rovnake = U && (+kap.kapacita_neplatitelia||0)===U.neplatitelia && (+kap.kapacita_platitelia||0)===U.platitelia;
           if(U && znamy && !rovnake){
             const text = `Zmeniť na ${U.neplatitelia} + ${U.platitelia} klientov`;
-            return smie ? `<button class="abtn pri" style="width:100%;--_c:${p.farba}" onclick="spustiPredplatne('uctovnik','mes',null,${klientiArg})">${text}</button>` : stlmene(text);
+            // kanál ostáva: pri prevode server pripraví doplatkovú výzvu (admin_67)
+            const kanal = (firmaConfig && firmaConfig.plan_kanal==="prevod") ? ",'prevod'" : "";
+            return smie ? `<button class="abtn pri" style="width:100%;--_c:${p.farba}" onclick="spustiPredplatne('uctovnik','mes',null,${klientiArg}${kanal})">${text}</button>` : stlmene(text);
           }
           return `<button class="abtn" disabled style="width:100%;opacity:.5">Aktívny plán</button>`;
         }
@@ -25697,7 +25707,11 @@ function kartaPlanu(p){
         const jeZmena = akt!=="free";
         const text = jeZmena ? `Prejsť na ${p.nazov}` : `Predplatiť ${p.nazov}`;
         if(!smie) return stlmene(text);
-        return `<button class="abtn pri" style="width:100%;--_c:${p.farba}" onclick="spustiPredplatne('${p.kod}','${cennikRocne?'rok':'mes'}',null,${klientiArg})">${text}</button>`;
+        // Prevodom len nové mesačné predplatné (admin_67): zmena bežiaceho ide
+        // kanálom, ktorým sa platí, a prevod obnovuje výzva servera.
+        const prevodom = !jeZmena && !cennikRocne
+          ? `<button class="abtn" style="width:100%;margin-top:6px" onclick="spustiPredplatne('${p.kod}','mes',null,${klientiArg},'prevod')">Zaplatiť prevodom</button>` : "";
+        return `<button class="abtn pri" style="width:100%;--_c:${p.farba}" onclick="spustiPredplatne('${p.kod}','${cennikRocne?'rok':'mes'}',null,${klientiArg})">${text}</button>${prevodom}`;
       })()}
     </div>`;
 }
@@ -25715,8 +25729,36 @@ function akciaKodHtml(dnes){
   return `<div class="nv-plan" style="margin-top:12px"><span aria-hidden="true">🎁</span><span>Máte <b>akciový kód</b> z e-mailu alebo zo sociálnej siete? Zadáte ho na stránke platby v políčku na zľavový kód. Platí pri <b>mesačnom</b> predplatnom — <a href="akcia.html" target="_blank" rel="noopener">podmienky akcie</a>.</span></div>`;
 }
 
+// Predplatné prevodom v cenníku (admin_67): čakajúca výzva s QR a zrušením,
+// alebo kedy príde ďalšia. Výzva sa dočíta na pozadí a rámček sa prekreslí.
+function prevodBoxHtml(){
+  const v=prevodCakajuca, cfg=firmaConfig||{};
+  const ram=(obsah)=>`<div style="background:var(--brand-lite);border-left:3px solid var(--brand);border-radius:0 10px 10px 0;padding:11px 14px;margin-bottom:14px;font-size:13px;line-height:1.6">${obsah}</div>`;
+  if(v){
+    const plan=(PLANY[v.plan]||{}).nazov||v.plan;
+    return ram(`<b>Čaká na platbu prevodom:</b> ${eur(+v.suma||0)} · ${esc(plan)}${v.doplatok?" (doplatok)":v.je_obnova?" (ďalší mesiac)":""}
+      · VS ${esc(String(v.vs))} · splatnosť ${fmtDatum(String(v.splatnost).slice(0,10))}
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:9px">
+        <button class="abtn pri" onclick="ukazVyzvuPrevodom(prevodVyzvaZCakajucej())">QR kód a údaje na platbu</button>
+        ${smiemMenitPredplatne()?`<button class="abtn" onclick="zrusVyzvuPrevodom('${esc(String(v.id))}')">Zrušiť výzvu</button>`:""}
+      </div>`);
+  }
+  if(cfg.plan_kanal==="prevod" && cfg.plan_do && new Date(cfg.plan_do)>new Date() && aktualnyPlan()!=="free"){
+    return ram(`<b>Predplatné platíte prevodom</b> do ${fmtDatum(String(cfg.plan_do).slice(0,10))}.
+      Samo sa neobnovuje — 7 dní pred koncom vám pošleme výzvu na ďalšiu platbu (a deň pred koncom pripomienku).`);
+  }
+  return "";
+}
+function prevodVyzvaZCakajucej(){
+  const v=prevodCakajuca||{};
+  return { ...v, aktivovane: !v.je_obnova && !v.doplatok && aktualnyPlan()!=="free" };
+}
+
 function zobrazCennik(modul){
   const akt=aktualnyPlan();
+  if(!localMode && sb && firmaId){
+    nacitajPrevodCakajucu().then(()=>{ const el=document.getElementById("cenPrevod"); if(el) el.innerHTML=prevodBoxHtml(); });
+  }
   const poznamka = (modul && APPS[modul])
     ? `<div class="nv-plan"><span aria-hidden="true">🔒</span><span><b>${esc(APPS[modul].n)}</b> vo vašom pláne nie je.${planyModuluHtml(modul)}</span></div>`
     : "";
@@ -25744,6 +25786,7 @@ function zobrazCennik(modul){
           ? `<button class="abtn" style="margin-top:9px" onclick="zrusitZmenuPlanu()">Zrušiť naplánovanú zmenu</button>`
           : `<div style="margin-top:6px;color:var(--ink-soft)">${esc(ZMENA_PLANU_LEN_VLASTNIK)}</div>`}
       </div>`; })()}
+    <div id="cenPrevod">${prevodBoxHtml()}</div>
     <div class="cenMriezka">
       ${kartaPlanu(PLANY.free)}
       ${kartaPlanu(PLANY.standard)}
@@ -25851,6 +25894,8 @@ const SAAS_DODAVATEL = {
   zivReg: "140-35561",
   register: "Živnostenský register: 140-35561",
   web:   "ezivnostnik.eu",
+  // účet na predplatné prevodom (admin_67) — záloha, keď výzva nepríde zo servera
+  iban:  "SK59 5600 0000 0007 6001 1001",
 };
 
 let _saasFaktury = null;      // cache, aby sa nesťahovali pri každom prekreslení
@@ -25864,7 +25909,7 @@ async function nacitajSaasFaktury(){
   try{
     const { data, error } = await sb.from("saas_faktury")
       .select("cislo, popis, obdobie_od, obdobie_do, zaklad, sadzba_dph, dph, spolu, mena, vystavene, "+
-              "odb_nazov, odb_adresa, odb_ico, odb_dic, odb_icdph, typ, opravuje")
+              "odb_nazov, odb_adresa, odb_ico, odb_dic, odb_icdph, typ, opravuje, uhrada, uhradene, vs")
       // FILTER JE POVINNÝ, nestačí RLS. Politika `sfakt_select` púšťa okrem
       // vlastníka aj administrátora — takže adminovi vráti faktúry VŠETKÝCH
       // zákazníkov a `autoZaevidujSaasFaktury` mu ich zaúčtuje do výdavkov
@@ -26366,7 +26411,8 @@ function uctovnikMiestoHtml(){
         </div>`);
     }
     if(planHradiUctovnik()) return box(`Plán tejto firmy hradí iný účtovník.`);
-    if(cfg.stripe_sub_id) return box(`Firmu spravujete, plán si klient platí sám.`);
+    // klient platí kartou alebo prevodom (admin_67 — server to stráži rovnako)
+    if(cfg.stripe_sub_id || (cfg.plan_kanal==="prevod" && cfg.plan_do && new Date(cfg.plan_do)>new Date())) return box(`Firmu spravujete, plán si klient platí sám.`);
     const odporucane = platca ? "platitel" : "neplatitel";
     return box(`<b>Plán tejto firmy môžete hradiť vy</b> — klient potom neplatí nič.
       <div class="uctMiestoAkcie">
@@ -26434,7 +26480,9 @@ async function uctOdoberMiesto(){
 // kalendárny rok; v marci by to odomklo rok, ktorý sa ešte nepodáva.
 // `klienti` = {neplatitelia, platitelia} — koľko miest pre klientov si účtovník
 // kupuje (kap. 145). Pri ostatných plánoch je null a edge funkcia ho ignoruje.
-async function spustiPredplatne(plan, obdobie, rok, klienti){
+// `sposob` "prevod" (admin_67): objednávka s VS a výzva na platbu namiesto
+// brány Stripe; faktúra až po pripísaní platby (NAVRH_PREVOD 8b).
+async function spustiPredplatne(plan, obdobie, rok, klienti, sposob){
   if(localMode || !sb || !firmaId){ alert("Predplatné je dostupné len v prihlásenom (cloud) režime."); return; }
   // Server nevlastníka odmietne 403 až po otázkach; povedať to hneď (č. 95).
   if(!smiemMenitPredplatne()){ alert(PREDPLATNE_LEN_VLASTNIK); return; }
@@ -26490,9 +26538,22 @@ async function spustiPredplatne(plan, obdobie, rok, klienti){
       body:JSON.stringify({ plan, obdobie:obdobie||"mes", firma_id:beh.koren,
                             navrat_url:location.origin+location.pathname,
                             rok: rok ? String(rok) : null,
-                            klienti: klienti || null })
+                            klienti: klienti || null,
+                            ...(sposob==="prevod" ? { akcia:"prevod" } : {}) })
     });
     const r=await res.json().catch(()=>({}));
+
+    // PREVOD: objednávka je vytvorená (aj po prepnutí firmy patrí firme pôvodu).
+    if(r.prevod){
+      if(firmaId===beh.koren) await nacitajFirmaConfig(firmaId);
+      renderHomeStrip(); renderLauncher();
+      if(!beh.platny()){
+        alert("Výzva na platbu prevodom pre firmu "+menoFirmy()+" je vytvorená — nájdete ju v Nastaveniach → Predplatné, keď firmu otvoríte znova.");
+        return;
+      }
+      await ukazVyzvuPrevodom(r.prevod);
+      return;
+    }
 
     // Prepnutie počas odpovede servera: zmena plánu už prebehla — firme pôvodu, a to sa povie
     // s jej menom; nová platba sa nezačne. Plán inej firmy sa nenačítava ani neprekresľuje.
@@ -26558,8 +26619,71 @@ async function spustiPredplatne(plan, obdobie, rok, klienti){
     // neukazuje. 403 bez kódu vracia `stripe-checkout` pred nasadením desiateho
     // kola (je v nej jediný 403), takže na poradí nasadenia nezáleží.
     else if(r.kod==="len_vlastnik" || (res.status===403 && !r.kod)) alert(PREDPLATNE_LEN_VLASTNIK);
+    // Odmietnutia prevodu (čakajúca výzva, beží prevod/karta) majú vlastnú vetu servera.
+    else if(String(r.kod||"").startsWith("prevod_")) alert(r.error);
     else alert("Platbu sa nepodarilo spustiť: "+(r.error||res.status));
   }catch(e){ alert("Chyba: "+e.message); }
+}
+
+// ── Predplatné prevodom (admin_67, NAVRH_PREVOD 8b) ─────────────────────────
+// Príjemca: meno PRESNE ako ho vedie banka (overenie mena príjemcu) — server
+// ho posiela z EX.PREVADZKOVATEL; keď výzva e-mailom neodíde, appka má zálohu
+// v SAAS_DODAVATEL (zhodu stráži test_predplatne_prevod).
+function prevodPrijemca(v){
+  return { iban:(v&&v.iban)||SAAS_DODAVATEL.iban, meno:(v&&v.prijemca)||SAAS_DODAVATEL.nazov };
+}
+// Výzva na platbu: QR PAY by square, údaje na ručné zadanie a čo sa stane.
+// Nie je to faktúra — tá príde e-mailom po pripísaní platby.
+async function vyzvaPrevodomHtml(v){
+  const P=prevodPrijemca(v);
+  let qr=null;
+  try{ qr=await payBySquareDataUrl({ cislo:"VS"+v.vs, suma:v.suma, splatnost:v.splatnost, vs:v.vs,
+    sprava:"eZivnostnik predplatne", meno:P.meno, iban:P.iban }); }catch(e){ console.warn("QR výzvy:", e); }
+  const riadok=(k,h)=>`<div style="display:flex;justify-content:space-between;gap:12px;padding:5px 0;border-bottom:1px solid var(--line)"><span class="acol-muted">${k}</span><b style="text-align:right;word-break:break-all">${h}</b></div>`;
+  const plan=PLANY[v.plan]?PLANY[v.plan].nazov:(v.plan||"");
+  return `${qr?`<div style="text-align:center;margin:4px 0 12px"><img src="${qr}" alt="QR kód PAY by square" style="width:200px;height:200px"><div class="acol-muted" style="font-size:12px">Naskenujte v aplikácii banky</div></div>`:""}
+    ${riadok("Príjemca", esc(P.meno))}
+    ${riadok("IBAN", esc(P.iban))}
+    ${riadok("Suma", eur(+v.suma||0))}
+    ${riadok("Variabilný symbol", esc(String(v.vs)))}
+    ${riadok("Splatnosť", fmtDatum(String(v.splatnost).slice(0,10)))}
+    <p style="font-size:13px;line-height:1.55;margin:12px 0 0">${
+      v.doplatok ? "Doplatok za zvýšenie počtu klientov. Nové miesta pribudnú, keď platba príde na účet."
+      : v.aktivovane ? `Plán ${esc(plan)} máte <b>zapnutý hneď</b>. Keď platba do splatnosti nepríde, prejde na Free.`
+      : `Plán ${esc(plan)} sa zapne dňom, keď platba príde na účet.`}
+      Predplatné začína dňom pripísania platby a <b>faktúru vám pošleme e-mailom</b> potom — toto nie je faktúra.
+      Variabilný symbol uveďte presne, podľa neho platbu spárujeme.</p>`;
+}
+async function ukazVyzvuPrevodom(v){
+  openModal("Platba prevodom", await vyzvaPrevodomHtml(v), null, null, null, "Zavrieť");
+}
+// Čakajúca výzva firmy (RLS: vlastné objednávky). Nastavenia → Predplatné.
+let prevodCakajuca=null;
+async function nacitajPrevodCakajucu(){
+  prevodCakajuca=null;
+  if(localMode || !sb || !firmaId) return null;
+  const fid=firmaId;
+  const { data, error }=await sb.from("objednavky")
+    .select("id, plan, suma, vs, splatnost, je_obnova, doplatok, vytvorene")
+    .eq("firma_id", fid).eq("kanal","prevod").eq("stav","caka_na_prevod")
+    .order("vytvorene",{ascending:false}).limit(1).maybeSingle();
+  if(error){ console.error("čakajúca výzva:", error.message||error); return null; }
+  if(fid!==firmaId) return null;
+  prevodCakajuca=data||null;
+  return prevodCakajuca;
+}
+async function zrusVyzvuPrevodom(id){
+  if(!confirm("Zrušiť výzvu na platbu prevodom?\n\nAk vám plán zapla len táto výzva, vypne sa hneď. Ak ste už zaplatili, výzvu nerušte — platbu spárujeme.")) return;
+  const _tok=await ziskajToken(); if(!_tok){ alert(CHYBA_SESSION); return; }
+  const res=await fetch(SUPABASE_URL+"/functions/v1/predplatne-prevod",{ method:"POST",
+    headers:{"Content-Type":"application/json","Authorization":"Bearer "+_tok}, body:JSON.stringify({ akcia:"zrus", objednavka_id:id }) });
+  const r=await res.json().catch(()=>({}));
+  if(!res.ok){ alert("Výzvu sa nepodarilo zrušiť: "+(r.error||res.status)); return; }
+  closeModal();
+  if(firmaId) await nacitajFirmaConfig(firmaId);
+  await nacitajPrevodCakajucu();
+  renderHomeStrip(); renderLauncher();
+  cloudMsg("Výzva na platbu je zrušená.","ok");
 }
 
 // prepíše základ a DPH hodnotami dopočítanými z celkovej sumy
@@ -26903,6 +27027,13 @@ function zmenitNaFree(){
   if(!smiemMenitPredplatne()){ alert(PREDPLATNE_LEN_VLASTNIK); return; }
   const dokedy = (firmaConfig && firmaConfig.plan_do)
     ? fmtDatum(String(firmaConfig.plan_do).slice(0,10)) : "konca obdobia";
+  // Prevod sa neobnovuje sám (admin_67) — v Stripe nie je čo rušiť.
+  if(firmaConfig && firmaConfig.plan_kanal==="prevod"){
+    alert("Predplatné platíte prevodom a samo sa neobnovuje.\n\nAk nechcete pokračovať, ďalšiu výzvu na platbu jednoducho nezaplaťte"
+      +(prevodCakajuca?" (alebo ju zrušte v Nastaveniach → Predplatné)":"")
+      +". Plán ostane aktívny do "+dokedy+", potom prejdete na Free a o dáta neprídete.");
+    return;
+  }
   if(!confirm("Zrušiť predplatné?\n\nVáš plán ostane aktívny do "+dokedy+
               ", potom prejdete na Free.\nNič vám už nestrhneme a o dáta neprídete.")) return;
   spustiPredplatne("free", null);
@@ -32593,27 +32724,33 @@ async function generujPayBySquareQR(f, m){
     const _odpocet = String(f.zalohaOdpocet||"")==="uhrada" ? r2(+f.zalohaSuma||0) : 0;
     const _splatit = r2((+s.spolu||0) - _odpocet);
     if(_splatit<=0) return null;
-    const [bysq, QRMod]=await Promise.all([
-      import("https://esm.sh/bysquare@4/pay"),
-      import("https://esm.sh/qrcode@1.5.4")
-    ]);
-    const { encode, PaymentOptions, CurrencyCode }=bysq;
-    const QRCode=QRMod.default||QRMod;
-    const qrstring=encode({
-      invoiceId:String(f.cislo||""),
-      payments:[{
-        type:PaymentOptions.PaymentOrder,
-        currencyCode:CurrencyCode.EUR,
-        amount:_splatit,
-        ...(String(f.splatnost||"").slice(0,10) ? { paymentDueDate:String(f.splatnost).slice(0,10) } : {}),
-        variableSymbol:String(f.vs||f.cislo||""),
-        paymentNote:"Faktura "+(f.cislo||""),
-        beneficiary:{ name:m.nazov||"" },
-        bankAccounts:[{ iban }]
-      }]
-    });
-    return await QRCode.toDataURL(qrstring,{margin:1,width:220});
+    return await payBySquareDataUrl({ cislo:f.cislo, suma:_splatit, splatnost:f.splatnost,
+      vs:f.vs||f.cislo, sprava:"Faktura "+(f.cislo||""), meno:m.nazov, iban });
   }catch(e){ console.warn("QR sa nepodarilo vygenerovať:",e); return null; }
+}
+// Jadro PAY by square — jedno pre QR na faktúre aj na výzve na platbu
+// predplatného prevodom (admin_67). Chybu nechá prejsť na volajúceho.
+async function payBySquareDataUrl(p){
+  const [bysq, QRMod]=await Promise.all([
+    import("https://esm.sh/bysquare@4/pay"),
+    import("https://esm.sh/qrcode@1.5.4")
+  ]);
+  const { encode, PaymentOptions, CurrencyCode }=bysq;
+  const QRCode=QRMod.default||QRMod;
+  const qrstring=encode({
+    invoiceId:String(p.cislo||""),
+    payments:[{
+      type:PaymentOptions.PaymentOrder,
+      currencyCode:CurrencyCode.EUR,
+      amount:r2(+p.suma||0),
+      ...(String(p.splatnost||"").slice(0,10) ? { paymentDueDate:String(p.splatnost).slice(0,10) } : {}),
+      variableSymbol:String(p.vs||""),
+      paymentNote:String(p.sprava||""),
+      beneficiary:{ name:p.meno||"" },
+      bankAccounts:[{ iban:String(p.iban||"").replace(/\s/g,"") }]
+    }]
+  });
+  return await QRCode.toDataURL(qrstring,{margin:1,width:220});
 }
 
 // PDF faktúry — šablóna žije v module faktura_pdf.js (spoločná s webhookom)

@@ -333,6 +333,13 @@ tr.chce td{background:#fff5e6}
       </div>
     </div>
 
+    <!-- PLATBY PREDPLATNÉHO PREVODOM (admin_67, admin_objednavky.js) -->
+    <div class="sec" data-sekcia="objednavky">
+      <div class="head"><h2>Platby predplatného prevodom</h2><div class="sp"></div>
+        <button class="btn" onclick="nacitajObjednavkyPrevod()">Obnoviť</button></div>
+      <div class="body" id="objAdmBody"><div class="loading">Načítavam…</div></div>
+    </div>
+
     <!-- VYSTAVENÉ FAKTÚRY ZA PREDPLATNÉ (naše tržby, nie tržby zákazníkov) -->
     <div class="sec" data-sekcia="faktury">
       <div class="head"><h2>Vystavené faktúry za predplatné</h2><div class="sp"></div>
@@ -610,7 +617,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";  // ANON 
 let sb = null, currentUser = null, cfgFirmaId = null;
 // Verzia adminu = verzia appky pri nasadení. Pripája sa k súborom sekcií
 // (admin_kampane.js…), aby prehliadač nedržal starú kópiu z cache.
-const ADMIN_VERZIA = "2026.10.09-RX";
+const ADMIN_VERZIA = "2026.10.09-RY";
 
 function init(){
   if(!SUPABASE_KEY || SUPABASE_KEY.startsWith("SEM_")){
@@ -769,6 +776,7 @@ const ADMIN_SEKCIE = [
   { skup:"Zákazníci" },
   { id:"zakaznici", ik:"👥", n:"Zákazníci",            nacitaj:()=>nacitajPrehlad() },
   { id:"faktury",   ik:"🧾", n:"Faktúry za predplatné", nacitaj:()=>{ pripravRokySaas(); nacitajSaasFaktury(); } },
+  { id:"objednavky", ik:"🏦", n:"Platby prevodom",     skripty:["admin_objednavky.js"], nacitaj:()=>nacitajObjednavkyPrevod() },
   { id:"spatna-vazba", ik:"💬", n:"Spätná väzba",      skripty:["admin_spatna_vazba.js"], nacitaj:()=>nacitajSpatnuVazbu() },
   { skup:"Prevádzka" },
   { id:"zalohy",    ik:"💾", n:"Zálohy",               nacitaj:()=>nacitajZalohy() },
@@ -987,7 +995,7 @@ async function nacitajSaasFaktury(){
   tabulka.classList.add("hidden"); prazdne.classList.add("hidden"); suhrn.classList.add("hidden");
 
   const { data, error } = await sb.from("saas_faktury")
-    .select("cislo, vystavene, obdobie_od, typ, opravuje, odb_nazov, odb_ico, odb_icdph, zaklad, dph, spolu, sadzba_dph, "
+    .select("cislo, vystavene, obdobie_od, typ, opravuje, uhrada, uhradene, odb_nazov, odb_ico, odb_icdph, zaklad, dph, spolu, sadzba_dph, "
       + "peppol_odoslat, peppol_odoslane, peppol_nedorucitelne, peppol_chyba, peppol_pokusy")
     .gte("vystavene", rok + "-01-01")
     .lte("vystavene", rok + "-12-31T23:59:59")
@@ -1068,8 +1076,11 @@ function exportSaasCsv(){
 //
 // Vedomé rozhodnutie: NEexportuje sa e-mail zákazníka. Do daňovej evidencie
 // nepatrí a v súbore na disku je to zbytočné riziko.
-function exportSaasJson(){
+async function exportSaasJson(){
   if(!_saasFakturyAdmin.length){ alert("Nie je čo exportovať."); return; }
+  // Deň dodania má jedno pravidlo — `dodanieSaas` v module e-faktúry (prevod
+  // zaplatený vopred = deň pripísania, § 19 ods. 4); PDF aj ISDOC ho majú tiež.
+  const EX = await import("./efaktura_xml.js?v=" + ADMIN_VERZIA);
   const rok = document.getElementById("sfRok").value;
   const data = {
     typ: "ezivnostnik-saas-faktury",
@@ -1083,7 +1094,7 @@ function exportSaasJson(){
       typ:       f.typ || "faktura",
       opravuje:  f.opravuje || "",
       datum:     String(f.vystavene||"").slice(0,10),
-      dodanie:   String(f.obdobie_od || f.vystavene || "").slice(0,10),
+      dodanie:   String(EX.dodanieSaas(f) || "").slice(0,10),
       odberatel: f.odb_nazov || "",
       ico:       f.odb_ico || "",
       icdph:     f.odb_icdph || "",
@@ -1091,6 +1102,9 @@ function exportSaasJson(){
       dph:       Math.round((+f.dph||0)*100)/100,
       spolu:     Math.round((+f.spolu||0)*100)/100,
       sadzba:    +f.sadzba_dph || 0.23,
+      // spôsob a deň úhrady (admin_67): karta = deň platby, prevod = deň pripísania
+      uhrada:    f.uhrada || "karta",
+      uhradene:  String(f.uhradene || f.vystavene || "").slice(0,10),
     })),
   };
   const blob = new Blob([JSON.stringify(data, null, 1)], { type:"application/json" });
