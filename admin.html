@@ -610,7 +610,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";  // ANON 
 let sb = null, currentUser = null, cfgFirmaId = null;
 // Verzia adminu = verzia appky pri nasadení. Pripája sa k súborom sekcií
 // (admin_kampane.js…), aby prehliadač nedržal starú kópiu z cache.
-const ADMIN_VERZIA = "2026.10.09-RW";
+const ADMIN_VERZIA = "2026.10.09-RX";
 
 function init(){
   if(!SUPABASE_KEY || SUPABASE_KEY.startsWith("SEM_")){
@@ -939,6 +939,44 @@ function saasEfakturaStav(f){
   return '<div class="email">e-faktúra čaká na odoslanie</div>';
 }
 
+// ── Dobropis k faktúre za predplatné (Roman 9. 10. 2026: ručne, rad D,
+//    vrátenie predplatné ukončí; admin_66, edge predplatne-dobropis) ──
+// Tlačidlo len pri faktúre, ktorá dobropis ešte nemá. Sumu určí server
+// z vrátenia v Stripe (najprv sa vracia v Stripe, potom tu).
+function saasDobropisTlacidlo(f){
+  if(f.typ==="dobropis") return "";
+  if((_saasFakturyAdmin||[]).some(x=>x.typ==="dobropis" && x.opravuje===f.cislo)) return '<div class="email">dobropis vystavený</div>';
+  return `<div><button class="btn" style="margin-top:4px;padding:3px 8px;font-size:11px" onclick="vystavDobropisSaas('${esc(f.cislo)}')">Dobropis…</button></div>`;
+}
+// Nezvratné: doklad odíde zákazníkovi a predplatné sa ukončí. Preto ukážka
+// dôsledkov a potvrdenie napísaním čísla, nie confirm() (CLAUDE.md, Poučenia).
+async function vystavDobropisSaas(cislo){
+  const f = (_saasFakturyAdmin||[]).find(x=>x.cislo===cislo);
+  if(!f) return;
+  const odp = prompt("DOBROPIS K FAKTÚRE " + cislo + " (" + (f.odb_nazov||"") + ", " + penaz(f.spolu) + ")\n\n"
+    + "1. Platbu najprv vráťte v Stripe — dobropis sa vystaví na sumu, ktorú Stripe vrátil.\n"
+    + "2. Vznikne dobropis v rade D, zákazník ho dostane e-mailom (PDF s ISDOC, od 2027 aj e-faktúrou).\n"
+    + (f.obdobie_od
+      ? "3. Predplatné firmy sa HNEĎ ukončí (zruší sa v Stripe, plán prejde na Free).\n\n"
+      : "3. Priznanie B za zaplatený rok sa znova zamkne (predplatné sa nemení).\n\n")
+    + "Nedá sa vrátiť. Na potvrdenie napíšte číslo faktúry:");
+  if(odp===null) return;
+  if(String(odp).trim()!==cislo){ alert("Číslo nesedí — dobropis sa nevystavil."); return; }
+  try{
+    const { data, error } = await sb.functions.invoke("predplatne-dobropis", { body: { cislo } });
+    if(error){
+      let sprava = error.message;
+      try{ const t = await error.context.json(); if(t && t.error) sprava = t.error; }catch(_){}
+      throw new Error(sprava);
+    }
+    alert("✓ Dobropis " + data.cislo + " na " + penaz(data.spolu) + " je vystavený"
+      + (data.email ? ", zákazník ho dostal e-mailom" : " — e-mail neodišiel, pošlite PDF ručne")
+      + (data.predplatne ? (f.obdobie_od ? ". Predplatné je ukončené." : ". Priznanie B je znova zamknuté.") : ".")
+      + (data.upozornenie ? "\n\n⚠ " + data.upozornenie : ""));
+    nacitajSaasFaktury();
+  }catch(e){ alert("Dobropis sa nevystavil: " + e.message); }
+}
+
 async function nacitajSaasFaktury(){
   const rok = +document.getElementById("sfRok").value || new Date().getFullYear();
   const loading = document.getElementById("sfLoading");
@@ -949,7 +987,7 @@ async function nacitajSaasFaktury(){
   tabulka.classList.add("hidden"); prazdne.classList.add("hidden"); suhrn.classList.add("hidden");
 
   const { data, error } = await sb.from("saas_faktury")
-    .select("cislo, vystavene, odb_nazov, odb_ico, odb_icdph, zaklad, dph, spolu, sadzba_dph, "
+    .select("cislo, vystavene, obdobie_od, typ, opravuje, odb_nazov, odb_ico, odb_icdph, zaklad, dph, spolu, sadzba_dph, "
       + "peppol_odoslat, peppol_odoslane, peppol_nedorucitelne, peppol_chyba, peppol_pokusy")
     .gte("vystavene", rok + "-01-01")
     .lte("vystavene", rok + "-12-31T23:59:59")
@@ -961,14 +999,19 @@ async function nacitajSaasFaktury(){
 
   if(!_saasFakturyAdmin.length){ prazdne.classList.remove("hidden"); return; }
 
-  // súhrn — zvlášť platitelia DPH (KV DPH A.1) a neplatitelia (D.2)
+  // súhrn — zvlášť platitelia DPH (KV DPH A.1), ich dobropisy (C.1, admin_66)
+  // a neplatitelia (D.2, dobropis tam znižuje súhrn). Sumy dobropisov sú
+  // záporné, takže „spolu“ je čistá suma po vrátení.
   const s = { poc:0, zaklad:0, dph:0, spolu:0,
               pocA1:0, zakladA1:0, dphA1:0,
+              pocC1:0, zakladC1:0, dphC1:0,
               pocD2:0, zakladD2:0, dphD2:0 };
   _saasFakturyAdmin.forEach(f=>{
     const z = +f.zaklad||0, d = +f.dph||0, c = +f.spolu||0;
     s.poc++; s.zaklad += z; s.dph += d; s.spolu += c;
-    if(String(f.odb_icdph||"").trim()){ s.pocA1++; s.zakladA1 += z; s.dphA1 += d; }
+    const sIcDph = !!String(f.odb_icdph||"").trim();
+    if(sIcDph && f.typ==="dobropis"){ s.pocC1++; s.zakladC1 += z; s.dphC1 += d; }
+    else if(sIcDph){ s.pocA1++; s.zakladA1 += z; s.dphA1 += d; }
     else { s.pocD2++; s.zakladD2 += z; s.dphD2 += d; }
   });
 
@@ -978,13 +1021,14 @@ async function nacitajSaasFaktury(){
     <div class="kpi w" style="padding:12px"><div class="n mono amt" style="font-size:17px">${penaz(s.dph)}</div><div class="l">DPH na výstupe</div></div>
     <div class="kpi g" style="padding:12px"><div class="n mono amt" style="font-size:17px">${penaz(s.spolu)}</div><div class="l">Spolu s DPH</div></div>
     <div class="kpi" style="padding:12px"><div class="n mono" style="font-size:15px">${s.pocA1} · ${penaz(s.zakladA1)}</div><div class="l">KV DPH — A.1 (s IČ DPH)</div></div>
+    ${s.pocC1 ? `<div class="kpi" style="padding:12px"><div class="n mono" style="font-size:15px">${s.pocC1} · ${penaz(s.zakladC1)}</div><div class="l">KV DPH — C.1 (dobropisy s IČ DPH)</div></div>` : ""}
     <div class="kpi" style="padding:12px"><div class="n mono" style="font-size:15px">${s.pocD2} · ${penaz(s.zakladD2)}</div><div class="l">KV DPH — D.2 (bez IČ DPH)</div></div>
   `;
   suhrn.classList.remove("hidden");
 
   document.getElementById("sfBody").innerHTML = _saasFakturyAdmin.map(f=>`
     <tr>
-      <td class="mono">${esc(f.cislo||"—")}${saasEfakturaStav(f)}</td>
+      <td class="mono">${f.typ==="dobropis"?'<span style="color:var(--neg)">Dobropis</span> ':""}${esc(f.cislo||"—")}${f.typ==="dobropis"?'<div class="email">opravuje '+esc(f.opravuje||"")+"</div>":""}${saasEfakturaStav(f)}${saasDobropisTlacidlo(f)}</td>
       <td class="hide-sm">${esc(String(f.vystavene||"").slice(0,10))}</td>
       <td>${esc(f.odb_nazov||"—")}<div class="email mono">${esc(f.odb_ico||"")}</div></td>
       <td class="hide-sm mono">${f.odb_icdph ? esc(f.odb_icdph) : '<span style="color:var(--mut)">neplatca</span>'}</td>
@@ -998,9 +1042,9 @@ async function nacitajSaasFaktury(){
 function exportSaasCsv(){
   if(!_saasFakturyAdmin.length){ alert("Nie je čo exportovať."); return; }
   const rok = document.getElementById("sfRok").value;
-  const hlavicka = ["Cislo","Datum","Odberatel","ICO","IC DPH","Zaklad","DPH","Spolu","Sadzba"];
+  const hlavicka = ["Cislo","Typ","Opravuje","Datum","Odberatel","ICO","IC DPH","Zaklad","DPH","Spolu","Sadzba"];
   const riadky = _saasFakturyAdmin.map(f=>[
-    f.cislo||"", String(f.vystavene||"").slice(0,10), f.odb_nazov||"",
+    f.cislo||"", f.typ==="dobropis"?"dobropis":"faktura", f.opravuje||"", String(f.vystavene||"").slice(0,10), f.odb_nazov||"",
     f.odb_ico||"", f.odb_icdph||"",
     (+f.zaklad||0).toFixed(2), (+f.dph||0).toFixed(2), (+f.spolu||0).toFixed(2),
     Math.round((+f.sadzba_dph||0)*100) + "%",
@@ -1029,13 +1073,17 @@ function exportSaasJson(){
   const rok = document.getElementById("sfRok").value;
   const data = {
     typ: "ezivnostnik-saas-faktury",
-    verzia: 1,
+    // verzia 2 (9. 10. 2026): dobropisy (typ, opravuje) a deň dodania
+    verzia: 2,
     rok: +rok,
     vytvorene: new Date().toISOString(),
     pocet: _saasFakturyAdmin.length,
     faktury: _saasFakturyAdmin.map(f=>({
       cislo:     f.cislo || "",
+      typ:       f.typ || "faktura",
+      opravuje:  f.opravuje || "",
       datum:     String(f.vystavene||"").slice(0,10),
+      dodanie:   String(f.obdobie_od || f.vystavene || "").slice(0,10),
       odberatel: f.odb_nazov || "",
       ico:       f.odb_ico || "",
       icdph:     f.odb_icdph || "",

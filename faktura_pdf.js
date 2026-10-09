@@ -602,7 +602,12 @@ function datumZoZaznamu(v) {
 
 export function modelSaasFaktury(f, dodavatel) {
   const zaklad = +f.zaklad || 0, dph = +f.dph || 0, spolu = +f.spolu || 0;
+  // Dobropis (`typ = dobropis`, rad D, admin_66): sumy sú ZÁPORNÉ ako všetky
+  // dobropisy v appke (spec 100.2); riadok −1 × kladná cena, nadpis a odkaz
+  // na opravovanú faktúru. Ten istý tvar nesie ISDOC/UBL (efaktura_xml.js).
+  const dobropis = f.typ === "dobropis";
   return {
+    ...(dobropis ? { nadpisDokladu: "DOBROPIS", podnadpis: "Opravuje faktúru č. " + (f.opravuje || "") } : {}),
     cislo: f.cislo,
     dodavatel: {
       nazov: dodavatel.nazov, adresa: dodavatel.adresa,
@@ -631,19 +636,21 @@ export function modelSaasFaktury(f, dodavatel) {
       dodanie: datumZoZaznamu(f.obdobie_od || f.vystavene),
       splatnost: null,           // uhradené kartou, splatnosť nemá zmysel
     },
-    platba: { sposob: "Uhradené kartou", vs: null },
+    platba: { sposob: dobropis ? "Vrátené na platobnú kartu" : "Uhradené kartou", vs: null },
     // Celý popis ide do ODSEKU nad tabuľkou, nie do názvu položky: bunka má
     // 54 mm a `splitTextToSize(...)[0]` v šablóne berie len prvý riadok —
     // dlhý text by sa ticho odsekol uprostred slova.
     popis: f.popis || "eživnostník — predplatné",
-    polozky: [{
-      nazov: "Predplatné eživnostník",
-      mn: 1, mj: "", cena: zaklad,
-    }],
+    polozky: [dobropis
+      ? { nazov: "Predplatné eživnostník — vrátenie", mn: -1, mj: "", cena: Math.abs(zaklad) }
+      : { nazov: "Predplatné eživnostník", mn: 1, mj: "", cena: zaklad }],
     sumy: { bez: zaklad, dph, spolu, sadzba: +f.sadzba_dph || 0.23 },
     // obdobie je súčasťou popisu, druhýkrát ho nevypisujeme
     obdobie: null,
-    poznamka: "Faktúra bola uhradená platobnou kartou. Neuhrádzajte ju znova.",
+    poznamka: dobropis
+      // priznanie B obdobie nemá a predplatné nie je — veta o ukončení len pri predplatnom
+      ? "Suma bola vrátená na platobnú kartu, ktorou bola faktúra " + (f.opravuje || "") + " uhradená." + (f.obdobie_od ? " Predplatné je ukončené." : "")
+      : "Faktúra bola uhradená platobnou kartou. Neuhrádzajte ju znova.",
   };
 }
 

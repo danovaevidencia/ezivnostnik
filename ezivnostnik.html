@@ -2262,7 +2262,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.10.09-RW";  // podmienky 1.10: príjem e-faktúr vo Free (spec 150.6)
+const APP_VERZIA = "2026.10.09-RX";  // podmienky 1.10: príjem e-faktúr vo Free (spec 150.6)
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -12493,16 +12493,24 @@ async function importSaasJson(subor){
     if(uz.has(cislo)){ preskocenych++; continue; }
 
     const zaklad=r2(+f.zaklad||0), dph=r2(+f.dph||0), spolu=r2(+f.spolu||0);
+    // Dobropis (rad D, admin_66): opravný doklad ako každý dobropis v appke —
+    // záporné množstvo, kladná cena, odkaz na opravovanú faktúru (C.1 KV DPH
+    // ho žiada). Dodanie = prvý deň predplatného (export verzie 2), staršie
+    // exporty ho nemajú → deň vystavenia.
+    const dobropis = f.typ==="dobropis";
     firmaData.faktury.push({
       cislo, vs:cislo,
       odberatel: f.odberatel || "—",
       ico: f.ico||"", icdph: f.icdph||"",
       // Adresu export nenesie — do KV DPH nevstupuje a doplniť sa dá ručne.
       adresa: "",
-      datum: f.datum, vystavenie: f.datum, dodanie: f.datum, splatnost: f.datum,
-      popis: "Predplatné eživnostník",
+      datum: f.datum, vystavenie: f.datum, dodanie: f.dodanie || f.datum, splatnost: f.datum,
+      popis: dobropis ? "Dobropis — predplatné eživnostník" : "Predplatné eživnostník",
       bez: zaklad, dph, spolu,
-      polozky: [{ nazov:"Predplatné eživnostník", mn:1, cena:zaklad, mj:"ks" }],
+      polozky: [dobropis
+        ? { nazov:"Predplatné eživnostník — vrátenie", mn:-1, cena:Math.abs(zaklad), mj:"ks" }
+        : { nazov:"Predplatné eživnostník", mn:1, cena:zaklad, mj:"ks" }],
+      ...(dobropis ? { opravujeDoklad:String(f.opravuje||""), druhOpravy:"dobropis" } : {}),
       // Platba kartou cez Stripe prebehla v deň vystavenia — faktúra je
       // uhradená hneď, inak by ju appka vykazovala ako pohľadávku.
       zaplatena: true, datumUhrady: f.datum, sposobUhrady: "karta",
@@ -25856,7 +25864,7 @@ async function nacitajSaasFaktury(){
   try{
     const { data, error } = await sb.from("saas_faktury")
       .select("cislo, popis, obdobie_od, obdobie_do, zaklad, sadzba_dph, dph, spolu, mena, vystavene, "+
-              "odb_nazov, odb_adresa, odb_ico, odb_dic, odb_icdph")
+              "odb_nazov, odb_adresa, odb_ico, odb_dic, odb_icdph, typ, opravuje")
       // FILTER JE POVINNÝ, nestačí RLS. Politika `sfakt_select` púšťa okrem
       // vlastníka aj administrátora — takže adminovi vráti faktúry VŠETKÝCH
       // zákazníkov a `autoZaevidujSaasFaktury` mu ich zaúčtuje do výdavkov
@@ -25919,12 +25927,7 @@ async function autoZaevidujSaasFaktury(){
         // Tú istú faktúru môže práve evidovať človek ťuknutím — alebo ju medzitým
         // zapísal (č. 88, `_saasEviduje` pri `zaevidujSaasFakturu`).
         if(_saasEviduje.has(f.cislo) || saasFakturaZaevidovana(f.cislo)) continue;
-        const datum=String(f.vystavene||"").slice(0,10) || new Date().toISOString().slice(0,10);
-        const obj={ druh:"Došlá faktúra", partner:SAAS_DODAVATEL.nazov, cislo:f.cislo, vs:f.cislo,
-          popis:f.popis||"eživnostník — predplatné", datum, mesiac:datum.slice(0,7),
-          bez:+f.zaklad||0, dph:+f.dph||0, spolu:+f.spolu||0, zahranicny:false, kodKrajiny:"",
-          dodavatelIco:SAAS_DODAVATEL.ico, dodavatelDic:SAAS_DODAVATEL.dic,
-          dodavatelIcDph:SAAS_DODAVATEL.icdph, zdroj:"predplatne" };
+        const obj=saasVydavok(f);
         if(najdiDuplicityVydavku(obj).length) continue;   // ticho preskoč duplicitu
         obj.id="v"+Date.now()+Math.random().toString(36).slice(2,7);
         _saasEviduje.add(f.cislo);
@@ -25961,6 +25964,24 @@ async function autoZaevidujSaasFaktury(){
       return n;
     });
   }catch(e){ console.error("autoZaevidujSaasFaktury:", e); return 0; }
+}
+
+// ── Výdavok z faktúry za predplatné — JEDINÉ miesto tvaru ──
+// Skladali ho tri kópie (automatika, ručné zaevidovanie jednej, dávka). Od
+// 9. 10. 2026 je v `saas_faktury` aj DOBROPIS (`typ = dobropis`, rad D,
+// admin_66): sumy záporné ako všetky dobropisy v appke (spec 100.2) a
+// `opravujeDoklad` = číslo opravovanej faktúry — bez neho kontrolný výkaz
+// C.2 zablokuje odoslanie (povinné pole). Bez `id`, to pridá volajúci.
+function saasVydavok(f){
+  const datum=String(f.vystavene||"").slice(0,10) || new Date().toISOString().slice(0,10);
+  const dobropis = f.typ==="dobropis";
+  return { druh:"Došlá faktúra", partner:SAAS_DODAVATEL.nazov, cislo:f.cislo, vs:f.cislo,
+    popis:f.popis||(dobropis?"eživnostník — dobropis k predplatnému":"eživnostník — predplatné"),
+    datum, mesiac:datum.slice(0,7),
+    bez:+f.zaklad||0, dph:+f.dph||0, spolu:+f.spolu||0, zahranicny:false, kodKrajiny:"",
+    dodavatelIco:SAAS_DODAVATEL.ico, dodavatelDic:SAAS_DODAVATEL.dic,
+    dodavatelIcDph:SAAS_DODAVATEL.icdph, zdroj:"predplatne",
+    ...(dobropis ? { opravujeDoklad:String(f.opravuje||"") } : {}) };
 }
 
 // ── Faktúra za predplatné aj ako e-faktúra zo siete (od 1. 1. 2027) ──
@@ -26042,20 +26063,7 @@ async function zaevidujSaasFakturuRaz(cislo){
   // vybavenú a pri ďalšom spustení by sa nič nestalo.
   saasZabudniZaevidovanu(cislo);
 
-  const datum = String(f.vystavene||"").slice(0,10) || new Date().toISOString().slice(0,10);
-  const obj = {
-    druh:"Došlá faktúra",
-    partner: SAAS_DODAVATEL.nazov,
-    cislo: f.cislo, vs: f.cislo,
-    popis: f.popis || "eživnostník — predplatné",
-    datum, mesiac: datum.slice(0,7),
-    bez: +f.zaklad || 0, dph: +f.dph || 0, spolu: +f.spolu || 0,
-    zahranicny:false, kodKrajiny:"",
-    dodavatelIco: SAAS_DODAVATEL.ico,
-    dodavatelDic: SAAS_DODAVATEL.dic,
-    dodavatelIcDph: SAAS_DODAVATEL.icdph,
-    zdroj:"predplatne",
-  };
+  const obj = saasVydavok(f);
   // PDF a nahratie trvajú (ROZHODNUTIA č. 119): po prepnutí firmy by výdavok, pamäť
   // zaevidovaných aj partner išli do otvorenej firmy. Zapisuje sa do zachytených dát
   // a len keď beh platí; PDF nahraté pre predošlú firmu zmaže `dokladUpload` (č. 121).
@@ -26090,7 +26098,7 @@ async function zaevidujSaasFakturuRaz(cislo){
   saasOznacZaevidovanu(f.cislo);
   if(typeof zapamatajPartnera==="function") zapamatajPartnera(obj);
   poZmene();
-  alert("✓ Faktúra "+f.cislo+" bola zaevidovaná do výdavkov.\n\n"+
+  alert("✓ "+(f.typ==="dobropis"?"Dobropis ":"Faktúra ")+f.cislo+" bol"+(f.typ==="dobropis"?"":"a")+" zaevidovan"+(f.typ==="dobropis"?"ý":"á")+" do výdavkov.\n\n"+
         eur(obj.spolu)+" · základ "+eur(obj.bez)+" · DPH "+eur(obj.dph)+
         (prilozene ? "\n\n📎 PDF faktúry je priložené k dokladu."
           : "\n\n⚠ PDF faktúry sa k dokladu nepriložilo ("+dovodPdf+"). Stiahnuť si ho môžete tu, v zozname faktúr za predplatné."));
@@ -26218,7 +26226,8 @@ async function otvorSaasFaktury(){
       ? fmtDatum(String(f.obdobie_od).slice(0,10))+" – "+fmtDatum(String(f.obdobie_do).slice(0,10)) : "";
     return `<div class="arow" style="align-items:flex-start">
       <div style="flex:1;min-width:0">
-        <div class="acol-strong">${esc(f.cislo)} · ${eur(+f.spolu||0)}</div>
+        <div class="acol-strong">${f.typ==="dobropis"?"Dobropis ":""}${esc(f.cislo)} · ${eur(+f.spolu||0)}</div>
+        ${f.typ==="dobropis"?`<div class="acol-muted">Opravuje faktúru ${esc(f.opravuje||"")} — vrátenie platby${f.obdobie_od?", predplatné je ukončené":""}.</div>`:""}
         <div class="acol-muted">${esc(f.popis||"")}</div>
         <div class="acol-muted">${fmtDatum(String(f.vystavene).slice(0,10))}${obd?" · "+esc(obd):""}
           · základ ${eur(+f.zaklad||0)} · DPH ${eur(+f.dph||0)}</div>
@@ -26262,12 +26271,7 @@ async function zaevidujVsetkySaasFakturyRaz(){
     if(!beh.platny()) break;
     // Faktúru mohla medzitým zapísať automatika — alebo ju práve zapisuje (_saasEviduje).
     if(_saasEviduje.has(f.cislo) || saasFakturaZaevidovana(f.cislo)) continue;
-    const datum=String(f.vystavene||"").slice(0,10) || new Date().toISOString().slice(0,10);
-    const obj={ druh:"Došlá faktúra", partner:SAAS_DODAVATEL.nazov, cislo:f.cislo, vs:f.cislo,
-      popis:f.popis||"eživnostník — predplatné", datum, mesiac:datum.slice(0,7),
-      bez:+f.zaklad||0, dph:+f.dph||0, spolu:+f.spolu||0, zahranicny:false, kodKrajiny:"",
-      dodavatelIco:SAAS_DODAVATEL.ico, dodavatelDic:SAAS_DODAVATEL.dic,
-      dodavatelIcDph:SAAS_DODAVATEL.icdph, zdroj:"predplatne" };
+    const obj=saasVydavok(f);
     if(!data.vydavky) data.vydavky=[];
     if(najdiDuplicityVydavku(obj).length) continue;
     obj.id="v"+Date.now()+Math.random().toString(36).slice(2,7);

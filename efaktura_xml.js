@@ -166,7 +166,10 @@ export function ublXml(M) {
   // (BR-CO-16). Inak zaplatené vopred len to, čo model povie.
   const prepaid = karta ? spolu : r2(S.prepaid || 0);
   const splatit = r2(spolu - prepaid);
-  const prepaidXml = prepaid > 0 ? "\n    <cbc:PrepaidAmount currencyID=\"" + MENA + "\">" + prepaid.toFixed(2) + "</cbc:PrepaidAmount>" : "";
+  // `!== 0`, nie `> 0`: dobropis zaplatený (vrátený) kartou má zápornú sumu
+  // a teda aj záporné „zaplatené vopred“ — inak by na úhradu ostalo 0 bez
+  // PrepaidAmount a doklad by porušil BR-CO-16 (úhrada = spolu − zaplatené).
+  const prepaidXml = prepaid !== 0 ? "\n    <cbc:PrepaidAmount currencyID=\"" + MENA + "\">" + prepaid.toFixed(2) + "</cbc:PrepaidAmount>" : "";
   const odbKrajina = ublKrajina(odbIcDph);
   const dodavka = (kat.kod === "K") ? `
   <cac:Delivery>
@@ -356,7 +359,8 @@ export function isdocXml(M) {
       <PostalAddress><StreetName>${esc(oa.ulica)}</StreetName><BuildingNumber>${esc(oa.cislo)}</BuildingNumber><CityName>${esc(oa.mesto)}</CityName><PostalZone>${esc(oa.psc)}</PostalZone><Country><IdentificationCode>${esc(odbKrajina)}</IdentificationCode><Name>${esc(kraj(odbKrajina))}</Name></Country></PostalAddress>
       <PartyTaxScheme><CompanyID>${esc(O.icdph || "")}</CompanyID><TaxScheme>VAT</TaxScheme></PartyTaxScheme>${O.dic ? `
       <PartyTaxScheme><CompanyID>${esc(O.dic)}</CompanyID><TaxScheme>TIN</TaxScheme></PartyTaxScheme>` : ""}
-   </Party></AccountingCustomerParty>
+   </Party></AccountingCustomerParty>${M.opravuje ? `
+   <OriginalDocumentReferences><OriginalDocumentReference><ID>${esc(M.opravuje)}</ID></OriginalDocumentReference></OriginalDocumentReferences>` : ""}
    <InvoiceLines>
 ${lines}
    </InvoiceLines>
@@ -402,8 +406,13 @@ export function modelEfakturySaas(r, dodavatel, opts = {}) {
   const s0 = +r.sadzba_dph || 0.23;
   const sadzba = s0 > 1 ? s0 / 100 : s0;
   const zaklad = +r.zaklad || 0;
+  // Dobropis (`typ = dobropis`, rad D, admin_66): sumy v riadku sú ZÁPORNÉ
+  // (tak drží dobropisy celá appka — spec 100.2, `dobropisZaporne`), riadok má
+  // množstvo −1 a KLADNÚ cenu (záporná jednotková cena = BR-27).
+  const dobropis = r.typ === "dobropis";
   return {
-    doklad: "380",
+    doklad: dobropis ? "381" : "380",
+    opravuje: dobropis ? String(r.opravuje || "") : "",
     cislo: String(r.cislo || ""),
     uuid: opts.uuid || uuidZTextu("saas:" + (r.cislo || "")),
     vystavene: datum(r.vystavene),
@@ -416,7 +425,9 @@ export function modelEfakturySaas(r, dodavatel, opts = {}) {
     odberatel: { nazov: r.odb_nazov || "", ico: r.odb_ico || "", dic: r.odb_dic || "", icdph: r.odb_icdph || "", adresa: r.odb_adresa || "" },
     kategoria: { kod: sadzba > 0 ? "S" : "O", ...(sadzba > 0 ? {} : { dovod: "Dodávateľ nie je platiteľ DPH", bezSadzby: true, bezIcDph: true }) },
     sadzba,
-    riadky: [{ nazov: r.popis || "Predplatné eživnostník", mn: 1, mj: "mesiac", cena: zaklad }],
+    riadky: [dobropis
+      ? { nazov: r.popis || "Dobropis — predplatné eživnostník", mn: -1, mj: "mesiac", cena: Math.abs(zaklad) }
+      : { nazov: r.popis || "Predplatné eživnostník", mn: 1, mj: "mesiac", cena: zaklad }],
     sumy: { bez: zaklad, dph: +r.dph || 0, spolu: +r.spolu || 0 },
     platba: { kod: opts.platba === "prevod" ? "30" : "48", vs: opts.vs || "", iban: D.iban },
   };
