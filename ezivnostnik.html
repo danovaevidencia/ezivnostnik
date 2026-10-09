@@ -2262,7 +2262,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.10.09-RZ";  // podmienky 1.11, zásady 1.24: predplatné prevodom (admin_67), súhlas pred platbou
+const APP_VERZIA = "2026.10.09-SA";  // výkazy: import z kalendára → editor, zákazky, kontrola s faktúrou z položiek
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -4923,7 +4923,8 @@ function calcDanRow(mesiacIdx, rok, S, opt){
   // odpracované dni = človekodni z položiek faktúr mesiaca (ako stará appka), fallback na výkazy
   let odprac=0;
   const faktMesPol=(firmaData.faktury||[]).filter(f=>faktObdobie(f)===mk);
-  faktMesPol.forEach(f=>{ (f.polozky||[]).forEach(p=>{ const mj=(p.mj||"").toLowerCase(); if(/člov|clov|deň|den|md/.test(mj)) odprac+=Math.round(+p.mn||0); }); });
+  // jedno pravidlo s kontrolou výkazu (faktClovekodni), nie tretí regex na MJ
+  faktMesPol.forEach(f=>{ odprac+=Math.round(faktClovekodni(f)); });
   if(odprac===0){ (firmaData.vykazy||[]).forEach(w=>{ (w.polozky||[]).forEach(p=>{ if(String(p.datum||"").slice(0,7)===mk && (+p.hodiny||0)>0) odprac++; }); }); }
   // stav úhrady faktúr mesiaca — kanonický stav (banka, ručné potvrdenie,
   // legacy príznak), nie vlastná VS/suma heuristika (kap. 45.2)
@@ -10777,7 +10778,16 @@ function buildVykazXlsx(w,X){
   X.utils.book_append_sheet(wb,ws,"SP");
   const buf=X.write(wb,{type:"array",bookType:"xlsx"});
   downloadBlob(new Blob([buf],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}),
-    "Výkaz_prác_"+(w.zakazka||w.projekt||"vykaz").replace(/[^\w.-]+/g,"_")+".xlsx");
+    vykazSuborNazov("Vykaz_prac", w)+".xlsx");
+}
+// Názov súboru výkazu a protokolu — jedno pravidlo: druh + zákazka (inak
+// projekt) + mesiac výkazu, diakritika prepísaná, nie zmenená na „_“.
+// Dovtedy `\w` (len ASCII) robilo z „Výkaz z kalendára“ `V_kaz_z_kalend_ra`,
+// Word bez zákazky dal vždy `vykaz_prac` a protokol bez mesiaca (9. 10. 2026).
+function vykazSuborNazov(druh, w){
+  const cast=s=>String(s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^A-Za-z0-9.-]+/g,"_").replace(/^_+|_+$/g,"");
+  const proj=w.projekt===VYKAZ_Z_KALENDARA ? "" : w.projekt;
+  return [druh, cast(w.zakazka||proj), vykazMesiac(w)].filter(Boolean).join("_");
 }
 function buildVykazDocx(w,D){
   const S=firmaData.settings||{};
@@ -10810,7 +10820,7 @@ function buildVykazDocx(w,D){
     new Paragraph(""),
     new Paragraph("Dátum a podpis: __________________________________"),
   ]}]});
-  Packer.toBlob(doc).then(b=>downloadBlob(b,"vykaz_"+(w.zakazka||"prac").replace(/[^\w.-]+/g,"_")+".docx"));
+  Packer.toBlob(doc).then(b=>downloadBlob(b,vykazSuborNazov("Vykaz_prac", w)+".docx"));
 }
 
 function exportProtokolDocx(idx){
@@ -10825,8 +10835,10 @@ function buildProtokolDocx(w,D){
   const tarifa=+S.tarifa||+S.denTarifa||350;
   const suma=r2(dni*tarifa);
   const dnesSk=new Date().toLocaleDateString("sk-SK");
-  const mesROK=(w.obdobie||"").match(/(\d{2})[\/.](\d{4})/);
-  const nadpis="Akceptačný protokol"+(mesROK?("_"+mesROK[1]+"_"+mesROK[2]):"");
+  // mesiac z jedného pravidla (vykazMesiac) — regex `(\d{2})[\/.](\d{4})`
+  // nechytal „1. 7. 2026“ ani „1.7.2026“ a protokol ostal bez mesiaca
+  const vm=vykazMesiac(w);
+  const nadpis="Akceptačný protokol"+(vm?("_"+vm.slice(5,7)+"_"+vm.slice(0,4)):"");
   const TABPOS=1900;
   const tabStops=[{type:"left",position:TABPOS}];
   const tab=(label,val,bold)=>new Paragraph({tabStops,children:[new TextRun({text:label,bold:true}),new TextRun({text:"\t"+(val||""),bold:!!bold})]});
@@ -10872,16 +10884,21 @@ function buildProtokolDocx(w,D){
       sigCell("Za dodávateľa:",w.pracovnik||m.nazov||"",true),
     ]})]}),
   ]}]});
-  Packer.toBlob(doc).then(b=>downloadBlob(b,nadpis.replace(/[^\w.-]+/g,"_")+".docx"));
+  Packer.toBlob(doc).then(b=>downloadBlob(b,vykazSuborNazov("Akceptacny_protokol", w)+".docx"));
 }
 
-// Mesiac, za ktorý je výkaz — z obdobia "1.5.2026 - 30.5.2026" alebo z dátumov
-// položiek. Slúži na spárovanie s faktúrou za to isté obdobie.
+// Mesiac, za ktorý je výkaz — mesiac, do ktorého padne VÄČŠINA dní výkazu;
+// bez dní z obdobia "1.5.2026 - 30.5.2026". Slúži na spárovanie s faktúrou,
+// na rok v prehľadoch aj na názov protokolu — jedno pravidlo. Dovtedy sa bral
+// PRVÝ dátum obdobia: import z kalendára „29. 6. – 30. 7.“ (jeden deň júna,
+// zvyšok júl) sa porovnával s júnovou faktúrou (9. 10. 2026).
 function vykazMesiac(w){
+  const poc={};
+  (w.polozky||[]).forEach(p=>{ const m=String(p.datum||"").slice(0,7); if(/^\d{4}-\d{2}$/.test(m)) poc[m]=(poc[m]||0)+1; });
+  const mes=Object.keys(poc).sort();
+  if(mes.length) return mes.reduce((a,b)=>poc[b]>poc[a]?b:a, mes[0]);
   const m=(w.obdobie||"").match(/(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})/);
-  if(m) return m[3]+"-"+String(+m[2]).padStart(2,"0");
-  const dat=(w.polozky||[]).map(p=>p.datum).filter(Boolean).sort();
-  return dat.length ? String(dat[0]).slice(0,7) : "";
+  return m ? m[3]+"-"+String(+m[2]).padStart(2,"0") : "";
 }
 // Do ktorého DPH obdobia faktúra spadá. Zákon o DPH hovorí, že rozhoduje
 // DÁTUM DODANIA — nie vystavenia ani úhrady. Staršie faktúry pole `dodanie`
@@ -10921,6 +10938,20 @@ function faktObdobieDane(f){
 function faktVRoku(f, rok){ return faktObdobieDane(f).slice(0,4)===String(rok); }
 function faktMesiac(f){ return faktObdobie(f); }  // alias pre kontrolu výkaz↔faktúra
 
+// Koľko človekodní je na faktúre — z POLOŽIEK (MJ človekodeň/MD/deň), jedno
+// pravidlo pre kontrolu výkazu aj prehľad mesiaca. Uložené `f.dni` (zapisujú
+// ho len importy) je len záloha pre faktúru bez položiek: editor ho
+// neprepočíta a kópia faktúry ho dedila — 9. 10. 2026 mali tri faktúry
+// v poli 25 čld zo skopírovanej júnovej, kým v položkách 17, 32 a 23,
+// a výkazy svietili načerveno, hoci sedeli.
+function faktClovekodni(f){
+  const pol=(f&&f.polozky)||[];
+  if(!pol.length) return +(f&&f.dni)||0;
+  let s=0;
+  pol.forEach(p=>{ if(/clovek|\bcld\b|\bmd\b|man.?day|\bden\b|\bdni\b|\bdays?\b/.test(normTxt(p.mj))) s+=(+p.mn||0); });
+  return r2(s);
+}
+
 // Sedí počet človekodní vo výkaze s vyfakturovaným množstvom za ten istý mesiac?
 // Rozdiel znamená buď nedofakturované dni, alebo výkaz, ktorý nezodpovedá tomu,
 // čo odberateľ dostal na faktúre — a to je vec, ktorú treba vidieť pred podaním,
@@ -10930,14 +10961,23 @@ function faktMesiac(f){ return faktObdobie(f); }  // alias pre kontrolu výkaz�
 // výkaze s inou dĺžkou dňa než 8 h appka hlásila nezrovnalosť, ktorá
 // neexistovala. Falošný poplach je drahší než žiadny: naučí preskakovať
 // aj pravé nálezy.
+// Ktorá faktúra k výkazu patrí (9. 10. 2026): faktúry mesiaca s človekodňami;
+// keď je ich viac, rozhodne ZÁKAZKA (kód z výkazu v texte faktúry). Keď sa to
+// jednoznačne určiť nedá, appka neporovnáva — hádaná dvojica dáva falošný
+// poplach, a ten je drahší než žiadny.
 function vykazKontrolaFaktury(w){
   const dni=vykazClovekodni(w);
   const vm=vykazMesiac(w); if(!vm) return null;
-  const zhoda=(firmaData.faktury||[]).filter(f=>faktMesiac(f)===vm && +f.dni>0);
-  if(!zhoda.length) return {stav:"chyba_faktura", dni, mesiac:vm};
-  const f=zhoda[0];
-  const sedi=Math.abs((+f.dni||0)-dni)<0.01;
-  return {stav:sedi?"ok":"nesedi", dni, faktDni:+f.dni||0, cislo:f.cislo};
+  const mesiaca=(firmaData.faktury||[]).filter(f=>faktMesiac(f)===vm && faktClovekodni(f)>0);
+  if(!mesiaca.length) return {stav:"chyba_faktura", dni, mesiac:vm};
+  const zak=normTxt(w.zakazka).trim();
+  const nesie=f=>!!zak && normTxt([f.popis, f.poznamka, f.zakazka, ...(f.polozky||[]).map(p=>(p.nazov||"")+" "+(p.popis||""))].join(" ")).includes(zak);
+  const sZakazkou=mesiaca.filter(nesie);
+  const kand = sZakazkou.length ? sZakazkou : mesiaca;
+  if(kand.length!==1) return {stav:"nejasne", dni, mesiac:vm, pocet:kand.length};
+  const f=kand[0], fd=faktClovekodni(f);
+  const sedi=Math.abs(fd-dni)<0.01;
+  return {stav:sedi?"ok":"nesedi", dni, faktDni:fd, cislo:f.cislo};
 }
 function appVykazy(){
   if(prekresliVRamci("vykazy")) return;   // rámec super apky (GY)
@@ -10956,7 +10996,10 @@ function appVykazy(){
       // Hláška povie AJ TO, ako sa človekodeň počíta. Bez toho vyzerá rozdiel
       // ako chyba v účtovníctve, hoci ide len o zle zvolený režim — a práve
       // to poslalo hľadať chybu, ktorá neexistovala.
-      : kf.stav==="nesedi" ? `<div style="background:var(--sfc-warn);border-radius:8px;padding:7px 11px;margin-bottom:8px;font-size:12px;color:var(--neg)">⚠ Výkaz má ${cldTxt(kf.dni)} čld${vykazMdRezim(w)==="hodiny"?` (${vykazHodiny(w)} h ÷ ${cldTxt(vykazMdHodin(w))} h)`:" (1 deň = 1 čld)"}, ale faktúra ${esc(kf.cislo)} za ten mesiac má ${cldTxt(kf.faktDni)} — skontrolujte pred podaním</div>`
+      // Rozdiel je otázka, nie chyba — výkaz aj faktúra môžu byť správne
+      // (dofakturované dni, zmena po dohode). Preto upozornenie, nie červená.
+      : kf.stav==="nesedi" ? `<div style="background:var(--sfc-warn);border-radius:8px;padding:7px 11px;margin-bottom:8px;font-size:12px;color:var(--ink)">⚠ Výkaz ${cldTxt(kf.dni)} čld${vykazMdRezim(w)==="hodiny"?` (${vykazHodiny(w)} h ÷ ${cldTxt(vykazMdHodin(w))} h)`:" (1 deň = 1 čld)"} · faktúra ${esc(kf.cislo)} ${cldTxt(kf.faktDni)} čld — sedí to?</div>`
+      : kf.stav==="nejasne" ? `<div style="background:var(--bg);border-radius:8px;padding:7px 11px;margin-bottom:8px;font-size:12px;color:var(--ink-soft)">${cldTxt(kf.dni)} človekodní · za mesiac je ${kf.pocet} faktúr s človekodňami — s faktúrou sa porovná, keď bude zákazka v texte faktúry</div>`
       : `<div style="background:var(--bg);border-radius:8px;padding:7px 11px;margin-bottom:8px;font-size:12px;color:var(--ink-soft)">${cldTxt(kf.dni)} človekodní · za tento mesiac zatiaľ nie je faktúra</div>`;
       // Deň označený ako dovolenka, ktorý má hodiny a činnosť. Nekreslí sa
       // stále — len keď taký deň naozaj je (trvalý prvok, ktorý väčšinou
@@ -11024,9 +11067,50 @@ let _vykazEdit=null;
 function editVykaz(idx){
   const d=firmaData, nova=idx==null;
   _vykazEdit={ idx, nova, w: nova
-    ? {projekt:"",zakazka:"",pracovnik:(d.meta&&d.meta.nazov)||"",obdobie:"",polozky:[]}
+    ? {...vykazPredvolene(), obdobie:"", polozky:[]}
     : JSON.parse(JSON.stringify(d.vykazy[idx])) };
   renderVykazEditor();
+}
+
+// ── Zákazky a predvolené hlavičky (Roman 9. 10. 2026) ───────────────────────
+// Zákazka nie je samostatná entita — žije vo výkazoch. Zoznam = zákazky zo
+// starších výkazov, ku každej projekt a pracovník z NAJNOVŠIEHO výkazu tej
+// zákazky; navrch predvolená z Nastavení (`zakazkaCislo`/`projektNazov`, ktoré
+// sa dovtedy len zapisovali a nečítal ich nikto).
+const VYKAZ_Z_KALENDARA="Výkaz z kalendára";   // starý názov importu — nepreberá sa
+function vykazPracovnikOsoba(){
+  const S=firmaData.settings||{}, D=S.pbDanovnik||{};
+  const meno=[D.titul, D.meno, D.priezvisko].filter(x=>String(x||"").trim()).join(" ").trim();
+  return String(S.kjVodic||"").trim() || meno || ((firmaData.meta&&firmaData.meta.nazov)||"");
+}
+function vykazZakazky(){
+  const S=firmaData.settings||{}, mapa=new Map();
+  [...(firmaData.vykazy||[])].map((w,i)=>({w,i,m:vykazMesiac(w)}))
+    .sort((a,b)=>(a.m||"").localeCompare(b.m||"") || a.i-b.i)
+    .forEach(({w})=>{ const z=String(w.zakazka||"").trim(); if(!z) return;
+      mapa.set(z, { zakazka:z, projekt:w.projekt===VYKAZ_Z_KALENDARA?"":(w.projekt||""), pracovnik:w.pracovnik||"" }); });
+  const zoz=[...mapa.values()].reverse();   // najnovšia zákazka prvá
+  const zs=String(S.zakazkaCislo||"").trim();
+  if(zs && !mapa.has(zs)) zoz.push({ zakazka:zs, projekt:String(S.projektNazov||""), pracovnik:"" });
+  return zoz;
+}
+// Hlavička nového výkazu (ručného aj z kalendára): posledná zákazka, inak
+// nastavenia; pracovník je OSOBA (kniha jázd / priznanie), nie obchodné meno.
+function vykazPredvolene(){
+  const S=firmaData.settings||{}, posl=vykazZakazky()[0];
+  return {
+    projekt: (posl&&posl.projekt) || String(S.projektNazov||""),
+    zakazka: (posl&&posl.zakazka) || String(S.zakazkaCislo||""),
+    pracovnik: (posl&&posl.pracovnik) || vykazPracovnikOsoba(),
+  };
+}
+// Výber zákazky v editore doplní projekt a pracovníka z jej posledného výkazu —
+// len do prázdnych polí (a za starý názov importu), napísané sa neprepisuje.
+function vykazZakazkaVybrana(hodnota){
+  const z=vykazZakazky().find(x=>x.zakazka===String(hodnota||"").trim()); if(!z) return;
+  const pr=document.getElementById("m_projekt"), pc=document.getElementById("m_pracovnik");
+  if(pr && z.projekt && (!pr.value.trim() || pr.value.trim()===VYKAZ_Z_KALENDARA)) pr.value=z.projekt;
+  if(pc && z.pracovnik && !pc.value.trim()) pc.value=z.pracovnik;
 }
 
 // činnosti, ktoré už vo výkazoch boli — ponúkajú sa jedným ťuknutím
@@ -11087,7 +11171,8 @@ function renderVykazEditor(){
   openModal(nova?"Nový výkaz":"Upraviť výkaz",`
     <div class="mfield"><label>Projekt</label><input id="m_projekt" value="${esc(w.projekt||'')}"></div>
     <div class="mrow2">
-      <div class="mfield"><label>Zákazka</label><input id="m_zakazka" value="${esc(w.zakazka||'')}"></div>
+      <div class="mfield"><label>Zákazka</label><input id="m_zakazka" value="${esc(w.zakazka||'')}" list="m_zakazky" autocomplete="off" onchange="vykazZakazkaVybrana(this.value)">
+        <datalist id="m_zakazky">${vykazZakazky().map(z=>`<option value="${esc(z.zakazka)}">${esc(z.projekt||"")}</option>`).join("")}</datalist></div>
       <div class="mfield"><label>Pracovník</label><input id="m_pracovnik" value="${esc(w.pracovnik||'')}"></div>
     </div>
     <div class="mfield"><label>Obdobie</label><input id="m_obdobie" value="${esc(w.obdobie||'')}" placeholder="1.1.2026 - 31.1.2026"></div>
@@ -11254,11 +11339,11 @@ function vykazNaProtokol(){
     objednavatelAdresa:S.odberatelAdresa||"", schvalil:S.odberatelSchvalil||"",
     miesto:M.obec||"", text:""
   };
+  // číslo z mesiaca výkazu (jedno pravidlo s Word protokolom), dátum = koniec obdobia
+  const vm=vykazMesiac(w);
+  if(vm) p.cislo="Akceptačný protokol_"+vm.slice(5,7)+"_"+vm.slice(0,4);
   const m=(w.obdobie||"").match(/(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4}).*?(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})/);
-  if(m){
-    p.cislo="Akceptačný protokol_"+String(+m[2]).padStart(2,"0")+"_"+m[3];
-    p.datum=m[6]+"-"+String(+m[5]).padStart(2,"0")+"-"+String(+m[4]).padStart(2,"0");
-  }
+  if(m) p.datum=m[6]+"-"+String(+m[5]).padStart(2,"0")+"-"+String(+m[4]).padStart(2,"0");
   if(!firmaData.protokoly) firmaData.protokoly=[];
   firmaData.protokoly.unshift(p);
   closeModal(); _vykazEdit=null; poZmene();
@@ -11741,21 +11826,38 @@ function spracujICS(e){
       const skip=(ev.start&&ev.start.allDay)||busy==="FREE"||transp==="TRANSPARENT"||part==="DECLINED"||(ev.status||"").toUpperCase()==="CANCELLED";
       ev.zahrnut=!skip;
     });
-    _icsEvents=expandRecurring(evs);
+    _icsEvents=expandRecurring(evs); _icsMesiac=null;
     icsSprievodca();
   };
   rd.readAsText(file);
 }
+// Import z kalendára je len ŠTART výkazu (Roman 9. 10. 2026): jeden výkaz =
+// jeden mesiac, hlavička z poslednej zákazky (nie „Výkaz z kalendára“ a obchodné
+// meno ako pracovník), hodiny na deň z nastavenia človekodňa a po uložení sa
+// hneď otvorí editor — dovtedy sa musel výkaz hľadať a otvárať znova.
+let _icsMesiac=null;
+function icsMesiace(evs){
+  const poc={};
+  evs.forEach(e=>{ const m=String(e.start.iso||"").slice(0,7); if(m) poc[m]=(poc[m]||{vsetky:0,vybrane:0}); if(m){ poc[m].vsetky++; if(e.zahrnut) poc[m].vybrane++; } });
+  return poc;
+}
 function icsSprievodca(){
-  const evs=_icsEvents.filter(e=>e.start&&!e.start.allDay);
+  const vsetky=_icsEvents.filter(e=>e.start&&!e.start.allDay);
+  const mes=icsMesiace(vsetky), zoz=Object.keys(mes).sort();
+  if(!_icsMesiac || !mes[_icsMesiac]) _icsMesiac = zoz.reduce((a,b)=>(mes[b].vybrane>mes[a].vybrane ? b : a), zoz[0]);
+  const evs=vsetky.filter(e=>String(e.start.iso).slice(0,7)===_icsMesiac);
   const vybrane=evs.filter(e=>e.zahrnut);
-  // zoskup po dňoch
   const byDay={}; vybrane.forEach(e=>{ (byDay[e.start.iso]=byDay[e.start.iso]||[]).push(e); });
   const dni=Object.keys(byDay).sort();
-  const pausalH=8;
-  openModal(`Import z kalendára (${evs.length} stretnutí)`, `
+  const hodNaDen=vykazMdHodin({});
+  const nazovMes=m=>{ const [r,mm]=m.split("-"); return (MES_SK[+mm-1]||mm)+" "+r; };
+  openModal(`Import z kalendára`, `
+    <div class="mfield"><label>Mesiac výkazu</label>
+      <select onchange="_icsMesiac=this.value;prekresliModal(icsSprievodca)">
+        ${zoz.map(m=>`<option value="${m}" ${m===_icsMesiac?"selected":""}>${esc(nazovMes(m))} · ${mes[m].vybrane} z ${mes[m].vsetky} stretnutí</option>`).join("")}
+      </select></div>
     <div style="background:var(--brand-lite);color:var(--brand-deep);font-size:12.5px;padding:10px 13px;border-radius:9px;margin-bottom:12px">
-      Našli sme <b>${evs.length} stretnutí</b>. Odškrtnite tie, ktoré nepatria do výkazu (súkromné, voľné termíny). Vytvorí sa <b>${dni.length} dní</b> výkazu (${pausalH}h/deň).
+      Odškrtnite stretnutia, ktoré do výkazu nepatria. Vznikne návrh na <b>${dni.length} dní</b> (${cldTxt(hodNaDen)} h/deň) a hneď sa otvorí na úpravu — zákazku, dni aj činnosti doladíte v editore.
     </div>
     <div style="display:flex;gap:8px;margin-bottom:10px">
       <button type="button" class="aabtn" style="flex:1" onclick="icsOznac(true)">Označiť všetky</button>
@@ -11769,23 +11871,28 @@ function icsSprievodca(){
       </div>`;}).join('')}
     </div>
   `, ()=>{
-    const vyb=_icsEvents.filter(e=>e.start&&!e.start.allDay&&e.zahrnut);
-    if(!vyb.length){ alert("Nič nie je označené."); return false; }
+    const vyb=_icsEvents.filter(e=>e.start&&!e.start.allDay&&e.zahrnut&&String(e.start.iso).slice(0,7)===_icsMesiac);
+    if(!vyb.length){ alert("V mesiaci nie je označené žiadne stretnutie."); return false; }
     const byDay={}; vyb.forEach(e=>{ (byDay[e.start.iso]=byDay[e.start.iso]||[]).push(e); });
     const polozky=Object.keys(byDay).sort().map(iso=>{
       const list=byDay[iso].sort((a,b)=>(a.start.h*60+a.start.mi)-(b.start.h*60+b.start.mi));
       const aktivity=list.map(e=>cleanMeetingName(e.summary)).filter(Boolean);
-      return {datum:iso, hodiny:pausalH, aktivity, poznamka:aktivity.join("; ")};
+      return {datum:iso, hodiny:hodNaDen, aktivity, poznamka:aktivity.join("; ")};
     });
-    const isoOd=polozky[0].datum, isoDo=polozky[polozky.length-1].datum;
-    const w={projekt:"Výkaz z kalendára", zakazka:"", pracovnik:(firmaData.meta&&firmaData.meta.nazov)||"", obdobie:fmtDatum(isoOd)+" - "+fmtDatum(isoDo), polozky, hodiny:polozky.length*pausalH, dni:polozky.length};
+    // obdobie = celý mesiac výkazu (výkaz sa fakturuje za mesiac)
+    const [r,mm]=_icsMesiac.split("-").map(Number);
+    const od=_icsMesiac+"-01", doD=_icsMesiac+"-"+String(new Date(r, mm, 0).getDate()).padStart(2,"0");
+    const w={...vykazPredvolene(), obdobie:fmtDatum(od)+" - "+fmtDatum(doD), polozky};
+    vykazPrepocitaj(w);
     if(!firmaData.vykazy) firmaData.vykazy=[];
     firmaData.vykazy.push(w); poZmene(); appVykazy();
-    alert("Výkaz vytvorený: "+polozky.length+" dní.");
+    _icsMesiac=null;
+    // návrh sa hneď otvorí na úpravu (kalendár je len štart)
+    setTimeout(()=>editVykaz(firmaData.vykazy.length-1), 0);
   });
 }
 function icsToggle(gi){ if(_icsEvents[gi]){ _icsEvents[gi].zahrnut=!_icsEvents[gi].zahrnut; prekresliModal(icsSprievodca); } }
-function icsOznac(v){ _icsEvents.forEach(e=>{ if(e.start&&!e.start.allDay) e.zahrnut=v; }); prekresliModal(icsSprievodca); }
+function icsOznac(v){ _icsEvents.forEach(e=>{ if(e.start&&!e.start.allDay&&String(e.start.iso).slice(0,7)===_icsMesiac) e.zahrnut=v; }); prekresliModal(icsSprievodca); }
 
 // ── FAKTÚRY ──
 let fFilter="vsetky", fRok="", fMesiac="";
@@ -12860,6 +12967,10 @@ function faktKopiaPreNovu(zdroj){
   const spl=new Date(); spl.setDate(spl.getDate()+dniSpl);
   k.splatnost=spl.toISOString().slice(0,10);
   delete k.cislo; delete k.vs;   // priradí editor
+  // Človekodne sa počítajú z položiek (faktClovekodni); uložené `dni` zo
+  // zdrojovej faktúry by v kópii klamalo — tri faktúry tak mali 25 čld
+  // z júna (9. 10. 2026).
+  delete k.dni;
   delete k.zaplatena; delete k.uhrada; delete k.uhradaRucne; delete k.zaplateny;
   delete k.originalSubor;        // originál patrí pôvodnému dokladu
   delete k.id;
