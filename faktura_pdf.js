@@ -624,7 +624,11 @@ export function modelSaasFaktury(f, dodavatel) {
       // Pôvodné `slice(0,10)` orezávalo slovenský tvar (11 znakov) na
       // „13. 8. 202" a `fmtDatum` ho už nerozpoznal, takže sa vytlačil tak.
       vystavenie: datumZoZaznamu(f.vystavene),
-      dodanie: datumZoZaznamu(f.vystavene),
+      // Dodanie = prvý deň aktívneho predplatného (Roman 8. 10. 2026) — ten
+      // istý dátum nesie ISDOC aj UBL (efaktura_xml.js modelEfakturySaas).
+      // Pri karte je to deň platby; pri obnove začiatok nového obdobia.
+      // Priznanie B obdobie nemá → deň vystavenia.
+      dodanie: datumZoZaznamu(f.obdobie_od || f.vystavene),
       splatnost: null,           // uhradené kartou, splatnosť nemá zmysel
     },
     platba: { sposob: "Uhradené kartou", vs: null },
