@@ -26639,7 +26639,8 @@ async function vyzvaPrevodomHtml(v){
   let qr=null;
   try{ qr=await payBySquareDataUrl({ cislo:"VS"+v.vs, suma:v.suma, splatnost:v.splatnost, vs:v.vs,
     sprava:"eZivnostnik predplatne", meno:P.meno, iban:P.iban }); }catch(e){ console.warn("QR výzvy:", e); }
-  const riadok=(k,h)=>`<div style="display:flex;justify-content:space-between;gap:12px;padding:5px 0;border-bottom:1px solid var(--line)"><span class="acol-muted">${k}</span><b style="text-align:right;word-break:break-all">${h}</b></div>`;
+  // zalamovať len na medzerách — IBAN a meno sa prepisujú do banky po skupinách
+  const riadok=(k,h)=>`<div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:5px 0;border-bottom:1px solid var(--line)"><span class="acol-muted" style="flex:none">${k}</span><b style="text-align:right;min-width:0;overflow-wrap:break-word">${h}</b></div>`;
   const plan=PLANY[v.plan]?PLANY[v.plan].nazov:(v.plan||"");
   return `${qr?`<div style="text-align:center;margin:4px 0 12px"><img src="${qr}" alt="QR kód PAY by square" style="width:200px;height:200px"><div class="acol-muted" style="font-size:12px">Naskenujte v aplikácii banky</div></div>`:""}
     ${riadok("Príjemca", esc(P.meno))}
@@ -26655,7 +26656,9 @@ async function vyzvaPrevodomHtml(v){
       Variabilný symbol uveďte presne, podľa neho platbu spárujeme.</p>`;
 }
 async function ukazVyzvuPrevodom(v){
-  openModal("Platba prevodom", await vyzvaPrevodomHtml(v), null, null, null, "Zavrieť");
+  openModal("Platba prevodom", await vyzvaPrevodomHtml(v), null, null, null);
+  // „Zrušiť“ by sa čítalo ako zrušenie objednávky — okno len zatvára
+  const zr=document.getElementById("modalZrusit"); if(zr) zr.textContent="Zavrieť";
 }
 // Čakajúca výzva firmy (RLS: vlastné objednávky). Nastavenia → Predplatné.
 let prevodCakajuca=null;
@@ -27574,6 +27577,8 @@ function openModal(title, bodyHTML, onSave, onDelete, trieda, okText){
   if(onDelete) del.classList.remove("hidden"); else del.classList.add("hidden");
   const ok=document.getElementById("modalOk");
   if(ok){ ok.style.display=onSave?"":"none"; ok.textContent=okText||"Uložiť"; }
+  // predvolený text — okno bez akcie si ho môže prepísať (výzva prevodom: „Zavrieť“)
+  const zr=document.getElementById("modalZrusit"); if(zr) zr.textContent="Zrušiť";
   _oknoZmenene=false;
   // Menu z lišty zavrieť PRED prepočtom vrstiev: focus z položky menu sa vráti na
   // tlačidlo menu a to je otvárač okna (č. 132).
@@ -32739,22 +32744,30 @@ async function payBySquareDataUrl(p){
     import("https://esm.sh/bysquare@4/pay"),
     import("https://esm.sh/qrcode@1.5.4")
   ]);
-  const { encode, PaymentOptions, CurrencyCode }=bysq;
   const QRCode=QRMod.default||QRMod;
-  const qrstring=encode({
+  const qrstring=bysq.encode(payBySquareUdaje(p, bysq));
+  return await QRCode.toDataURL(qrstring,{margin:1,width:220});
+}
+// Údaje pre PAY by square — čistá funkcia, test ich podá skutočnej knižnici.
+// Splatnosť chce bysquare 4.x v tvare RRRRMMDD: „2026-10-12“ odmietne
+// výnimkou a QR sa ticho nenakreslil na žiadnej faktúre so splatnosťou
+// (zistené 9. 10. 2026 pri výzve prevodom; kotva strážila zlý tvar).
+function payBySquareUdaje(p, bysq){
+  const { PaymentOptions, CurrencyCode }=bysq;
+  const spl=String(p.splatnost||"").slice(0,10);
+  return {
     invoiceId:String(p.cislo||""),
     payments:[{
       type:PaymentOptions.PaymentOrder,
       currencyCode:CurrencyCode.EUR,
       amount:r2(+p.suma||0),
-      ...(String(p.splatnost||"").slice(0,10) ? { paymentDueDate:String(p.splatnost).slice(0,10) } : {}),
+      ...(/^\d{4}-\d{2}-\d{2}$/.test(spl) ? { paymentDueDate:spl.replace(/-/g,"") } : {}),
       variableSymbol:String(p.vs||""),
       paymentNote:String(p.sprava||""),
       beneficiary:{ name:p.meno||"" },
       bankAccounts:[{ iban:String(p.iban||"").replace(/\s/g,"") }]
     }]
-  });
-  return await QRCode.toDataURL(qrstring,{margin:1,width:220});
+  };
 }
 
 // PDF faktúry — šablóna žije v module faktura_pdf.js (spoločná s webhookom)
