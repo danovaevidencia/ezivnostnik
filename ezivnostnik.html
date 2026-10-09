@@ -2262,7 +2262,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.10.09-SB";  // výkazy: zákazkový list, faktúra z výkazu, stav, PDF výkazu a protokolu, e-mail s prílohami
+const APP_VERZIA = "2026.10.09-SC";  // bloček z FS s jednou položkou: tankovanie len keď vyzerá ako palivo
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -14046,6 +14046,17 @@ function litreZPoloziekFS(polozky){
   return polozky.length===1 ? r2(najlepsie) : 0;
 }
 
+// Jediná položka s neznámym názvom je palivo len vtedy, keď tak aj vyzerá:
+// cena za jednotku ako pri palive (LPG ~0,7 € až benzín ~2 €/l, s rezervou)
+// a množstvo, aké sa tankuje (desatinné alebo aspoň 5). Dovtedy stačila
+// „jediná položka“ a bloček „Servis 1× 324 €“ z autoservisu sa uložil ako
+// tankovanie s 1 litrom (Roman, 9. 10. 2026).
+function jednaPolozkaAkoPalivo(p, mn, spolu){
+  const cena=parseFloat(String(p.cena ?? p.price ?? "").replace(",","."))||(+spolu||0);
+  if(!(mn>0) || !(cena>0)) return false;
+  const zaJednotku=cena/mn;
+  return zaJednotku>=0.4 && zaJednotku<=3.5 && (mn>=5 || Math.abs(mn-Math.round(mn))>0.001);
+}
 // Poskladá doklad priamo z odpovede Finančnej správy — bez OCR.
 //
 // Všetko, čo sa z bločku číta, FS pozná presne: dodávateľa, IČO, IČ DPH, DIČ,
@@ -14072,7 +14083,7 @@ function dokladZFS(d, ekasa){
   const litre=litreZPoloziekFS(pol);
   if(litre>0 && pol.some(p=>jePalivoNazov(p.nazov||p.name))){
     R.litre=litre; R.druh="PHM (tankovanie)"; R.kategoria="phm"; R.autoDoklad=true; R.autoDruh="phm";
-  } else if(litre>0 && pol.length===1){
+  } else if(litre>0 && pol.length===1 && jednaPolozkaAkoPalivo(pol[0], litre, R.spolu)){
     R.litre=litre; R.druh="PHM (tankovanie)"; R.kategoria="phm"; R.autoDoklad=true; R.autoDruh="phm";
   }
   R._polozkyFS=pol;
