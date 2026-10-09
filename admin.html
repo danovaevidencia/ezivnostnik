@@ -921,6 +921,24 @@ function pripravRokySaas(){
   }
 }
 
+// Stav e-faktúry za predplatné (od 1. 1. 2027, admin_65). Pred tým dátumom
+// riadok nič nenesie a nekreslí sa nič. Neodoslanú skúša cron `saas-efaktury`
+// sám (najviac 10×); chyba tu je preto, aby sa nedala prehliadnuť — bez DIČ
+// odberateľa alebo s odmietnutým dokladom neodíde nikdy sama.
+function saasEfakturaStav(f){
+  if(!f.peppol_odoslat && !f.peppol_chyba) return "";
+  if(f.peppol_odoslane){
+    return f.peppol_nedorucitelne
+      ? '<div class="email" style="color:var(--warn)">e-faktúra odoslaná · príjemca nie je v sieti (dostal ju e-mailom)</div>'
+      : '<div class="email" style="color:var(--accent)">e-faktúra odoslaná</div>';
+  }
+  if(f.peppol_chyba){
+    return '<div class="email" style="color:var(--neg)">e-faktúra neodišla' + (f.peppol_pokusy ? " (" + (+f.peppol_pokusy) + "×)" : "")
+      + ": " + esc(f.peppol_chyba) + "</div>";
+  }
+  return '<div class="email">e-faktúra čaká na odoslanie</div>';
+}
+
 async function nacitajSaasFaktury(){
   const rok = +document.getElementById("sfRok").value || new Date().getFullYear();
   const loading = document.getElementById("sfLoading");
@@ -931,7 +949,8 @@ async function nacitajSaasFaktury(){
   tabulka.classList.add("hidden"); prazdne.classList.add("hidden"); suhrn.classList.add("hidden");
 
   const { data, error } = await sb.from("saas_faktury")
-    .select("cislo, vystavene, odb_nazov, odb_ico, odb_icdph, zaklad, dph, spolu, sadzba_dph")
+    .select("cislo, vystavene, odb_nazov, odb_ico, odb_icdph, zaklad, dph, spolu, sadzba_dph, "
+      + "peppol_odoslat, peppol_odoslane, peppol_nedorucitelne, peppol_chyba, peppol_pokusy")
     .gte("vystavene", rok + "-01-01")
     .lte("vystavene", rok + "-12-31T23:59:59")
     .order("vystavene", { ascending: false });
@@ -965,7 +984,7 @@ async function nacitajSaasFaktury(){
 
   document.getElementById("sfBody").innerHTML = _saasFakturyAdmin.map(f=>`
     <tr>
-      <td class="mono">${esc(f.cislo||"—")}</td>
+      <td class="mono">${esc(f.cislo||"—")}${saasEfakturaStav(f)}</td>
       <td class="hide-sm">${esc(String(f.vystavene||"").slice(0,10))}</td>
       <td>${esc(f.odb_nazov||"—")}<div class="email mono">${esc(f.odb_ico||"")}</div></td>
       <td class="hide-sm mono">${f.odb_icdph ? esc(f.odb_icdph) : '<span style="color:var(--mut)">neplatca</span>'}</td>
