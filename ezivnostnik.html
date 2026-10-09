@@ -1034,8 +1034,11 @@ h1,h2,h3,h4,.chead,.wbig,.sbox .sn,.sp-title b,.splittitle{text-wrap:balance}
 .sp-tag.match{background:#e3f2e8;color:var(--pos)}
 .sp-open{text-align:center;font-size:11.5px;color:var(--brand);padding:9px;margin-top:4px;cursor:pointer;border-top:1px dashed var(--line)}
 .sp-open:hover{background:var(--brand-lite)}
+/* príloha dokladu pri párovaní — na mobile nesmie zabrať celý panel s platbami */
+.par-priloha-telo{max-height:40vh;overflow:auto}
 /* široká obrazovka — panely vedľa seba */
 @media(min-width:700px){
+  .par-priloha-telo{max-height:55vh}
   .sp-wrap{flex-direction:row;align-items:stretch}
   /* Panely vyplnia výšku okna — prázdna plocha pod krátkym zoznamom bola
      mŕtva; teraz je to priestor zoznamu (45.7 follow-up). */
@@ -2262,7 +2265,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.10.09-SC";  // bloček z FS s jednou položkou: tankovanie len keď vyzerá ako palivo
+const APP_VERZIA = "2026.10.09-SD";  // párovanie: príloha dokladu v paneli (od dokladu aj od platby)
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -3220,6 +3223,7 @@ function resetStavuModulov(){
   dphTab="vykaz"; dphVybObdobie="";
   splitVybranyPohyb=null; splitMesiac=""; splitStavFilter="nespar"; splitVsetciKand=false; splitDokladyMesiac="";
   splitVybranyDoklad=null; splitDokStavFilter="neuhr";   // druhá polovica Párovania — smer „od dokladu“
+  _parPriloha=null; _parPrilohaSkryta=false; if(_prilohaCache) _prilohaCache.clear();   // náhľady príloh patria firme
   dokFilter="vsetky";   // filter Dokumentov je per firma rovnako ako filtre vyššie
   vwFilterKm=0; _vwParsed=[]; _vwMeta=null; _vwTankovania=[];
   if(typeof vwSprievodca==="function") vwSprievodca._init=false;
@@ -44030,13 +44034,83 @@ function splitNahlad(modulId){
 // volali natvrdo `renderSplit`. Odkedy tie isté akcie žijú aj v karte
 // pohybu, musí o prekreslení rozhodovať jedno miesto — inak by karta po
 // kliknutí ukazovala staré čísla a človek by netušil, či sa niečo stalo.
+// ═══ PRÍLOHA DOKLADU PRI PÁROVANÍ (Roman 9. 10. 2026) ═══════════════════
+// „Chcem pri doklade vedieť zobraziť aj prílohu, keď párujem.“ Dovtedy sa
+// k originálu dalo dostať len cez ✎ → editor → Otvoriť (nová karta) a späť.
+// Náhľad je priamo v paneli: od dokladu nad platbami, od platby po ťuknutí
+// na 📎 pri kandidátovi (aj v karte pohybu z Banky). PDF sa kreslí cez pdf.js
+// do obrázkov — vložené PDF v iframe Android (WebView, Samsung) nezobrazí.
+// Hotový náhľad sa drží v pamäti podľa cesty, takže prekreslenie po
+// spárovaní ho nesťahuje znova; pri prepnutí firmy sa zahodí.
+// `var`, nie `let`: nuluje ich resetStavuModulov, ktorý je v súbore skôr.
+var PRILOHA_STRAN_MAX=3;
+var _parPriloha=null;            // {typ,kluc} kandidáta, ktorého prílohu ukazuje karta pohybu
+var _parPrilohaSkryta=false;     // od dokladu: človek náhľad zbalil
+var _prilohaCache=new Map();     // cesta → Promise<{obrazky:[src], stran} | {chyba}>
+function dokladPrilohaCesta(z){ return z ? String(z.doklad||z.originalSubor||"") : ""; }
+function prilohaNahladHtml(cesta, titul, zavri){
+  return `<div class="par-priloha" data-cesta="${esc(cesta)}" style="border:1px solid var(--line);border-radius:10px;margin-bottom:10px;background:var(--paper);overflow:hidden">
+    <div style="display:flex;gap:6px;align-items:center;padding:6px 8px;border-bottom:1px solid var(--line);background:var(--bg);font-size:12px">
+      <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">📎 <b>${esc(titul)}</b></span>
+      <button class="aabtn" style="padding:2px 8px;font-size:11px" onclick="event.stopPropagation();otvorDokladSubor('${esc(cesta)}')" title="Otvoriť v novom okne">↗</button>
+      <button class="aabtn" style="padding:2px 8px;font-size:11px" onclick="event.stopPropagation();${zavri}" title="Skryť prílohu">✕</button>
+    </div>
+    <div class="par-priloha-telo" style="padding:6px;font-size:12px;color:var(--ink-soft)">Načítavam prílohu…</div>
+  </div>`;
+}
+function prilohaNacitaj(cesta){
+  if(_prilohaCache.has(cesta)) return _prilohaCache.get(cesta);
+  const p=(async()=>{
+    const url=await dokladUrl(cesta);
+    if(!url) return {chyba: localMode ? "V lokálnom režime sa prílohy neukladajú." : "Prílohu sa nepodarilo načítať."};
+    const r=await fetch(url);
+    if(!r.ok) throw new Error("úložisko vrátilo "+r.status);
+    const blob=await r.blob();
+    const jePdf=/pdf/i.test(blob.type) || /\.pdf$/i.test(cesta);
+    if(!jePdf) return {obrazky:[URL.createObjectURL(blob)], stran:1};
+    const pdfjs=await ensurePdfjs();
+    const pdf=await pdfjs.getDocument({data:await blob.arrayBuffer()}).promise;
+    const obrazky=[];
+    for(let i=1;i<=Math.min(pdf.numPages, PRILOHA_STRAN_MAX);i++){
+      const str=await pdf.getPage(i), v=str.getViewport({scale:1.6});
+      const c=document.createElement("canvas"); c.width=v.width; c.height=v.height;
+      await str.render({canvasContext:c.getContext("2d"), viewport:v}).promise;
+      obrazky.push(c.toDataURL("image/jpeg", 0.85));   // toDataURL: toBlob čaká vo WebView ~4 s
+    }
+    return {obrazky, stran:pdf.numPages};
+  })().catch(e=>{
+    console.error("náhľad prílohy:", e);
+    _prilohaCache.delete(cesta);   // ďalší pokus znova, nie zapamätaná chyba
+    return {chyba:"Prílohu sa nepodarilo zobraziť ("+(e&&e.message||e)+"). Skúste ↗."};
+  });
+  _prilohaCache.set(cesta, p);
+  if(_prilohaCache.size>8) _prilohaCache.delete(_prilohaCache.keys().next().value);
+  return p;
+}
+// Doplní obsah do všetkých náhľadov, ktoré práve vznikli prekreslením.
+function prilohaNahladyDoplnit(){
+  document.querySelectorAll(".par-priloha[data-cesta]").forEach(async box=>{
+    const cesta=box.dataset.cesta, telo=box.querySelector(".par-priloha-telo"); if(!cesta||!telo) return;
+    const v=await prilohaNacitaj(cesta);
+    if(!box.isConnected || box.dataset.cesta!==cesta) return;   // medzitým prekreslené
+    if(v.chyba){ telo.textContent=v.chyba; telo.style.color="var(--neg)"; return; }
+    telo.innerHTML=v.obrazky.map(src=>`<img src="${src}" alt="Príloha dokladu" style="display:block;width:100%;height:auto;margin-bottom:6px;border:1px solid var(--line);border-radius:4px;background:#fff">`).join("")
+      +(v.stran>v.obrazky.length?`<div style="padding:4px 2px">Zobrazené ${v.obrazky.length} z ${v.stran} strán — celé cez ↗.</div>`:"");
+  });
+}
+function parUkazPrilohu(typ, kluc){
+  _parPriloha = (_parPriloha && _parPriloha.typ===typ && _parPriloha.kluc===kluc) ? null : {typ, kluc};
+  parPrekresli();
+}
+function parSkryPrilohuDokladu(skryt){ _parPrilohaSkryta=!!skryt; renderSplit(); }
+
 let _kartaPohybuId=null;
 function parPrekresli(){
   if(_kartaPohybuId && document.getElementById("modal") &&
      document.getElementById("modal").classList.contains("on")){
     const tx=(firmaData.vypis||[]).find(t=>txId(t)===_kartaPohybuId);
     const telo=document.getElementById("modalBody");
-    if(tx && telo){ prekresliSoScrollom(()=>{ telo.innerHTML=pohybKartaHtml(tx); }); return; }
+    if(tx && telo){ prekresliSoScrollom(()=>{ telo.innerHTML=pohybKartaHtml(tx); }); prilohaNahladyDoplnit(); return; }
   }
   if(typeof renderSplit==="function") renderSplit();
 }
@@ -44045,7 +44119,7 @@ function parPrekresli(){
 function otvorKartuPohybu(txIdVal){
   const tx=(firmaData.vypis||[]).find(t=>txId(t)===txIdVal); if(!tx) return;
   _kartaPohybuId=txIdVal;
-  splitVsetciKand=false;
+  splitVsetciKand=false; _parPriloha=null;
   const znak=tx.smer==="prijem"?"+":"−";
   openModal((tx.proti||tx.popis||"Pohyb")+" · "+znak+eur(tx.suma),
             pohybKartaHtml(tx), null, null, "siroky");
@@ -44147,6 +44221,13 @@ function pohybKartaHtml(tx){
             </div>`).join("")}
           </div>`; })()}
         ${(()=>{
+          // príloha kandidáta, ktorú si človek otvoril cez 📎 — nad zoznamom
+          const pr=_parPriloha && najdiDoklad(_parPriloha.typ, _parPriloha.kluc), cesta=dokladPrilohaCesta(pr);
+          if(!cesta) return "";
+          return prilohaNahladHtml(cesta, (pr.cislo||"doklad")+" · "+eur(+pr.spolu||+pr.bez||0),
+            "parUkazPrilohu('"+_parPriloha.typ+"','"+esc(String(_parPriloha.kluc))+"')");
+        })()}
+        ${(()=>{
           let ohodnotene=kand.map(k=>({...k, ...parSkore(tx,k)})).sort((a,b)=>b.skore-a.skore);
           const filterAktivny=splitDokladyFilterAktivny();
           if(splitDokladyMesiac) ohodnotene=ohodnotene.filter(k=>String((k.z&&(k.z.datum||k.z.vystavenie))||"").slice(0,7)===splitDokladyMesiac);
@@ -44161,7 +44242,7 @@ function pohybKartaHtml(tx){
             const odporucane = jasny && i===0;
             const znacky=k.dovody.map(d=>`<span class="sp-tag ${d.ok?'match':'open'}">${d.ok?'✓':'·'} ${esc(d.t)}</span>`).join(" ");
             return `<div class="sp-item ${odporucane?'match':(k.sedi?'':'dim')}" onclick="splitSparuj('${txId(tx)}','${k.typ}','${esc(String(k.kluc))}')"${zam("banka")}>
-              <div class="sp-r1"><span>${odporucane?'<b>⭐ ':''}${esc(String(k.cislo||"—"))}${odporucane?'</b>':''} ${k.nazov?'· '+esc(k.nazov):''}</span><span style="display:flex;gap:6px;align-items:center"><span class="sp-amt">${eur(k.suma)}</span><button class="aabtn" style="padding:2px 7px;font-size:11px" onclick="event.stopPropagation();splitOtvorDoklad('${k.typ}','${esc(String(k.kluc))}')" title="Otvoriť a upraviť doklad">✎</button></span></div>
+              <div class="sp-r1"><span>${odporucane?'<b>⭐ ':''}${esc(String(k.cislo||"—"))}${odporucane?'</b>':''} ${k.nazov?'· '+esc(k.nazov):''}</span><span style="display:flex;gap:6px;align-items:center"><span class="sp-amt">${eur(k.suma)}</span>${dokladPrilohaCesta(k.z)?`<button class="aabtn${_parPriloha&&_parPriloha.typ===k.typ&&_parPriloha.kluc===String(k.kluc)?' pri':''}" style="padding:2px 7px;font-size:11px" onclick="event.stopPropagation();parUkazPrilohu('${k.typ}','${esc(String(k.kluc))}')" title="Zobraziť prílohu dokladu">📎</button>`:""}<button class="aabtn" style="padding:2px 7px;font-size:11px" onclick="event.stopPropagation();splitOtvorDoklad('${k.typ}','${esc(String(k.kluc))}')" title="Otvoriť a upraviť doklad">✎</button></span></div>
               <div class="sp-r2">${k.z&&k.z.datum?fmtDatum(k.z.datum)+" · ":""}${znacky}${(()=>{
                 const st=dokladStavUhrady(k.typ,k.kluc);
                 const kde=uhradyPopis(k.typ,k.kluc);
@@ -44217,7 +44298,7 @@ function renderSplit(){
         const cls=sel?"sel":(s.stav==="uhradene"?"done":(s.stav==="ciastocne"?"cast":""));
         return `<div class="sp-item ${cls}" onclick="splitVyberDoklad('${k.typ}','${esc(k.kluc)}')">
           <div class="sp-r1"><span>${esc(k.z.cislo||"—")}${k.nazov?" · "+esc(k.nazov):""}</span><span class="sp-amt">${eur(k.suma)}</span></div>
-          <div class="sp-r2">${fmtDatum(k.datum)} · ${k.typ==="faktura"?"faktúra":"výdavok"} ${
+          <div class="sp-r2">${fmtDatum(k.datum)} · ${k.typ==="faktura"?"faktúra":"výdavok"}${dokladPrilohaCesta(k.z)?' <span title="Má prílohu">📎</span>':''} ${
             s.stav==="uhradene" ? '<span class="sp-tag done">✓ uhradené</span>'
             : s.stav==="ciastocne" ? '<span class="sp-tag cast">'+esc(s.text)+'</span>'
             : '<span class="sp-tag open">neuhradené</span>'}</div>
@@ -44228,8 +44309,13 @@ function renderSplit(){
         <div class="sp-body"><div class="aempty" style="padding:30px 16px">Vyberte doklad a zobrazia sa platby, ktoré k nemu sedia.</div></div>`;
     } else {
       const dk=najdiDoklad(splitVybranyDoklad.typ, splitVybranyDoklad.kluc);
+      // príloha vybraného dokladu nad platbami — zbalená ostane zbalená
+      const cesta=dokladPrilohaCesta(dk);
+      const prHtml=!cesta ? "" : _parPrilohaSkryta
+        ? `<div style="margin-bottom:10px"><button class="aabtn" style="padding:4px 10px;font-size:12px" onclick="parSkryPrilohuDokladu(false)">📎 Zobraziť prílohu</button></div>`
+        : prilohaNahladHtml(cesta, (dk.cislo||"doklad")+" · "+eur(+dk.spolu||+dk.bez||0), "parSkryPrilohuDokladu(true)");
       pravy=`<div class="sp-head" style="--_c:var(--m-banka)"><div class="sp-ic">🏦</div><div class="sp-tt">Platby</div><span class="sp-badge">${eur0(+dk.spolu||+dk.bez||0)}</span></div>
-        <div class="sp-body" data-scroll="pravy">${vyberPlatbyHtml(splitVybranyDoklad.typ, splitVybranyDoklad.kluc)}</div>`;
+        <div class="sp-body" data-scroll="pravy">${prHtml}${vyberPlatbyHtml(splitVybranyDoklad.typ, splitVybranyDoklad.kluc)}</div>`;
     }
   } else if(splitJeParovanie()){
     // ŠPECIÁL: banka ↔ doklady s párovaním
@@ -44322,11 +44408,12 @@ function renderSplit(){
   const selEl=document.querySelector("#splitScreen .sp-item.sel");
   if(selEl && selEl.scrollIntoView){ const r=selEl.getBoundingClientRect(), rodic=selEl.closest(".sp-body");
     if(rodic){ const rr=rodic.getBoundingClientRect(); if(r.top<rr.top||r.bottom>rr.bottom) selEl.scrollIntoView({block:"nearest"}); } }
+  prilohaNahladyDoplnit();
 }
 let splitMesiac="", splitStavFilter="nespar";
 function splitNastavMesiac(m){ splitMesiac=m; renderSplit(); }
 function splitNastavStav(k){ splitStavFilter=k; renderSplit(); }
-function splitVyberPohyb(id){ splitVybranyPohyb = (splitVybranyPohyb===id) ? null : id; splitVsetciKand=false; renderSplit(); }
+function splitVyberPohyb(id){ splitVybranyPohyb = (splitVybranyPohyb===id) ? null : id; splitVsetciKand=false; _parPriloha=null; renderSplit(); }
 function splitSparuj(txIdVal, typ, cislo){
   if(!strazZapis("banka")) return;
   const tx=(firmaData.vypis||[]).find(t=>txId(t)===txIdVal); if(!tx) return;
