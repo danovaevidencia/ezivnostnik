@@ -466,12 +466,15 @@ tr.chce td{background:#fff5e6}
   <div class="box">
     <div class="mh"><h3 id="cfgTitle">Konfigurácia firmy</h3><button class="x" onclick="zavriCfg()">×</button></div>
     <div class="mb">
+      <!-- Kto plán platí (admin_firma_platba, spec 154 A9) -->
+      <div class="hint" id="cfgPlatba" style="margin-top:0"></div>
+      <!-- Ceny sem nepatria: tretia kópia cenníka (ročné sa ani nepredávajú). Platia podmienky.html. -->
       <div class="field"><label>Plán</label>
         <select id="cfgPlan">
           <option value="free">Free</option>
-          <option value="standard">Neplatiteľ DPH (7,90 € / 79 €)</option>
-          <option value="profi">Platiteľ DPH (12,18 € / 119 €)</option>
-          <option value="uctovnik">Účtovník (od 7,90 € + klienti / 269 €)</option>
+          <option value="standard">Neplatiteľ DPH (standard)</option>
+          <option value="profi">Platiteľ DPH (profi)</option>
+          <option value="uctovnik">Účtovník</option>
         </select>
       </div>
       <div class="field"><label>Platnosť predplatného</label>
@@ -500,9 +503,14 @@ tr.chce td{background:#fff5e6}
       <div class="field"><label>Režim výdavkov</label>
         <select id="cfgVyd"><option value="">— nechať na zákazníka —</option><option value="skutocne">Skutočné výdavky</option><option value="pausal">Paušálne výdavky</option></select>
       </div>
+      <div class="hint warn hidden" id="cfgVarovanie">
+        <b>Plán tejto firmy platí zákazník.</b> Ručná zmena plánu alebo platnosti sa pri ďalšej platbe prepíše
+        (karta) alebo podľa nej pôjde výzva a prechod na Free (prevod). Zmena sa zapíše do logu zásahov.
+        <label class="chk" style="margin-top:6px"><input type="checkbox" id="cfgRozumiem"> Rozumiem, zmeniť aj tak</label>
+      </div>
       <div class="err" id="cfgErr"></div>
       <div style="border-top:1px solid var(--line);margin-top:16px;padding-top:16px">
-        <label style="display:block;font-size:12px;color:var(--soft);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">GDPR</label>
+        <label style="display:block;font-size:12px;color:var(--neg);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Nebezpečná zóna — GDPR</label>
         <div style="display:flex;gap:10px">
           <button class="rowbtn" onclick="gdprExport()">📦 Export dát</button>
           <button class="rowbtn" style="border-color:var(--neg);color:var(--neg)" onclick="gdprZmazat()">🗑 Zmazať účet</button>
@@ -520,6 +528,23 @@ tr.chce td{background:#fff5e6}
     <div class="mf">
       <button class="rowbtn" onclick="zavriCfg()">Zrušiť</button>
       <button class="btn" style="width:auto;padding:10px 20px" onclick="ulozCfg()">Uložiť</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: zmazanie účtu — zhrnutie a potvrdenie napísaním IČO (spec 154 A2) -->
+<div class="modal" id="gdprModal">
+  <div class="box">
+    <div class="mh"><h3>Zmazať účet</h3><button class="x" onclick="gdprZavri()">×</button></div>
+    <div class="mb" data-scroll>
+      <div id="gdprBody"></div>
+      <div class="field" style="margin-top:12px"><label id="gdprKlucPopis">Na potvrdenie napíšte IČO firmy:</label>
+        <input id="gdprKluc" autocomplete="off" oninput="gdprKontrola()"></div>
+      <div class="err" id="gdprErr"></div>
+    </div>
+    <div class="mf">
+      <button class="rowbtn" onclick="gdprZavri()">Zrušiť</button>
+      <button class="btn" id="gdprPotvrd" disabled style="width:auto;padding:10px 20px;background:var(--neg)" onclick="gdprZmazatPotvrd()">Zmazať natrvalo</button>
     </div>
   </div>
 </div>
@@ -631,7 +656,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";  // ANON 
 let sb = null, currentUser = null, cfgFirmaId = null;
 // Verzia adminu = verzia appky pri nasadení. Pripája sa k súborom sekcií
 // (admin_kampane.js…), aby prehliadač nedržal starú kópiu z cache.
-const ADMIN_VERZIA = "2026.10.10-SG";
+const ADMIN_VERZIA = "2026.10.10-SH";
 
 function init(){
   if(!SUPABASE_KEY || SUPABASE_KEY.startsWith("SEM_")){
@@ -814,6 +839,17 @@ function adminPocet(id, n){
   if(!el) return;
   el.textContent = n || "";
   el.classList.toggle("hidden", !n);
+}
+// Stopa zásahu admina (admin_71, spec 154 D1): kto, kedy, čo, predtým → potom.
+// Zápis po úspešnej akcii; zlyhanie zápisu akciu nevracia, ale nesmie byť
+// ticho — console.error a návratová hodnota false.
+async function adminLog(akcia, firmaId, objekt, pred, po){
+  try{
+    const { error } = await sb.rpc("admin_log_zapis", { p_akcia: akcia, p_firma: firmaId || null,
+      p_objekt: objekt == null ? null : String(objekt), p_pred: pred || null, p_po: po || null });
+    if(error) throw error;
+    return true;
+  }catch(e){ console.error("admin_log " + akcia + ":", e); return false; }
 }
 function adminSkript(subor){
   if(!_adminSkripty[subor]) _adminSkripty[subor] = new Promise((ok, zle) => {
@@ -999,6 +1035,7 @@ async function vystavDobropisSaas(cislo){
       + (data.email ? ", zákazník ho dostal e-mailom" : " — e-mail neodišiel, pošlite PDF ručne")
       + (data.predplatne ? (f.obdobie_od ? ". Predplatné je ukončené." : ". Priznanie B je znova zamknuté.") : ".")
       + (data.upozornenie ? "\n\n⚠ " + data.upozornenie : ""));
+    await adminLog("dobropis", f.firma_id, data.cislo, { faktura: cislo, spolu: f.spolu }, data);
     nacitajSaasFaktury();
   }catch(e){ alert("Dobropis sa nevystavil: " + e.message); }
 }
@@ -1013,7 +1050,7 @@ async function nacitajSaasFaktury(){
   tabulka.classList.add("hidden"); prazdne.classList.add("hidden"); suhrn.classList.add("hidden");
 
   const { data, error } = await sb.from("saas_faktury")
-    .select("cislo, vystavene, obdobie_od, typ, opravuje, uhrada, uhradene, odb_nazov, odb_ico, odb_icdph, zaklad, dph, spolu, sadzba_dph, "
+    .select("cislo, firma_id, vystavene, obdobie_od, typ, opravuje, uhrada, uhradene, odb_nazov, odb_ico, odb_icdph, zaklad, dph, spolu, sadzba_dph, "
       + "peppol_odoslat, peppol_odoslane, peppol_nedorucitelne, peppol_chyba, peppol_pokusy")
     .gte("vystavene", rok + "-01-01")
     .lte("vystavene", rok + "-12-31T23:59:59")
@@ -1208,8 +1245,16 @@ async function otvorCfg(firmaId, nazov){
   prepniModuly();
   document.getElementById("cfgDph").value = c.platca_dph===true ? "platca" : (c.platca_dph===false ? "neplatca" : "");
   document.getElementById("cfgVyd").value = c.vydavky_rezim || "";
+  // Pôvodný plán a platnosť — pri firme, ktorá platí, ich zmena žiada
+  // výslovné „Rozumiem“ (spec 154 A9).
+  _cfgPovodne = { plan: c.plan || "free", plan_do: document.getElementById("cfgPlanDo").value };
+  document.getElementById("cfgVarovanie").classList.add("hidden");
+  document.getElementById("cfgRozumiem").checked = false;
   document.getElementById("cfgModal").classList.add("on");
+  try{ await adminSkript("admin_zasahy.js"); await cfgNacitajPlatbu(firmaId); }
+  catch(e){ console.error("Konfig — kto platí:", e); }
 }
+let _cfgPovodne = null;
 
 // zapne/vypne ručný výber modulov
 function prepniModuly(){
@@ -1230,16 +1275,24 @@ async function ulozCfg(){
   const dphVal = document.getElementById("cfgDph").value;
   const planDo = document.getElementById("cfgPlanDo").value;
   const rec = {
-    firma_id: cfgFirmaId,
     plan: document.getElementById("cfgPlan").value,
     plan_do: planDo ? new Date(planDo + "T23:59:59").toISOString() : null,
     aktivny: document.getElementById("cfgAktivny").checked,
     moduly,
     platca_dph: dphVal==="platca" ? true : (dphVal==="neplatca" ? false : null),
-    vydavky_rezim: document.getElementById("cfgVyd").value || null,
-    upravene: new Date().toISOString()
+    vydavky_rezim: document.getElementById("cfgVyd").value || null
   };
-  const { error } = await sb.from("firma_config").upsert(rec, { onConflict: "firma_id" });
+  // Firma, ktorej plán platí zákazník: zmena plánu či platnosti len
+  // s výslovným „Rozumiem“ — varovať, dovoliť (spec 154.8 bod 2).
+  if(typeof cfgTrebaPotvrdit === "function" && cfgTrebaPotvrdit(_cfgPlatba, _cfgPovodne, { plan: rec.plan, plan_do: planDo })
+     && !document.getElementById("cfgRozumiem").checked){
+    document.getElementById("cfgVarovanie").classList.remove("hidden");
+    err.textContent = "Potvrďte varovanie vyššie, inak sa nič neuloží.";
+    return;
+  }
+  // Zápis cez RPC: len povolené polia, kontrola hodnôt a zápis pred → po do
+  // logu zásahov (admin_71). Dovtedy priamy upsert bez stopy.
+  const { error } = await sb.rpc("admin_firma_config", { p_firma: cfgFirmaId, p: rec });
   if(error){ err.textContent = "Uloženie zlyhalo: " + error.message; return; }
   zavriCfg();
   nacitajPrehlad();
@@ -1278,7 +1331,11 @@ async function otvorDetail(firmaId, nazov){
       ${poslF.map(f=>`<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line);font-size:13px">
         <span>${esc(f.cislo||"—")} · ${esc(f.odberatel||"—")}</span><span class="mono">${eur(f.spolu)}</span></div>`).join("")}` : ""}
     <div style="margin-top:16px;font-size:11px;color:var(--mut)">Len na čítanie (podpora). Úpravy robí zákazník vo svojej aplikácii.</div>
+    <div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px;margin:16px 0 6px">Zásahy admina</div>
+    <div id="detailZasahy"><div class="loading" style="padding:8px">Načítavam…</div></div>
   `;
+  try{ await adminSkript("admin_zasahy.js"); await detailZasahy(firmaId); }
+  catch(e){ const z = document.getElementById("detailZasahy"); if(z) z.textContent = "Zásahy sa nenačítali: " + e.message; }
 }
 function zavriDetail(){ document.getElementById("detailModal").classList.remove("on"); }
 
@@ -1315,43 +1372,15 @@ async function gdprExport(){
   }catch(e){ err.textContent="Chyba: "+e.message; }
 }
 
+// Zmazanie účtu: okno so zhrnutím a potvrdením napísaním IČO (spec 154 A2,
+// admin_zasahy.js) — dovtedy confirm(), ktoré sa pri nezvratnej akcii číta
+// ako formalita. Testovací režim (zmaže aj faktúry za predplatné, daňové
+// doklady s 10-ročnou archiváciou) okno povie červeným.
 async function gdprZmazat(){
   if(!cfgFirmaId) return;
-  const err=document.getElementById("cfgErr");
-
-  // Testovací režim zmaže aj vystavené faktúry. Pri ostrom zákazníkovi sa
-  // nesmie stať omylom — je to zásah do účtovnej evidencie s 10-ročnou
-  // archivačnou povinnosťou, nie upratovanie.
   const jeTest = document.getElementById("cfgTestovaci")?.checked === true;
-
-  if(!confirm("Naozaj zmazať tento účet a VŠETKY jeho dáta? Túto akciu nie je možné vrátiť.")) return;
-
-  if(jeTest){
-    if(!confirm("TESTOVACÍ REŽIM\n\nZmažú sa AJ vystavené faktúry za predplatné, "+
-                "teda vaše daňové doklady.\n\nPri skutočnom zákazníkovi to NEROBTE — "+
-                "faktúry musíte archivovať 10 rokov.\n\nPokračovať?")) return;
-  }
-
-  err.textContent="Mažem…";
-  try{
-    const _tok = await ziskajToken();
-    if(!_tok){ err.textContent=CHYBA_SESSION; return; }
-    const res = await fetch(SUPABASE_URL + "/functions/v1/gdpr", {
-      method:"POST",
-      headers:{ "Content-Type":"application/json", "Authorization":"Bearer "+_tok },
-      body: JSON.stringify({ akcia:"zmazat", firma_id:cfgFirmaId, testovaci:jeTest })
-    });
-    const r = await res.json().catch(()=>({}));
-    if(!res.ok || !r.ok){ err.textContent="Zmazanie zlyhalo: "+(r.error||res.status); return; }
-    const z = r.zmazane || {};
-    alert("Účet zmazaný.\n\n"+
-          (z.faktury!=null ? "Zmazaných faktúr: "+z.faktury+"\n"
-                           : "Faktúry ponechané (archivačná povinnosť): "+(z.faktury_ponechane??0)+"\n")+
-          "Zmazaných súborov: "+(z.subory??0));
-    zavriCfg();
-    nacitajPrehlad();
-    nacitajSaasFaktury();
-  }catch(e){ err.textContent="Chyba: "+e.message; }
+  try{ await adminSkript("admin_zasahy.js"); await gdprOtvor(cfgFirmaId, jeTest); }
+  catch(e){ document.getElementById("cfgErr").textContent = "Okno zmazania sa nenačítalo: " + e.message; }
 }
 
 // ── pomocné ──

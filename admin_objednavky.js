@@ -35,7 +35,7 @@ async function nacitajObjednavkyPrevod(){
   const telo = document.getElementById("objAdmBody");
   telo.innerHTML = '<div class="loading">Načítavam platby prevodom…</div>';
   const { data, error } = await sb.from("objednavky")
-    .select("id, vytvorene, stav, plan, suma, vs, splatnost, je_obnova, doplatok, prijate_dna, prijate_suma, sparoval, overene_vypisom, vypis_rozpor, obdobie_od, obdobie_do, firmy(nazov)")
+    .select("id, firma_id, vytvorene, stav, plan, suma, vs, splatnost, je_obnova, doplatok, prijate_dna, prijate_suma, sparoval, overene_vypisom, vypis_rozpor, obdobie_od, obdobie_do, firmy(nazov)")
     .eq("kanal", "prevod").order("vytvorene", { ascending: false }).limit(300);
   _objAdm = { data: data || [], chyba: error ? error.message : "" };
   vykresliObjednavkyPrevod();
@@ -103,6 +103,7 @@ async function objSparujPotvrd(id){
   if(!/^\d{4}-\d{2}-\d{2}$/.test(datum) || datum > objDnesBA()){ if(chyba) chyba.textContent = "Zadajte deň pripísania — nie v budúcnosti."; return; }
   try{
     const v = await objVolaj({ akcia: "admin_sparuj", objednavka_id: id, datum, suma: o.suma, overene: true });
+    await adminLog("prevod_sparuj", o.firma_id, o.vs, { stav: o.stav, suma: o.suma }, { datum, faktura: v && v.faktura || null });
     _objAdm.sparuj = null;
     alert("✓ Spárované" + (v && v.faktura ? ", faktúra " + v.faktura : " — faktúru dobehne cron") + ".");
     nacitajObjednavkyPrevod();
@@ -110,10 +111,20 @@ async function objSparujPotvrd(id){
 }
 async function objZrus(id){
   if(!confirm("Zrušiť objednávku? Neskorú platbu s týmto VS potom automatika nespáruje.")) return;
-  try{ await objVolaj({ akcia: "admin_zrus", objednavka_id: id }); nacitajObjednavkyPrevod(); }
+  const o = _objAdm.data.find(x => x.id === id) || {};
+  try{
+    await objVolaj({ akcia: "admin_zrus", objednavka_id: id });
+    await adminLog("prevod_zrus", o.firma_id, o.vs, { stav: o.stav, suma: o.suma }, { stav: "zrusena" });
+    nacitajObjednavkyPrevod();
+  }
   catch(e){ alert("Nezrušené: " + e.message); }
 }
 async function objOver(id){
-  try{ await objVolaj({ akcia: "admin_over", objednavka_id: id }); nacitajObjednavkyPrevod(); }
+  const o = _objAdm.data.find(x => x.id === id) || {};
+  try{
+    await objVolaj({ akcia: "admin_over", objednavka_id: id });
+    await adminLog("prevod_over", o.firma_id, o.vs, { overene_vypisom: o.overene_vypisom }, { overene_vypisom: true });
+    nacitajObjednavkyPrevod();
+  }
   catch(e){ alert("Nezapísané: " + e.message); }
 }

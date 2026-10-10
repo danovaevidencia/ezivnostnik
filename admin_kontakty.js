@@ -230,7 +230,7 @@ async function kontVyber(kampan, lenPocet){
   if(error){ kontSprava("kvSprava", "Chyba: " + error.message, true); return; }
   const text = "Vo filtri " + data.zhoda + " · dá sa osloviť " + data.dostupne
     + (lenPocet ? "" : " · <b>pridaných " + data.pridane + "</b>")
-    + " · odhlásení " + data.odhlaseni + " · oslovení za " + data.dni + " dní " + data.nedavno
+    + " · odhlásení " + data.odhlaseni + (data.vyluceni ? " · vylúčení z kampaní " + data.vyluceni : "") + " · oslovení za " + data.dni + " dní " + data.nedavno
     + (f.len_neoslovene ? " · už oslovení " + data.osloveni : "") + " · čakajú inde " + data.caka_inde + " · už v kampani " + data.v_kampani;
   // Pridanie prekreslí detail kampane (počty čakajúcich) — hlásenie až potom.
   if(!lenPocet) await nacitajKampane();
@@ -329,10 +329,21 @@ function kontAdresatiTabulka(kampan, rucna){
     + '<div id="kontOdpPotvrd"></div>'
     + '<div style="overflow-x:auto;max-height:520px;overflow-y:auto;border:1px solid var(--line);border-radius:8px" data-scroll><table><thead><tr><th>Adresát</th><th>Stav</th><th>Odoslané</th><th>Pripomienka</th><th>Odpoveď</th>' + (rucna ? "<th></th>" : "") + "</tr></thead><tbody>"
     + r.map(x => "<tr><td><div style=\"overflow-wrap:anywhere\">" + esc(x.email) + '</div><div class="email">' + esc([x.firma, x.mesto].filter(Boolean).join(" · ")) + "</div></td>"
-      + "<td>" + esc(KONT_STAVY[x.stav] || x.stav) + (x.chyba ? '<div class="email">' + esc(x.chyba) + "</div>" : "") + "</td>"
+      + "<td>" + esc(KONT_STAVY[x.stav] || x.stav) + (x.chyba ? '<div class="email">' + esc(x.chyba) + "</div>" : "")
+        + (x.stav === "caka" || x.stav === "odoslane" ? '<div><button class="rowbtn" style="padding:2px 8px;font-size:11.5px" onclick="kontVyradZacni(' + kampan + "," + x.id + ')">Vyradiť…</button></div>' : "") + "</td>"
       + "<td>" + esc(kontDen(x.odoslane_o)) + "</td><td>" + esc(kontDen(x.pripomenute_o)) + "</td><td>" + select(x) + "</td>"
       + (rucna ? '<td><button class="rowbtn" onclick="kontNahlad(' + kampan + "," + x.id + ')">Náhľad</button></td>' : "") + "</tr>").join("")
     + "</tbody></table></div>";
+}
+// Vyradenie z tabuľky adresátov — ten istý formulár ako pri pripravenom
+// e-maile (kampVyradOtvor z admin_kampane.js, spec 154 B3).
+function kontVyradZacni(kampan, adresat){
+  const x = _kontAdresati.find(a => a.id === adresat); if(!x) return;
+  kampVyradOtvor("kontOdpPotvrd", x.id, x.email, x.stav, async (r, dovod) => {
+    kontSprava("kampSprava", "Vyradený: " + x.email + " — " + dovod + (r.vylucene_kontaktov ? " · vylúčený z ďalších kampaní" : ""));
+    await kontKampanDetail(kampan);
+  });
+  const el = document.getElementById("kontOdpPotvrd"); if(el && el.scrollIntoView) el.scrollIntoView({ block:"nearest" });
 }
 async function kontOdpoved(kampan, adresat, sel){
   const hodnota = sel.value || null;

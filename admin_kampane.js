@@ -294,8 +294,72 @@ function kampanRucneVykresli(){
         : '<a class="rowbtn" href="' + esc(kampGmailOdkaz(e)) + '" target="_blank" rel="noopener">Otvoriť v Gmaile</a>')
         + '<button class="rowbtn" onclick="kampanKopiruj(' + i + ')">Kopírovať text</button>')
       + '<button class="rowbtn" onclick="kampanOdoslane(' + i + ')">Odoslané ✓</button>'
-    + "</div></div>";
+      + '<button class="rowbtn" onclick="kampanVyradZacni(' + i + ')">Vyradiť…</button>'
+    + '</div><div id="kampVyrad' + i + '"></div></div>';
   }).join("");
+}
+
+// ── Vyradenie adresáta (spec 154 B3, admin_71 kampan_vyrad) ─────────────────
+// Dovtedy SQL zápisom (spec 151.3) a vyradený neúčtovník sa v ďalšej kampani
+// skupiny objavil znova. „Vylúčiť z kampaní“ = príznak na kontakte (aj iné
+// adresy s tým istým IČO), skupina ostáva pre štatistiku (č. 154.8 bod 3).
+const KAMP_VYRAD = {
+  neuctovnik:    { n: "nie je účtovná kancelária", vylucit: true },
+  bez_cinnosti:  { n: "web bez zmienky o činnosti", vylucit: true },
+  nedorucitelna: { n: "nedoručiteľná adresa", vylucit: false },
+  duplicita:     { n: "duplicita (iná adresa tej istej firmy)", vylucit: false },
+  ine:           { n: "iné", vylucit: false },
+};
+function kampVyradDovod(typ, upresnenie){
+  const u = String(upresnenie || "").trim();
+  if(typ === "ine" || !KAMP_VYRAD[typ]) return u;
+  return KAMP_VYRAD[typ].n + (u ? ": " + u : "");
+}
+let _kampVyrad = null;
+// Formulár v mieste `miesto`; stav ≠ čaká = e-mail už odišiel, ostáva len
+// vylúčenie z ďalších kampaní (server inak odmietne).
+function kampVyradOtvor(miesto, adresat, email, stav, poVyradeni){
+  _kampVyrad = { miesto, adresat, email, caka: stav === "caka", poVyradeni };
+  const el = document.getElementById(miesto);
+  if(!el) return;
+  el.innerHTML = '<div class="hint warn" style="display:grid;gap:6px">'
+    + "<b>Vyradiť " + esc(email) + "</b>" + (_kampVyrad.caka ? "" : '<span style="font-size:12.5px">E-mail už odišiel — kontakt sa len vylúči z ďalších kampaní.</span>')
+    + '<select id="kvTyp" onchange="kampVyradTyp()">' + Object.entries(KAMP_VYRAD).map(([k, v]) => '<option value="' + k + '">' + esc(v.n) + "</option>").join("") + "</select>"
+    + '<input id="kvUpr" placeholder="upresnenie, napr. čím sa firma zaoberá" autocomplete="off">'
+    + '<label class="chk"><input type="checkbox" id="kvVylucit"' + (_kampVyrad.caka ? "" : " disabled") + "> Vylúčiť z ďalších kampaní (aj iné adresy s tým istým IČO)</label>"
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="rowbtn" style="border-color:var(--neg);color:var(--neg)" onclick="kampVyradPotvrd()">Vyradiť</button>'
+    + '<button class="rowbtn" onclick="kampVyradZrus()">Zrušiť</button></div><div class="err" id="kvChyba"></div></div>';
+  kampVyradTyp();
+}
+function kampVyradTyp(){
+  const typ = (document.getElementById("kvTyp") || {}).value;
+  const chk = document.getElementById("kvVylucit");
+  if(chk) chk.checked = !_kampVyrad || !_kampVyrad.caka ? true : !!(KAMP_VYRAD[typ] || {}).vylucit;
+}
+function kampVyradZrus(){
+  const el = _kampVyrad && document.getElementById(_kampVyrad.miesto);
+  if(el) el.innerHTML = "";
+  _kampVyrad = null;
+}
+async function kampVyradPotvrd(){
+  const v = _kampVyrad; if(!v) return;
+  const dovod = kampVyradDovod(document.getElementById("kvTyp").value, document.getElementById("kvUpr").value);
+  const chyba = document.getElementById("kvChyba");
+  if(!dovod){ chyba.textContent = "Napíšte dôvod."; return; }
+  const vylucit = !!document.getElementById("kvVylucit").checked;
+  const { data, error } = await sb.rpc("kampan_vyrad", { p_adresat: v.adresat, p_dovod: dovod, p_vylucit: vylucit });
+  if(error){ chyba.textContent = "Nevyradené: " + error.message; return; }
+  kampVyradZrus();
+  if(v.poVyradeni) await v.poVyradeni(data || {}, dovod);
+}
+function kampanVyradZacni(i){
+  const e = _rucnePripravene[i]; if(!e) return;
+  kampVyradOtvor("kampVyrad" + i, e.id, e.email, "caka", (r, dovod) => {
+    const j = _rucnePripravene.indexOf(e);
+    if(j >= 0) _rucnePripravene.splice(j, 1);
+    kampanRucneVykresli();
+    kampanSprava("Vyradený: " + e.email + " — " + dovod + (r.vylucene_kontaktov ? " · vylúčený z ďalších kampaní" : ""));
+  });
 }
 async function kampanKopiruj(i){
   const e = _rucnePripravene[i];
@@ -366,7 +430,7 @@ async function kampanImport(id){
   const { data, error } = await sb.rpc("kampan_import", { p_kampan: id, p_riadky: riadky });
   if(error){ kampanSprava("Chyba: " + error.message, true); return; }
   kampanSprava("Pridaných " + data.pridane + " · odhlásených " + data.odhlasene + " · bez zdroja " + data.bez_zdroja
-    + " · duplicita " + data.duplicita + " · chybný e-mail " + data.zle);
+    + " · duplicita " + data.duplicita + " · chybný e-mail " + data.zle + (data.nedavno ? " · nedávno oslovených " + data.nedavno : "") + (data.vylucene ? " · vylúčených z kampaní " + data.vylucene : ""));
   document.getElementById("kampCsv").value = "";
   nacitajKampane();
 }
