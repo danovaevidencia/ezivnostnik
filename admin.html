@@ -690,7 +690,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";  // ANON 
 let sb = null, currentUser = null, cfgFirmaId = null;
 // Verzia adminu = verzia appky pri nasadení. Pripája sa k súborom sekcií
 // (admin_kampane.js…), aby prehliadač nedržal starú kópiu z cache.
-const ADMIN_VERZIA = "2026.10.10-SJ";
+const ADMIN_VERZIA = "2026.10.10-SK";
 
 function init(){
   if(!SUPABASE_KEY || SUPABASE_KEY.startsWith("SEM_")){
@@ -931,17 +931,10 @@ function adminDalsiHtml(zobrazene, spolu, obsluha){
     : "";
 }
 
-// Stopa zásahu admina (admin_71, spec 154 D1): kto, kedy, čo, predtým → potom.
-// Zápis po úspešnej akcii; zlyhanie zápisu akciu nevracia, ale nesmie byť
-// ticho — console.error a návratová hodnota false.
-async function adminLog(akcia, firmaId, objekt, pred, po){
-  try{
-    const { error } = await sb.rpc("admin_log_zapis", { p_akcia: akcia, p_firma: firmaId || null,
-      p_objekt: objekt == null ? null : String(objekt), p_pred: pred || null, p_po: po || null });
-    if(error) throw error;
-    return true;
-  }catch(e){ console.error("admin_log " + akcia + ":", e); return false; }
-}
+// Stopa zásahu admina (admin_71, spec 154 D1) sa zapisuje na SERVERI — v RPC
+// (Konfig, vyradenie z kampane) a v edge funkciách (gdpr, predplatne-prevod,
+// predplatne-dobropis, zapisZasah). Do 10. 10. 2026 (SJ) ju písal panel po
+// úspešnej akcii; zlyhaný zápis z prehliadača by zásah nechal bez stopy.
 function adminSkript(subor){
   if(!_adminSkripty[subor]) _adminSkripty[subor] = new Promise((ok, zle) => {
     const sc = document.createElement("script");
@@ -1130,7 +1123,6 @@ async function vystavDobropisSaas(cislo){
       + (data.email ? ", zákazník ho dostal e-mailom" : " — e-mail neodišiel, pošlite PDF ručne")
       + (data.predplatne ? (f.obdobie_od ? ". Predplatné je ukončené." : ". Priznanie B je znova zamknuté.") : ".")
       + (data.upozornenie ? "\n\n⚠ " + data.upozornenie : ""));
-    await adminLog("dobropis", f.firma_id, data.cislo, { faktura: cislo, spolu: f.spolu }, data);
     nacitajSaasFaktury();
   }catch(e){ alert("Dobropis sa nevystavil: " + e.message); }
 }

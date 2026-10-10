@@ -125,7 +125,6 @@ async function objSparujPotvrd(id){
   if(!/^\d{4}-\d{2}-\d{2}$/.test(datum) || datum > objDnesBA()){ if(chyba) chyba.textContent = "Zadajte deň pripísania — nie v budúcnosti."; return; }
   try{
     const v = await objVolaj({ akcia: "admin_sparuj", objednavka_id: id, datum, suma: o.suma, overene: true });
-    await adminLog("prevod_sparuj", o.firma_id, o.vs, { stav: o.stav, suma: o.suma }, { datum, faktura: v && v.faktura || null });
     _objAdm.sparuj = null;
     alert("✓ Spárované" + (v && v.faktura ? ", faktúra " + v.faktura : " — faktúru dobehne cron") + ".");
     nacitajObjednavkyPrevod();
@@ -133,19 +132,16 @@ async function objSparujPotvrd(id){
 }
 async function objZrus(id){
   if(!confirm("Zrušiť objednávku? Neskorú platbu s týmto VS potom automatika nespáruje.")) return;
-  const o = _objAdm.data.find(x => x.id === id) || {};
+  // Záznam do logu zásahov zapisuje edge predplatne-prevod (spec 154 D1).
   try{
     await objVolaj({ akcia: "admin_zrus", objednavka_id: id });
-    await adminLog("prevod_zrus", o.firma_id, o.vs, { stav: o.stav, suma: o.suma }, { stav: "zrusena" });
     nacitajObjednavkyPrevod();
   }
   catch(e){ alert("Nezrušené: " + e.message); }
 }
 async function objOver(id){
-  const o = _objAdm.data.find(x => x.id === id) || {};
   try{
     await objVolaj({ akcia: "admin_over", objednavka_id: id });
-    await adminLog("prevod_over", o.firma_id, o.vs, { overene_vypisom: o.overene_vypisom }, { overene_vypisom: true });
     nacitajObjednavkyPrevod();
   }
   catch(e){ alert("Nezapísané: " + e.message); }

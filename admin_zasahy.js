@@ -10,7 +10,7 @@
 //  · Detail: „Zásahy admina“ z `admin_log_zoznam`.
 //
 //  Klasický skript; admin ho načíta pri otvorení Konfigu, Detailu alebo
-//  zmazania (adminSkript). Používa globálne sb, esc, penaz, adminLog,
+//  zmazania (adminSkript). Používa globálne sb, esc, penaz,
 //  cfgFirmaId, ziskajToken, SUPABASE_URL, CHYBA_SESSION, zavriCfg,
 //  nacitajPrehlad a nacitajSaasFaktury z admin.html.
 // ═══════════════════════════════════════════════════════════════════════════
@@ -134,8 +134,7 @@ async function gdprZmazatPotvrd(){
     const r = await res.json().catch(() => ({}));
     if(!res.ok || !r.ok){ err.textContent = "Zmazanie zlyhalo: " + (r.error || res.status); gdprKontrola(); return; }
     const z = r.zmazane || {};
-    await adminLog("gdpr_zmazat", g.firma, g.k.kluc,
-      { nazov: g.zhrnutie.nazov, firmy: g.zhrnutie.firmy.map(f => f.nazov), testovaci: g.testovaci }, z);
+    // Záznam do logu zásahov zapisuje edge gdpr sám (spec 154 D1).
     gdprZavri();
     zavriCfg();
     alert("Účet zmazaný.\n\n" +
