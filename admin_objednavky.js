@@ -49,6 +49,10 @@ function vykresliObjednavkyPrevod(){
   const neover = d.filter(o => o.stav === "zaplatena" && o.overene_vypisom === false);
   adminPocet("objednavky", caka.length + neover.filter(o => objPodozriva(o)).length);
   if(!d.length){ telo.innerHTML = '<div class="empty">Zatiaľ žiadna objednávka prevodom.</div>'; return; }
+  // Filter (spec 154 B5): predvolene len to, čo treba vybaviť; hľadanie VS, firmy, plánu.
+  const filter = (document.getElementById("objFilter") || {}).value || "";
+  const vybrane = objFiltruj(d, filter, (document.getElementById("objHladaj") || {}).value || "");
+  const strana = _objAdm.strana || ADMIN_STRANA;
   const riadok = (o) => {
     const druh = o.doplatok ? "doplatok" : o.je_obnova ? "obnova" : "nová";
     // Ručné spárovanie: formulár priamo v riadku, nie vyskakovacie okno prompt (spec 154 C1) —
@@ -80,8 +84,17 @@ function vykresliObjednavkyPrevod(){
     </tr>`;
   };
   telo.innerHTML = `<div class="email" style="margin-bottom:10px">Automatika páruje každých 15 minút z notifikácií banky aj z Banky, keď sedí VS aj suma; platbu z notifikácie potvrdí mesačný výpis (keď ju výpis za ten deň nemá, je to rozpor a príde e-mail). Ručne len to, čo nesedí — dátum = deň pripísania na účet.</div>
-    <div style="overflow-x:auto"><table><thead><tr><th>Vytvorená</th><th>Firma</th><th>VS</th><th class="r">Suma</th><th>Stav</th><th></th></tr></thead>
-    <tbody>${d.map(riadok).join("")}</tbody></table></div>`;
+    ${vybrane.length ? `<div style="overflow-x:auto"><table><thead><tr><th>Vytvorená</th><th>Firma</th><th>VS</th><th class="r">Suma</th><th>Stav</th><th></th></tr></thead>
+    <tbody>${vybrane.slice(0, strana).map(riadok).join("")}</tbody></table></div>`
+      : `<div class="empty">${(document.getElementById("objHladaj") || {}).value ? "Nič nezodpovedá hľadaniu." : "Nič nečaká na vybavenie — ostatné ukáže filter „všetky“."}</div>`}
+    ${adminDalsiHtml(Math.min(strana, vybrane.length), vybrane.length, "_objAdm.strana = (_objAdm.strana || ADMIN_STRANA) + ADMIN_STRANA; vykresliObjednavkyPrevod()")}`;
+}
+// Na vybavenie = čaká na platbu alebo zaplatená a neoverená výpisom (aj
+// podozrivá) — to, pri čom je v riadku tlačidlo. „vsetky“ = celá história.
+function objFiltruj(d, filter, hladaj){
+  return d.filter(o => (filter === "vsetky" || o.stav === "caka_na_prevod" || o.stav === "neuhradena"
+      || (o.stav === "zaplatena" && o.overene_vypisom === false))
+    && adminHladaj([o.vs, o.plan, o.firmy && o.firmy.nazov, OBJ_STAV[o.stav]], hladaj));
 }
 
 async function objVolaj(telo){

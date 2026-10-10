@@ -52,7 +52,7 @@ function ppUkonceniaHtml(){
   const u = (_ppAdm.data && _ppAdm.data.ukoncenia) || [];
   if(!u.length) return '<div class="hint">Žiadne ukončenie. Vznikne pri zrušení účtu s firmou v sieti, po 30 dňoch výberu bez účtu alebo odchodom firmy.</div>';
   const dnes = ppDnes();
-  return '<table><thead><tr><th>Firma</th><th>Dôvod</th><th>Čo urobiť</th><th>Lehota</th><th>Stav</th></tr></thead><tbody>'
+  return '<div style="overflow-x:auto"><table><thead><tr><th>Firma</th><th>Dôvod</th><th>Čo urobiť</th><th>Lehota</th><th>Stav</th></tr></thead><tbody>'
     + u.map(x => {
       const po = !x.vykonane && x.termin < dnes;
       const stav = x.vykonane
@@ -70,13 +70,13 @@ function ppUkonceniaHtml(){
         + "<td><b>" + esc(PP_SPOSOB[x.sposob] || x.sposob) + "</b></td>"
         + '<td style="' + (po ? "color:var(--neg);font-weight:700" : "") + '">' + esc(ppDatum(x.termin)) + (po ? " — po lehote" : "") + "</td>"
         + "<td>" + stav + "</td></tr>";
-    }).join("") + "</tbody></table>";
+    }).join("") + "</tbody></table></div>";
 }
 
 function ppVyberyHtml(){
   const w = (_ppAdm.data && _ppAdm.data.vybery) || [];
   if(!w.length) return '<div class="hint">Žiadne volanie webhooku FS.</div>';
-  return '<table><thead><tr><th>#</th><th>Prijaté</th><th>DIČ</th><th>Podpis</th><th>Vertecu</th><th>Rozhodnutie</th></tr></thead><tbody>'
+  return '<div style="overflow-x:auto"><table><thead><tr><th>#</th><th>Prijaté</th><th>DIČ</th><th>Podpis</th><th>Vertecu</th><th>Rozhodnutie</th></tr></thead><tbody>'
     + w.map(x => {
       const p = (x.polozky || [])[0] || {};
       const caka = x.preposlane_stav === "neposiela_sa" && !x.rozhodnutie;
@@ -97,18 +97,18 @@ function ppVyberyHtml(){
         + '<td style="' + (caka ? "color:var(--neg);font-weight:600" : "") + '">' + esc(x.preposlane_stav || "–") + (x.preposlane_kod ? " (" + esc(String(x.preposlane_kod)) + ")" : "")
         + (x.preposlane_odpoved ? '<div style="font-size:12px;color:var(--soft)">' + esc(String(x.preposlane_odpoved).slice(0, 120)) + "</div>" : "") + "</td>"
         + "<td>" + roz + "</td></tr>";
-    }).join("") + "</tbody></table>";
+    }).join("") + "</tbody></table></div>";
 }
 
 function ppNesparovaneHtml(){
   const f = (_ppAdm.data && _ppAdm.data.nesparovane) || [];
   if(!f.length) return '<div class="hint">Každá firma v sieti má účet.</div>';
-  return '<table><thead><tr><th>DIČ</th><th>Výber z FS</th><th>Prečo</th><th>Výzvy</th></tr></thead><tbody>'
+  return '<div style="overflow-x:auto"><table><thead><tr><th>DIČ</th><th>Výber z FS</th><th>Prečo</th><th>Výzvy</th></tr></thead><tbody>'
     + f.map(x => "<tr><td><b>" + esc(x.dic) + "</b><div style=\"font-size:12px;color:var(--soft)\">" + esc(x.obchodne_meno || "") + "</div></td>"
       + "<td>" + esc(ppCas(x.fs_prijate)) + "</td>"
       + "<td>" + (x.kandidat ? "kandidát s účtom — spárovať ručne" : "bez účtu") + '<div style="font-size:12px;color:var(--soft)">' + esc(x.dovod || "") + "</div></td>"
       + "<td>" + (x.ukoncene ? "ukončuje sa" : (x.vyzva1_kedy ? "1. " + esc(ppDatum(x.vyzva1_kedy)) : "–") + (x.vyzva2_kedy ? " · 2. " + esc(ppDatum(x.vyzva2_kedy)) : "")) + "</td></tr>").join("")
-    + "</tbody></table>";
+    + "</tbody></table></div>";
 }
 
 function ppTajomstvoHtml(){
@@ -124,9 +124,9 @@ function ppTajomstvoHtml(){
     out += '<div class="hint" style="border-left-color:' + (sHlav.length && sedi === sHlav.length ? "var(--accent2)" : "var(--neg)") + '">'
       + (sHlav.length ? "Sedí na " + sedi + " z " + sHlav.length + " volaní s hlavičkou." : "Žiadne uložené volanie nemá hlavičku x-pds-secret — nie je na čom overiť.")
       + (v.length > sHlav.length ? " Bez hlavičky: " + (v.length - sHlav.length) + "." : "") + "</div>"
-      + '<table><thead><tr><th>#</th><th>Prijaté</th><th>Stav podpisu</th><th>Zhoda</th></tr></thead><tbody>'
+      + '<div style="overflow-x:auto"><table><thead><tr><th>#</th><th>Prijaté</th><th>Stav podpisu</th><th>Zhoda</th></tr></thead><tbody>'
       + v.map(x => "<tr><td>" + esc(String(x.id)) + "</td><td>" + esc(ppCas(x.prijate)) + "</td><td>" + esc(x.podpis_stav || "–") + "</td><td>"
-        + (x.zhoda === true ? "✅" : x.zhoda === false ? "❌" : "bez hlavičky") + "</td></tr>").join("") + "</tbody></table>";
+        + (x.zhoda === true ? "✅" : x.zhoda === false ? "❌" : "bez hlavičky") + "</td></tr>").join("") + "</tbody></table></div>";
   }
   return out;
 }
@@ -160,12 +160,12 @@ function ppCerpanieHtml(){
   if(_ppAdm.cerpanieChyba) return '<div class="hint" style="border-left-color:var(--neg)">Nenačítalo sa: ' + esc(_ppAdm.cerpanieChyba) + "</div>" + tl;
   if(!c) return '<div class="hint">Kredit dobiť do 31. 1. 2027 (K1, spec 149.15). Odhad dáva Verteco za aktuálny mesiac; zostatok kreditu je len v konzole.</div>' + tl;
   const odhad = c.model === "per_document" ? c.perDocumentCents : c.perCompanyCents;
-  return '<table><tbody>'
+  return '<div style="overflow-x:auto"><table><tbody>'
     + "<tr><td>Model</td><td><b>" + esc(PP_MODEL[c.model] || c.model || "–") + "</b>" + (c.pendingModel ? " → " + esc(PP_MODEL[c.pendingModel] || c.pendingModel) + " od " + esc(ppDatum(c.pendingFrom)) : "") + "</td></tr>"
     + "<tr><td>Firmy, ktoré tento mesiac odoslali</td><td><b>" + esc(String(c.activeCompanies ?? "–")) + "</b></td></tr>"
     + "<tr><td>Odoslané / prijaté doklady</td><td>" + esc(String(c.sentDocuments ?? "–")) + " / " + esc(String(c.receivedDocuments ?? "–")) + "</td></tr>"
     + "<tr><td>Odhad za mesiac (bez DPH)</td><td><b>" + esc(ppEur(odhad)) + "</b>" + (c.model !== "per_document" ? ' <span style="color:var(--soft)">(za doklad by bolo ' + esc(ppEur(c.perDocumentCents)) + ")</span>" : "") + "</td></tr>"
-    + "</tbody></table>" + tl;
+    + "</tbody></table></div>" + tl;
 }
 async function ppNacitajCerpanie(){
   _ppAdm.cerpanieBezi = true; _ppAdm.cerpanieChyba = ""; ppKresli();

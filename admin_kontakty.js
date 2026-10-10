@@ -315,25 +315,49 @@ function kontGrafy(dni){
     + '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--soft);margin-top:2px"><span>' + esc(kontDen(dni[0].den))
     + "</span><span>" + esc(kontDen(dni[dni.length - 1].den)) + "</span></div></div>";
 }
+// Hľadanie a filter stavu (spec 154 B5): 1 000 riadkov bez filtra sa na mobile
+// nedalo prejsť. Ovládanie je mimo prekresľovaného zoznamu — pole pri písaní
+// nestratí fokus.
+let _kontAdr = { kampan: null, rucna: false, strana: 100 };
+function kontAdresatiFiltruj(riadky, stav, hladaj){
+  return riadky.filter(x => (!stav || x.stav === stav) && adminHladaj([x.email, x.firma, x.mesto, x.chyba], hladaj));
+}
 function kontAdresatiTabulka(kampan, rucna){
   const r = _kontAdresati;
   if(!r.length) return '<div class="muted" style="margin:8px 0">Kampaň zatiaľ nemá adresátov.</div>';
+  _kontAdr = { kampan, rucna, strana: ADMIN_STRANA };
+  const stavy = [...new Set(r.map(x => x.stav))];
+  return '<h3 style="font-size:14px;margin:14px 0 6px">Adresáti a odpovede</h3>'
+    + '<div class="muted" style="margin-bottom:6px">Odpoveď zapíš jedným klikom, keď príde do schránky. Nezáujem a nedoručené zapíšu adresu do Odhlásení.</div>'
+    + '<div id="kontOdpPotvrd"></div>'
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px"><input id="kontAdrHladaj" type="search" placeholder="Hľadať: e-mail, firma, mesto, dôvod" oninput="kontAdresatiPrekresli(true)" style="flex:1;min-width:180px">'
+    + '<select id="kontAdrStav" onchange="kontAdresatiPrekresli(true)" style="width:auto"><option value="">všetky stavy (' + r.length + ")</option>"
+    + stavy.map(s => '<option value="' + esc(s) + '">' + esc(KONT_STAVY[s] || s) + " (" + r.filter(x => x.stav === s).length + ")</option>").join("") + "</select></div>"
+    + '<div id="kontAdrZoznam">' + kontAdresatiZoznam() + "</div>";
+}
+function kontAdresatiPrekresli(odZaciatku){
+  if(odZaciatku) _kontAdr.strana = ADMIN_STRANA;
+  const el = document.getElementById("kontAdrZoznam");
+  if(el) el.innerHTML = kontAdresatiZoznam();
+}
+function kontAdresatiZoznam(){
+  const { kampan, rucna } = _kontAdr;
+  const r = kontAdresatiFiltruj(_kontAdresati, (document.getElementById("kontAdrStav") || {}).value || "", (document.getElementById("kontAdrHladaj") || {}).value || "");
+  if(!r.length) return '<div class="muted" style="margin:8px 0">Nič nezodpovedá filtru.</div>';
   const select = x => {
     if(!x.odoslane_o) return "";
     return '<select aria-label="Odpoveď ' + esc(x.email) + '" style="width:auto;padding:4px 8px;font-size:12.5px" onchange="kontOdpoved(' + kampan + "," + x.id + ',this)">'
       + '<option value="">— bez odpovede —</option>'
       + Object.entries(KONT_ODPOVEDE).map(([k, n]) => '<option value="' + k + '"' + (x.odpoved === k ? " selected" : "") + ">" + esc(n) + "</option>").join("") + "</select>";
   };
-  return '<h3 style="font-size:14px;margin:14px 0 6px">Adresáti a odpovede</h3>'
-    + '<div class="muted" style="margin-bottom:6px">Odpoveď zapíš jedným klikom, keď príde do schránky. Nezáujem a nedoručené zapíšu adresu do Odhlásení.</div>'
-    + '<div id="kontOdpPotvrd"></div>'
-    + '<div style="overflow-x:auto;max-height:520px;overflow-y:auto;border:1px solid var(--line);border-radius:8px" data-scroll><table><thead><tr><th>Adresát</th><th>Stav</th><th>Odoslané</th><th>Pripomienka</th><th>Odpoveď</th>' + (rucna ? "<th></th>" : "") + "</tr></thead><tbody>"
-    + r.map(x => "<tr><td><div style=\"overflow-wrap:anywhere\">" + esc(x.email) + '</div><div class="email">' + esc([x.firma, x.mesto].filter(Boolean).join(" · ")) + "</div></td>"
+  return '<div style="overflow-x:auto;max-height:520px;overflow-y:auto;border:1px solid var(--line);border-radius:8px" data-scroll><table><thead><tr><th>Adresát</th><th>Stav</th><th>Odoslané</th><th>Pripomienka</th><th>Odpoveď</th>' + (rucna ? "<th></th>" : "") + "</tr></thead><tbody>"
+    + r.slice(0, _kontAdr.strana).map(x => "<tr><td><div style=\"overflow-wrap:anywhere\">" + esc(x.email) + '</div><div class="email">' + esc([x.firma, x.mesto].filter(Boolean).join(" · ")) + "</div></td>"
       + "<td>" + esc(KONT_STAVY[x.stav] || x.stav) + (x.chyba ? '<div class="email">' + esc(x.chyba) + "</div>" : "")
         + (x.stav === "caka" || x.stav === "odoslane" ? '<div><button class="rowbtn" style="padding:2px 8px;font-size:11.5px" onclick="kontVyradZacni(' + kampan + "," + x.id + ')">Vyradiť…</button></div>' : "") + "</td>"
       + "<td>" + esc(kontDen(x.odoslane_o)) + "</td><td>" + esc(kontDen(x.pripomenute_o)) + "</td><td>" + select(x) + "</td>"
       + (rucna ? '<td><button class="rowbtn" onclick="kontNahlad(' + kampan + "," + x.id + ')">Náhľad</button></td>' : "") + "</tr>").join("")
-    + "</tbody></table></div>";
+    + "</tbody></table></div>"
+    + adminDalsiHtml(Math.min(_kontAdr.strana, r.length), r.length, "_kontAdr.strana += ADMIN_STRANA; kontAdresatiPrekresli()");
 }
 // Vyradenie z tabuľky adresátov — ten istý formulár ako pri pripravenom
 // e-maile (kampVyradOtvor z admin_kampane.js, spec 154 B3).
