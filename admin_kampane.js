@@ -98,39 +98,9 @@ async function kampanNova(){
 // Server (kampan-posli, akcia „priprav“) skontroluje odhlásenia a pripraví
 // hotový čistý text; človek ho pošle zo svojej schránky a klikne „Odoslané“.
 // Nič sa neposiela cez Resend ani iného poskytovateľa a nič sa nemeria.
-// Ceny v šablóne musia sedieť s podmienkami — stráži test_kampane.
-const SABLONA_UCTOVNICI = {
-  predmet: "E-faktúry od roku 2027 a vaši klienti živnostníci",
-  telo: [
-    "Dobrý deň,",
-    "",
-    "volám sa Roman Slivka a vyvíjam eživnostník — aplikáciu na daňovú evidenciu a fakturáciu pre živnostníkov. Píšem vám, pretože na svojej stránke ponúkate vedenie účtovníctva.",
-    "",
-    "Od 1. 1. 2027 budú všetci vaši klienti prijímať faktúry elektronicky cez sieť Peppol a platitelia DPH ich budú aj vystavovať. Každý si pritom musí na portáli Finančnej správy vybrať poskytovateľa a doklady už nebudú chodiť ako PDF v e-maile.",
-    "",
-    "Klientom, ktorí vedú daňovú evidenciu, to eživnostník rieši v jednej aplikácii:",
-    "– prijímanie e-faktúr zadarmo, aj v bezplatnom pláne; prijatá faktúra sa ponúkne na zaevidovanie do výdavkov a originál sa archivuje,",
-    "– odosielanie e-faktúr v pláne Platiteľ DPH za 9,90 € bez DPH mesačne,",
-    "– faktúry, výdavky, banka, kniha jázd, DPH aj daňové priznanie typu B.",
-    "",
-    "Pre vás je určený plán Účtovník: firmy klientov spravujete z jedného účtu — platíte svoj plán a za každého klienta 1,63 € (neplatiteľ DPH) alebo 3,25 € (platiteľ DPH) bez DPH mesačne, spolu najviac 24,31 € bez DPH. Klient vás do svojej firmy pozve sám a podklady za celý rok vám odovzdá v jednom súbore Excel.",
-    "",
-    "Aplikáciu si môžete hneď pozrieť v ukážke bez registrácie:",
-    "https://ezivnostnik.eu/?do=ukazka&utm_source=email&utm_medium=osobne&utm_campaign=uctovnici",
-    "",
-    "Ak vás to zaujíma, rád vám ju ukážem aj na krátkom online stretnutí — stačí odpísať na tento e-mail.",
-    "",
-    "S pozdravom",
-    "",
-    "Ing. Roman Slivka",
-    "eživnostník — účtovníctvo a e-faktúry pre živnostníkov",
-    "info@ezivnostnik.eu · https://ezivnostnik.eu",
-    "",
-    "—",
-    "Doručovaciu službu e-faktúr poskytuje Ing. Roman Slivka - agile management ako sprostredkovateľ zapísaný v zozname Finančnej správy SR; technicky ju zabezpečuje certifikovaný poskytovateľ Verteco digital services, s. r. o. (EFSK000031).",
-    "Váš kontakt som našiel na {source_url}. Ak si neželáte ďalšie správy, odhlásite sa jedným klikom: {odhlasenie}",
-  ].join("\n"),
-};
+// Šablóny sú len v knižnici (Šablóny / štúdio, dev/kampane/sablony/*.json);
+// vstavaná textová šablóna pre účtovníkov bola stará (bez UCTO3, starý podpis
+// a UTM) a vložila sa jedným ťuknutím — odstránená 10. 10. 2026 (spec 154 A6).
 let _rucnePripravene = [];
 function kampanFormularRucne(k, p){
   return '<div style="margin-top:12px;display:grid;gap:10px">'
@@ -143,7 +113,6 @@ function kampanFormularRucne(k, p){
     + p("kampLimit", "Denný limit (odporúčané 20–30)", k.denny_limit, "number")
     + p("kampGmail", "Gmail účet, v ktorom sa otvorí koncept (napr. roman@ezivnostnik.eu)", kampGmailUcet())
     + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
-      + '<button class="btn" style="width:auto" onclick="kampanSablonaUctovnici()">Vložiť šablónu pre účtovníkov</button>'
       + '<button class="btn" style="width:auto" onclick="document.getElementById(\'kampSablonaSubor\').click()">Importovať šablónu (HTML)</button>'
       + '<input type="file" id="kampSablonaSubor" accept=".html,.htm,text/html" hidden onchange="kampanSablonaImport(this)">'
       + '<button class="btn" style="width:auto" onclick="kampanUloz(' + k.id + ')">Uložiť</button>'
@@ -164,14 +133,6 @@ function kampGmailUcet(){ try{ return localStorage.getItem("eziv_kamp_gmail") ||
 function kampGmailUloz(){
   const el = document.getElementById("kampGmail");
   if(el){ try{ localStorage.setItem("eziv_kamp_gmail", el.value.trim()); }catch(_){} }
-}
-function kampanSablonaUctovnici(){
-  const tel = document.getElementById("kampTelo"), pr = document.getElementById("kampPredmet");
-  if(tel.value.trim() && !confirm("Prepísať súčasný predmet a text šablónou pre účtovníkov?")) return;
-  pr.value = SABLONA_UCTOVNICI.predmet;
-  tel.value = SABLONA_UCTOVNICI.telo;
-  if(!document.getElementById("kampUtm").value) document.getElementById("kampUtm").value = "uctovnici";
-  kampanSprava("Šablóna vložená — skontroluj a ulož.");
 }
 // ── Šablóna zo súboru (č. 243) ─────────────────────────────────────────
 // HTML súbor: <title> = predmet, obsah <body> = telo. Ručná kampaň ho

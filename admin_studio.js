@@ -950,7 +950,10 @@ function studioStiahniHtml(){
 // vlastnú adresu — Ctrl+V, ako pri ostrom odosielaní (kampanHtmlDoGmailu).
 function studioVlastnaAdresa(){
   let a = "";
-  try{ a = typeof kampGmailUcet === "function" ? kampGmailUcet() : (localStorage.getItem("eziv_kamp_gmail") || ""); }catch(_){}
+  // Skúška má VLASTNÝ kľúč (spec 154 A8): kým zapisovala do eziv_kamp_gmail,
+  // skúška z iného účtu prepísala schránku, v ktorej sa otvárajú ostré e-maily
+  // kampane. Prvýkrát sa ponúkne účet kampane, potom posledná adresa skúšky.
+  try{ a = localStorage.getItem("eziv_studio_skuska") || (typeof kampGmailUcet === "function" ? kampGmailUcet() : (localStorage.getItem("eziv_kamp_gmail") || "")); }catch(_){}
   return a;
 }
 function studioSkuskaPolia(){
@@ -964,7 +967,7 @@ function studioAdresaDialog(pokracuj){
     { text: "Kopírovať a otvoriť Gmail", hlavne: true, akcia: () => {
       const a = document.getElementById("stSkAdresa").value.trim();
       if(!/^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(a)){ document.getElementById("stSkAdresa").focus(); return; }
-      try{ localStorage.setItem("eziv_kamp_gmail", a); }catch(_){}
+      try{ localStorage.setItem("eziv_studio_skuska", a); }catch(_){}
       studioDialogZavri();
       pokracuj(a);
     } },

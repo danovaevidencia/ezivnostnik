@@ -617,7 +617,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";  // ANON 
 let sb = null, currentUser = null, cfgFirmaId = null;
 // Verzia adminu = verzia appky pri nasadení. Pripája sa k súborom sekcií
 // (admin_kampane.js…), aby prehliadač nedržal starú kópiu z cache.
-const ADMIN_VERZIA = "2026.10.09-SD";
+const ADMIN_VERZIA = "2026.10.10-SE";
 
 function init(){
   if(!SUPABASE_KEY || SUPABASE_KEY.startsWith("SEM_")){
@@ -1121,6 +1121,7 @@ async function odhlas(){
 }
 
 // ── PREHĽAD: agregované view admin_prehlad (bez čítania celého citlivého JSON) ──
+let _zakRiadky = [];   // riadky Zákazníkov — obsluha tlačidiel berie názov odtiaľto, nie z atribútu
 async function nacitajPrehlad(){
   const { data, error } = await sb.from("admin_prehlad").select("*").order("posledna_zmena", { ascending: false });
   const loading = document.getElementById("zakLoading");
@@ -1137,7 +1138,17 @@ async function nacitajPrehlad(){
   const tbody = document.getElementById("zakBody");
   if(!rows.length){ document.getElementById("zakEmpty").classList.remove("hidden"); return; }
   document.getElementById("zakTable").classList.remove("hidden");
-  tbody.innerHTML = rows.map(r=>{
+  // Text od zákazníka (názov firmy) NESMIE ísť do atribútu s kódom: kým išiel
+  // cez JSON.stringify do onclick v apostrofoch, apostrof v názve atribút ukončil
+  // a zvyšok sa vykonal v relácii admina s druhým faktorom (spec 154 A1).
+  // Tlačidlo nesie len index riadku, názov sa berie z načítaných dát.
+  _zakRiadky = rows;
+  tbody.onclick = e => {
+    const b = e.target.closest("button[data-zak]"); if(!b) return;
+    const r = _zakRiadky[+b.dataset.i]; if(!r) return;
+    (b.dataset.zak === "cfg" ? otvorCfg : otvorDetail)(r.firma_id, r.nazov || "");
+  };
+  tbody.innerHTML = rows.map((r, i)=>{
     const plan = r.plan || "free";
     const stav = r.stav_planu || "free";
     const stavText = {
@@ -1147,13 +1158,13 @@ async function nacitajPrehlad(){
     const stavFarba = { expiruje_coskoro:"#c77d3e", expirovane:"#c0504a", neobmedzene:"#1a7d4a" }[stav] || "var(--soft)";
     const planPill = r.aktivny===false
       ? '<span class="pill off">pozastavený</span>'
-      : `<span class="pill ${plan}">${plan}</span>${stavText?`<div style="font-size:10.5px;color:${stavFarba};margin-top:3px">${stavText}</div>`:''}`;
+      : `<span class="pill ${esc(plan)}">${esc(plan)}</span>${stavText?`<div style="font-size:10.5px;color:${stavFarba};margin-top:3px">${stavText}</div>`:''}`;
     return `<tr>
       <td><div class="name">${esc(r.nazov||"—")}</div><div class="email hide-sm">${esc(r.email||"")}</div></td>
       <td class="hide-sm">${planPill}</td>
       <td class="r amt">${r.pocet_faktur||0}</td>
       <td class="r amt hide-sm">${eur(r.fakturovane_spolu)}</td>
-      <td class="r"><button class="rowbtn" onclick='otvorDetail(${JSON.stringify(r.firma_id)}, ${JSON.stringify(r.nazov||"")})'>Detail</button> <button class="rowbtn" onclick='otvorCfg(${JSON.stringify(r.firma_id)}, ${JSON.stringify(r.nazov||"")})'>Konfig</button></td>
+      <td class="r"><button class="rowbtn" data-zak="detail" data-i="${i}">Detail</button> <button class="rowbtn" data-zak="cfg" data-i="${i}">Konfig</button></td>
     </tr>`;
   }).join("");
 }
@@ -1932,14 +1943,17 @@ async function clPublikuj(id, akcia, zPoradia){
     if(!res.ok){ throw new Error(r.chyba || ("HTTP " + res.status)); }
 
     await nacitajClanky();
+    // Commit do main robí server — lokálny main je potom pozadu a push appky
+    // bez rebase zlyhá alebo ostane web na starej verzii (CLAUDE.md, Nasadzovanie;
+    // spec 154 C4). Hláška to povie pri každom commite.
+    const pull = r.commit ? " Commit " + String(r.commit).slice(0, 7) + " je v main — pred ďalším nasadením appky git fetch a git rebase origin/main." : "";
     if(aPoradie) clStav("Poradie je aj na webe — zoznam článkov prerobený"
-      + (r.commit ? " (commit " + String(r.commit).slice(0, 7) + ")" : "")
-      + ". Prejaví sa do minúty (GitHub Pages sa prestavuje).");
+      + ". Prejaví sa do minúty (GitHub Pages sa prestavuje)." + pull);
     // Tlačidlo mimo modálu (Prerobiť zoznam) nemá kam písať hlášku. Bez tohto
     // by úspech vyzeral presne ako nefunkčné tlačidlo — a to je horšie než
     // chyba, lebo sa nedá odlíšiť od „nič sa nestalo".
     if(!doModalu && !zPoradia) alert("Stránky článkov, zoznam aj sitemap prerobené.\n\n"
-      + "Commit je v repozitári, na webe sa prejaví do minúty.");
+      + "Commit je v repozitári, na webe sa prejaví do minúty." + (pull ? "\n\n" + pull.trim() : ""));
     if(doModalu){
       // Najprv znova otvoriť, až potom hláška: otvorClanok hlášku aj chybu
       // maže. Kým sa nečakalo, zmazala ju hneď v ďalšej mikroúlohe a veta
@@ -1949,7 +1963,7 @@ async function clPublikuj(id, akcia, zPoradia){
       // stránku, uvidí 404 a bude hľadať chybu, ktorá nie je.
       hlaska.textContent = akcia === "zmaz"
         ? "Stránka zmazaná z webu. Prejaví sa to do minúty."
-        : "Hotovo. Na webe sa zmena prejaví do minúty (GitHub Pages sa prestavuje).";
+        : "Hotovo. Na webe sa zmena prejaví do minúty (GitHub Pages sa prestavuje)." + pull;
     }
   }catch(e){
     console.error("clanok-publikuj:", e.message);
