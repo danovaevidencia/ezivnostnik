@@ -133,6 +133,7 @@
      (a naopak) dala 21. 9. aj 27. 9. 2026 nečitateľný text (spec 141.2). */
   .hint{background:var(--panel2);color:var(--ink);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:8px;padding:9px 11px;margin:8px 0;font-size:13px;line-height:1.5}
   .hint.warn{border-left-color:var(--warn)}
+  .hint.neg{border-left-color:var(--neg)}
 .warnTxt{color:var(--warn)}
 .muted{color:var(--soft);font-size:12px;line-height:1.45}
 tr.chce td{background:#fff5e6}
@@ -239,10 +240,16 @@ tr.chce td{background:#fff5e6}
   <div class="rozlozenie">
   <nav class="nav" id="adminNav" aria-label="Sekcie adminu"></nav>
   <main class="wrap">
+    <!-- DNES TREBA — čo čaká, z admin_dnes (spec 154 B1); kreslí sa, len keď niečo čaká -->
+    <div class="sec hidden" id="dnesSec" data-sekcia="prehlad">
+      <div class="head"><h2>Dnes treba</h2></div>
+      <div class="body" id="dnesBody" style="padding:8px 14px"></div>
+    </div>
+
     <div class="kpis" id="kpis" data-sekcia="prehlad">
       <div class="kpi a"><div class="n" id="kZak">–</div><div class="l">Zákazníkov</div></div>
       <div class="kpi g"><div class="n" id="kAkt">–</div><div class="l">Aktívnych</div></div>
-      <div class="kpi"><div class="n amt" id="kFakt">–</div><div class="l">Fakturované spolu</div></div>
+      <div class="kpi"><div class="n amt" id="kFakt">–</div><div class="l" id="kFaktL">Mesačne podľa cien</div></div>
       <div class="kpi w"><div class="n" id="kPlat">–</div><div class="l">Platcov DPH</div></div>
     </div>
 
@@ -287,6 +294,13 @@ tr.chce td{background:#fff5e6}
     </div>
 
     <!-- ZÁLOHY — šifrovaná záloha všetkých dát na lokálny disk, história a dohľad (admin_48) -->
+    <!-- AUTOMATIKA — cron, odpovede edge funkcií, Stripe, faktúry (admin_70, spec 154 B2) -->
+    <div class="sec" data-sekcia="automatika">
+      <div class="head"><h2>Automatika</h2><div class="sp"></div>
+        <button class="btn" style="width:auto;padding:8px 14px" onclick="nacitajAutomatiku()">Obnoviť</button></div>
+      <div class="body" id="autoBody"><div class="loading">Načítavam…</div></div>
+    </div>
+
     <div class="sec" data-sekcia="zalohy">
       <div class="head"><h2>Zálohy</h2><div class="sp"></div>
         <button class="btn" style="width:auto;padding:8px 14px" onclick="zalOtvor()">Stiahnuť zálohu</button></div>
@@ -617,7 +631,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";  // ANON 
 let sb = null, currentUser = null, cfgFirmaId = null;
 // Verzia adminu = verzia appky pri nasadení. Pripája sa k súborom sekcií
 // (admin_kampane.js…), aby prehliadač nedržal starú kópiu z cache.
-const ADMIN_VERZIA = "2026.10.10-SF";
+const ADMIN_VERZIA = "2026.10.10-SG";
 
 function init(){
   if(!SUPABASE_KEY || SUPABASE_KEY.startsWith("SEM_")){
@@ -754,6 +768,9 @@ async function overAdmin(user){
   document.getElementById("loginView").classList.add("hidden");
   document.getElementById("adminView").classList.remove("hidden");
   adminMenu();
+  // Panel „Dnes“ a počítadlá menu hneď po prihlásení — jedno RPC s číslami,
+  // nie načítanie sekcií (spec 154 B1).
+  adminSkript("admin_prevadzka.js").then(adminDnes).catch(e => console.error("panel Dnes:", e));
   window.addEventListener("hashchange", adminTrasa);
   adminTrasa();
 }
@@ -779,7 +796,8 @@ const ADMIN_SEKCIE = [
   { id:"objednavky", ik:"🏦", n:"Platby prevodom",     skripty:["admin_objednavky.js"], nacitaj:()=>nacitajObjednavkyPrevod() },
   { id:"spatna-vazba", ik:"💬", n:"Spätná väzba",      skripty:["admin_spatna_vazba.js"], nacitaj:()=>nacitajSpatnuVazbu() },
   { skup:"Prevádzka" },
-  { id:"zalohy",    ik:"💾", n:"Zálohy",               nacitaj:()=>nacitajZalohy() },
+  { id:"automatika", ik:"⚙️", n:"Automatika",           skripty:["admin_prevadzka.js"], nacitaj:()=>nacitajAutomatiku() },
+  { id:"zalohy",   ik:"💾", n:"Zálohy",               nacitaj:()=>nacitajZalohy() },
   { id:"efaktury",  ik:"📮", n:"Záznamy e-faktúr",      nacitaj:()=>{} },
   { id:"peppol",    ik:"🔌", n:"Peppol: ukončenia a výbery", skripty:["admin_peppol.js"], nacitaj:()=>nacitajPeppolAdmin() },
   { id:"sadzby",    ik:"§",  n:"Sadzby a hranice",      nacitaj:()=>vykresliSadzby() },
@@ -1132,7 +1150,8 @@ async function nacitajPrehlad(){
   // KPI
   document.getElementById("kZak").textContent = rows.length;
   document.getElementById("kAkt").textContent = rows.filter(r=>r.aktivny!==false).length;
-  document.getElementById("kFakt").textContent = eur(rows.reduce((a,r)=>a+(+r.fakturovane_spolu||0),0));
+  // kFakt = mesačný príjem predplatného, plní ho adminDnes (admin_prevadzka.js,
+  // spec 154 B1). Súčet faktúr ZÁKAZNÍKOV je pre prevádzkovateľa bez významu.
   document.getElementById("kPlat").textContent = rows.filter(r=>r.platca_dph===true).length;
 
   const tbody = document.getElementById("zakBody");
