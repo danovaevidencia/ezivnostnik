@@ -72,7 +72,7 @@ function gdprSedi(napisane, k){
 function gdprZhrnutieHtml(z){
   const firmy = z.firmy || [];
   const pocet = (f, kl) => (((f.data || {})[kl]) || []).length;
-  let h = '<div class="hint neg"><b>Zmaže sa celý účet používateľa</b> — ' + (firmy.length === 1 ? "jeho firma" : "všetkých " + firmy.length + " jeho firiem") + ":</div>"
+  let h = '<div class="hint neg"><b>Zmaže sa celý účet používateľa</b> — ' + (firmy.length === 1 ? "jeho firma" : "všetky jeho firmy (" + firmy.length + ")") + ":</div>"
     + "<ul style=\"margin:6px 0 10px 18px;font-size:13px\">"
     + firmy.map(f => "<li>" + esc(((f.data || {}).meta || {}).nazov || f.nazov || "—") + " — faktúr " + pocet(f, "faktury") + ", výdavkov "
       + pocet(f, "vydavky") + ", jázd " + pocet(f, "jazdy") + "</li>").join("") + "</ul>"
