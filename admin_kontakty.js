@@ -238,7 +238,8 @@ async function kontVyber(kampan, lenPocet){
   if(el){ el.innerHTML = text; el.style.color = "var(--ink)"; }
 }
 function kontVyradeneText(v){
-  const n = { odhlaseny:"odhlásený", lehota:"oslovený pred < 60 dňami", mx:"doména bez MX", "mx-nezname":"MX sa nepodarilo overiť (skúsi sa znova)" };
+  const n = { odhlaseny:"odhlásený", lehota:"oslovený pred < 60 dňami", mx:"doména bez MX", "mx-nezname":"MX sa nepodarilo overiť (skúsi sa o hodinu)",
+    "mx-odlozene":"čaká na nové overenie domény" };
   const e = Object.entries(v || {});
   return e.length ? " · vyradené: " + e.map(([k, c]) => (n[k] || k) + " " + c).join(", ") : "";
 }

@@ -15,6 +15,10 @@ const OBJ_STAV = { caka_na_prevod:"čaká na platbu", neuhradena:"neuhradená", 
 let _objAdm = { data: [], chyba: "" };
 
 function objDatum(x){ return x ? new Date(String(x).length === 10 ? x + "T12:00:00" : x).toLocaleDateString("sk-SK") : "–"; }
+// Dnešok v Bratislave (RRRR-MM-DD). `toISOString()` je UTC — medzi 0:00 a 2:00
+// SELČ dal včerajšok, a ten deň je začiatok predplatného aj dátum na faktúre
+// (spec 154 C1).
+function objDnesBA(){ return new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Bratislava" }).format(new Date()); }
 
 // Neoverená výpisom do konca nasledujúceho mesiaca = podozrivá (Roman 8. 10.:
 // pri podvrhnutej notifikácii prídeme o jedno predplatné, nie o peniaze).
@@ -47,7 +51,17 @@ function vykresliObjednavkyPrevod(){
   if(!d.length){ telo.innerHTML = '<div class="empty">Zatiaľ žiadna objednávka prevodom.</div>'; return; }
   const riadok = (o) => {
     const druh = o.doplatok ? "doplatok" : o.je_obnova ? "obnova" : "nová";
-    const akcie = (o.stav === "caka_na_prevod" || o.stav === "neuhradena")
+    // Ručné spárovanie: formulár priamo v riadku, nie vyskakovacie okno prompt (spec 154 C1) —
+    // dátum je pole typu date s dneškom v Bratislave, nezvratnosť je napísaná pri tlačidle.
+    const akcie = (o.stav === "caka_na_prevod" || o.stav === "neuhradena") && _objAdm.sparuj === o.id
+      ? `<div style="display:grid;gap:6px;min-width:220px">
+           <label class="email">Deň pripísania na účet <input type="date" id="objSpDatum" value="${objDnesBA()}" max="${objDnesBA()}" style="font-size:12px"></label>
+           <div class="email">Predplatné začne týmto dňom a hneď odíde faktúra — nedá sa vrátiť. Suma ${penaz(o.suma)} musí sedieť do centa.</div>
+           <div id="objSpChyba" class="email" style="color:var(--neg)"></div>
+           <div><button class="btn" style="padding:3px 8px;font-size:11px" onclick="objSparujPotvrd('${esc(o.id)}')">Spárovať a vystaviť faktúru</button>
+             <button class="btn" style="padding:3px 8px;font-size:11px" onclick="objSparuj(null)">Späť</button></div>
+         </div>`
+      : (o.stav === "caka_na_prevod" || o.stav === "neuhradena")
       ? `<button class="btn" style="padding:3px 8px;font-size:11px" onclick="objSparuj('${esc(o.id)}')">Spárovať ručne…</button>
          <button class="btn" style="padding:3px 8px;font-size:11px" onclick="objZrus('${esc(o.id)}')">Zrušiť</button>`
       : (o.stav === "zaplatena" && o.overene_vypisom === false)
@@ -66,8 +80,8 @@ function vykresliObjednavkyPrevod(){
     </tr>`;
   };
   telo.innerHTML = `<div class="email" style="margin-bottom:10px">Automatika páruje každých 15 minút z notifikácií banky aj z Banky, keď sedí VS aj suma; platbu z notifikácie potvrdí mesačný výpis (keď ju výpis za ten deň nemá, je to rozpor a príde e-mail). Ručne len to, čo nesedí — dátum = deň pripísania na účet.</div>
-    <table><thead><tr><th>Vytvorená</th><th>Firma</th><th>VS</th><th class="r">Suma</th><th>Stav</th><th></th></tr></thead>
-    <tbody>${d.map(riadok).join("")}</tbody></table>`;
+    <div style="overflow-x:auto"><table><thead><tr><th>Vytvorená</th><th>Firma</th><th>VS</th><th class="r">Suma</th><th>Stav</th><th></th></tr></thead>
+    <tbody>${d.map(riadok).join("")}</tbody></table></div>`;
 }
 
 async function objVolaj(telo){
@@ -80,18 +94,19 @@ async function objVolaj(telo){
   return data;
 }
 
-async function objSparuj(id){
+// Otvorí (id) alebo zavrie (null) formulár ručného spárovania v riadku.
+function objSparuj(id){ _objAdm.sparuj = id || null; vykresliObjednavkyPrevod(); }
+async function objSparujPotvrd(id){
   const o = _objAdm.data.find(x => x.id === id); if(!o) return;
-  const datum = prompt("RUČNÉ SPÁROVANIE — VS " + o.vs + ", " + penaz(o.suma) + "\n\n"
-    + "Predplatné začne dňom pripísania a hneď odíde faktúra (nedá sa vrátiť).\n"
-    + "Suma musí sedieť do centa — inú sumu treba riešiť so zákazníkom.\n\n"
-    + "Deň pripísania na účet (RRRR-MM-DD):", new Date().toISOString().slice(0, 10));
-  if(datum === null) return;
+  const datum = String((document.getElementById("objSpDatum") || {}).value || "").trim();
+  const chyba = document.getElementById("objSpChyba");
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(datum) || datum > objDnesBA()){ if(chyba) chyba.textContent = "Zadajte deň pripísania — nie v budúcnosti."; return; }
   try{
-    const v = await objVolaj({ akcia: "admin_sparuj", objednavka_id: id, datum: datum.trim(), suma: o.suma, overene: true });
+    const v = await objVolaj({ akcia: "admin_sparuj", objednavka_id: id, datum, suma: o.suma, overene: true });
+    _objAdm.sparuj = null;
     alert("✓ Spárované" + (v && v.faktura ? ", faktúra " + v.faktura : " — faktúru dobehne cron") + ".");
     nacitajObjednavkyPrevod();
-  }catch(e){ alert("Nespárované: " + e.message); }
+  }catch(e){ if(chyba) chyba.textContent = "Nespárované: " + e.message; else alert("Nespárované: " + e.message); }
 }
 async function objZrus(id){
   if(!confirm("Zrušiť objednávku? Neskorú platbu s týmto VS potom automatika nespáruje.")) return;

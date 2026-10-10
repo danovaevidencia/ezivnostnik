@@ -24,9 +24,33 @@ async function nacitajKampane(){
       : '<div style="padding:14px 18px;color:var(--soft);font-size:13px">Zatiaľ žiadna kampaň.</div>')
     + '<div style="padding:10px 18px;border-top:1px solid var(--line);font-size:12px;color:var(--soft)">Trvalých odhlásení celkovo: <b>'
       + ((data && data.odhlasenia) || 0) + "</b>"
-    + (log.length ? "<br>" + log.slice(0, 5).map(l => esc(new Date(l.cas).toLocaleString("sk-SK")) + " — " + esc(l.akcia) + " " + esc(JSON.stringify(l.podrobnosti || {}))).join("<br>") : "")
+    + (log.length ? "<br>" + log.slice(0, 5).map(l => esc(new Date(l.cas).toLocaleString("sk-SK")) + " — " + esc(kampanLogText(l))).join("<br>") : "")
     + "</div>";
   if(_kampanOtvorena && typeof kontKampanDetail === "function") kontKampanDetail(_kampanOtvorena);
+}
+// Záznam logu kampane ľudskou rečou (spec 154 C2). Dovtedy „priprav
+// {"pripravene":18,"vyradene":{"lehota":2}}“. Neznáma akcia ostane surová —
+// nová akcia sa tak nestratí, len sa ukáže technicky.
+const KAMP_LOG = {
+  "priprav":              p => "pripravené " + (p.pripravene || 0) + (typeof kontVyradeneText === "function" ? kontVyradeneText(p.vyradene) : ""),
+  "rucne-odoslane":       p => "odoslané ručne (adresát " + p.adresat + ")",
+  "rucne-vyradene":       p => "vyradený ručne (adresát " + p.adresat + ")" + (p.dovod ? ": " + p.dovod : ""),
+  "lehota-vyradene":      p => "vyradený — oslovený pred menej ako 60 dňami (adresát " + p.adresat + ")",
+  "mx-vyradene":          p => "vyradený — doména " + (p.domena || "") + " neprijíma poštu",
+  "mx-nezname":           p => "doménu " + (p.domena || "") + " sa nepodarilo overiť — skúsi sa o hodinu",
+  "pripomienky-priprav":  p => "pripravené pripomienky " + (p.pripravene || 0),
+  "pripomienka-odoslana": p => "pripomienka odoslaná (adresát " + p.adresat + ")",
+  "davka":                p => "dávka: odoslané " + (p.odoslane || 0) + (p.chyby ? ", chyby " + p.chyby : "") + " · dnes " + p.dnes + "/" + p.limit
+                                 + (typeof kontVyradeneText === "function" ? kontVyradeneText(p.vyradene) : ""),
+  "skuska":               p => "skúška na " + (p.komu || "?") + (p.ok ? "" : " — chyba: " + (p.chyba || "?")),
+  "import":               p => "import adresátov: pridaných " + (p.pridane || 0) + (p.odhlasene ? ", odhlásených " + p.odhlasene : ""),
+  "vyber":                p => "výber zo skupiny " + (p.skupina || "") + ": pridaných " + (p.pridane || 0),
+  "odpoved":              p => "odpoveď adresáta " + p.adresat + ": " + (p.odpoved || "—"),
+};
+function kampanLogText(l){
+  const p = l.podrobnosti || {}, f = KAMP_LOG[l.akcia];
+  try{ if(f) return f(p); }catch(_){ /* nečakaný tvar — padne na surový zápis nižšie */ }
+  return l.akcia + " " + JSON.stringify(p);
 }
 function kampanRiadok(k){
   const otvorena = _kampanOtvorena === k.id;
@@ -52,6 +76,9 @@ function kampanFormular(k){
       + '<textarea id="kampTelo" rows="8">' + esc(k.telo) + "</textarea></div>"
     + p("kampUtm", "utm_campaign (podľa toho sa kampaň nájde v Návštevnosti)", k.utm_campaign)
     + p("kampLimit", "Denný limit", k.denny_limit, "number")
+    // skúška a dávka: polia v stránke, nie vyskakovacie okno prompt (spec 154 C1)
+    + p("kampSkuska", "Skúšobný e-mail na adresu", kampGmailUcet(), "email")
+    + p("kampDavkaPocet", "Koľko poslať v dávke", Math.max(1, (+k.denny_limit || 0) - (+k.dnes || 0)), "number")
     + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
       + '<button class="btn" onclick="kampanUloz(' + k.id + ')">Uložiť</button>'
       + '<button class="btn" onclick="kampanSkuska(' + k.id + ')">Poslať skúšku sebe</button>'
@@ -118,7 +145,11 @@ function kampanFormularRucne(k, p){
       + '<button class="btn" style="width:auto" onclick="kampanUloz(' + k.id + ')">Uložiť</button>'
       + '<button class="btn" style="width:auto" onclick="kampanNahlad(' + k.id + ')">Náhľad</button>'
       + '<button class="btn" style="width:auto" onclick="kampanStav(' + k.id + ',\'' + (k.stav === "bezi" ? "pozastavena" : "bezi") + '\')">' + (k.stav === "bezi" ? "Pozastaviť" : "Spustiť") + "</button>"
-      + '<button class="btn" style="width:auto" onclick="kampanPriprav(' + k.id + ')"' + (k.stav === "bezi" ? "" : " disabled") + ">Pripraviť e-maily</button>"
+      // Počet je pole v stránke, nie vyskakovacie okno prompt (spec 154 C1): to okno blokuje
+      // automatizáciu cez CDP a nedá sa doňho dať predvolený zvyšok limitu.
+      + '<span style="display:inline-flex;align-items:center;gap:6px"><input id="kampPocet" type="number" min="1" max="30" value="' + kampPocetPredvolene(k)
+        + '" aria-label="Koľko e-mailov pripraviť" style="width:64px">'
+        + '<button class="btn" style="width:auto" onclick="kampanPriprav(' + k.id + ')"' + (k.stav === "bezi" ? "" : " disabled") + ">Pripraviť e-maily</button></span>"
       + kampanStudioTlacidlo(k)
       + "</div>"
     + '<div id="kampRucne"></div>'
@@ -208,33 +239,63 @@ function kampGmailOdkaz(e){
   return "https://mail.google.com/mail/" + (ucet ? "?authuser=" + encodeURIComponent(ucet) + "&" : "?")
     + "view=cm&fs=1&tf=1&to=" + encodeURIComponent(e.email) + "&su=" + encodeURIComponent(e.predmet) + "&body=" + encodeURIComponent(e.text);
 }
-async function kampanPriprav(id){
+// Predvolený počet = zvyšok dnešného limitu (1–30), aby sa jedným ťuknutím
+// pripravilo presne to, čo dnes ešte smie odísť.
+function kampPocetPredvolene(k){ return Math.max(1, Math.min(30, +k.denny_limit ? (+k.denny_limit) - (+k.dnes || 0) : 10)); }
+// `pocet` sa dá podať priamo (vlákno, test); inak z poľa #kampPocet.
+async function kampanPriprav(id, pocet){
   kampGmailUloz();
-  const k = _kampane.find(x => x.id === id) || {};
-  const pocet = prompt("Koľko e-mailov pripraviť? (čaká " + (k.caka || 0) + ", dnes " + (k.dnes || 0) + "/" + (k.denny_limit || 0) + ")", "10");
-  if(!pocet) return;
+  const n = Math.floor(Number(pocet != null ? pocet : (document.getElementById("kampPocet") || {}).value));
+  if(!(n >= 1)){ kampanSprava("Zadajte, koľko e-mailov pripraviť (1–30).", true); return; }
   try{
-    const d = await kampanVolaj({ kampan: id, akcia: "priprav", pocet: +pocet });
+    const d = await kampanVolaj({ kampan: id, akcia: "priprav", pocet: n });
     _rucnePripravene = (d.emaily || []).map(e => Object.assign({ kampan: id }, e));
     kampanRucneVykresli();
     kampanSprava("Pripravených " + _rucnePripravene.length + " · dnes odoslaných " + d.dnes + "/" + d.limit + (d.dovod ? " (" + d.dovod + ")" : "")
       + (typeof kontVyradeneText === "function" ? kontVyradeneText(d.vyradene) : ""));
   }catch(e){ kampanSprava("Chyba: " + e.message, true); }
 }
+// Odkaz na hľadanie adresáta v Odoslaných — overenie, či e-mail už neodišiel.
+function kampGmailHladaj(email){
+  const ucet = kampGmailUcet();
+  return "https://mail.google.com/mail/" + (ucet ? "?authuser=" + encodeURIComponent(ucet) : "") + "#search/" + encodeURIComponent("in:sent to:" + email);
+}
+// Web adresáta zo zdroja kontaktu — len http(s), nič iné sa ako odkaz nevloží.
+function kampWebOdkaz(u){
+  const s = String(u || "").trim(); if(!s) return "";
+  const url = /^https?:\/\//i.test(s) ? s : "https://" + s;
+  return /^https?:\/\/[^\s"'<>]+$/i.test(url) ? url : "";
+}
+// Odkaz do RPO podľa IČO (ten istý zdroj, z ktorého appka číta firmy): hlavná
+// činnosť (SK NACE 6920 = účtovníctvo) sa overí jedným ťuknutím (spec 154 B4).
+function kampRpoOdkaz(ico){ const d = String(ico || "").replace(/\D/g, ""); return d.length >= 6 ? "https://api.statistics.sk/rpo/v1/search?identifier=" + d : ""; }
+function kampanOverene(i){ const e = _rucnePripravene[i]; if(e){ e.overene = true; kampanRucneVykresli(); } }
 function kampanRucneVykresli(){
   const el = document.getElementById("kampRucne");
   if(!el) return;
-  el.innerHTML = _rucnePripravene.map((e, i) => '<div class="hint" style="display:grid;gap:6px">'
-    + '<div><b>' + esc(e.email) + '</b> <span style="color:var(--soft);font-size:12px">zdroj: ' + esc(e.source_url) + "</span></div>"
+  el.innerHTML = _rucnePripravene.map((e, i) => {
+    // Pripravený už skôr a nezapísaný ako odoslaný (spec 154 A3): mohol odísť
+    // a „Odoslané ✓“ sa nekliklo. Gmail sa otvorí až po overení v Odoslaných.
+    const skor = !!e.pripravene_o && !e.overene;
+    const web = kampWebOdkaz(e.source_url), rpo = kampRpoOdkaz(e.ico);
+    return '<div class="hint" style="display:grid;gap:6px">'
+    + '<div><b>' + esc(e.email) + "</b>" + (e.firma ? " · " + esc(e.firma) : "") + (e.ico ? ' <span style="color:var(--soft);font-size:12px">IČO ' + esc(e.ico) + "</span>" : "")
+      + '<div style="font-size:12px;color:var(--soft)">zdroj: ' + (web ? '<a href="' + esc(web) + '" target="_blank" rel="noopener">' + esc(e.source_url) + " ↗</a>" : esc(e.source_url || "—"))
+      + (rpo ? ' · <a href="' + esc(rpo) + '" target="_blank" rel="noopener">RPO (hlavná činnosť) ↗</a>' : "") + "</div></div>"
+    + (skor ? '<div style="background:#fff5e6;border-radius:8px;padding:8px 10px;font-size:12.5px;color:var(--ink)">⚠ Pripravený už '
+        + esc(new Date(e.pripravene_o).toLocaleString("sk-SK")) + " a nie je zapísaný ako odoslaný — možno odišiel a „Odoslané ✓“ sa nekliklo. "
+        + '<a href="' + esc(kampGmailHladaj(e.email)) + '" target="_blank" rel="noopener">Hľadať v Odoslaných ↗</a>'
+        + '<div style="margin-top:6px"><button class="rowbtn" onclick="kampanOverene(' + i + ')">Overil som — neodišiel</button></div></div>' : "")
     + '<div style="font-size:12.5px"><b>Predmet:</b> ' + esc(e.predmet) + "</div>"
     + '<details><summary style="cursor:pointer;font-size:12.5px">Text</summary><pre style="white-space:pre-wrap;font:inherit;font-size:12.5px;margin-top:6px">' + esc(e.text) + "</pre></details>"
     + (e.html ? '<div style="font-size:12.5px;color:var(--soft)">HTML šablóna: tlačidlo skopíruje e-mail a otvorí koncept s adresátom a predmetom — v Gmaile vlož telo cez <b>Ctrl+V</b>. Šablóna má vlastný podpis: ak ho Gmail pridá druhýkrát, zmaž ho (alebo v Gmaile nastav pre nové e-maily z odosielacej adresy „Bez podpisu“).</div>' : "")
     + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
-      + (e.html ? '<button class="rowbtn" onclick="kampanHtmlDoGmailu(' + i + ')">Kopírovať a otvoriť Gmail</button>'
+      + (skor ? "" : (e.html ? '<button class="rowbtn" onclick="kampanHtmlDoGmailu(' + i + ')">Kopírovať a otvoriť Gmail</button>'
         : '<a class="rowbtn" href="' + esc(kampGmailOdkaz(e)) + '" target="_blank" rel="noopener">Otvoriť v Gmaile</a>')
-      + '<button class="rowbtn" onclick="kampanKopiruj(' + i + ')">Kopírovať text</button>'
+        + '<button class="rowbtn" onclick="kampanKopiruj(' + i + ')">Kopírovať text</button>')
       + '<button class="rowbtn" onclick="kampanOdoslane(' + i + ')">Odoslané ✓</button>'
-    + "</div></div>").join("");
+    + "</div></div>";
+  }).join("");
 }
 async function kampanKopiruj(i){
   const e = _rucnePripravene[i];
@@ -247,6 +308,9 @@ async function kampanKopiruj(i){
 // (vyžaduje zameranú stránku), až potom nová karta — tá by fokus vzala.
 async function kampanHtmlDoGmailu(i){
   const e = _rucnePripravene[i];
+  if(!e) return;
+  // Poistka aj tu, nie len skryté tlačidlo — volá sa aj mimo kliknutia (spec 154 A3).
+  if(e.pripravene_o && !e.overene){ kampanSprava("Adresát " + e.email + " bol pripravený už skôr — najprv over v Odoslaných, či e-mail neodišiel.", true); return; }
   try{
     await navigator.clipboard.write([new ClipboardItem({
       "text/html": new Blob([e.html], { type: "text/html" }),
@@ -307,16 +371,16 @@ async function kampanImport(id){
   nacitajKampane();
 }
 async function kampanSkuska(id){
-  const komu = prompt("Skúšobný e-mail poslať na adresu:");
-  if(!komu) return;
+  const komu = String((document.getElementById("kampSkuska") || {}).value || "").trim();
+  if(!/^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(komu)){ kampanSprava("Zadajte adresu, na ktorú ide skúška.", true); return; }
   const { data, error } = await sb.functions.invoke("kampan-posli", { body: { kampan: id, skuska: komu } });
   if(error || (data && data.chyba)) kampanSprava("Chyba: " + ((data && data.chyba) || error.message), true);
   else kampanSprava("Skúška odoslaná na " + komu + ".");
 }
 async function kampanDavka(id){
   const k = _kampane.find(x => x.id === id) || {};
-  const pocet = prompt("Koľko e-mailov poslať teraz? (čaká " + (k.caka || 0) + ", denný limit " + (k.denny_limit || 0) + ")", "50");
-  if(!pocet) return;
+  const pocet = Math.floor(Number((document.getElementById("kampDavkaPocet") || {}).value));
+  if(!(pocet >= 1)){ kampanSprava("Zadajte, koľko e-mailov poslať.", true); return; }
   if(!confirm("Naozaj odoslať " + pocet + " e-mailov kampane „" + (k.nazov || "") + "“? Odoslané sa nedá vziať späť.")) return;
   const { data, error } = await sb.functions.invoke("kampan-posli", { body: { kampan: id, pocet: +pocet } });
   if(error || (data && data.chyba)) kampanSprava("Chyba: " + ((data && data.chyba) || error.message), true);
