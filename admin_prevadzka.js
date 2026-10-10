@@ -102,6 +102,11 @@ function autoKedy(ts, teraz){
   if(min < 48 * 60) return "pred " + Math.round(min / 60) + " h";
   return "pred " + Math.round(min / 1440) + " dňami";
 }
+// 1 beh, 2–4 behy, 5+ behov
+function autoPocet(n, jeden, dva, pat){
+  n = +n || 0;
+  return n + " " + (n === 1 ? jeden : n >= 2 && n <= 4 ? dva : pat);
+}
 function autoInterval(m){
   if(!m) return "";
   if(m < 60) return "každých " + m + " min";
@@ -123,8 +128,9 @@ function autoPrehladHtml(a, teraz){
       + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:baseline"><b class="mono">' + esc(u.meno) + "</b>"
       + '<span style="color:var(--soft);font-size:12px">' + esc(autoInterval(u.interval_min) || u.rozvrh || "") + "</span>"
       + (u.problem ? '<span class="pill off">' + esc(u.problem) + "</span>" : '<span class="pill" style="color:var(--accent2)">beží</span>') + "</div>"
-      + '<div style="font-size:12.5px;color:var(--soft)">posledný beh ' + esc(autoKedy(u.posledny, teraz)) + (u.stav ? " (" + esc(u.stav) + ")" : "")
-      + " · za 24 h " + (+u.behov24 || 0) + " behov" + (u.chyb24 ? ', <span style="color:var(--neg)">' + (+u.chyb24) + " zlyhaní</span>" : "") + "</div>"
+      + '<div style="font-size:12.5px;color:var(--soft)">posledný beh: ' + esc(autoKedy(u.posledny, teraz)) + (u.stav ? " (" + esc(u.stav) + ")" : "")
+      + " · za 24 h " + autoPocet(u.behov24, "beh", "behy", "behov")
+      + (u.chyb24 ? ', <span style="color:var(--neg)">' + autoPocet(u.chyb24, "zlyhanie", "zlyhania", "zlyhaní") + "</span>" : "") + "</div>"
       + (u.stav === "failed" && u.sprava ? '<div class="mono" style="font-size:12px;color:var(--neg);word-break:break-word">' + esc(u.sprava) + "</div>" : "")
       + "</div>").join("");
   o += "</div>";
