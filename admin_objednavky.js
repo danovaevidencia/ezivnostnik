@@ -43,6 +43,7 @@ async function nacitajObjednavkyPrevod(){
 
 function vykresliObjednavkyPrevod(){
   const telo = document.getElementById("objAdmBody");
+  telo.onclick = objKlik;
   if(_objAdm.chyba){ telo.innerHTML = '<div class="loading">Chyba: ' + esc(_objAdm.chyba) + "</div>"; return; }
   const d = _objAdm.data;
   const caka = d.filter(o => o.stav === "caka_na_prevod" || o.stav === "neuhradena");
@@ -62,15 +63,15 @@ function vykresliObjednavkyPrevod(){
            <label class="email">Deň pripísania na účet <input type="date" id="objSpDatum" value="${objDnesBA()}" max="${objDnesBA()}" style="font-size:12px"></label>
            <div class="email">Predplatné začne týmto dňom a hneď odíde faktúra — nedá sa vrátiť. Suma ${penaz(o.suma)} musí sedieť do centa.</div>
            <div id="objSpChyba" class="email" style="color:var(--neg)"></div>
-           <div><button class="btn" style="padding:3px 8px;font-size:11px" onclick="objSparujPotvrd('${esc(o.id)}')">Spárovať a vystaviť faktúru</button>
+           <div><button class="btn" style="padding:3px 8px;font-size:11px" data-obj="potvrd" data-id="${esc(o.id)}">Spárovať a vystaviť faktúru</button>
              <button class="btn" style="padding:3px 8px;font-size:11px" onclick="objSparuj(null)">Späť</button></div>
          </div>`
       : (o.stav === "caka_na_prevod" || o.stav === "neuhradena")
-      ? `<button class="btn" style="padding:3px 8px;font-size:11px" onclick="objSparuj('${esc(o.id)}')">Spárovať ručne…</button>
-         <button class="btn" style="padding:3px 8px;font-size:11px" onclick="objZrus('${esc(o.id)}')">Zrušiť</button>`
+      ? `<button class="btn" style="padding:3px 8px;font-size:11px" data-obj="sparuj" data-id="${esc(o.id)}">Spárovať ručne…</button>
+         <button class="btn" style="padding:3px 8px;font-size:11px" data-obj="zrus" data-id="${esc(o.id)}">Zrušiť</button>`
       : (o.stav === "zaplatena" && o.overene_vypisom === false)
         ? `<span class="email" style="color:${objPodozriva(o) ? "var(--neg)" : "inherit"}">${o.vypis_rozpor ? "ROZPOR — výpis za ten deň platbu nemá" : objPodozriva(o) ? "PODOZRIVÁ — výpis ju nepotvrdil" : "čaká na výpis"}</span>
-           <button class="btn" style="padding:3px 8px;font-size:11px" onclick="objOver('${esc(o.id)}')">Overené vo výpise</button>`
+           <button class="btn" style="padding:3px 8px;font-size:11px" data-obj="over" data-id="${esc(o.id)}">Overené vo výpise</button>`
         : "";
     return `<tr>
       <td>${objDatum(o.vytvorene)}</td>
@@ -97,6 +98,14 @@ function objFiltruj(d, filter, hladaj){
     && adminHladaj([o.vs, o.plan, o.firmy && o.firmy.nazov, OBJ_STAV[o.stav]], hladaj));
 }
 
+// Tlačidlá v riadkoch nesú len data-obj (akcia) a data-id; kód v atribúte
+// nevzniká (spec 154 D2, vzor A1). Obsluha jedna, delegovaná na telo sekcie.
+const OBJ_AKCIE = { potvrd: id => objSparujPotvrd(id), sparuj: id => objSparuj(id), zrus: id => objZrus(id), over: id => objOver(id) };
+function objKlik(e){
+  const b = e.target && e.target.closest ? e.target.closest("button[data-obj]") : null;
+  if(!b || !OBJ_AKCIE[b.dataset.obj]) return;
+  OBJ_AKCIE[b.dataset.obj](b.dataset.id);
+}
 async function objVolaj(telo){
   const { data, error } = await sb.functions.invoke("predplatne-prevod", { body: telo });
   if(error){

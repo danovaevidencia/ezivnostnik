@@ -690,7 +690,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";  // ANON 
 let sb = null, currentUser = null, cfgFirmaId = null;
 // Verzia adminu = verzia appky pri nasadení. Pripája sa k súborom sekcií
 // (admin_kampane.js…), aby prehliadač nedržal starú kópiu z cache.
-const ADMIN_VERZIA = "2026.10.10-SI";
+const ADMIN_VERZIA = "2026.10.10-SJ";
 
 function init(){
   if(!SUPABASE_KEY || SUPABASE_KEY.startsWith("SEM_")){
@@ -1099,7 +1099,7 @@ function saasEfakturaStav(f){
 function saasDobropisTlacidlo(f){
   if(f.typ==="dobropis") return "";
   if((_saasFakturyAdmin||[]).some(x=>x.typ==="dobropis" && x.opravuje===f.cislo)) return '<div class="email">dobropis vystavený</div>';
-  return `<div><button class="btn" style="margin-top:4px;padding:3px 8px;font-size:11px" onclick="vystavDobropisSaas('${esc(f.cislo)}')">Dobropis…</button></div>`;
+  return `<div><button class="btn" style="margin-top:4px;padding:3px 8px;font-size:11px" data-sf="dobropis" data-id="${esc(f.cislo)}">Dobropis…</button></div>`;
 }
 // Nezvratné: doklad odíde zákazníkovi a predplatné sa ukončí. Preto ukážka
 // dôsledkov a potvrdenie napísaním čísla, nie confirm() (CLAUDE.md, Poučenia).
@@ -1184,6 +1184,8 @@ async function nacitajSaasFaktury(){
   `;
   suhrn.classList.remove("hidden");
 
+  // Dobropis… nesie len data-sf a data-id (spec 154 D2) — obsluha delegovaná.
+  document.getElementById("sfBody").onclick = e => { const b = e.target.closest("button[data-sf]"); if(b && b.dataset.sf === "dobropis") vystavDobropisSaas(b.dataset.id); };
   document.getElementById("sfBody").innerHTML = _saasFakturyAdmin.map(f=>`
     <tr>
       <td class="mono">${f.typ==="dobropis"?'<span style="color:var(--neg)">Dobropis</span> ':""}${esc(f.cislo||"—")}${f.typ==="dobropis"?'<div class="email">opravuje '+esc(f.opravuje||"")+"</div>":""}${saasEfakturaStav(f)}${saasDobropisTlacidlo(f)}</td>
@@ -1693,6 +1695,12 @@ async function nacitajClanky(){
     return;
   }
   const zverejneneIds = clZoznam.filter(c => c.zverejneny).map(c => c.id);
+  // Šípky poradia a Upraviť nesú len data-cl, data-id, data-kam (spec 154 D2).
+  document.getElementById("clBody").onclick = e => {
+    const b = e.target.closest("button[data-cl]"); if(!b || b.disabled) return;
+    if(b.dataset.cl === "presun") clPresun(b.dataset.id, b.dataset.kam);
+    else if(b.dataset.cl === "otvor") otvorClanok(b.dataset.id);
+  };
   document.getElementById("clBody").innerHTML = clZoznam.map(c => clRiadok(c, zverejneneIds)).join("");
   tab.classList.remove("hidden");
 }
@@ -1709,7 +1717,7 @@ let clPoradieBezi = false, clWebCasovac = null;
 function clPoradieTlacidla(id, poz, n){
   const b = (kam, znak, popis, vypnute) =>
     `<button class="rowbtn" title="${popis}" aria-label="${popis}" ${vypnute ? "disabled" : ""}
-       onclick="clPresun('${esc(id)}','${kam}')">${znak}</button>`;
+       data-cl="presun" data-id="${esc(id)}" data-kam="${kam}">${znak}</button>`;
   return b("hore", "↑", "Posunúť vyššie", poz === 0)
        + b("dole", "↓", "Posunúť nižšie", poz === n - 1)
        + b("navrch", "Navrch", "Presunúť na prvé miesto", poz === 0);
@@ -1781,7 +1789,7 @@ function clRiadok(c, zverejneneIds){
     <td class="hide-sm">${esc(moduly)}</td>
     <td>${stav}${web}</td>
     <td class="hide-sm">${String(c.zmenene||"").slice(0,10)}</td>
-    <td class="r"><div class="clAkcie">${poz >= 0 ? clPoradieTlacidla(c.id, poz, ids.length) : ""}<button class="rowbtn" onclick="otvorClanok('${esc(c.id)}')">Upraviť</button></div></td>
+    <td class="r"><div class="clAkcie">${poz >= 0 ? clPoradieTlacidla(c.id, poz, ids.length) : ""}<button class="rowbtn" data-cl="otvor" data-id="${esc(c.id)}">Upraviť</button></div></td>
   </tr>`;
 }
 
@@ -2128,12 +2136,16 @@ async function clPublikuj(id, akcia, zPoradia){
     // bez rebase zlyhá alebo ostane web na starej verzii (CLAUDE.md, Nasadzovanie;
     // spec 154 C4). Hláška to povie pri každom commite.
     const pull = r.commit ? " Commit " + String(r.commit).slice(0, 7) + " je v main — pred ďalším nasadením appky git fetch a git rebase origin/main." : "";
-    if(aPoradie) clStav("Poradie je aj na webe — zoznam článkov prerobený"
+    // Web sa nemenil (koncept, prerobenie bez zmeny) → server commit nerobí (spec 154 A7).
+    const bezZmeny = r.bezZmeny === true;
+    if(aPoradie) clStav(bezZmeny ? "Poradie je uložené — web sa tým nemení, commit nevznikol."
+      : "Poradie je aj na webe — zoznam článkov prerobený"
       + ". Prejaví sa do minúty (GitHub Pages sa prestavuje)." + pull);
     // Tlačidlo mimo modálu (Prerobiť zoznam) nemá kam písať hlášku. Bez tohto
     // by úspech vyzeral presne ako nefunkčné tlačidlo — a to je horšie než
     // chyba, lebo sa nedá odlíšiť od „nič sa nestalo".
-    if(!doModalu && !zPoradia) alert("Stránky článkov, zoznam aj sitemap prerobené.\n\n"
+    if(!doModalu && !zPoradia) alert(bezZmeny ? "Stránky článkov, zoznam aj sitemap sú aktuálne — nič sa nezmenilo, commit nevznikol."
+      : "Stránky článkov, zoznam aj sitemap prerobené.\n\n"
       + "Commit je v repozitári, na webe sa prejaví do minúty." + (pull ? "\n\n" + pull.trim() : ""));
     if(doModalu){
       // Najprv znova otvoriť, až potom hláška: otvorClanok hlášku aj chybu
@@ -2144,6 +2156,7 @@ async function clPublikuj(id, akcia, zPoradia){
       // stránku, uvidí 404 a bude hľadať chybu, ktorá nie je.
       hlaska.textContent = akcia === "zmaz"
         ? "Stránka zmazaná z webu. Prejaví sa to do minúty."
+        : bezZmeny ? "Uložené. Na webe sa tým nič nemení — commit nevznikol."
         : "Hotovo. Na webe sa zmena prejaví do minúty (GitHub Pages sa prestavuje)." + pull;
     }
   }catch(e){

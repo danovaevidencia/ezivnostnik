@@ -144,6 +144,9 @@ function svAdmChyba(e){
 function svAdmKresli(){
   const telo = document.getElementById("svAdmBody");
   if(!telo) return;
+  // Riadky a tlačidlá detailu nesú len data-sv a data-id (spec 154 D2) —
+  // ID sa do kódu v atribúte neskladá, obsluha je jedna, delegovaná.
+  telo.onclick = svAdmKlik;
   const f = _svAdm.filter;
   const volba = (k, hodnoty, prazdne) => '<select onchange="svAdmFilter(\'' + k + '\', this.value)" style="width:auto">'
     + (prazdne ? '<option value="">' + esc(prazdne) + "</option>" : "")
@@ -154,7 +157,7 @@ function svAdmKresli(){
   if(f.modul) moduly[f.modul] = f.modul;
   const riadky = _svAdm.polozky.map(x => {
     const zaciatok = String(x.text || "").replace(/\s+/g, " ").slice(0, 80);
-    return '<tr style="cursor:pointer' + (x.id === _svAdm.detail ? ";background:var(--accent-lite)" : "") + '" onclick="location.hash=\'spatna-vazba/' + esc(x.id) + '\'">'
+    return '<tr style="cursor:pointer' + (x.id === _svAdm.detail ? ";background:var(--accent-lite)" : "") + '" data-sv="detail" data-id="' + esc(x.id) + '">'
       + "<td>" + esc(svAdmTyp(x)) + "</td>"
       + "<td>" + svAdmSkore(x.skore) + "</td>"
       + "<td>" + esc(x.modul || "—") + "</td>"
@@ -210,9 +213,9 @@ function svAdmDetailKresli(){
     + '<div class="field" style="margin:10px 0 0"><label>Odpoveď' + (x.odpovedane ? " (uložená " + esc(svAdmCas(x.odpovedane)) + ")" : "") + '</label><textarea id="svAdmOdp" rows="3" maxlength="4000">' + esc(x.odpoved || "") + "</textarea>"
     + '<div style="font-size:12px;color:var(--soft);margin-top:4px">' + svAdmOdpovedStav(x) + "</div></div>"
     + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px">'
-    + '<button class="btn" style="width:auto;padding:8px 14px" onclick="svAdmUloz(\'' + esc(x.id) + '\')">Uložiť</button>'
-    + (x.kontakt_ok && x.email && !x.odpoved_odoslana ? '<button class="btn" style="width:auto;padding:8px 14px" onclick="svAdmPosli(\'' + esc(x.id) + '\')">Uložiť a poslať e-mailom</button>' : "")
-    + (x.text || x.email ? '<button class="rowbtn" onclick="svAdmVymaz(\'' + esc(x.id) + '\')">' + (_svAdm.vymazPotvrd ? "Naozaj vymazať text a väzby" : "Vymazať text (žiadosť o výmaz)") + "</button>" : "")
+    + '<button class="btn" style="width:auto;padding:8px 14px" data-sv="uloz" data-id="' + esc(x.id) + '">Uložiť</button>'
+    + (x.kontakt_ok && x.email && !x.odpoved_odoslana ? '<button class="btn" style="width:auto;padding:8px 14px" data-sv="posli" data-id="' + esc(x.id) + '">Uložiť a poslať e-mailom</button>' : "")
+    + (x.text || x.email ? '<button class="rowbtn" data-sv="vymaz" data-id="' + esc(x.id) + '">' + (_svAdm.vymazPotvrd ? "Naozaj vymazať text a väzby" : "Vymazať text (žiadosť o výmaz)") + "</button>" : "")
     + '<span id="svAdmDetSprava" style="font-size:12.5px"></span></div>'
     + (_svAdm.vymazPotvrd ? '<div class="hint" style="border-left-color:var(--neg)">Vymaže sa text, odpoveď, poznámka a väzba na účet a firmu. Ostane len skóre a modul ako anonymná štatistika. Krok sa nedá vrátiť — potvrďte druhým ťuknutím.</div>' : "")
     + "</div>";
@@ -287,3 +290,10 @@ window.addEventListener("hashchange", () => {
   _svAdm.detail = id;
   svAdmKresli();
 });
+
+const SV_AKCIE = { detail: id => { location.hash = "spatna-vazba/" + id; }, uloz: id => svAdmUloz(id), posli: id => svAdmPosli(id), vymaz: id => svAdmVymaz(id) };
+function svAdmKlik(e){
+  const el = e.target && e.target.closest ? e.target.closest("[data-sv]") : null;
+  if(!el || !SV_AKCIE[el.dataset.sv]) return;
+  SV_AKCIE[el.dataset.sv](el.dataset.id);
+}
