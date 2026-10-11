@@ -380,7 +380,7 @@ function asVytvor() {
   const el = document.createElement("div");
   el.id = "asistent"; el.setAttribute("role", "complementary"); el.setAttribute("aria-label", "Asistent");
   el.innerHTML = `
-    <div class="asHlava"><span aria-hidden="true">✦</span><b>Asistent</b><span class="sp"></span>
+    <div class="asHlava"><b>Asistent</b><span class="sp"></span>
       <button class="asX" onclick="ASISTENT.zavri()" title="Zavrieť" aria-label="Zavrieť asistenta">✕</button></div>
     <div class="asLog" id="asLog" role="log" aria-live="polite" data-scroll="asLog"></div>
     <div class="asNavrhy" id="asNavrhy"></div>
