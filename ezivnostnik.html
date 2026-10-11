@@ -2265,7 +2265,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.10.10-SK";  // zásahy admina do logu zapisuje server (gdpr, prevod, dobropis)
+const APP_VERZIA = "2026.10.11-SL";  // asistent A0: obdobia, po splatnosti, kategórie mesiaca, doklady bez platby, trasy, splatnosť (spec 155)
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -5438,6 +5438,10 @@ function jazdyKontrola(){
   if(sukr && autoRezim()==="100") out.push(N(`${sukr} ${sukr===1?'jazda je označená ako súkromná':'jázd je označených ako súkromných'} — pri plnom odpočte DPH na to nemáte nárok.`));
   const vikendBezUcelu=jazdy.filter(j=>{ const dw=dowOf(j); return (dw===0||dw===6) && !jazdaSukromna(j) && !String(j.ucel||"").trim(); }).length;
   if(vikendBezUcelu) out.push(N(`${vikendBezUcelu} víkendových jázd nemá účel ani príznak súkromnej — pri kontrole sa naň pýtajú ako prvé.`));
+  // Trasa (spec 155.5, kolo A0): import z vozidla dá jazde nad `kjAutoLimit` km
+  // prázdnu trasu a dovtedy ju nič nehlásilo — dopĺňala sa po jednej v editore.
+  const bezTrasy=jazdyBezTrasy().length;
+  if(bezTrasy) out.push(N(`${bezTrasy} ${bezTrasy===1?'jazda nemá':'jázd nemá'} trasu.`, {akcia:{popis:"✎ Doplniť trasy", kod:"jazdyDoplnTrasyOkno()"}}));
 
   // Spojitosť tachometra: `kon` jazdy musí byť `poc` nasledujúcej. Je to prvá
   // vec, ktorú kontrola pri knihe jázd overuje, a dovtedy sa nesledovala vôbec.
@@ -11364,8 +11368,7 @@ function vykazFakturaPredloha(w){
   const vzor=(firmaData.faktury||[]).filter(f=>tohoIste(f) && f.typ!=="dobropis")
     .sort((a,b)=>String(faktDatumDodania(b)||"").localeCompare(String(faktDatumDodania(a)||"")))[0];
   const k=vzor ? faktKopiaPreNovu(vzor) : (()=>{ const dnes=new Date().toISOString().slice(0,10);
-    const spl=new Date(); spl.setDate(spl.getDate()+(+((firmaData.settings||{}).splatnostDni)||14));
-    return {datum:dnes, vystavenie:dnes, splatnost:spl.toISOString().slice(0,10)}; })();
+    return {datum:dnes, vystavenie:dnes, splatnost:faktSplatnostOd(dnes)}; })();
   const pole=(kluc,hod)=>{ if(hod && (ODB.zList || !k[kluc])) k[kluc]=hod; };
   pole("odberatel",ODB.nazov); pole("ico",ODB.ico); pole("icdph",ODB.icdph); pole("dic",ODB.dic); pole("adresa",ODB.adresa);
   const dod=vykazDodanie(w); if(dod) k.dodanie=dod;
@@ -13423,10 +13426,22 @@ async function faktImportZapis(rows){
 // Číslo, dátumy, variabilný symbol a stav úhrady musia byť nové — kópia
 // s prevzatým číslom by prepísala originál a s prevzatou úhradou by tvrdila,
 // že je zaplatená. Prevzatý originálny PDF by tiež patril inému dokladu.
+// Predvolená splatnosť faktúr — JEDNO miesto pre novú faktúru, kópiu aj faktúru
+// z výkazu (155.14 b. 1, kolo A0). Dni z Nastavení → Dokumenty a fakturácia,
+// záloha 14; `faktSplatnostOd(iso)` vráti ISO deň o toľko dní neskôr.
+function faktSplatnostDni(){
+  const raw=((firmaData||{}).settings||{}).splatnostDni;
+  if(raw==null || raw==="") return 14;            // nenastavené ≠ nula dní
+  const v=+raw; return (Number.isFinite(v) && v>=0 && v<=365) ? Math.round(v) : 14;
+}
+function faktSplatnostOd(iso){
+  const d=new Date(String(iso||"").slice(0,10)+"T00:00:00"); if(isNaN(d)) return "";
+  d.setDate(d.getDate()+faktSplatnostDni());
+  return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+}
 // Podklad pre NOVÝ doklad odvodený z existujúceho — kópia aj oprava. Jedno
 // miesto, lebo obe potrebujú to isté: nové dátumy, žiadne číslo, žiadnu úhradu.
 function faktKopiaPreNovu(zdroj){
-  const d=firmaData;
   const k=JSON.parse(JSON.stringify(zdroj));
   const dnes=new Date().toISOString().slice(0,10);
   // Číslo sa ZÁMERNE nepredprideľuje. `dalsieCisloFaktury()` len odvodí ďalšie
@@ -13435,10 +13450,11 @@ function faktKopiaPreNovu(zdroj){
   // a vznikli by dve rovnaké. Preto číslo pridelí až editor pri OTVORENÍ ako
   // pri každej novej faktúre, a zapíše sa až uložením.
   k.datum=dnes; k.vystavenie=dnes; k.dodanie=dnes;
-  const dniSpl=+((d.settings||{}).splatnostDni)||14;
-  const spl=new Date(); spl.setDate(spl.getDate()+dniSpl);
-  k.splatnost=spl.toISOString().slice(0,10);
+  k.splatnost=faktSplatnostOd(dnes);
   delete k.cislo; delete k.vs;   // priradí editor
+  // Interná poznámka patrí k dokladu, pri ktorom vznikla („prečo je tento doklad
+  // výnimka“) — v kópii by klamala (O11, spec 155.15). Popis položiek ostáva.
+  delete k.poznamkaInterna;
   // Človekodne sa počítajú z položiek (faktClovekodni); uložené `dni` zo
   // zdrojovej faktúry by v kópii klamalo — tri faktúry tak mali 25 čld
   // z júna (9. 10. 2026).
@@ -13643,7 +13659,10 @@ function editFaktura(idx, predloha, ciel){
       // volania dalsieCisloFaktury s pribudnutou faktúrou medzitým) rozísť.
       // Priradením naraz je zhoda garantovaná.
       const _c=jePonuka?dalsieCisloPonuky():jeZaloha?dalsieCisloZalohy():dalsieCisloFaktury();
-      _feEdit={cislo:_c,vs:String(_c).replace(/\D/g,""),odberatel:"",ico:"",icdph:"",datum:new Date().toISOString().slice(0,10),splatnost:"",polozky:[{nazov:"",mn:1,mj:"ks",cena:0}],zaplatena:false};
+      // Splatnosť z Nastavení aj pri úplne novej faktúre (155.14 b. 1); ponuka má
+      // namiesto splatnosti platnosť a tú si človek určí sám.
+      const _dnes=new Date().toISOString().slice(0,10);
+      _feEdit={cislo:_c,vs:String(_c).replace(/\D/g,""),odberatel:"",ico:"",icdph:"",datum:_dnes,splatnost:jePonuka?"":faktSplatnostOd(_dnes),polozky:[{nazov:"",mn:1,mj:"ks",cena:0}],zaplatena:false};
     }
   } else {
     _feEdit=JSON.parse(JSON.stringify(POLE()[idx]));
@@ -14743,6 +14762,14 @@ function vydHromadneZrusit(){
   vydVybrane.clear(); appVydavky(); if(n) setTimeout(()=>alert("Úhrada zrušená pri "+n+" výdavkoch."),50);
 }
 function vydJeUhradeny(x){ return !!(x && dokladJeUhradeny("vydavok", dokladKluc(x))); }
+// Výdavky po splatnosti (spec 155.5, kolo A0): neuhradené podľa toho istého
+// pravidla ako zoznam (`dokladJeUhradeny` — banka, ručné potvrdenie, starý
+// príznak) so splatnosťou pred dňom `den` (ISO, predvolene dnes). Do 11. 10.
+// 2026 vedela „po splatnosti“ len Pohľadávky, a tam len pre došlé faktúry.
+function vydavkyPoSplatnosti(den){
+  const dnes=den?String(den).slice(0,10):new Date().toISOString().slice(0,10);
+  return (firmaData.vydavky||[]).filter(x=>x && x.splatnost && String(x.splatnost).slice(0,10)<dnes && dokladKluc(x) && !vydJeUhradeny(x));
+}
 function appVydavky(){
   if(prekresliVRamci("vydavky")) return;   // rámec super apky (GY)
   const d=firmaData, c=APPS.vydavky.c;
@@ -14805,6 +14832,7 @@ function appVydavky(){
   // človek v tomto filtri hľadá. Stav úhrady sa pýta cez `dokladKluc`, ktorý
   // doklad bez čísla pozná podľa id (kap. 109.11, oprava 13. 9. 2026).
   else if(vFilter==="neuhradene") list=vyd.filter(x=>!vydJeUhradeny(x));
+  else if(vFilter==="posplat"){ const P=new Set(vydavkyPoSplatnosti()); list=vyd.filter(x=>P.has(x)); }
   else if(vFilter==="statu") list=vydStatu;
   else if(vFilter==="kontrola") list=vyd.filter(x=>x && x.naKontrolu);
   if((_hladaj.vydavky||"").trim()) list=list.filter(x=>hladajZhoda(_hladaj.vydavky, x.cislo, x.partner, x.popis, x.variabilny, x.spolu));
@@ -14851,7 +14879,9 @@ function appVydavky(){
           : "Obdobie sa počíta z <b>dátumu úhrady</b>. Nezaplatené doklady tu nie sú: v tom období peniaze neodišli."}
         Sumy nad zoznamom idú za túto množinu, nie za základ dane.
       </div>`:""}
-      ${['vsetky|Všetky','faktury|Došlé faktúry','blocky|Bločky','neuhradene|Neuhradené','statu|Odvody a dane']
+      ${['vsetky|Všetky','faktury|Došlé faktúry','blocky|Bločky','neuhradene|Neuhradené']
+        .concat((()=>{ const n=vydavkyPoSplatnosti().length; return (n||vFilter==="posplat")?['posplat|Po splatnosti'+(n?' ('+n+')':'')]:[]; })())
+        .concat(['statu|Odvody a dane'])
         .concat(vydavkyNaKontrolu().length?['kontrola|👁 Na kontrolu ('+vydavkyNaKontrolu().length+')']:[])
         .map(x=>{const[k,l]=x.split('|');return `<span class="achip ${vFilter===k?'on':''}" onclick="vyber=null;vFilter='${k}';appVydavky()">${l}</span>`}).join('')}${hladatkoHtml('vydavky','appVydavky','🔍 Partner, číslo, popis, suma…')}
     </div>
@@ -18454,8 +18484,13 @@ function appSadzby(){
 //  Súčet stĺpca „do základu" sa musí presne rovnať výdavkom v uzávierke —
 //  je to tá istá funkcia vydavokDoZakladu(), len rozpísaná.
 // ═══════════════════════════════════════════════════════════════
-function kategorieRoka(rok){
-  const vyd=(firmaData.vydavky||[]).filter(x=>vydavokVRoku(x, rok) && !x.zaradenyOdpisovany);
+// Jadro súčtov podľa kategórií — JEDNO pre rok aj mesiac (spec 155.5, kolo A0).
+// `patriDoklad(x)` vyberá doklady obdobia, `patriVratenie(obdobie)` hovorí,
+// či žiadosť o vrátenie cudzej DPH (č. 77) patrí do obdobia — tá sa viaže
+// na obdobie žiadosti, nie na dátum dokladu. Kým bol súčet len ročný, mesačný
+// pohľad by znamenal druhú kópiu pravidla; teraz sú obe nad týmto jadrom.
+function kategorieZoznam(patriDoklad, patriVratenie){
+  const vyd=(firmaData.vydavky||[]).filter(x=>patriDoklad(x) && !x.zaradenyOdpisovany);
   const mapa={};
   vyd.forEach(x=>{
     const k=odhadniKategoriu(x);
@@ -18464,27 +18499,46 @@ function kategorieRoka(rok){
     r.zDokladov=r2(r.zDokladov+(+x.bez||0));
     r.doZakladu=r2(r.doZakladu+vydavokDoZakladu(x));
   });
-  // cudzia DPH so žiadosťou o vrátenie v tomto roku (č. 77), aj z dokladu iného roka
   (firmaData.vydavky||[]).forEach(x=>{
-    if(vydavokDphVratenieObdobie(x).slice(0,4)!==String(rok)) return;
+    if(!patriVratenie(vydavokDphVratenieObdobie(x))) return;
     const k=odhadniKategoriu(x);
     const r=mapa[k]||(mapa[k]={kluc:k, pocet:0, zDokladov:0, doZakladu:0});
     r.doZakladu=r2(r.doZakladu+vydavokDphVratenieDoZakladu(x));
   });
-  const NAH=nahradyObdobie(rok);
   const zoznam=Object.keys(mapa)
     .map(k=>Object.assign({}, mapa[k], {nazov:(KATEGORIE_VYDAVKOV[k]||{}).n||k,
       ovplyvnuje:(KATEGORIE_VYDAVKOV[k]||{}).zaklad!==false}))
     .sort((a,b)=>(b.ovplyvnuje-a.ovplyvnuje)||(b.doZakladu-a.doZakladu)||(b.zDokladov-a.zDokladov));
   const ovpl=zoznam.filter(r=>r.ovplyvnuje), neovpl=zoznam.filter(r=>!r.ovplyvnuje);
+  return {
+    pocet:vyd.length, zoznam, ovpl, neovpl,
+    zDokladovOvpl:r2(ovpl.reduce((a,r)=>a+r.zDokladov,0)),
+    doZakladuDoklady:r2(ovpl.reduce((a,r)=>a+r.doZakladu,0)),
+    mimoZakladu:r2(neovpl.reduce((a,r)=>a+r.zDokladov,0)),
+  };
+}
+function kategorieRoka(rok){
+  // cudzia DPH so žiadosťou o vrátenie v tomto roku (č. 77), aj z dokladu iného roka
+  const Z=kategorieZoznam(x=>vydavokVRoku(x, rok), obd=>obd.slice(0,4)===String(rok));
+  const NAH=nahradyObdobie(rok);
   const nahrady=NAH.aktivne?r2(NAH.spolu):0;
   return {
-    rok, pocet:vyd.length, zoznam, ovpl, neovpl, nahrady,
-    zDokladovOvpl:r2(ovpl.reduce((a,r)=>a+r.zDokladov,0)),
-    doZakladu:r2(ovpl.reduce((a,r)=>a+r.doZakladu,0)+nahrady),
-    mimoZakladu:r2(neovpl.reduce((a,r)=>a+r.zDokladov,0)),
+    rok, pocet:Z.pocet, zoznam:Z.zoznam, ovpl:Z.ovpl, neovpl:Z.neovpl, nahrady,
+    zDokladovOvpl:Z.zDokladovOvpl,
+    doZakladu:r2(Z.doZakladuDoklady+nahrady),
+    mimoZakladu:Z.mimoZakladu,
     odpis:odpisRokCelkom(rok),
     vyradenie:vyradeniaRok(rok).vydavok,
+  };
+}
+// Mesiac tým istým pravidlom ako rok: obdobie dane (`vydavokObdobieDane`),
+// nie dátum dokladu — súčet dvanástich mesiacov sa tak rovná roku. Náhrady
+// za km, odpisy a vyradenia sú ročné veličiny a mesiac ich nenesie.
+function kategorieMesiaca(mk){
+  const Z=kategorieZoznam(x=>vydavokObdobieDane(x)===String(mk), obd=>obd===String(mk));
+  return {
+    mesiac:String(mk), pocet:Z.pocet, zoznam:Z.zoznam, ovpl:Z.ovpl, neovpl:Z.neovpl,
+    zDokladovOvpl:Z.zDokladovOvpl, doZakladu:Z.doZakladuDoklady, mimoZakladu:Z.mimoZakladu,
   };
 }
 function kategorieRokHtml(rok){
@@ -18744,6 +18798,50 @@ function jazdyDoplnUcel(od, doD){
   return n;
 }
 function kjMesiacObdobie(mk){ return mk ? [mk+"-01", mk+"-31"] : [null, null]; }
+// ── JAZDY BEZ TRASY (spec 155.5, kolo A0) ──────────────────────────────────
+// To isté pravidlo ako `optimalizujMesiac`: trasa je `cesta` alebo `trasa`,
+// prázdna po orezaní. `mk` = "RRRR-MM" podľa `jazdaMonthKey` (dátum jazdy je
+// „6. 6. 2026“, pole `mesiac` dopĺňa až `jazdaDokonci`), bez `mk` celá kniha.
+// Vracia {j, i} — index je potrebný na zápis, jazda nemá vlastný kľúč.
+function jazdyBezTrasy(mk){
+  return (firmaData.jazdy||[]).map((j,i)=>({j,i}))
+    .filter(({j})=>j && (!mk || jazdaMonthKey(j)===String(mk)) && !String(j.cesta||j.trasa||"").trim());
+}
+// Hromadné doplnenie trás: jeden formulár pre všetky jazdy bez trasy, jeden
+// `poZmene` na konci. Kilometre sa nemenia — jazdy z vozidla ich majú namerané
+// a návrh z poslednej jazdy po rovnakej trase (`jazdaTrasaNaposledy`) patrí len
+// jazde bez km. Prázdny riadok sa preskočí, nie je to chyba. Našepkávač ponúka
+// trasy, ktoré už v knihe sú, a predvolenú z nastavení.
+function kjTrasaPredvolena(n){ const el=document.getElementById("kjt_"+n); const S=firmaData.settings||{}; if(el && S.kjTrasaDefault) el.value=S.kjTrasaDefault; }
+function kjTrasaPredvolenaVsetkym(){ let n=0; while(document.getElementById("kjt_"+n)){ const el=document.getElementById("kjt_"+n); if(!String(el.value||"").trim()) kjTrasaPredvolena(n); n++; } }
+function jazdyDoplnTrasyOkno(mk){
+  if(!strazZapis("jazdy")) return;
+  const Z=jazdyBezTrasy(mk);
+  if(!Z.length){ alert(mk?"V tomto mesiaci nie je jazda bez trasy.":"V knihe jázd nie je jazda bez trasy."); return; }
+  const S=firmaData.settings||{};
+  const trasy=[...new Set((firmaData.jazdy||[]).map(j=>String(j.cesta||j.trasa||"").trim()).filter(Boolean))].slice(-30);
+  const riadok=({j},n)=>`<div class="arow" style="grid-template-columns:auto 1fr auto;gap:8px;align-items:center;cursor:default">
+      <div style="font-size:12px;color:var(--ink-soft);white-space:nowrap">${esc(j.datum||"")}<br>${esc(String(r2(+j.km||0)).replace(".",","))} km</div>
+      <div style="min-width:0"><input id="kjt_${n}" value="" list="kjTrasyZoznam" placeholder="${esc(S.kjTrasaDefault||'napr. Trnava – Bratislava – Trnava')}" style="width:100%;border:1.5px solid var(--line);border-radius:9px;padding:7px 10px;font:inherit;font-size:13px">
+        ${String(j.ucel||"").trim()?`<div style="font-size:11px;color:var(--ink-soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(j.ucel)}</div>`:""}</div>
+      ${S.kjTrasaDefault?`<button type="button" class="aabtn" style="padding:4px 8px;font-size:11px" onclick="kjTrasaPredvolena(${n})" title="Použiť predvolenú trasu z nastavení">↓</button>`:"<span></span>"}
+    </div>`;
+  openModal("Doplniť trasy ("+Z.length+")", `
+    <div class="csub" style="margin-bottom:8px">Jazdy bez trasy${mk?" za "+esc(mesiacLabel(String(mk))):""}. Prázdny riadok sa nezmení, kilometre ostávajú.</div>
+    <datalist id="kjTrasyZoznam">${trasy.map(t=>`<option value="${esc(t)}">`).join("")}</datalist>
+    ${S.kjTrasaDefault?`<button type="button" class="aabtn" style="margin-bottom:8px" onclick="kjTrasaPredvolenaVsetkym()">↓ Predvolenú trasu všetkým prázdnym</button>`:""}
+    <div class="alist" data-scroll="kjTrasy">${Z.map(riadok).join("")}</div>`, ()=>{
+    let n=0;
+    Z.forEach((z,k)=>{
+      const el=document.getElementById("kjt_"+k); const v=el?String(el.value||"").trim():"";
+      const j=firmaData.jazdy[z.i];
+      if(!v || !j || j!==z.j) return;   // riadok prázdny, alebo sa kniha medzitým zmenila
+      j.cesta=v; n++;
+    });
+    if(n){ poZmene(); appJazdy(); }
+    setTimeout(()=>alert(n?(n+" "+(n===1?"jazda dostala trasu.":"jázd dostalo trasu.")):"Žiadna trasa nebola vyplnená — nič sa nezmenilo."),100);
+  }, null, "siroky", "Uložiť trasy");
+}
 function jazdyDoplnUcelZVykazu(mesiac){
   if(!strazZapis("jazdy")) return;
   const n=jazdyDoplnUcel(...kjMesiacObdobie(mesiac));
@@ -21924,8 +22022,12 @@ function appData(){
     <div class="card">
       <h2 style="font-size:16px;margin-bottom:4px">Dokumenty a fakturácia</h2>
       <div class="csub" style="margin-bottom:14px">Predvolené hodnoty pre faktúry a výkazy.</div>
-      <div class="mfield"><label>Cena za človekodeň (€)</label><input type="number" id="set_denTarifa" value="${esc((d.settings||{}).denTarifa||(d.settings||{}).tarifa||'')}" placeholder="napr. 350">
-        <div style="font-size:11.5px;color:var(--ink-soft);margin-top:4px">Použije sa, keď zákazka nemá v Dokumentoch zákazkový list so sadzbou. Prázdne = appka si sadzbu nevymýšľa.</div></div>
+      <div class="mrow2">
+        <div class="mfield"><label>Cena za človekodeň (€)</label><input type="number" id="set_denTarifa" value="${esc((d.settings||{}).denTarifa||(d.settings||{}).tarifa||'')}" placeholder="napr. 350">
+          <div style="font-size:11.5px;color:var(--ink-soft);margin-top:4px">Použije sa, keď zákazka nemá v Dokumentoch zákazkový list so sadzbou. Prázdne = appka si sadzbu nevymýšľa.</div></div>
+        <div class="mfield"><label>Splatnosť faktúr (dní)</label><input type="number" min="0" max="365" step="1" id="set_splatnostDni" value="${esc(faktSplatnostDni())}">
+          <div style="font-size:11.5px;color:var(--ink-soft);margin-top:4px">Predvolená splatnosť novej faktúry, kópie aj faktúry z výkazu. Pri každej faktúre sa dá zmeniť.</div></div>
+      </div>
       <div class="mrow2">
         <div class="mfield"><label>Človekodeň sa počíta</label>
           <select id="set_mdRezim">
@@ -22227,6 +22329,9 @@ async function ulozNastavenia(){
   // (vykazSadzba, 9. 10. 2026). Pole chýba (firemný režim skrýva kartu, nie
   // vynecháva) — vtedy ostane, čo bolo.
   if(document.getElementById("set_denTarifa")){ s.denTarifa=num("set_denTarifa",0); s.tarifa=s.denTarifa; } // alias pre protokol
+  // Splatnosť faktúr (155.14 b. 1): pole, z ktorého kópia a faktúra z výkazu
+  // čítali od začiatku, ale nikto ho nezapisoval — vždy vyšlo 14 dní.
+  if(document.getElementById("set_splatnostDni")){ const v=num("set_splatnostDni",14); s.splatnostDni=(v>=0 && v<=365)?Math.round(v):14; }
   if(document.getElementById("set_vykazMailPredmet")){ s.vykazMailPredmet=val("set_vykazMailPredmet").trim(); s.vykazMailText=val("set_vykazMailText").trim(); }
   if(document.getElementById("set_mdRezim")) s.mdRezim=(val("set_mdRezim")==="dni")?"dni":"hodiny";
   // Nula alebo prázdno by delili nulou — vtedy sa vracia predvolených 8.
@@ -32102,12 +32207,18 @@ function peppolEfakturyOtvorene(){ return modulNaObrazovke()==="efaktury"; }
 // Volanie našej edge funkcie používateľovým tokenom — o firme rozhoduje RLS.
 async function edgeFunkciaVolaj(funkcia, akcia, telo){
   if(localMode || !sb || !firmaId) throw new Error("Funguje len v cloudovom režime.");
+  // Firma sa zachytí PRED prvým await (ROZHODNUTIA č. 125/129). Do 11. 10. 2026
+  // sa `firmaId` čítalo až po získaní tokenu, takže po prepnutí firmy počas
+  // čakania odišla požiadavka pod novou firmou — volajúci si síce výsledok
+  // zahodil cez `beh.platny()`, ale server už zapísal (spec 155.18 b. 3).
+  const beh=behFirmy(), fid=firmaId;
   const tok=await ziskajToken();
   if(!tok) throw new Error(CHYBA_SESSION);
+  if(!beh.platny()){ const e=new Error("Medzitým ste otvorili inú firmu — požiadavka sa neodoslala."); e.stav=409; throw e; }
   const res=await fetch(SUPABASE_URL+"/functions/v1/"+funkcia,{
     method:"POST",
     headers:{"Content-Type":"application/json","Authorization":"Bearer "+tok},
-    body:JSON.stringify(Object.assign({akcia:akcia, firma_id:firmaId}, telo||{}))
+    body:JSON.stringify(Object.assign({akcia:akcia, firma_id:fid}, telo||{}))
   });
   const d=await res.json().catch(()=>({}));
   if(!res.ok){ const e=new Error(d.error || (funkcia+" odpovedal "+res.status)); e.stav=res.status; throw e; }
@@ -34248,6 +34359,41 @@ function dphParsujObdobie(kod){
   const [r,m]=String(kod||"").split("-").map(Number);
   return {rok:r, mesiac:m, stvrtrok:null, mesiace:[String(kod||"")],
     nazov:(MES_SK[(m||1)-1]||"")+" "+r};
+}
+// ── OBDOBIE Z TOKENU (spec 155.3.5, kolo A0) ──────────────────────────────
+// Jedno miesto na „minulý mesiac“: kto obdobie potrebuje (asistent, moduly),
+// pošle token a dátum počíta kód — model nevie, aký je dnes deň, a január
+// → „minulý mesiac“ je december minulého roka. `dnes` je ISO deň alebo Date;
+// bez neho dnešok. Vracia {od, do, mesiace, kod, nazov, buduce, token} alebo
+// null pri neznámom tokene. `kod` je tvar, ktorý berie DPH (dphParsujObdobie):
+// RRRR-MM / RRRR-Qn; pri roku RRRR. `buduce` = obdobie sa ešte nezačalo —
+// volajúci vtedy nepokračuje a vráti otázku (R6).
+function asistentObdobie(token, dnes){
+  const D = dnes instanceof Date ? dnes : (dnes ? new Date(String(dnes).slice(0,10)+"T00:00:00") : new Date());
+  if(isNaN(D)) return null;
+  const Y=D.getFullYear(), M=D.getMonth()+1;
+  const p2=n=>String(n).padStart(2,"0");
+  const posledny=(r,m)=>new Date(r, m, 0).getDate();
+  const mesiac=(r,m)=>{ while(m<1){ m+=12; r--; } while(m>12){ m-=12; r++; }
+    return {od:r+"-"+p2(m)+"-01", do:r+"-"+p2(m)+"-"+p2(posledny(r,m)), mesiace:[r+"-"+p2(m)], kod:r+"-"+p2(m), nazov:MES_SK[m-1]+" "+r}; };
+  const stvrtrok=(r,q)=>{ while(q<1){ q+=4; r--; } const m1=(q-1)*3+1;
+    return {od:r+"-"+p2(m1)+"-01", do:r+"-"+p2(m1+2)+"-"+p2(posledny(r,m1+2)), mesiace:[0,1,2].map(i=>r+"-"+p2(m1+i)), kod:r+"-Q"+q, nazov:q+". štvrťrok "+r}; };
+  const rok=r=>({od:r+"-01-01", do:r+"-12-31", mesiace:Array.from({length:12},(_,i)=>r+"-"+p2(i+1)), kod:String(r), nazov:"rok "+r});
+  const t=String(token||"").trim().toLowerCase();
+  let o=null, m;
+  if(t==="tento_mesiac") o=mesiac(Y,M);
+  else if(t==="minuly_mesiac") o=mesiac(Y,M-1);
+  else if(t==="tento_stvrtrok") o=stvrtrok(Y, Math.floor((M-1)/3)+1);
+  else if(t==="minuly_stvrtrok") o=stvrtrok(Y, Math.floor((M-1)/3));
+  else if(t==="tento_rok") o=rok(Y);
+  else if(t==="minuly_rok") o=rok(Y-1);
+  else if((m=t.match(/^(\d{4})-(\d{2})$/)) && +m[2]>=1 && +m[2]<=12) o=mesiac(+m[1],+m[2]);
+  else if((m=t.match(/^(\d{4})-q([1-4])$/))) o=stvrtrok(+m[1],+m[2]);
+  else if((m=t.match(/^(\d{4})$/))) o=rok(+m[1]);
+  if(!o) return null;
+  o.buduce = o.od > (Y+"-"+p2(M)+"-"+p2(D.getDate()));
+  o.token=t;
+  return o;
 }
 function dphZberObdobie(kod){
   const P=dphParsujObdobie(kod);
@@ -44256,15 +44402,12 @@ function pohybKartaHtml(tx){
           }).join("")+dalsieBtn;
         })()}`;
 }
-function renderSplit(){
+// Doklady pre smer „od dokladu“ — jeden zoznam pre split aj asistenta
+// (spec 155.5, kolo A0): výdavky a faktúry s kľúčom, partnerom, dátumom
+// a sumou, najnovšie prvé. Nič nečíta z okna, nič nezapisuje.
+function dokladyNaParovanie(){
   const d=firmaData;
-  let lavy, pravy;
-  if(splitJeParovanie() && splitOdDokladu()){
-    // ═══ SMER „OD DOKLADU" (GX) ═══
-    // Vľavo doklady, vpravo platby, ktoré k vybranému dokladu sedia. Zoznam
-    // aj ponuka platieb sú tie isté funkcie ako inde — `platbyPreDoklad`
-    // a `vyberPlatbyHtml` z etapy 5; pribudol len ľavý zoznam.
-    const dokl=[
+  return [
       ...(d.vydavky||[]).map(x=>({typ:"vydavok", z:x})),
       ...(d.faktury||[]).map(x=>({typ:"faktura", z:x})),
     ].filter(k=>dokladKluc(k.z))
@@ -44274,12 +44417,36 @@ function renderSplit(){
                  ? (typeof k.z.odberatel==="string"?k.z.odberatel:(k.z.odberatel&&k.z.odberatel.nazov)||"")
                  : (k.z.partner||k.z.popis||"")}))
      .sort((a,b)=>b.datum.localeCompare(a.datum));
+}
+// Doklady bez platby (O10): nie je uhradený podľa `dokladJeUhradeny` — banka,
+// ručné potvrdenie, hotovosť aj starý príznak. Ručne či hotovostne zaplatený
+// doklad sem NEPATRÍ: platba naň v banke nikdy nepríde a nie je čo párovať.
+// Do 11. 10. 2026 split filtroval cez `dokladStavUhrady` (len banka), takže
+// bloček zaplatený v hotovosti sa v ňom ukazoval ako neuhradený (155.14 b. 4).
+// `obdobie`: "RRRR-MM", alebo {od, do} v ISO dňoch, alebo nič = celá kniha.
+function dokladyBezPlatby(obdobie){
+  const O = typeof obdobie==="string" ? (obdobie ? {od:obdobie+"-01", do:obdobie+"-31"} : null) : (obdobie||null);
+  return dokladyNaParovanie().filter(k=>{
+    if(O){ const den=k.datum.slice(0,10); if((O.od && den<O.od) || (O.do && den>O.do)) return false; }
+    return !dokladJeUhradeny(k.typ, k.kluc);
+  });
+}
+function renderSplit(){
+  const d=firmaData;
+  let lavy, pravy;
+  if(splitJeParovanie() && splitOdDokladu()){
+    // ═══ SMER „OD DOKLADU" (GX) ═══
+    // Vľavo doklady, vpravo platby, ktoré k vybranému dokladu sedia. Zoznam
+    // aj ponuka platieb sú tie isté funkcie ako inde — `platbyPreDoklad`
+    // a `vyberPlatbyHtml` z etapy 5; pribudol len ľavý zoznam.
+    const dokl=dokladyNaParovanie();
     const mesiace=[...new Set(dokl.map(k=>k.datum.slice(0,7)).filter(m=>/^\d{4}-\d{2}$/.test(m)))].sort().reverse();
     if(splitMesiac && !mesiace.includes(splitMesiac)) splitMesiac="";
     let zozn=dokl;
     if(splitMesiac) zozn=zozn.filter(k=>k.datum.slice(0,7)===splitMesiac);
     const stav=k=>dokladStavUhrady(k.typ, k.kluc);
-    const neuhr=zozn.filter(k=>{ const s=stav(k); return s.stav==="neuhradene"||s.stav==="ciastocne"; });
+    // „neuhradené“ = bez platby podľa O10, to isté pravidlo ako asistent
+    const neuhr=dokladyBezPlatby(splitMesiac||null);
     if(splitDokStavFilter==="neuhr") zozn=neuhr;
     if((_hladaj.splitBanka||"").trim())
       zozn=zozn.filter(k=>hladajZhoda(_hladaj.splitBanka, k.z.cislo, k.nazov, k.suma, k.z.popis, k.z.variabilny));
