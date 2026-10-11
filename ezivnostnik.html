@@ -1998,6 +1998,9 @@ html[data-jazda] .jazdapruh{display:flex}
          riadku (Roman, 18. 9. 2026). Sú to pomôcky, nie agenda — patria tam,
          kde človek hľadá pomoc, a to je hlavička. Modul ostáva ten istý,
          mení sa len cesta doň. -->
+    <!-- Asistent (spec 155.7, kolo A3): tlačidlo svieti len firme so zapnutým
+         modulom (pilot z adminu); viditeľnosť prepína renderLauncher. -->
+    <button class="usermenu" id="asistentBtn" onclick="asistentOtvor()" title="Asistent — napíšte, čo treba urobiť" aria-label="Asistent" style="display:none">✦</button>
     <button class="usermenu" id="navodyBtn" onclick="otvorApp('navody')" title="Návody — ako na to" aria-label="Návody">?</button>
     <button class="usermenu notifbtn" id="notifBtn" onclick="otvorNotifikacie()" title="Notifikácie">🔔<span id="notifBadge" class="notifbadge" style="display:none">0</span></button>
     <!-- Zapnúť sa to musí jedným klepnutím, práve keď ľudia vchádzajú do
@@ -2265,7 +2268,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.10.11-SN";  // asistent A2: server (admin_72, edge asistent), zásady 1.25 — Anthropic, admin Dnes (spec 155)
+const APP_VERZIA = "2026.10.11-SO";  // asistent A3: panel asistent.js, register asistent_nastroje.js, nástroje čítania, demo, skratka (spec 155)
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -2383,6 +2386,14 @@ function spristupniNeskor(){
   }, 0);
 }
 function spustiKlavesnicu(){
+  // Kláves „/“ na desktope otvorí asistenta (spec 155.7) — nie v poli, kde sa píše.
+  document.addEventListener("keydown", e=>{
+    if(e.key!=="/" || e.ctrlKey || e.metaKey || e.altKey) return;
+    const a=document.activeElement, tag=a&&a.tagName;
+    if(tag==="INPUT"||tag==="TEXTAREA"||tag==="SELECT"||(a&&a.isContentEditable)) return;
+    if(window.innerWidth<900 || typeof asistentDostupny!=="function" || !asistentDostupny()) return;
+    e.preventDefault(); asistentOtvor();
+  });
   // Sleduje sa LEN pribudanie a ubúdanie uzlov. Keby sa sledovali aj atribúty,
   // vlastné setAttribute by pozorovateľa spúšťalo donekonečna.
   //
@@ -3086,7 +3097,11 @@ const MODUL_KATEGORIA={
   banka:"banka", cashflow:"banka",
   dph:"dph", priznania:"priznanie", priznanieB:"priznanie", prognoza:"priznanie",
   jazdy:"jazdy", majetok:"jazdy", dokumenty:"jazdy", dovolenka:"jazdy",
-  knihy:"knihy"
+  knihy:"knihy",
+  // Asistent (spec 155.7, kolo A3): vlastná kategória, ktorú nemá žiadny plán —
+  // pilot sa zapína len z adminu (firma_config.moduly). BEZ tohto riadka by
+  // „neznámy modul → true“ nižšie odomkol asistenta všetkým (155.18 b. 7).
+  asistent:"asistent"
 };
 // Moduly, ktoré platia LEN pre fyzickú osobu (priznanie k dani z príjmov FO,
 // jeho import a prognóza dane a odvodov). Obchodnej spoločnosti sa nezobrazia
@@ -4111,7 +4126,7 @@ let _zdielaneSkusene=false;
 function spustiSkratku(){
   let akcia="";
   try{ akcia=new URLSearchParams(location.search).get("akcia")||""; }catch(_){ return; }
-  if(akcia!=="doklad" && akcia!=="jazda") return;
+  if(akcia!=="doklad" && akcia!=="jazda" && akcia!=="asistent") return;
   try{ history.replaceState(null,"",location.pathname); }catch(_){}
   // Jazda sa spúšťa pri nastupovaní do auta — dve klepnutia navyše cez menu
   // znamenajú, že sa človek nespustí vôbec a km si potom vymyslí.
@@ -4119,6 +4134,8 @@ function spustiSkratku(){
     if(typeof jazdaSpusti==="function") setTimeout(jazdaSpusti, 60);
     return;
   }
+  // Asistent zo skratky manifestu (spec 155.7, kolo A3) — panel sa načíta lenivo.
+  if(akcia==="asistent"){ setTimeout(()=>asistentOtvor(), 60); return; }
   const btn=document.querySelector(".qaIt");
   if(typeof rychlyDoklad==="function") setTimeout(()=>rychlyDoklad(btn), 60);
 }
@@ -9616,6 +9633,8 @@ window.addEventListener("resize", ()=>setTimeout(nastavVyskuListy, 0));
 function renderLauncher(){
   const el=document.getElementById("launcher");
   const d=firmaData||{};
+  // Asistent: tlačidlo v lište len firme so zapnutým modulom (155.7)
+  try{ const ab=document.getElementById("asistentBtn"); if(ab) ab.style.display=asistentDostupny()?"":"none"; }catch(_){}
   // Číslo na dlaždici je pri agendách POČET ZÁZNAMOV — „koľko toho tam mám".
   // Pri E-faktúrach to nedáva zmysel: prijatý doklad je ÚLOHA, nie archív.
   // Ukazuje sa preto, koľko ich čaká na zaevidovanie (Roman, 18. 9. 2026);
@@ -10051,6 +10070,32 @@ function navodyNacitaj(){
   _nvNacitanie=Promise.all([skript("navody.js"), skript("navody_snimky.js")])
     .catch(e=>{ _nvNacitanie=null; console.error(e); throw e; });
   return _nvNacitanie;
+}
+// ── ASISTENT — lenivé načítanie panelu (spec 155.7, 155.15.1, kolo A3) ──────
+// `asistent.js` je klasický skript ako `navody.js`; načíta sa až pri prvom
+// otvorení, `?v=APP_VERZIA` ako admin. Register (ESM) si načíta sám. Kolo A3
+// je rozpracované: kým súbor nie je, panel povie, že sa nenačítal.
+let _asNacitanie=null;
+function asistentNacitaj(){
+  if(window.ASISTENT && typeof ASISTENT.otvor==="function") return Promise.resolve();
+  if(_asNacitanie) return _asNacitanie;
+  _asNacitanie=new Promise((ok,zle)=>{
+    const s=document.createElement("script");
+    s.src="asistent.js?v="+encodeURIComponent(APP_VERZIA);
+    s.onload=ok; s.onerror=()=>zle(new Error("nenačítalo sa asistent.js"));
+    document.head.appendChild(s);
+  }).catch(e=>{ _asNacitanie=null; console.error(e); throw e; });
+  return _asNacitanie;
+}
+// Demo ho má vždy (O2: nahraté odpovede, model sa nevolá); lokálny režim nikdy
+// (spec 11: nič sa neposiela na server); inak pilot z adminu cez modul.
+// Demo beží ako lokálny režim (spustiDemo: localMode aj demoMode) — preto demo
+// najprv, lokálny zákaz až potom.
+function asistentDostupny(){ return demoMode || (!localMode && modulPovolenyPreModul("asistent")); }
+function asistentOtvor(veta){
+  if(!asistentDostupny()) return;
+  asistentNacitaj().then(()=>ASISTENT.otvor(veta||""))
+    .catch(()=>alert("Asistent sa nenačítal — skúste to o chvíľu, keď budete online."));
 }
 function otvorNavod(modul, uloha){
   _nvStav={modul:modul||null, uloha:uloha||null};
