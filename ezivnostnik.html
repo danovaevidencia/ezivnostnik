@@ -2265,7 +2265,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.10.11-SL";  // asistent A0: obdobia, po splatnosti, kategórie mesiaca, doklady bez platby, trasy, splatnosť (spec 155)
+const APP_VERZIA = "2026.10.11-SM";  // asistent A1: náhľad výpisu, protokol bez straty zmien, ICS až v editore, smerovač súborov, eziv:ulozene (spec 155)
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -7209,6 +7209,65 @@ if("serviceWorker" in navigator){
 // Napája sa na `spracujOCR` — teda na TÚ ISTÚ cestu, ktorou ide ručný výber
 // súboru. Druhá vetva spracovania by sa časom rozišla s prvou a jedna z nich
 // by ticho zaostala.
+// ── „NAHRAJ ČOKOĽVEK“: jeden smerovač súborov (spec 155.6, kolo A1) ────────
+// Do SL každý druh súboru vchádzal inými dverami a zdieľanie posielalo všetko
+// do OCR. `rozpoznajSubor` číta LEN hlavičku (prvé 4 kB) a typ/názov; vracia
+// {druh, dovod}. Druhy: ics, vypis (camt/MT940/GPC/CDF), csv (výpis alebo
+// jazdy — rozhodne obsah), efaktura (UBL/ISDOC), gpx, zip (archív výpisov),
+// xlsx (vozidlo alebo výkaz — rozhodne hárok), docx (protokol), pdf, obrazok,
+// nezname. `otvorSuborPodlaDruhu` pošle súbor do existujúcich dverí; každé
+// z nich si drží vlastnú stráž zápisu a limity.
+async function rozpoznajSubor(file){
+  const n=String(file&&file.name||"").toLowerCase(), typ=String(file&&file.type||"").toLowerCase();
+  const b=new Uint8Array(await file.slice(0,4096).arrayBuffer());
+  const t=new TextDecoder("utf-8").decode(b).replace(/^﻿/,"");
+  const pripona=(n.match(/\.([a-z0-9]+)$/)||[])[1]||"";
+  if(jeZipBajty(b)){
+    if(pripona==="xlsx") return {druh:"xlsx", dovod:"zip s príponou .xlsx"};
+    if(pripona==="docx") return {druh:"docx", dovod:"zip s príponou .docx"};
+    return {druh:"zip", dovod:"archív"};
+  }
+  if(/^%PDF/.test(t) || typ==="application/pdf" || pripona==="pdf") return {druh:"pdf", dovod:"PDF"};
+  if(typ.startsWith("image/") || /^(jpe?g|png|webp|heic|gif)$/.test(pripona)) return {druh:"obrazok", dovod:typ||pripona};
+  if(/BEGIN:VCALENDAR/.test(t)) return {druh:"ics", dovod:"BEGIN:VCALENDAR"};
+  if(/<gpx[\s>]/i.test(t)) return {druh:"gpx", dovod:"<gpx>"};
+  if(/<BkToCstmrStmt|<Stmt[\s>]/.test(t)) return {druh:"vypis", dovod:"camt.053"};
+  if(/^:20:|\n:61:|\n:86:/.test(t)) return {druh:"vypis", dovod:"MT940"};
+  if(/^07[45]\d{16}/.test(t)) return {druh:"vypis", dovod:"GPC"};
+  if(/<Invoice[\s>]|<CreditNote[\s>]|<Faktura[\s>]|ISDOC/i.test(t)) return {druh:"efaktura", dovod:"UBL/ISDOC"};
+  if(pripona==="ics") return {druh:"ics", dovod:"prípona"};
+  if(pripona==="gpx") return {druh:"gpx", dovod:"prípona"};
+  if(/^(sta|gpc|cdf)$/.test(pripona)) return {druh:"vypis", dovod:"prípona "+pripona};
+  if(pripona==="csv" || typ==="text/csv") return {druh:"csv", dovod:"CSV"};
+  if(/^\s*<\?xml|^\s*</.test(t) || pripona==="xml") return {druh:"xml", dovod:"XML iného druhu"};
+  return {druh:"nezname", dovod:typ||pripona||"bez typu"};
+}
+async function otvorSuborPodlaDruhu(file, druh){
+  const R=druh||(await rozpoznajSubor(file)).druh;
+  switch(R){
+    case "ics": return spracujICSSubor(file);
+    case "vypis": case "zip": return spracujVypisSubor(file);
+    case "gpx": return spracujGPXSubor(file);
+    case "docx": return vykazImportProtokol(file);
+    case "csv": {
+      // CSV je výpis (Fio, Revolut, Wise, mBank) alebo jazdy — rozhodne hlavička.
+      const text=await file.text();
+      let v=null; try{ v=parseVypis(text); }catch(_){ v=null; }
+      return v ? spracujVypisSubor(file) : spracujGPXSubor(file);
+    }
+    case "xlsx": {
+      // Vozidlo (hárok „Krátkodobé údaje“) alebo výkaz z tejto appky.
+      let vozidlo=false;
+      try{ await ensureXLSX(); const wb=XLSX.read(await file.arrayBuffer(),{type:"array"}); vozidlo=!!wb.Sheets["Krátkodobé údaje"]; }
+      catch(e){ console.error("xlsx:", e); }
+      return vozidlo ? spracujVWSubor(file) : vykazImportXlsx(file);
+    }
+    default:
+      // PDF, obrázok, e-faktúra aj neznáme XML idú tam, kam doteraz — čítanie
+      // dokladu si s e-faktúrou v XML poradí samo (`spracujDokladSubor`).
+      return spracujDokladZoSuboru(file, null);
+  }
+}
 async function prevezmiZdielane(){
   let mam=false;
   try{ mam=new URLSearchParams(location.search).has("zdielane"); }catch(_){ return; }
@@ -7227,9 +7286,10 @@ async function prevezmiZdielane(){
     let nazov="doklad";
     try{ nazov=decodeURIComponent(r.headers.get("X-Nazov")||"doklad"); }catch(_){}
     const subor=new File([blob], nazov, {type:blob.type||"application/octet-stream"});
-    // rovnaký tvar udalosti, aký posiela <input type=file>
-    spracujOCR({ target:{ files:[subor], value:"" } });
-  }catch(_){}   // bez Cache API alebo v starom prehliadači sa proste nič nestane
+    // Zdieľaný súbor ide podľa obsahu do správnych dverí (kolo A1, spec 155.6):
+    // kalendár, výpis, jazdy z vozidla, protokol — do SL šlo všetko do OCR.
+    await otvorSuborPodlaDruhu(subor);
+  }catch(e){ console.error("zdieľaný súbor:", e); }   // bez Cache API alebo v starom prehliadači sa nič nestane
 }
 
 function ponukniAktualizaciu(worker){
@@ -11260,10 +11320,12 @@ function vykazOpravSporne(i){
 // ═══════════════════════════════════════════════════════════════════════════
 let _vykazEdit=null;
 
-function editVykaz(idx){
+// `predloha` (kolo A1, O9): nový výkaz predvyplnený zvonku — z kalendára,
+// neskôr od asistenta — ktorý sa do dát dostane až tlačidlom Uložiť v editore.
+function editVykaz(idx, predloha){
   const d=firmaData, nova=idx==null;
   _vykazEdit={ idx, nova, w: nova
-    ? {...vykazPredvolene(), obdobie:"", polozky:[]}
+    ? (predloha ? JSON.parse(JSON.stringify(predloha)) : {...vykazPredvolene(), obdobie:"", polozky:[]})
     : JSON.parse(JSON.stringify(d.vykazy[idx])) };
   if(!nova && !_vykazEdit.w.od && !_vykazEdit.w.do){ const r=vykazObdobieRozsah(_vykazEdit.w); _vykazEdit.w.od=r.od; _vykazEdit.w.do=r.do; }
   renderVykazEditor();
@@ -11654,6 +11716,7 @@ function renderVykazEditor(){
     if(!firmaData.vykazy) firmaData.vykazy=[];
     if(nova) firmaData.vykazy.push(w); else firmaData.vykazy[idx]=w;
     _vykazEdit=null; poZmene(); appVykazy();
+    ulozeneUdalost("vykaz", w.id||null, nova?firmaData.vykazy.length-1:idx);
   },
   nova?null:()=>{ firmaData.vykazy.splice(idx,1); _vykazEdit=null; poZmene(); appVykazy(); },
   "siroky");
@@ -11759,11 +11822,13 @@ function vykPouziCastu(ci){
 // Protokol je potvrdenie odberateľa o prevzatí práce, takže z výkazu preberá
 // počet dní a obdobie; sumu dopočíta z tarify. Číslo sa odvodí z obdobia,
 // aby sa protokoly dali spárovať s výkazmi aj mimo appky.
-function vykazNaProtokol(){
-  if(!strazZapis("vykazy")) return;
-  const w=vykazPrepocitaj(_vykazEdit.w);
-  if(!w.dni){ alert("Výkaz nemá žiadny odpracovaný deň."); return; }
-  const S=firmaData.settings||{}, M=firmaData.meta||{};
+// Záznam protokolu z výkazu — ČISTÉ jadro (spec 155.5, kolo A1): neotvára
+// okno, nepýta sa, nezapisuje. Vracia {p, w, tarifa} alebo {chyba}. Volá ho
+// editor (vykazNaProtokol) a neskôr aj karta výkazu a asistent.
+function vykazProtokolZaznam(vykaz){
+  const w=vykazPrepocitaj(JSON.parse(JSON.stringify(vykaz||{})));
+  if(!w.dni) return {chyba:"Výkaz nemá žiadny odpracovaný deň."};
+  const M=firmaData.meta||{};
   // jedno pravidlo sadzby (zákazkový list → Nastavenia `denTarifa`/`tarifa`)
   const tarifa=vykazSadzba(w);
   const ODB=vykazOdberatel(w);
@@ -11786,6 +11851,20 @@ function vykazNaProtokol(){
   if(vm) p.cislo="Akceptačný protokol_"+vm.slice(5,7)+"_"+vm.slice(0,4);
   const m=(w.obdobie||"").match(/(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4}).*?(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})/);
   if(m) p.datum=m[6]+"-"+String(+m[5]).padStart(2,"0")+"-"+String(+m[4]).padStart(2,"0");
+  return {p, w, tarifa};
+}
+function vykazNaProtokol(){
+  if(!strazZapis("vykazy")) return;
+  // Najprv sa ULOŽÍ VÝKAZ — hlavička z formulára a rozpísané dni — a až z neho
+  // vznikne protokol. Do 11. 10. 2026 sa protokol zapísal a okno zavrelo bez
+  // uloženia: úpravy v editore sa zahodili a výkaz s protokolom sa rozišli
+  // (155.14 b. 3). Pri novom (neuloženom) výkaze tlačidlo nie je.
+  vykazUlozHlavicku();
+  const E=_vykazEdit||{};
+  const Z=vykazProtokolZaznam(E.w||{});
+  if(Z.chyba){ alert(Z.chyba); return; }
+  const w=Z.w, p=Z.p, tarifa=Z.tarifa;
+  if(!E.nova && E.idx!=null && firmaData.vykazy && firmaData.vykazy[E.idx]) firmaData.vykazy[E.idx]=w;
   if(!firmaData.protokoly) firmaData.protokoly=[];
   firmaData.protokoly.unshift(p);
   closeModal(); _vykazEdit=null; poZmene();
@@ -12291,6 +12370,11 @@ function icsImport(){ document.getElementById("icsInput").click(); }
 function spracujICS(e){
   if(!strazZapis("vykazy")) return;
   const file=e.target.files[0]; if(!file) return; e.target.value="";
+  spracujICSSubor(file);
+}
+// Jedna cesta pre výber súboru, zdieľanie aj asistenta (kolo A1, `rozpoznajSubor`).
+function spracujICSSubor(file){
+  if(!strazZapis("vykazy")) return;
   const rd=new FileReader();
   rd.onload=()=>{
     const evs=parseICS(String(rd.result));
@@ -12359,11 +12443,11 @@ function icsSprievodca(){
     const od=_icsMesiac+"-01", doD=_icsMesiac+"-"+String(new Date(r, mm, 0).getDate()).padStart(2,"0");
     const w={...vykazPredvolene(), od, do:doD, obdobie:vykazObdobieText(od, doD), polozky};
     vykazPrepocitaj(w);
-    if(!firmaData.vykazy) firmaData.vykazy=[];
-    firmaData.vykazy.push(w); poZmene(); appVykazy();
     _icsMesiac=null;
-    // návrh sa hneď otvorí na úpravu (kalendár je len štart)
-    setTimeout(()=>editVykaz(firmaData.vykazy.length-1), 0);
+    // Návrh sa hneď otvorí na úpravu (kalendár je len štart) a do dát sa
+    // dostane až tlačidlom Uložiť v editore (O9, spec 155.15, kolo A1).
+    // Do SL sa výkaz uložil už tu a Zrušiť v editore ho nechalo v zozname.
+    setTimeout(()=>editVykaz(null, w), 0);
   });
 }
 function icsToggle(gi){ if(_icsEvents[gi]){ _icsEvents[gi].zahrnut=!_icsEvents[gi].zahrnut; prekresliModal(icsSprievodca); } }
@@ -13854,6 +13938,7 @@ function feModal(idx, nova, kluc){
     if(nova) POLE().push(f); else POLE()[idx]=f;
     // Faktúra z výkazu: väzba vzniká až uložením (Zrušiť nenechá stopu).
     if(nova && KLUC==="faktury" && f.zVykazu) vykazPrepojFakturu(f);
+    ulozeneUdalost(KLUC==="faktury"?"faktura":KLUC, f.id||null, dokladKluc(f));
     // Checkbox „Uhradená" ide cez tie isté funkcie ako zoznam — žiadny priamy
     // zápis príznaku (kap. 45.2). Odškrtnutie ruší len ručné tvrdenie; úhradu
     // potvrdenú bankovým výpisom checkbox neprebije.
@@ -15628,6 +15713,7 @@ async function ulozVydavokZFormularaRaz(idx, R){
     ucetFSzmazPreklep(ulozeny);   // preklep nie je „neviem": starý stav z registra preč (č. 61)
   }
   zapamatajPartnera(ulozeny);
+  ulozeneUdalost("vydavok", ulozeny.id, dokladKluc(ulozeny));
   if(doplnene) zapisAutomat("icdph", [dokladKluc(ulozeny)]);
   // Ten istý doklad čaká aj ako e-faktúra zo siete (č. 234): výdavok z PDF,
   // fotky či mailu ju vybaví, inak by čakala navždy. Nie pri zaevidovaní
@@ -19632,6 +19718,10 @@ function kjImport(){ document.getElementById("gpxInput").click(); }
 function spracujGPX(e){
   if(!strazZapis("jazdy")) return;
   const file=e.target.files[0]; if(!file) return; e.target.value="";
+  spracujGPXSubor(file);
+}
+function spracujGPXSubor(file){
+  if(!strazZapis("jazdy")) return;
   const rd=new FileReader();
   rd.onload=()=>{
     const text=String(rd.result); let nove=[];
@@ -19752,6 +19842,10 @@ function vwOdTankovania(wb){
 async function spracujVW(e){
   if(!strazZapis("jazdy")) return;
   const file=e.target.files[0]; if(!file) return; e.target.value="";
+  return spracujVWSubor(file);
+}
+async function spracujVWSubor(file){
+  if(!strazZapis("jazdy")) return;
   try{
     const buf=await file.arrayBuffer();
     await ensureXLSX();
@@ -20209,7 +20303,8 @@ function editJazda(idx){
     if(!d.jazdy)d.jazdy=[];
     if(nova) d.jazdy.push(jazdaDokonci(obj));
     else d.jazdy[idx]=jazdaDokonci(Object.assign(d.jazdy[idx],obj));
-    poZmene(); appJazdy();},
+    poZmene(); appJazdy();
+    ulozeneUdalost("jazda", null, nova?d.jazdy.length-1:idx);},
   nova?null:()=>{ d.jazdy.splice(idx,1); poZmene(); appJazdy(); });
   zamOkno("jazdy");
   if(nova) jazdaTrasaNaposledy();
@@ -28526,6 +28621,15 @@ function chk(id){ const e=document.getElementById(id); return e?!!e.checked:fals
 function setCrumb(t){ const e=document.getElementById("appCrumb"); if(e) e.textContent=t; }
 
 function poZmene(){ firmaDirty=true; firmaDataVerzia++; kopiaZapis(true); ulozFirmu(); renderLauncher(); }
+// Udalosť „človek uložil záznam“ (spec 155.3.6, kolo A1): `eziv:ulozene`
+// s {typ, id, kluc}. Vzniká LEN v ukladacích cestách formulárov (faktúra,
+// výkaz, dokument, výdavok, jazda) — nie v `poZmene`, tá beží aj pri zmenách,
+// ktoré človek nespravil (automatika párovania). Čaká na ňu reťaz asistenta
+// „výkaz → faktúra → e-mail“; bez poslucháča nerobí nič.
+function ulozeneUdalost(typ, id, kluc){
+  try{ document.dispatchEvent(new CustomEvent("eziv:ulozene", {detail:{typ, id:id==null?null:id, kluc:kluc==null?null:kluc}})); }
+  catch(e){ console.error("eziv:ulozene", e); }
+}
 
 // ═══ VYHĽADÁVANIE V ZOZNAMOCH A PRIZNANÉ OREZANIE (kap. 45.6) ═══════════════
 // Jedna normalizácia a jedno správanie poľa pre všetky moduly. Bez diakritiky
@@ -30640,6 +30744,11 @@ async function spracujVypis(e){
   if(!strazZapis("banka")) return;
   const file=e.target.files[0]; if(!file) return;
   e.target.value="";
+  return spracujVypisSubor(file);
+}
+// Jedna cesta pre výber súboru, zdieľanie aj asistenta (kolo A1, `rozpoznajSubor`).
+async function spracujVypisSubor(file){
+  if(!strazZapis("banka")) return;
   // PDF výpis — náhradná cesta pre toho, kto k XML nemá prístup (kap. 80).
   // Importuje sa LEN keď sedia kontrolné súčty banky; inak sa neurobí nič.
   if(file.type==="application/pdf" || /\.pdf$/i.test(file.name)){
@@ -30665,7 +30774,11 @@ async function spracujVypis(e){
     // Text sa odovzdáva aj tak: podľa neho sa poznáva, či ten istý výpis už
     // bol nahratý, a ukladá sa originál. Pre PDF je to kanonický zápis
     // prečítaných pohybov — pre ten istý súbor vyjde vždy rovnaký.
-    importujVypisText(JSON.stringify({banka:P.banka, iban:P.mojIban, txns:P.txns}), file.name, P);
+    // Aj PDF ide cez náhľad (O6, kolo A1): import spustí človek na karte.
+    const textPdf=JSON.stringify({banka:P.banka, iban:P.mojIban, txns:P.txns});
+    vypisNahladOkno([vypisNahlad(textPdf, file.name, P)], file.name, ()=>{
+      importujVypisText(JSON.stringify({banka:P.banka, iban:P.mojIban, txns:P.txns}), file.name, P);
+    });
     return;
   }
   const text=await textVypisu(file);
@@ -30678,6 +30791,68 @@ async function spracujVypis(e){
 // ide cez `importujVypisText`; pri archíve sa hlášky zoberú do jednej, aby
 // človek neodklikával päť okien. Čo výpisom nie je, sa vymenuje, nie zamlčí.
 // Vracia počet súborov, ktoré boli výpisom (0 = nič sa neimportovalo).
+// ── NÁHĽAD VÝPISU PRED IMPORTOM (spec 155.5, O6, kolo A1) ───────────────────
+// Čo sa stane, keď človek potvrdí: formát, účet (len posledné 4 znaky), od–do,
+// mesiace, pohybov / nových, súčty, úroveň dôkazu a či ten istý súbor už
+// evidujeme. Nič nemení — `vypisNovePohyby` beží nasucho, evidencia sa nečíta
+// na zápis. Do 11. 10. 2026 sa náhľad ukázal len pri formáte bez kontrolných
+// súčtov (confirm), camt.053 aj overené PDF sa uložili hneď.
+function vypisNahlad(text, nazovSuboru, parsedVopred){
+  const t=String(text||"");
+  let parsed=null;
+  try{ parsed=parsedVopred || parseVypis(t); }catch(_){ parsed=null; }
+  if(!parsed) return {ok:false, nazov:nazovSuboru||"", dovod:vypisFormatHlaska(t, nazovSuboru)};
+  const T=parsed.txns||[];
+  const O=overVypisPdf(parsed);
+  const K=vypisUrovenDokazu(parsed, O);
+  const D=vypisNovePohyby(firmaData.vypis||[], T, true);
+  const dni=T.map(x=>String(x.datum||"").slice(0,10)).filter(Boolean).sort();
+  const s=smer=>r2(T.filter(x=>x.smer===smer).reduce((a,x)=>a+(+x.suma||0),0));
+  const iban=String(parsed.mojIban||"").replace(/\s/g,"");
+  const uzBol=vypisUzNahraty(t);
+  return {
+    ok:true, nazov:nazovSuboru||"", parsed,
+    format: parsed.zdrojFormat || (/^\s*\{/.test(t) ? "pdf" : "camt.053"),
+    banka: parsed.banka||"", ucetKoniec: iban ? iban.slice(-4) : "", ucty:(parsed.ucty||[]).length,
+    od:dni[0]||"", do:dni[dni.length-1]||"", mesiace:vypisMesiaceZo(parsed),
+    pohybov:T.length, novych:D.nove.length, doplnene:D.doplnene, preskocene:parsed.preskocene||0,
+    prijmy:s("prijem"), vydavky:s("vydaj"), bezDatumu:O.bezDatumu||0,
+    uroven:K.uroven, overenie:O.ok?"ok":(O.neoveritelne?"neoveritelne":"nesedi"), sprava:O.ok?"":(O.sprava||""),
+    varovania:(parsed.varovania||[]).slice(), uzBol:uzBol?{kedy:uzBol.kedy, novych:uzBol.novych}:null,
+  };
+}
+function vypisNahladHtml(N){
+  const r=(l,v)=>v===""||v==null?"":`<div class="dphline"><span>${esc(l)}</span><b>${v}</b></div>`;
+  const obd=N.od?fmtDatum(N.od)+" – "+fmtDatum(N.do):"";
+  const stav=N.overenie==="ok" ? `<span style="color:var(--pos)">✓ kontrolné súčty sedia</span>`
+    : N.overenie==="nesedi" ? `<span style="color:var(--neg)">⚠ kontrolné súčty nesedia — ${esc(N.sprava)}</span>`
+    : `<span style="color:var(--warn)">ℹ bez kontrolných súčtov — porovnajte počty so svojím bankingom</span>`;
+  return `<div class="card" style="margin-bottom:10px">
+    <div style="font-weight:700;margin-bottom:6px">${esc(N.nazov||"výpis")}</div>
+    ${r("Formát", esc(N.format)+(N.banka?" · "+esc(N.banka):""))}
+    ${r("Účet", N.ucetKoniec?"…"+esc(N.ucetKoniec)+(N.ucty>1?" (+"+(N.ucty-1)+" ďalšie)":""):"")}
+    ${r("Obdobie", obd?esc(obd)+(N.mesiace.length?" · "+N.mesiace.map(mesiacLabel).join(", "):""):"")}
+    ${r("Pohybov", N.pohybov+(N.pohybov!==N.novych?` · <b>nových ${N.novych}</b>`+(N.doplnene?`, ${N.doplnene} už evidovaných`:""):""))}
+    ${r("Príjmy / výdavky", eur(N.prijmy)+" / "+eur(N.vydavky))}
+    ${N.preskocene?r("Nezaúčtované", N.preskocene+" "+sklonPohyb(N.preskocene)+" (rezervácie) sa nenačítajú"):""}
+    ${N.bezDatumu?r("Bez dátumu", N.bezDatumu+" "+sklonPohyb(N.bezDatumu)):""}
+    <div style="font-size:12.5px;margin-top:6px">${stav}</div>
+    ${N.uzBol?`<div style="font-size:12.5px;margin-top:4px;color:var(--warn)">Tento súbor už evidujete (nahratý ${new Date(N.uzBol.kedy).toLocaleDateString("sk-SK")}) — import nič nezdvojí, len doplní údaje.</div>`:""}
+    ${N.varovania.length?`<div style="font-size:12px;color:var(--ink-soft);margin-top:4px">${N.varovania.map(v=>"ℹ "+esc(v)).join("<br>")}</div>`:""}
+  </div>`;
+}
+// Okno s náhľadom; import spustí človek tlačidlom (R4 — nie `confirm`).
+// `naImport` dostane zoznam potvrdených výpisov. Zrušiť = nič sa nestane.
+function vypisNahladOkno(nahlady, nazov, naImport){
+  const platne=nahlady.filter(n=>n.ok), zle=nahlady.filter(n=>!n.ok);
+  const novych=platne.reduce((a,n)=>a+n.novych,0);
+  openModal("Import výpisu"+(platne.length>1?" ("+platne.length+")":""), `
+    <div class="csub" style="margin-bottom:10px">${platne.length>1?"Archív "+esc(nazov||"")+". ":""}Toto sa po potvrdení pridá do Banky${novych?": <b>"+novych+" "+sklonPohyb(novych)+"</b>":" — <b>žiadny nový pohyb</b>, všetko už evidujete"}.</div>
+    <div data-scroll="vypisNahlad">${platne.map(vypisNahladHtml).join("")}</div>
+    ${zle.length?`<div style="font-size:12px;color:var(--ink-soft);margin-top:6px">Preskočené (nie sú výpis): ${zle.map(z=>esc(z.nazov)).join(", ")}</div>`:""}
+  `, ()=>{ naImport(platne); }, null, "", novych?"Importovať":"Importovať aj tak");
+  zamOkno("banka");
+}
 function importujVypisSubory(texty, nazov, volby){
   const zoznam=Array.isArray(texty) ? texty : [{nazov:nazov, text:String(texty)}];
   const vypisy=zoznam.filter(x=>{ try{ return !!parseVypis(String(x.text)); }catch(_){ return false; } });
@@ -30685,14 +30860,31 @@ function importujVypisSubory(texty, nazov, volby){
     if(!(volby&&volby.tichoAkNieVypis)) alert(vypisFormatHlaska(zoznam[0]?zoznam[0].text:"", nazov));
     return 0;
   }
-  if(!Array.isArray(texty)){ importujVypisText(zoznam[0].text, nazov); return 1; }
-  const hlasky=[];
-  vypisy.forEach(x=>importujVypisText(x.text, nazov+" › "+x.nazov, null, {hlasky}));
-  const preskocene=zoznam.filter(x=>vypisy.indexOf(x)<0).map(x=>x.nazov);
-  alert("Archív "+nazov+": "+vypisy.length+" "+sklon(vypisy.length,"výpis","výpisy","výpisov")+".\n\n"
-    +hlasky.map((h,i)=>"── "+vypisy[i].nazov+" ──\n"+h).join("\n\n")
-    +(preskocene.length ? "\n\nPreskočené (nie sú výpis): "+preskocene.join(", ") : ""));
-  return vypisy.length;
+  // Samotný import — spúšťa sa až po potvrdení náhľadu (alebo hneď pri
+  // `volby.bezNahladu`, čo je cesta bez človeka). `bezPotvrdenia`: otázku na
+  // formát bez súčtov už položil náhľad.
+  const spusti=()=>{
+    if(volby&&volby.beh&&!volby.beh.platny()){ alert(VYPIS_INA_FIRMA); return 0; }
+    let n=0;
+    // Vracia počet spracovaných VÝPISOV (ako doteraz), nie pohybov — výpis bez
+    // nového pohybu je tiež vybavený (schránka ho má označiť).
+    if(!Array.isArray(texty)){ importujVypisText(zoznam[0].text, nazov, null, {bezPotvrdenia:!!(volby&&volby.sNahladom)}); n=1; }
+    else {
+      const hlasky=[];
+      vypisy.forEach(x=>importujVypisText(x.text, nazov+" › "+x.nazov, null, {hlasky, bezPotvrdenia:!!(volby&&volby.sNahladom)}));
+      const preskocene=zoznam.filter(x=>vypisy.indexOf(x)<0).map(x=>x.nazov);
+      alert("Archív "+nazov+": "+vypisy.length+" "+sklon(vypisy.length,"výpis","výpisy","výpisov")+".\n\n"
+        +hlasky.map((h,i)=>"── "+vypisy[i].nazov+" ──\n"+h).join("\n\n")
+        +(preskocene.length ? "\n\nPreskočené (nie sú výpis): "+preskocene.join(", ") : ""));
+      n=vypisy.length;
+    }
+    if(volby&&typeof volby.poImporte==="function") volby.poImporte(n);
+    return n;
+  };
+  if(volby&&volby.bezNahladu) return spusti();
+  volby=Object.assign({}, volby||{}, {sNahladom:true});
+  vypisNahladOkno(zoznam.map(x=>vypisNahlad(x.text, Array.isArray(texty)?x.nazov:nazov, null)), nazov, spusti);
+  return vypisy.length;   // rozpoznané výpisy; import prebehne po potvrdení
 }
 
 // Čo je to za súbor, keď to nie je výpis camt.053. Generická veta „nepodarilo
@@ -31056,7 +31248,9 @@ function bankaVedra(){
 // tie zlučuje `zlucNotifikacie` s oknom ±4 dni. Bez tejto cesty by prvý
 // import po zmene id zdvojil celú históriu — a mesačný výpis po denných
 // SLSP by ju zdvojil aj bez zmeny id.
-function vypisNovePohyby(existujuce, prichadzajuce){
+// `sucho` = len spočítať, nič do existujúcich pohybov nedopĺňať (náhľad pred
+// importom, spec 155.5 — náhľad nesmie meniť firmaData).
+function vypisNovePohyby(existujuce, prichadzajuce, sucho){
   const E=existujuce||[];
   const existId=new Set(E.map(t=>t.id));
   const kluc=t=>String(t.datum||"").slice(0,10)+"|"+t.smer+"|"+Math.round((+t.suma||0)*100)+"|"+String(t.vs||"").replace(/\D/g,"");
@@ -31066,17 +31260,19 @@ function vypisNovePohyby(existujuce, prichadzajuce){
   // Polia, ktoré starý parser nedával. Existujúce hodnoty (proti, popis,
   // uhrady, skryty…) sa nedotknú — o tie mohol medzitým rozhodnúť človek.
   const DOPLN=["ss","ks","ucet","typ","kategoria","storno","okamzita","neobvyklySmer","povodnaKategoria","rozpis","symbolyOdvodene","ref"];
+  const spotrebovane=new Set();
   (prichadzajuce||[]).forEach(t=>{
     if(existId.has(t.id)) return;
-    const kand=(podlaKluca[kluc(t)]||[]).find(x=>!x._spotrebovany);
+    const kand=(podlaKluca[kluc(t)]||[]).find(x=>!spotrebovane.has(x));
     if(!kand){ nove.push(t); return; }
-    kand._spotrebovany=true;
-    DOPLN.forEach(k=>{ if(kand[k]===undefined && t[k]!==undefined && t[k]!=="") kand[k]=t[k]; });
-    if(!kand.ibanProti && t.ibanProti) kand.ibanProti=t.ibanProti;
-    if(!kand.popis && t.popis) kand.popis=t.popis;
+    spotrebovane.add(kand);
+    if(!sucho){
+      DOPLN.forEach(k=>{ if(kand[k]===undefined && t[k]!==undefined && t[k]!=="") kand[k]=t[k]; });
+      if(!kand.ibanProti && t.ibanProti) kand.ibanProti=t.ibanProti;
+      if(!kand.popis && t.popis) kand.popis=t.popis;
+    }
     doplnene++;
   });
-  E.forEach(t=>{ delete t._spotrebovany; });
   return {nove, doplnene};
 }
 function importujVypisText(text, nazovSuboru, parsedVopred, volby){
@@ -39033,17 +39229,22 @@ async function importujCakajuciVypis(id){
     const text=await textVypisu(subor);
     if(!beh.platny()){ console.error("výpis z e-mailu: iná firma — neimportuje sa"); alert(VYPIS_INA_FIRMA); return true; }
     if(text===null) return false;                 // zrušené alebo zlé heslo
-    // Nie je to výpis (ani jeden v archíve) — nech to skúsi ako doklad, bez hlášky.
-    if(!importujVypisSubory(text, z.subor_nazov||"výpis z e-mailu", {tichoAkNieVypis:true})) return false;
     // Zaheslovaný archív z e-mailu sa po importe maže. Od GT si appka uchováva
     // vlastnú kópiu výpisu (`ulozOriginalVypisu`) — držať vedľa nej aj archív
     // by bola tá istá vec dvakrát. Pozor na rozdiel: naša kópia je XML, teda
     // ROZŠIFROVANÝ obsah; vedomé rozhodnutie, viď kap. 47.9.
-    try{ await sb.storage.from("dokumenty").remove([z.subor_cesta]); }
-    catch(e){ console.warn("Archív sa nepodarilo zmazať:", e.message||e); }
-    await sb.from("cakajuce_doklady")
-      .update({ stav:"spracovane", spracovane:new Date().toISOString() }).eq("id", id);
-    await nacitajCakajuce(true);
+    // Od SM (kolo A1) ide import cez náhľad: mail sa označí a archív zmaže až
+    // PO potvrdení (`poImporte`) — zrušený náhľad nechá mail v schránke.
+    const poImporte=async(n)=>{
+      if(!n) return;
+      try{ await sb.storage.from("dokumenty").remove([z.subor_cesta]); }
+      catch(e){ console.warn("Archív sa nepodarilo zmazať:", e.message||e); }
+      await sb.from("cakajuce_doklady")
+        .update({ stav:"spracovane", spracovane:new Date().toISOString() }).eq("id", id);
+      await nacitajCakajuce(true);
+    };
+    // Nie je to výpis (ani jeden v archíve) — nech to skúsi ako doklad, bez hlášky.
+    if(!importujVypisSubory(text, z.subor_nazov||"výpis z e-mailu", {tichoAkNieVypis:true, beh, poImporte})) return false;
     return true;
   }catch(e){ alert("Výpis sa nepodarilo načítať: "+(e.message||e)); return false; }
 }
@@ -44955,9 +45156,15 @@ function appDokumenty(){
     </div>`:'<div class="aempty">Zatiaľ žiadne dokumenty. Pridajte prvý cez „＋ Dokument".</div>'}`;
   setCrumb(`dokumenty · ${zoznam.length} evidovaných`);
 }
-function dokPridaj(idx){
+// `predloha` a `subor` (kolo A1, spec 155.5): nový dokument predvyplnený
+// zvonku — zdieľaný súbor, Schránka, neskôr asistent so zákazkovým listom.
+// Súbor sa pripojí bez výberu (input type=file sa programovo naplniť nedá),
+// človek ho môže vymeniť; uloží ho tlačidlo ako doteraz.
+let _dokPredvolenySubor=null;
+function dokPridaj(idx, predloha, subor){
   if(!strazZapis("dokumenty")) return;
-  const d = idx!=null ? dokEnsure()[idx] : {};
+  const d = idx!=null ? dokEnsure()[idx] : (predloha ? JSON.parse(JSON.stringify(predloha)) : {});
+  _dokPredvolenySubor = (idx==null && subor) ? subor : null;
   const zk=d.zakazka||{}, jeZL=d.typ===DOK_ZAKAZKOVY_LIST;
   openModal(idx!=null?"Upraviť dokument":"Nový dokument", `
     <div class="mfield"><label>Názov</label><input id="dok_nazov" value="${esc(d.nazov||'')}" placeholder="napr. Rámcová zmluva s odberateľom"></div>
@@ -44987,13 +45194,15 @@ function dokPridaj(idx){
       <div class="mfield"><label>Platnosť do</label><input id="dok_do" type="date" value="${esc((d.platnostDo||'').slice(0,10))}"></div>
     </div>
     <div class="mfield"><label>Poznámka (nepovinné)</label><input id="dok_pozn" value="${esc(d.poznamka||'')}" placeholder="detail"></div>
-    <div class="mfield"><label>Súbor ${d.subor?'(nahradí existujúci)':''}</label><input id="dok_subor" type="file" accept=".pdf,.png,.jpg,.jpeg,.docx,.doc,.xlsx"></div>
+    <div class="mfield"><label>Súbor ${d.subor?'(nahradí existujúci)':''}</label>
+      ${_dokPredvolenySubor?`<div style="font-size:12.5px;margin-bottom:4px">📎 Pripojený: <b>${esc(_dokPredvolenySubor.name||"súbor")}</b> <span style="color:var(--ink-soft)">(${Math.round((_dokPredvolenySubor.size||0)/1024)} kB) — výberom nižšie ho vymeníte</span></div>`:""}
+      <input id="dok_subor" type="file" accept=".pdf,.png,.jpg,.jpeg,.docx,.doc,.xlsx"></div>
     <div id="dok_uploadStav" style="font-size:11.5px;margin-top:4px;min-height:14px"></div>
   `, ()=>{
     // Súbor sa nahráva — druhé ťuknutie, zámok okna aj zatvorenie záložky rieši
     // jedna cesta (`nahravajRaz`, ROZHODNUTIA č. 81). Kým sa nahrával, nový
     // dokument ešte nebol v zozname a druhé ťuknutie ho zapísalo druhý raz.
-    const f=document.getElementById("dok_subor").files[0];
+    const f=document.getElementById("dok_subor").files[0] || _dokPredvolenySubor;
     return f ? nahravajRaz(()=>dokUloz(idx, f)) : dokUloz(idx, null);
   });
   zamOkno("dokumenty");
@@ -45055,7 +45264,9 @@ async function dokUloz(idx, f){
     }
   }
   if(idx==null) zoznam.push(zaznam);
+  _dokPredvolenySubor=null;
   poZmene(); appDokumenty();
+  ulozeneUdalost("dokument", zaznam.id, zaznam.id);
   if(stary && stary!==zaznam.subor) dokladZmazOriginaly([stary]);
 }
 function dokDetail(idx){
