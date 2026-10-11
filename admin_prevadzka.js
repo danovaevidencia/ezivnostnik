@@ -55,7 +55,18 @@ function dnesPolozky(d){
   if(f.bez_pdf) p.push({ sekcia:"faktury", vaha:"neg", text: f.bez_pdf + " × faktúra za predplatné bez PDF" });
   if(z.dni == null) p.push({ sekcia:"zalohy", vaha:"neg", text: "Zatiaľ žiadna hotová záloha" });
   else if(z.dni > ZAL_DNI_UPOZORNENIE) p.push({ sekcia:"zalohy", vaha:"warn", text: "Posledná záloha je stará " + z.dni + " dní" });
+  // Asistent (spec 155.8.2, admin_72): chyba = model neodpovedal, odmietol alebo
+  // odsekol výstup (kód v asistent_volania.chyba) — čísla dňa sú v riadku príjmu.
+  const as = d.asistent || {};
+  if(as.chyby) p.push({ sekcia:"automatika", vaha:"neg", text: as.chyby + " × asistent: volanie modelu skončilo chybou (" + (as.volania || 0) + " volaní dnes)" });
   return p;
+}
+// Spotreba asistenta za dnešok pod riadkom príjmu: vety, volania, firmy, cena.
+function dnesAsistentHtml(a){
+  a = a || {};
+  if(!(+a.volania)) return "";
+  return "<br>asistent dnes: " + (+a.viet || 0) + " viet · " + (+a.volania || 0) + " volaní · " + (+a.firiem || 0) + " firiem · "
+    + (Math.round((+a.usd || 0) * 10000) / 10000) + " $" + (a.chyby ? ' · <span style="color:var(--neg)">' + (+a.chyby) + " chýb</span>" : "");
 }
 
 function dnesPanelHtml(polozky){
@@ -90,7 +101,7 @@ async function adminDnes(){
   }
   const n = document.getElementById("kFakt"), l = document.getElementById("kFaktL");
   if(n) n.textContent = penaz((_dnes.prijem || {}).cennik);
-  if(l) l.innerHTML = dnesPrijemHtml(_dnes.prijem);
+  if(l) l.innerHTML = dnesPrijemHtml(_dnes.prijem) + dnesAsistentHtml(_dnes.asistent);
 }
 
 // ═══ AUTOMATIKA ═════════════════════════════════════════════════════════════
