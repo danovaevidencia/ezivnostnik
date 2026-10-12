@@ -2251,6 +2251,8 @@ function analytikaPovolena(){
     if(!/(^|\.)ezivnostnik\.eu$/.test(location.hostname)) return false;
     if(navigator.doNotTrack==="1" || navigator.globalPrivacyControl) return false;
     if(localStorage.getItem("eziv_nepocitat")==="1") return false;
+    // Interný účet (ukážka, testy — admin_73, spec 156.5): do štatistík nepatrí.
+    if(typeof firmaConfig!=="undefined" && firmaConfig && firmaConfig.interna===true) return false;
   }catch(_){ return false; }
   return true;
 }
@@ -2274,7 +2276,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.10.11-SP";  // asistent A3: panel asistent.js, register asistent_nastroje.js, nástroje čítania, demo, skratka (spec 155)
+const APP_VERZIA = "2026.10.12-SQ";  // asistent A3: panel asistent.js, register asistent_nastroje.js, nástroje čítania, demo, skratka (spec 155)
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -2282,10 +2284,41 @@ let localMode = false;
 // inicializácia Supabase klienta (ak sú kľúče vyplnené)
 function initSupabase(){
   if(SUPABASE_URL.startsWith("http") && SUPABASE_KEY && !SUPABASE_KEY.startsWith("SEM_")){
-    try { sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY); return true; }
+    try { sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY); strazPouzivatela(); return true; }
     catch(e){ console.error(e); return false; }
   }
   return false;
+}
+// ── Stráž používateľa pod bežiacou kartou (spec 156.4, nález B1) ──────────
+// supabase-js šíri prihlásenie medzi kartami toho istého prehliadača: keď sa
+// v druhej karte prihlási iný účet (alebo sa odhlási), relácia v TEJTO karte
+// sa vymení, ale `firmaData` ostane firma predošlého používateľa. Uloženie by
+// šlo pod cudzím tokenom — RLS vráti 0 riadkov a appka by hlásila „konflikt
+// verzií“, ktorý neexistuje (12. 10. 2026, ukážkový účet). `behFirmy` stráži
+// len prepnutie firmy toho istého účtu, preto je tu druhá stráž: karta sa
+// zamkne a žiada obnovenie. `_prihlasenyUser` nastavuje `nacitajFirmu`,
+// odhlásenie ho vynuluje, aby vlastný signOut zámok nespustil.
+let _prihlasenyUser = null, _inyPouzivatel = false;
+function strazPouzivatela(){
+  if(!sb || !sb.auth || typeof sb.auth.onAuthStateChange!=="function") return;
+  sb.auth.onAuthStateChange((udalost, session)=>{
+    if(udalost==="INITIAL_SESSION" || !_prihlasenyUser) return;
+    const id = session && session.user ? session.user.id : null;
+    if(id!==_prihlasenyUser) inyPouzivatelVKarte(id);
+  });
+}
+function inyPouzivatelVKarte(id){
+  if(_inyPouzivatel) return;
+  _inyPouzivatel = true;
+  firmaDirty = false;   // neuložené zmeny patria relácii, ktorá už v karte nie je — nesmú odísť
+  const nazov = (firmaData && firmaData.meta && firmaData.meta.nazov) || "";
+  const app=document.getElementById("appScreen")||document.body;
+  app.innerHTML=`<div style="max-width:440px;margin:14vh auto;text-align:center;padding:30px">
+    <div style="font-size:44px;margin-bottom:14px">🔒</div>
+    <h2 style="font-family:var(--serif);font-size:22px;margin-bottom:10px">${id ? "V inej karte ste sa prihlásili ako iný používateľ" : "V inej karte ste sa odhlásili"}</h2>
+    <p style="color:var(--ink-soft);line-height:1.6">Táto karta pracovala s firmou ${esc(nazov)}. Aby sa zmeny neuložili pod cudzím účtom, karta je zamknutá. Obnovte stránku.</p>
+    <button class="abtn" style="margin-top:20px" onclick="location.reload()">Obnoviť stránku</button>
+  </div>`;
 }
 
 function show(id){ document.getElementById(id).classList.remove("hidden"); }
@@ -3840,6 +3873,7 @@ async function nacitajFirmu(idPoziadavka){
     // Do 19. 9. 2026 táto vetva otvorila sprievodcu novej firmy (spec 130.1).
     if(authErr && jeSietovaChyba(authErr)){ zobrazNenacitane(authErr, true); return; }
     if(authErr || !user){ zobrazFirmu(); return; }
+    _prihlasenyUser=user.id;   // stráž používateľa (B1): s kým sa firma načítala
 
     // Bez filtra na `user_id` — od fázy 2 sem patria aj firmy, ku ktorým má
     // používateľ delegovaný prístup, a tú množinu definuje RLS. Rolu si však
@@ -4092,6 +4126,7 @@ function zobrazFirmu(){
     return;
   }
   document.getElementById("obView")?.classList.add("hidden");
+  { const ovl=document.getElementById("tbOvladace"); if(ovl) ovl.style.display=""; }   // B2: po onboardingu späť
   empty.classList.add("hidden");
   renderHomeStrip();
   renderNotifBadge();
@@ -28106,7 +28141,7 @@ async function gdprZmazanieVykonaj(peppolSposob){
       : "";
     const predplatneVeta = zm.predplatne_zrusene ? "\n\nPredplatné sme zrušili, ďalšia platba sa nestrhne." : "";
     alert("Váš účet a všetky dáta boli zmazané. Ďakujeme, že ste eživnostník používali."+peppolVeta+predplatneVeta);
-    await sb.auth.signOut(); location.reload();
+    _prihlasenyUser=null; await sb.auth.signOut(); location.reload();
   }catch(e){ hlas("Chyba: "+e.message); }
 }
 
@@ -45871,6 +45906,15 @@ async function ulozFirmuRaz(){
     localStorage.setItem("eziv_firma",JSON.stringify(firmaData));
     firmaDirty=false; cloudMsg("Uložené lokálne v tomto prehliadači.","ok"); setSync("saved"); return;
   }
+  // Stráž používateľa (B1): relácia v karte už patrí niekomu inému — zápis
+  // by RLS zahodila a vyzeralo by to ako konflikt verzií. getSession je
+  // lokálne (bez siete); v teste nemusí existovať.
+  if(_inyPouzivatel){ setSync("offline"); return; }
+  if(_prihlasenyUser && sb.auth && typeof sb.auth.getSession==="function"){
+    const ses=(await sb.auth.getSession()).data.session;
+    const uid=ses && ses.user ? ses.user.id : null;
+    if(uid!==_prihlasenyUser){ setSync("offline"); inyPouzivatelVKarte(uid); return; }
+  }
   setSync("saving"); cloudMsg("Ukladám do cloudu…","info");
   // ULOŽENIE PATRÍ FIRME, KTOREJ DÁTA ODIŠLI (ROZHODNUTIA č. 119). Zápis celého JSON trvá
   // na mobile sekundy a prepnutie firmy sa počas neho dá potvrdiť („neuložené zmeny“).
@@ -46617,6 +46661,7 @@ async function doLogout(){
   // Kópia firmy pri výpadku (spec 130.5) patrí prihlásenému — na zdieľanom
   // zariadení nesmie ostať ďalšiemu človeku.
   kopiaZmaz();
+  _prihlasenyUser=null;   // vlastné odhlásenie nie je „iný používateľ v karte“ (B1)
   if(sb && !localMode){ await sb.auth.signOut(); }
   location.reload();
 }
@@ -46659,6 +46704,9 @@ function spustiOnboarding(){
   document.getElementById("splitScreen")?.classList.add("hidden");
   const v=document.getElementById("obView");
   v.classList.remove("hidden");
+  // Zvonček a oko nemajú bez firmy čo hlásiť ani skrývať (spec 156.4, B2);
+  // späť ich dá zobrazFirmu, keď sú dáta.
+  const ovl=document.getElementById("tbOvladace"); if(ovl) ovl.style.display="none";
   renderOnboarding();
 }
 

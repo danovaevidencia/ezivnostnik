@@ -503,6 +503,12 @@ tr.chce td{background:#fff5e6}
       <div class="field"><label>Účet aktívny</label>
         <label class="chk"><input type="checkbox" id="cfgAktivny"> Účet je aktívny (odškrtnuté = pozastavený)</label>
       </div>
+      <!-- Interný účet (admin_73, spec 156.5): ukážka a testy sa nerátajú do
+           štatistík (analytika_prehlad, KPI zákazníkov) ani appka neposiela
+           udalosti analytiky. Prístup a plán to nemení. -->
+      <div class="field"><label>Interný účet</label>
+        <label class="chk"><input type="checkbox" id="cfgInterna"> Ukážka alebo test — nerátať do štatistík a počtov</label>
+      </div>
       <div class="field"><label>Moduly — ručné prepísanie plánu</label>
         <label class="chk"><input type="checkbox" id="cfgModOverride" onchange="prepniModuly()"> Nastaviť moduly ručne (inak rozhoduje plán)</label>
         <div id="cfgModBox" style="opacity:.45;pointer-events:none;margin-top:8px">
@@ -694,7 +700,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";  // ANON 
 let sb = null, currentUser = null, cfgFirmaId = null;
 // Verzia adminu = verzia appky pri nasadení. Pripája sa k súborom sekcií
 // (admin_kampane.js…), aby prehliadač nedržal starú kópiu z cache.
-const ADMIN_VERZIA = "2026.10.11-SP";
+const ADMIN_VERZIA = "2026.10.12-SQ";
 
 function init(){
   if(!SUPABASE_KEY || SUPABASE_KEY.startsWith("SEM_")){
@@ -1277,12 +1283,19 @@ async function nacitajPrehlad(){
   loading.classList.add("hidden");
 
   const rows = data || [];
+  // Interné účty (ukážka, testy — admin_73, spec 156.5) ostávajú v zozname
+  // (treba ich vedieť nastaviť), ale do KPI sa nerátajú. Pohľad admin_prehlad
+  // stĺpec nemá, číta sa z firma_config.
+  const { data: intRows } = await sb.from("firma_config").select("firma_id").eq("interna", true);
+  const interne = new Set((intRows || []).map(x => x.firma_id));
+  rows.forEach(r => { r.interna = interne.has(r.firma_id); });
+  const ostre = rows.filter(r => !r.interna);
   // KPI
-  document.getElementById("kZak").textContent = rows.length;
-  document.getElementById("kAkt").textContent = rows.filter(r=>r.aktivny!==false).length;
+  document.getElementById("kZak").textContent = ostre.length;
+  document.getElementById("kAkt").textContent = ostre.filter(r=>r.aktivny!==false).length;
   // kFakt = mesačný príjem predplatného, plní ho adminDnes (admin_prevadzka.js,
   // spec 154 B1). Súčet faktúr ZÁKAZNÍKOV je pre prevádzkovateľa bez významu.
-  document.getElementById("kPlat").textContent = rows.filter(r=>r.platca_dph===true).length;
+  document.getElementById("kPlat").textContent = ostre.filter(r=>r.platca_dph===true).length;
 
   const tbody = document.getElementById("zakBody");
   if(!rows.length){ document.getElementById("zakEmpty").classList.remove("hidden"); return; }
@@ -1329,9 +1342,10 @@ function zakVykresli(){
       expiruje_coskoro:"⚠ "+(r.dni_do_konca||0)+" dní", expirovane:"expirovalo"
     }[stav] || "";
     const stavFarba = { expiruje_coskoro:"#c77d3e", expirovane:"#c0504a", neobmedzene:"#1a7d4a" }[stav] || "var(--soft)";
-    const planPill = r.aktivny===false
+    const planPill = (r.aktivny===false
       ? '<span class="pill off">pozastavený</span>'
-      : `<span class="pill ${esc(plan)}">${esc(plan)}</span>${stavText?`<div style="font-size:10.5px;color:${stavFarba};margin-top:3px">${stavText}</div>`:''}`;
+      : `<span class="pill ${esc(plan)}">${esc(plan)}</span>${stavText?`<div style="font-size:10.5px;color:${stavFarba};margin-top:3px">${stavText}</div>`:''}`)
+      + (r.interna ? '<div style="font-size:10.5px;color:var(--soft);margin-top:3px">interný účet</div>' : '');
     return `<tr>
       <td><div class="name">${esc(r.nazov||"—")}</div><div class="email hide-sm">${esc(r.email||"")}</div></td>
       <td class="hide-sm">${planPill}</td>
@@ -1352,6 +1366,7 @@ async function otvorCfg(firmaId, nazov){
   const c = data || { plan:"free", moduly:null, aktivny:true, platca_dph:null, vydavky_rezim:null, plan_do:null };
   document.getElementById("cfgPlan").value = c.plan || "free";
   document.getElementById("cfgAktivny").checked = c.aktivny !== false;
+  document.getElementById("cfgInterna").checked = c.interna === true;
   // platnosť predplatného (len dátumová časť)
   document.getElementById("cfgPlanDo").value = c.plan_do ? String(c.plan_do).slice(0,10) : "";
   // moduly: prázdne/null = rozhoduje plán; vyplnené = ručné prepísanie
@@ -1397,7 +1412,8 @@ async function ulozCfg(){
     aktivny: document.getElementById("cfgAktivny").checked,
     moduly,
     platca_dph: dphVal==="platca" ? true : (dphVal==="neplatca" ? false : null),
-    vydavky_rezim: document.getElementById("cfgVyd").value || null
+    vydavky_rezim: document.getElementById("cfgVyd").value || null,
+    interna: document.getElementById("cfgInterna").checked
   };
   // Firma, ktorej plán platí zákazník: zmena plánu či platnosti len
   // s výslovným „Rozumiem“ — varovať, dovoliť (spec 154.8 bod 2).
