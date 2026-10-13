@@ -1999,7 +1999,7 @@ html[data-jazda] .jazdapruh{display:flex}
          kde človek hľadá pomoc, a to je hlavička. Modul ostáva ten istý,
          mení sa len cesta doň. -->
     <!-- Asistent (spec 155.7, kolo A3): tlačidlo svieti len firme so zapnutým
-         modulom (pilot z adminu); viditeľnosť prepína renderLauncher. -->
+         modulom (platené plány od ST, inak darovaný z adminu); viditeľnosť prepína renderLauncher. -->
     <!-- Kreslené SVG, nie glyf iskry (U+2726): systémové fonty sú v tom pásme
          deravé (kap. 43.29, test_topbar — scanuje aj komentáre v lište). -->
     <button class="usermenu" id="asistentBtn" onclick="asistentOtvor()" title="Asistent — napíšte, čo treba urobiť" aria-label="Asistent" style="display:none">
@@ -2276,7 +2276,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.10.12-SS";  // asistent A3: panel asistent.js, register asistent_nastroje.js, nástroje čítania, demo, skratka (spec 155)
+const APP_VERZIA = "2026.10.13-ST";  // asistent v platených plánoch (spec 156.10).js, nástroje čítania, demo, skratka (spec 155)
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -2842,7 +2842,7 @@ const PLANY = {
     popis:"Faktúry, výdavky a daňové priznanie — bez agendy platiteľa DPH",
     limity:{ faktury:0, odberatelia:0, doklady:0, bankaImporty:0, ulozisko:2000 },
     moduly:["faktury","vykazy","pohladavky","vydavky","banka","kalendar",
-            "jazdy","majetok","dokumenty","dovolenka","knihy","priznania","priznanieB"],
+            "jazdy","majetok","dokumenty","dovolenka","knihy","priznania","priznanieB","asistent"],
     // Osoba registrovaná podľa § 7a platiteľom nie je, ale priznanie DPH za mesiac so
     // samozdanením (§ 78 ods. 3) a súhrnný výkaz (§ 80 ods. 3) podáva — modul DPH
     // dostane aj v tomto pláne (`modulPovoleny`, ROZHODNUTIA č. 91b).
@@ -2861,7 +2861,7 @@ const PLANY = {
     // eživnostník. Rovnaký zoznam drží edge funkcia `postar` (test_peppol_plan).
     peppolOdosielanie:true,
     moduly:["faktury","vykazy","pohladavky","vydavky","banka","kalendar",
-            "jazdy","majetok","dokumenty","dovolenka","knihy","priznania","priznanieB","dph"]
+            "jazdy","majetok","dokumenty","dovolenka","knihy","priznania","priznanieB","dph","asistent"]
   },
   // Plán, ktorý platí ÚČTOVNÍK za svojich klientov (kap. 38.11). Klientova
   // firma ostáva na Free a účtovník v nej robí KV DPH, priznania a párovanie;
@@ -2900,7 +2900,7 @@ const PLANY = {
     // (plán `standard` odosielanie nemá — stráži edge funkcia `postar`).
     peppolOdosielanie:true,
     moduly:["faktury","vykazy","pohladavky","vydavky","banka","kalendar",
-            "jazdy","majetok","dokumenty","dovolenka","knihy","priznania","priznanieB","dph"]
+            "jazdy","majetok","dokumenty","dovolenka","knihy","priznania","priznanieB","dph","asistent"]
   }
 };
 // jednorazové doplnky
@@ -3137,9 +3137,10 @@ const MODUL_KATEGORIA={
   dph:"dph", priznania:"priznanie", priznanieB:"priznanie", prognoza:"priznanie",
   jazdy:"jazdy", majetok:"jazdy", dokumenty:"jazdy", dovolenka:"jazdy",
   knihy:"knihy",
-  // Asistent (spec 155.7, kolo A3): vlastná kategória, ktorú nemá žiadny plán —
-  // pilot sa zapína len z adminu (firma_config.moduly). BEZ tohto riadka by
-  // „neznámy modul → true“ nižšie odomkol asistenta všetkým (155.18 b. 7).
+  // Asistent (spec 155.7, kolo A3): vlastná kategória. Od kola ST (156.10) ju
+  // majú plány Neplatiteľ DPH, Platiteľ DPH a Účtovník (PLANY.moduly); Free nie
+  // a server mu dáva nulový rozpočet (ASISTENT_ROZPOCET.free). BEZ tohto riadka
+  // by „neznámy modul → true“ nižšie odomkol asistenta aj vo Free (155.18 b. 7).
   asistent:"asistent"
 };
 // Moduly, ktoré platia LEN pre fyzickú osobu (priznanie k dani z príjmov FO,
@@ -10129,7 +10130,7 @@ function asistentNacitaj(){
   return _asNacitanie;
 }
 // Demo ho má vždy (O2: nahraté odpovede, model sa nevolá); lokálny režim nikdy
-// (spec 11: nič sa neposiela na server); inak pilot z adminu cez modul.
+// (spec 11: nič sa neposiela na server); inak modul plánu (od ST) alebo z adminu.
 // Demo beží ako lokálny režim (spustiDemo: localMode aj demoMode) — preto demo
 // najprv, lokálny zákaz až potom.
 function asistentDostupny(){ return demoMode || (!localMode && modulPovolenyPreModul("asistent")); }
@@ -26564,6 +26565,7 @@ function kartaPlanu(p){
         ${riadok("DPH pri registrácii podľa § 7a — priznanie a súhrnný výkaz", p.moduly.includes("dph") || !!p.dphPre7a)}
         ${riadok("Príjem e-faktúr Peppol", true)}
         ${riadok("Odosielanie e-faktúr Peppol", !!p.peppolOdosielanie)}
+        ${riadok("Asistent — nájde a skontroluje na jednu vetu", p.moduly.includes("asistent"))}
         ${U?riadok(`Klienti: ${U.neplatitelia} ${sklonKlient(U.neplatitelia,"neplatiteľ","neplatitelia","neplatiteľov")}, ${U.platitelia} ${sklonKlient(U.platitelia,"platiteľ","platitelia","platiteľov")} DPH`, true):""}
       </div>
       ${(()=>{
