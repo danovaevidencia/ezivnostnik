@@ -2276,7 +2276,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.10.13-ST";  // asistent v platených plánoch (spec 156.10).js, nástroje čítania, demo, skratka (spec 155)
+const APP_VERZIA = "2026.10.13-SU";  // IBAN z notifikácie s nezlomiteľnou medzerou (spec 156.11).js, nástroje čítania, demo, skratka (spec 155)
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -28984,7 +28984,16 @@ function notifDatum(s){
 }
 // IBAN aj v maskovanom tvare — Prima banka posiela vlastný účet ako
 // „SK*5600*76001*001". Hviezdičky sa zachovávajú, porovnáva ich `notifIbanSedi`.
-const NOTIF_IBAN_RE = /\b([A-Z]{2}[0-9*][0-9*](?:[ ]?[0-9A-Z*]){8,30})\b/;
+//
+// 🔴 13. 10. 2026, ostré dáta (spec 156.11): Prima banka oddeľuje štvorice IBAN
+// protistrany NEZLOMITEĽNOU medzerou (U+00A0), nie obyčajnou. Trieda `[ ]`
+// ju nepoznala, IBAN vyšiel prázdny pri KAŽDEJ notifikácii a pravidlo
+// ignorovania podľa IBAN (vlastné vklady zo súkromného účtu) nemalo s čím
+// porovnať — vklady viseli v Párovaní ako nespárované. Ručná vzorka v teste
+// mala obyčajné medzery, takže test bol zelený. Medzi štvoricami sa preto
+// pripúšťa aj U+00A0, U+202F a U+2007 — ale NIE `\s`: `notifIban` sa volá aj
+// po riadkoch (vlastný účet) a koniec riadka nemá byť súčasťou čísla účtu.
+const NOTIF_IBAN_RE = /\b([A-Z]{2}[0-9*][0-9*](?:[    ]?[0-9A-Z*]){8,30})\b/;
 function notifIban(s){
   const m=String(s??"").toUpperCase().match(NOTIF_IBAN_RE);
   return m ? m[1].replace(/\s/g,"") : "";
@@ -29153,7 +29162,8 @@ function notifCsobTransakcia(t){
   return {smer:s[1]==="-"?"vydaj":"prijem", suma:r2(notifCislo(s[2])), mena:s[3].toUpperCase(),
     datum:m[3]+"-"+notifD2(m[2])+"-"+notifD2(m[1]), cas:"",
     mojUcet:m[4].replace(/\s/g,"").toUpperCase(),
-    ibanProti:riadok(/^z [úu][čc]tu:\s*([A-Z]{2}[\d ]+)$/mi).replace(/\s/g,"").toUpperCase(),
+    // Štvorice aj s nezlomiteľnou medzerou (156.11) — tá istá pasca ako NOTIF_IBAN_RE.
+    ibanProti:riadok(/^z [úu][čc]tu:\s*([A-Z]{2}[\d    ]+)$/mi).replace(/\s/g,"").toUpperCase(),
     bicProti:riadok(/^banka:\s*([A-Z0-9]{8,11})/mi), proti:riadok(/^n[áa]zov proti[úu][čc]tu:\s*(.*)$/mi),
     ucetProti:"", vs:sym.vs||"", ss:sym.ss||"", ks:sym.ks||"", popis:riadok(/^inform[áa]cia pre pr[íi]jemcu:\s*(.*)$/mi), typ:"",
     zostatok: zost!=null ? r2(z[1]==="-"?-zost:zost) : null, zostatokPole: zost!=null ? "zostatok po zauctovani" : null,
@@ -38492,6 +38502,7 @@ async function nacitajCakajuce(tiche){
   if(typeof renderHomeStrip==="function") renderHomeStrip();
   // Prevzatie beží AŽ po načítaní zoznamu a len keď je do čoho písať.
   try{ await prevezmiNotifikacieAuto(); }catch(e){ console.error("automatické prevzatie notifikácií:", e); }
+  try{ await notifDoplnIbanProti(); }catch(e){ console.error("doplnenie IBAN z notifikácií:", e); }
 }
 
 // ── AUTOMATICKÉ PREVZATIE NOTIFIKÁCIÍ (č. 163) ─────────────────────────────
@@ -38548,6 +38559,51 @@ async function prevezmiNotifikacieAuto(){
     if(typeof renderHomeStrip==="function") renderHomeStrip();
     return { pridanych:pohyby.length, sparenych:sparene };
   } finally { _notifAutoBezi = false; }
+}
+// ── DOPLNENIE IBAN PROTISTRANY DO POHYBOV Z NOTIFIKÁCIÍ (spec 156.11) ───────
+// Do verzie SU parser zahadzoval IBAN, ktorý Prima banka píše s nezlomiteľnými
+// medzerami (NOTIF_IBAN_RE). Pohyby z tých mailov ostali vo výpise bez IBAN
+// a pravidlo ignorovania podľa IBAN na ne nesadlo — vlastné vklady viseli
+// v Párovaní ako nespárované. Mail je v `cakajuce_doklady` aj po uzavretí,
+// takže sa dá prečítať znova opraveným parserom.
+//
+// Pohyb sa hľadá podľa `id`, pod ktorým VZNIKOL, teda s prázdnym IBAN (pri
+// notifikácii bez zostatku je IBAN súčasťou id) — IBAN tak nemôže prejsť na
+// iný pohyb. Doplní sa LEN prázdne pole, nič iné sa nemení; stav párovania
+// sa nedotýka (mení ho len pridajUhradu/odoberUhradu).
+// Raz za reláciu a firmu: platba kartou IBAN nemá nikdy a bez poistky by sa
+// na ňu pýtal každý štart.
+const _notifIbanSkusene = new Set();
+async function notifDoplnIbanProti(){
+  if(localMode || demoMode || !sb || !firmaId) return 0;
+  if(typeof mozemPisat==="function" && !mozemPisat("banka")) return 0;
+  const kluc=String(firmaId);
+  if(_notifIbanSkusene.has(kluc)) return 0;
+  const chyba=(firmaData.vypis||[]).filter(t=>t && t.zdroj==="mail" && t.emailId && !t.ibanProti);
+  if(!chyba.length) return 0;
+  _notifIbanSkusene.add(kluc);
+  const beh=behFirmy();
+  const ids=[...new Set(chyba.map(t=>String(t.emailId)))].slice(0, 200);
+  const { data, error } = await sb.from("cakajuce_doklady").select("id, telo, od_koho, predmet").in("id", ids);
+  if(!beh.platny()) return 0;
+  if(error){ console.error("doplnenie IBAN z notifikácií:", error.message||error); return 0; }
+  const podlaId=new Map(chyba.map(t=>[t.id, t]));
+  let doplnene=0;
+  (data||[]).forEach(z=>{
+    let n=null;
+    try{ n=parseNotifikaciu(z.telo, z.od_koho, z.predmet); }
+    catch(e){ console.error("parseNotifikaciu:", e); return; }
+    if(!n || n.chyba || !notifDovera(n)) return;
+    const vsetky=[n].concat((n.dalsiePohyby||[]).map(d=>Object.assign({}, n, d, {dalsiePohyby:[], dalsie:0})));
+    vsetky.forEach(e=>{
+      const novy=notifNaPohyb(e, z.id);
+      const povodny=notifNaPohyb(Object.assign({}, e, {ibanProti:""}), z.id);
+      const tx=povodny && podlaId.get(povodny.id);
+      if(tx && !tx.ibanProti && novy && novy.ibanProti){ tx.ibanProti=novy.ibanProti; doplnene++; }
+    });
+  });
+  if(doplnene){ firmaDirty=true; poZmene(); }
+  return doplnene;
 }
 // Pohyby z mailu, ktoré čakajú na doklad. Počíta sa to zo stavu pohybov, nie
 // z uloženého čísla — hláška tak zmizne sama, keď je práca hotová.
