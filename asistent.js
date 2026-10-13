@@ -353,7 +353,17 @@ const ASISTENT_CSS = `
 #asistent .asHlava b{font-size:15px}
 #asistent .asHlava .sp{flex:1}
 #asistent .asX{border:0;background:transparent;font-size:20px;cursor:pointer;color:var(--ink-soft);padding:2px 6px}
-#asistent .asLog{flex:1;overflow:auto;padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+#asistent .asTelo{flex:1;overflow:auto;display:flex;flex-direction:column}
+#asistent .asLog{padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+#asistent .asLog:empty{display:none}
+#asistent .asUvod{padding:14px 14px 4px}
+#asistent .asUvod h3{font-family:var(--serif);font-size:19px;margin:0 0 4px}
+#asistent .asUvod .asLead{font-size:13px;color:var(--ink-soft);line-height:1.4;margin:0 0 10px}
+#asistent .asSkup{margin:0 0 9px}
+#asistent .asSkup .asSkupNazov{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-soft);margin:0 0 4px}
+#asistent .asNavrh{display:block;width:100%;text-align:left;border:1px solid var(--line);background:var(--paper);color:var(--ink);border-radius:9px;padding:6px 10px;margin:0 0 4px;font:inherit;font-size:13px;line-height:1.3;cursor:pointer}
+#asistent .asNavrh:hover,#asistent .asNavrh:focus-visible{border-color:var(--brand);background:var(--brand-lite)}
+#asistent .asNavrh small{display:block;font-size:11.5px;color:var(--ink-soft);margin-top:2px}
 #asistent .asSprava{max-width:92%;padding:8px 11px;border-radius:12px;line-height:1.4;white-space:pre-wrap;word-break:break-word}
 #asistent .asSprava.ja{align-self:flex-end;background:var(--brand-lite);border:1px solid var(--line)}
 #asistent .asSprava.on{align-self:flex-start;background:var(--bg);border:1px solid var(--line)}
@@ -366,11 +376,12 @@ const ASISTENT_CSS = `
 #asistent .asKarta th,#asistent .asKarta td{text-align:left;padding:3px 4px;border-top:1px solid var(--line-soft);vertical-align:top}
 #asistent .asKarta th{color:var(--ink-soft);font-weight:600;border-top:0}
 #asistent .asAkcie{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
-#asistent .asNavrhy{display:flex;flex-wrap:wrap;gap:6px;padding:0 12px 8px}
-#asistent .asNavrhy button{font-size:12px}
-#asistent .asVstup{display:flex;gap:6px;padding:8px 12px;border-top:1px solid var(--line);background:var(--bg)}
-#asistent .asVstup textarea{flex:1;min-height:40px;max-height:120px;resize:none;border:1.5px solid var(--line);border-radius:10px;padding:8px 10px;font:inherit;font-size:14px;background:var(--paper);color:inherit}
-#asistent .asPozn{font-size:11.5px;color:var(--ink-soft);padding:0 12px 8px}
+#asistent .asVstup{display:flex;align-items:flex-end;gap:6px;padding:8px 12px;border-top:1px solid var(--line);background:var(--bg)}
+#asistent .asVstup textarea{flex:1;min-width:0;height:40px;min-height:40px;max-height:140px;resize:none;border:1.5px solid var(--line);border-radius:10px;padding:9px 10px;font:inherit;font-size:14px;line-height:1.4;background:var(--paper);color:inherit;white-space:pre-wrap;overflow-y:auto}
+#asistent .asVstup textarea::placeholder{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#asistent .asVstup .aabtn{height:40px}
+#asistent .asPozn{font-size:11.5px;color:var(--ink-soft);line-height:1.4;margin:4px 0 8px}
+#asistent .asNova{border:1px solid var(--line);background:var(--paper);border-radius:8px;font:inherit;font-size:12px;padding:4px 9px;cursor:pointer;color:var(--ink)}
 `;
 
 function asPrvok() { return document.getElementById("asistent"); }
@@ -381,12 +392,19 @@ function asVytvor() {
   el.id = "asistent"; el.setAttribute("role", "complementary"); el.setAttribute("aria-label", "Asistent");
   el.innerHTML = `
     <div class="asHlava"><b>Asistent</b><span class="sp"></span>
+      <button class="asNova" id="asNova" onclick="ASISTENT.nova()" title="Začať novú konverzáciu" style="display:none">Nová</button>
       <button class="asX" onclick="ASISTENT.zavri()" title="Zavrieť" aria-label="Zavrieť asistenta">✕</button></div>
-    <div class="asLog" id="asLog" role="log" aria-live="polite" data-scroll="asLog"></div>
-    <div class="asNavrhy" id="asNavrhy"></div>
-    <div class="asPozn" id="asPozn"></div>
+    <div class="asTelo" id="asTelo" data-scroll="asTelo">
+      <div class="asUvod" id="asUvod">
+        <h3>Čo pre vás mám nájsť?</h3>
+        <p class="asLead">Opýtajte sa vlastnými slovami alebo ťuknite na otázku. Odpoveď hľadám vo vašej evidencii a ukážem, odkiaľ je.</p>
+        <div id="asNavrhy"></div>
+        <div class="asPozn" id="asPozn"></div>
+      </div>
+      <div class="asLog" id="asLog" role="log" aria-live="polite"></div>
+    </div>
     <div class="asVstup">
-      <textarea id="asVstup" rows="1" placeholder="Napíšte, čo treba urobiť… (Enter odošle)" onkeydown="ASISTENT.klaves(event)"></textarea>
+      <textarea id="asVstup" rows="1" placeholder="Opýtajte sa…" title="Enter odošle · Shift+Enter nový riadok" aria-label="Otázka pre asistenta" onkeydown="ASISTENT.klaves(event)" oninput="asVyska(this)"></textarea>
       <button class="aabtn pri" id="asPosli" onclick="ASISTENT.posliZPola()">Poslať</button>
     </div>`;
   document.body.appendChild(el);
@@ -396,9 +414,11 @@ function asVytvor() {
 function asPridaj(html, trieda) {
   const log = document.getElementById("asLog"); if (!log) return;
   const d = document.createElement("div"); d.className = trieda || "asKarta"; d.innerHTML = html; log.appendChild(d);
-  log.scrollTop = log.scrollHeight;
+  const telo = document.getElementById("asTelo"); if (telo) telo.scrollTop = telo.scrollHeight;
   return d;
 }
+// Pole rastie s textom (do max-height v CSS) — placeholder ostáva na jednom riadku.
+function asVyska(t) { if (!t) return; t.style.height = "40px"; t.style.height = Math.min(t.scrollHeight + 3, 140) + "px"; }
 function asSprava(text, kto) { return asPridaj(esc(text), "asSprava " + (kto || "on")); }
 function asKartaHtml(K) {
   if (!K) return "";
@@ -417,19 +437,39 @@ function asKartaHtml(K) {
   if (akcie.length) h += `<div class="asAkcie">${akcie.map(a => { const id = asId("a"); _as.akcie[id] = a.fn; return `<button class="aabtn" style="padding:5px 9px;font-size:12px" onclick="ASISTENT.akcia('${id}')">${esc(a.l)}</button>`; }).join("")}</div>`;
   return h;
 }
+// Úvod panela (N1, 155.13; prerobené 13. 10. 2026): otázky podľa tém, ktoré
+// asistent naozaj vie zodpovedať nástrojmi čítania (A3). Témy sa ukazujú len pre
+// moduly, ktoré firma má. Upozornenia sa neponúkajú ako nadpisy zo zvončeka
+// („DPH priznanie + kontrolný výkaz“ nie je otázka), ale ako otázka s počtom.
+function asNavrhySkupiny() {
+  if (demoMode) return [{ n: "Vyskúšajte v ukážke", v: ASISTENT_DEMO.map(d => ({ t: d.veta })) }];
+  const ma = m => { try { return modulPovolenyPreModul(m); } catch (_) { return true; } };
+  const platca = (() => { try { return !!dphRegistracia(); } catch (_) { return false; } })();
+  const S = [];
+  const teraz = [];
+  try { const n = (zbierNotifikacie() || []).length; if (n) teraz.push({ t: "Čo mám teraz vybaviť?", p: n === 1 ? "1 upozornenie" : n + (n < 5 ? " upozornenia" : " upozornení") }); } catch (_) {}
+  try { const T = danoveTerminy(new Date(), firmaData.settings || {}, 1) || []; if (T[0]) teraz.push({ t: "Kedy mám najbližší termín?", p: String(T[0].nazov || "") + (T[0].d instanceof Date ? " · " + T[0].d.getDate() + ". " + (T[0].d.getMonth() + 1) + "." : "") }); } catch (_) {}
+  if (teraz.length) S.push({ n: "Teraz", v: teraz });
+  S.push({ n: "Faktúry a peniaze", v: [{ t: "Koľko mám neuhradených faktúr?" }, { t: "Ktoré faktúry sú po splatnosti?" }, { t: "Koľko mi dlhujú odberatelia?" }] });
+  const vyd = [{ t: "Nájdi nezaplatené výdavky po splatnosti" }, { t: "Koľko som minul tento mesiac na PHM?" }];
+  if (ma("banka")) vyd.push({ t: "Ktoré platby v banke nemajú doklad?" });
+  S.push({ n: "Výdavky a banka", v: vyd });
+  const kon = [{ t: "Skontroluj minulý mesiac" }];
+  if (platca && ma("dph")) kon.push({ t: "Koľko DPH zaplatím za minulý mesiac?" });
+  S.push({ n: "Kontrola" + (platca && ma("dph") ? " a DPH" : ""), v: kon });
+  const jv = [];
+  if (ma("jazdy")) jv.push({ t: "Ktoré jazdy nemajú trasu?" }, { t: "Koľko kilometrov som najazdil tento mesiac?" });
+  if (ma("vykazy")) jv.push({ t: "Ukáž výkazy za minulý mesiac" });
+  if (jv.length) S.push({ n: "Jazdy a výkazy", v: jv });
+  S.push({ n: "Ako na to", v: [{ t: "Ako zaevidujem bloček?" }] });
+  return S;
+}
 function asNavrhy() {
   const box = document.getElementById("asNavrhy"); if (!box) return;
-  // N1 (155.13): návrhy bez modelu — z upozornení a termínov, a pár stálych
-  let vety = [];
-  if (demoMode) vety = ASISTENT_DEMO.map(d => d.veta);
-  else {
-    try { (zbierNotifikacie() || []).slice(0, 2).forEach(n => vety.push(n.nazov)); } catch (_) {}
-    try { const T = danoveTerminy(new Date(), firmaData.settings || {}, 1) || []; if (T[0]) vety.push("Kedy mám " + String(T[0].nazov || "podať ďalší termín").toLowerCase() + "?"); } catch (_) {}
-    ["Nájdi nezaplatené výdavky po splatnosti", "Skontroluj minulý mesiac", "Koľko mi dlhujú odberatelia?"].forEach(v => vety.push(v));
-  }
-  vety = [...new Set(vety)].slice(0, 5);
-  box.innerHTML = vety.map(v => `<button class="aabtn" onclick="ASISTENT.posli(${JSON.stringify(v).replace(/"/g, "&quot;")})">${esc(v)}</button>`).join("");
-  box.style.display = _as.historia.length ? "none" : "";
+  const btn = x => `<button class="asNavrh" onclick="ASISTENT.posli(${JSON.stringify(x.t).replace(/"/g, "&quot;")})">${esc(x.t)}${x.p ? `<small>${esc(x.p)}</small>` : ""}</button>`;
+  box.innerHTML = asNavrhySkupiny().map(s => `<div class="asSkup"><div class="asSkupNazov">${esc(s.n)}</div>${s.v.map(btn).join("")}</div>`).join("");
+  const uvod = document.getElementById("asUvod"); if (uvod) uvod.style.display = _as.historia.length ? "none" : "";
+  const nova = document.getElementById("asNova"); if (nova) nova.style.display = _as.historia.length ? "" : "none";
 }
 function asPoznamka() {
   const p = document.getElementById("asPozn"); if (!p) return;
@@ -498,7 +538,7 @@ async function asBehCloud(veta) {
 async function asBehDemo(veta) {
   _as.historia.push({ role: "user", content: veta });
   const d = ASISTENT_DEMO.find(x => x.veta.toLowerCase() === String(veta || "").trim().toLowerCase());
-  if (!d) { asSprava("V ukážke viem tieto príkazy (tlačidlá hore). Plný asistent, ktorý rozumie vlastným vetám, je po registrácii.", "on"); return; }
+  if (!d) { asSprava("V ukážke viem len pripravené otázky (tlačidlo Nová hore ich znova ukáže). Plný asistent, ktorý rozumie vlastným vetám, je po registrácii.", "on"); return; }
   for (const k of d.kroky) {
     try { const out = await ASISTENT_VYKONAJ[k.nastroj](k.vstup || {}); if (out && out.preKartu) asPridaj(asKartaHtml(out.preKartu), "asKarta"); }
     catch (e) { console.error("asistent demo:", e); asSprava("Nástroj zlyhal: " + (e && e.message || e), "chyba"); }
@@ -518,14 +558,15 @@ const ASISTENT = {
   zavri() { const el = asPrvok(); if (el) el.classList.remove("on"); _as.otvoreny = false; },
   nova() { _as.historia = []; _as.vysledky = {}; _as.akcie = {}; const log = document.getElementById("asLog"); if (log) log.innerHTML = ""; asNavrhy(); },
   klaves(e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ASISTENT.posliZPola(); } },
-  posliZPola() { const v = document.getElementById("asVstup"); const t = (v.value || "").trim(); if (!t) return; v.value = ""; ASISTENT.posli(t); },
+  posliZPola() { const v = document.getElementById("asVstup"); const t = (v.value || "").trim(); if (!t) return; v.value = ""; asVyska(v); ASISTENT.posli(t); },
   async posli(veta) {
     veta = String(veta || "").trim(); if (!veta || _as.bezi) return;
     if (!_as.otvoreny) ASISTENT.otvor();
     const btn = document.getElementById("asPosli");
     _as.bezi = true; if (btn) btn.disabled = true;
     asSprava(veta, "ja");
-    const nav = document.getElementById("asNavrhy"); if (nav) nav.style.display = "none";
+    const uvod = document.getElementById("asUvod"); if (uvod) uvod.style.display = "none";
+    const nova = document.getElementById("asNova"); if (nova) nova.style.display = "";
     try {
       // Demo je zároveň lokálny režim (spustiDemo) — preto ide prvé.
       if (demoMode) await asBehDemo(veta);

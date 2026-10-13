@@ -700,7 +700,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";  // ANON 
 let sb = null, currentUser = null, cfgFirmaId = null;
 // Verzia adminu = verzia appky pri nasadení. Pripája sa k súborom sekcií
 // (admin_kampane.js…), aby prehliadač nedržal starú kópiu z cache.
-const ADMIN_VERZIA = "2026.10.12-SR";
+const ADMIN_VERZIA = "2026.10.12-SS";
 
 function init(){
   if(!SUPABASE_KEY || SUPABASE_KEY.startsWith("SEM_")){
@@ -741,10 +741,24 @@ let mfaFactorId = null, mfaUser = null, mfaPravePridany = false;
 
 function mfaUkaz(zobraz){ document.getElementById("mfaBox").classList.toggle("hidden", !zobraz); }
 
+// Ne-admin tu nemá čo hľadať — ani druhý faktor. Do 13. 10. 2026 sa is_admin
+// kontroloval až v overAdmin PO overení kódu, takže každý prihlásený, kto otvoril
+// /admin.html, dostal QR a v Supabase mu vznikol nepotvrdený TOTP faktor (spec
+// 156.8, nález B3: ukážkový účet). Relácia appky a adminu je JEDNA (ten istý pôvod,
+// ten istý kľúč v localStorage) — preto sa ne-admin neodhlasuje: signOut by ho
+// vyhodil aj z appky v druhej karte. Vlastný riadok profilu RLS pustí aj na aal1.
+function nieAdmin(){
+  document.getElementById("loginErr").textContent =
+    "Tento účet nemá admin oprávnenie. V appke ostávate prihlásený; do adminu sa prihláste účtom správcu.";
+  mfaUkaz(false);
+}
 async function poHesle(user){
   mfaUser = user;
   const err = document.getElementById("loginErr");
   try{
+    const { data: pr, error: eP } = await sb.from("profily").select("is_admin").eq("id", user.id).maybeSingle();
+    if(eP) throw eP;
+    if(!pr || !pr.is_admin){ nieAdmin(); return; }
     const { data: aal, error: eAal } = await sb.auth.mfa.getAuthenticatorAssuranceLevel();
     if(eAal) throw eAal;
     // currentLevel === nextLevel znamená, že vyššie sa už ísť nedá — relácia
@@ -827,11 +841,8 @@ async function overAdmin(user){
   const err = document.getElementById("loginErr");
   const { data, error } = await sb.from("profily").select("is_admin,email").eq("id", user.id).maybeSingle();
   if(error){ err.textContent = "Nepodarilo sa overiť oprávnenie: " + error.message; return; }
-  if(!data || !data.is_admin){
-    err.textContent = "Tento účet nemá admin oprávnenie.";
-    await sb.auth.signOut();
-    return;
-  }
+  // Poistka za poHesle (B3): bez signOut — relácia je spoločná s appkou.
+  if(!data || !data.is_admin){ nieAdmin(); return; }
   currentUser = user;
   document.getElementById("whoami").textContent = data.email || user.email;
   document.getElementById("loginView").classList.add("hidden");
