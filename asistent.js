@@ -409,7 +409,30 @@ function asVytvor() {
     </div>`;
   document.body.appendChild(el);
   document.addEventListener("keydown", e => { if (e.key === "Escape" && _as.otvoreny && !document.querySelector(".modal.on")) ASISTENT.zavri(); });
+  const vv = window.visualViewport;
+  if (vv) { vv.addEventListener("resize", asPodlaKlavesnice); vv.addEventListener("scroll", asPodlaKlavesnice); }
+  const pole = document.getElementById("asVstup");
+  if (pole && pole.addEventListener) pole.addEventListener("focus", () => setTimeout(asPodlaKlavesnice, 300));
   return el;
+}
+// ── Klávesnica na mobile (spec 156.12, 15. 10. 2026) ──────────────────────
+// Roman: „pri písaní klávesnica prekrýva textové vstupné pole“. Chrome na
+// Androide (od 108) aj Safari pri otvorenej klávesnici zmenšujú len VIZUÁLNY
+// viewport; prvok s position:fixed a bottom:0 ostáva na spodku layoutu, teda
+// pod klávesnicou. Panel preto na mobile kopíruje viditeľnú plochu
+// (visualViewport: offsetTop a height) a posledná správa ostane nad poľom.
+// Desktop a WebView s adjustResize sa tým nezmenia — vizuálny viewport je
+// tam celé okno. Nie `interactive-widget` vo viewport meta: to by zmenilo
+// správanie celej appky, nie len panela.
+function asPodlaKlavesnice() {
+  const el = asPrvok(); if (!el) return;
+  const vv = window.visualViewport;
+  if (!vv || !_as.otvoreny || window.innerWidth >= 900) { el.style.top = ""; el.style.height = ""; el.style.bottom = ""; return; }
+  el.style.top = Math.max(0, Math.round(vv.offsetTop)) + "px";
+  el.style.height = Math.round(vv.height) + "px";
+  el.style.bottom = "auto";
+  const v = document.getElementById("asVstup"), t = document.getElementById("asTelo");
+  if (v && t && document.activeElement === v) t.scrollTop = t.scrollHeight;
 }
 function asPridaj(html, trieda) {
   const log = document.getElementById("asLog"); if (!log) return;
@@ -551,11 +574,12 @@ const ASISTENT = {
   otvor(veta) {
     const el = asVytvor();
     el.classList.add("on"); _as.otvoreny = true;
+    asPodlaKlavesnice();
     asNavrhy(); asPoznamka();
     const v = document.getElementById("asVstup");
     if (veta) { v.value = veta; ASISTENT.posliZPola(); } else if (window.innerWidth >= 900) v.focus();
   },
-  zavri() { const el = asPrvok(); if (el) el.classList.remove("on"); _as.otvoreny = false; },
+  zavri() { const el = asPrvok(); if (el) el.classList.remove("on"); _as.otvoreny = false; asPodlaKlavesnice(); },
   nova() { _as.historia = []; _as.vysledky = {}; _as.akcie = {}; const log = document.getElementById("asLog"); if (log) log.innerHTML = ""; asNavrhy(); },
   klaves(e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ASISTENT.posliZPola(); } },
   posliZPola() { const v = document.getElementById("asVstup"); const t = (v.value || "").trim(); if (!t) return; v.value = ""; asVyska(v); ASISTENT.posli(t); },
