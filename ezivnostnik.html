@@ -2283,7 +2283,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.10.15-TC";  // register asistenta pod číslom servera (esm.sh mimo prevádzky, edge sa nedala nasadiť)
+const APP_VERZIA = "2026.10.15-TD";  // Odlož si so zaplateným SP (jedno pravidlo odlozZaplatene), odvody budúceho roka z dnešných platieb a odhadu roka, ZP nerátané dvakrát
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -4378,6 +4378,15 @@ function odvodyPredpoved(rok){
     czd=r2(R.prijmy - (jePausal ? R.pausal : R.vydavkySkutSpolu));
     prijmyRozhodne=R.prijmy;
     zdroj="evidencia";
+    // Rok ešte beží (15. 10. 2026): zisk za 10 mesiacov delený 12 dával základ
+    // systematicky nízky (Romanovi 3 197,74 namiesto ~3 9xx). Do konca roka sa
+    // berie odhad celého roka z dePrognoza — rovnaký, aký ukazuje karta odhadu.
+    const P=(+rok>=new Date().getFullYear() && typeof dePrognoza==="function") ? dePrognoza(rok) : null;
+    if(P && P.zostavaMes>0 && P.rocPrijmy>0){
+      czd=r2(P.rocPrijmy - (P.pausalRezim ? P.pausalVydavok : P.rocVydavkySpolu));
+      prijmyRozhodne=P.rocPrijmy;
+      zdroj="odhad";
+    }
   }
   const platnost=socPlatnostVZ(rok);
 
@@ -4417,8 +4426,13 @@ function odvodyPredpoved(rok){
   const zpMes=r2(zpVZ*zpSadzba);
 
   // ── čo sa platí dnes ──
-  const socTeraz=r2(+S.socOdvodyMes||0);
-  const zpTeraz=r2(+S.preddavokZP||0);
+  // Sociálne z jedného pravidla spMesacne (nastavenie, inak posledná platba SP).
+  // Dovtedy len nastavenie: Roman platí 1 170,24 z banky s nulou v nastaveniach
+  // a karta tvrdila „dnes platíte 256,25“ a zvýšenie +1 315 €/mes (15. 10. 2026).
+  const socTeraz=r2(spMesacne(S).suma);
+  const zpPosledny=(firmaData.vydavky||[]).filter(x=>x.kategoria==="preddavokZP")
+    .sort((a,b)=>String(a.datum||"").localeCompare(String(b.datum||""))).pop();
+  const zpTeraz=r2(+S.preddavokZP || (zpPosledny ? +zpPosledny.spolu||0 : 0));
 
   return {
     rok:+rok, rokPlatnosti, odKedy:platnost.od, doKedy:platnost.do, odklad:platnost.odklad, zdroj,
@@ -4897,25 +4911,36 @@ function jePlatbaStatu(x){
 //      v priznaní bolo 1 287 €, a základ dane vyšiel o 1 788 € nižší.
 //   2. POHYBY — skutočné platby z výpisu za bežný rok.
 //   3. odhad z nastavení (rieši volajúci).
+// Doklady pokryté už započítanými pohybmi — cez väzbu ÚHRADY, nie len cez
+// `zdrojPohyb`. Po zlúčení notifikácie s výpisom ukazuje `zdrojPohyb` na staré
+// ID pohybu a preddavok ZP 256,25 € zo septembra 2026 sa v ročnom výpočte (aj
+// v priznaní B) rátal dvakrát (15. 10. 2026). Druhá poistka ako v pohybMaVydavok.
+function kluceVydavkovPohybov(pohyby){
+  const s=new Set();
+  (pohyby||[]).forEach(t=>(t.uhrady||[]).forEach(u=>{ if(u && u.typ==="vydavok") s.add(String(u.cislo)); }));
+  return s;
+}
 function zaplateneOdvodyRok(rok, druhOdvodu){
   const R=String(rok);
   const zap=(((firmaData.settings||{}).odvodyRoky||{})[R]||{})[druhOdvodu];
   if(zap!=null && zap!=="") return {suma:r2(+zap||0), pocet:1, zdroj:"priznanie"};
   const zpDruh = druhOdvodu==="zp" ? "odvodZP" : "odvodSP";
-  const zPohybov=new Set();
+  const zPohybov=new Set(), pohyby=[];
   let suma=0, pocet=0;
   (firmaData.vypis||[]).forEach(t=>{
     if(t.smer!=="vydaj" || !String(t.datum||"").startsWith(R)) return;
     const kl=klasifikujPohyb(t);
     if(!kl || kl.druh!==zpDruh) return;
     suma=r2(suma+(+t.suma||0)); pocet++;
-    zPohybov.add(txId(t));
+    zPohybov.add(txId(t)); pohyby.push(t);
   });
+  const pokryte=kluceVydavkovPohybov(pohyby);
   (firmaData.vydavky||[]).forEach(x=>{
     if(!String(x.datum||"").startsWith(R)) return;
     const K=KATEGORIE_VYDAVKOV[x.kategoria];
     if(!K || K.odvod!==druhOdvodu) return;
     if(x.zdrojPohyb && zPohybov.has(x.zdrojPohyb)) return;   // ten pohyb sa už počítal
+    if(pokryte.has(String(dokladKluc(x)))) return;            // … alebo ho pokrýva cez úhradu
     suma=r2(suma+(+x.spolu||0)); pocet++;
   });
   return {suma, pocet};
@@ -5078,14 +5103,25 @@ function calcDanRow(mesiacIdx, rok, S, opt){
 //  Odteraz platí: čo je na dlaždici napísané, to sa sčíta. Rozdiel oproti
 //  presnej sume je najviac pár eur a ide o rezervu, nie o platbu.
 // ═══════════════════════════════════════════════════════════════
+// Čo z povinností už odišlo: preddavky ZP a dane aj sociálne poistenie (platí
+// sa s konečnou platnosťou). JEDNO pravidlo pre dlaždicu, súhrn v Štatistikách
+// aj kartu v DPH a daniach — tie dve karty písali „ZP + daň“ a sa nesčítali.
+function odlozZaplatene(t){
+  const soc=+(t&&t.soc)||0;
+  return {suma:r2((+t.preddavokZP||0)+(+t.danPreddavok||0)+soc),
+          label:soc ? "Zaplatené preddavky a sociálne (ZP, daň, SP)" : "Zaplatené preddavky (ZP + daň)"};
+}
 function heroRozpis(t){
   const z=(v)=>Math.round(+v||0);            // rovnaké zaokrúhlenie ako eur0
   const casti=[];
-  const dan=z(t.dan), odvody=z(t.zdrav+t.soc), pred=z(t.preddavokZP+t.danPreddavok), dzmv=z(t.dzmv||0);
+  // Sociálne poistenie je v „odvodoch“ aj v platbách — platí sa s konečnou
+  // platnosťou, rovnako ako ho odpočíta calcDanRow.odlozit. Do 15. 10. 2026
+  // tu chýbalo: dlaždica ukazovala 13 041 €, Štatistiky 11 870 € (o zaplatené SP).
+  const dan=z(t.dan), odvody=z(t.zdrav+t.soc), pred=z(odlozZaplatene(t).suma), dzmv=z(t.dzmv||0);
   casti.push({kluc:"dan", label:"daň", v:dan, znam:1});
   casti.push({kluc:"odvody", label:"odvody", v:odvody, znam:1});
   if(dzmv) casti.push({kluc:"dzmv", label:"auto", v:dzmv, znam:1});
-  if(pred) casti.push({kluc:"preddavky", label:"preddavky", v:pred, znam:-1});
+  if(pred) casti.push({kluc:"preddavky", label:t.soc?"preddavky a soc.":"preddavky", v:pred, znam:-1});
   const spolu=casti.reduce((a,c)=>a+c.znam*c.v, 0);
   const text=casti.map(c=>`${c.label} ${c.znam<0?"−":""}${eur0(c.v)}`).join(" · ");
   return {casti, spolu, text, presne:r2(t.odlozit)};
@@ -18365,7 +18401,7 @@ function appDPH(){
       <div class="dphline"><span>Skutočné zdravotné poistné</span><b>${eur(t.zdrav)}</b></div>
       <div class="dphline"><span>Sociálne odvody</span><b>${eur(t.soc)}</b></div>
       <div class="dphline"><span>Daň z príjmov (${danSadzbaPctText(rok)})</span><b>${eur(t.dan)}</b></div>
-      <div class="dphline"><span>Zaplatené preddavky (ZP + daň)</span><b>−${eur(t.preddavokZP+t.danPreddavok)}</b></div>
+      <div class="dphline"><span>${odlozZaplatene(t).label}</span><b>−${eur(odlozZaplatene(t).suma)}</b></div>
       ${t.dzmv?`<div class="dphline"><span>Daň z motorových vozidiel (splatná ${(()=>{const d=dmvTermin(rok);return d.getDate()+". "+(d.getMonth()+1)+". "+d.getFullYear();})()})</span><b>${eur(t.dzmv)}</b></div>`:""}
       <div class="dphline" style="border-top:2px solid var(--line);font-size:15px"><span><b>Odložiť na dane a odvody</b></span><b style="color:var(--accent-deep)">${eur(t.odlozit)}</b></div>
     </div>
@@ -25195,7 +25231,9 @@ function odvodyPredpovedHtml(rok){
       Vymeriavajú sa z priznania za ${O.rok}, nie z toho, čo zarobíte budúci rok.
       ${O.zdroj==="priznanie"
         ? "Počítané z <b>podaného priznania</b> (príjmy "+eur(O.prijmy)+", základ a zaplatené poistné "+eur(O.czd)+")."
-        : "Počítané z evidencie v appke — po načítaní podaného priznania sa spresní."}
+        : (O.zdroj==="odhad"
+          ? "Počítané z <b>odhadu celého roka</b> (doterajšie mesiace a ich priemer do konca roka, príjmy "+eur(O.prijmy)+") — po skončení roka z evidencie, po načítaní podaného priznania presne."
+          : "Počítané z evidencie v appke — po načítaní podaného priznania sa spresní.")}
       ${O.predbezne
         ? "<b>Rok ešte beží</b>, takže čísla porastú — berte ich ako priebežný odhad."
         : "Rok je uzavretý, takže ak sa priznanie nezmení, toto sú konečné čísla."}
@@ -25238,7 +25276,7 @@ function sdPohladDane(rok){
   const S=firmaData.settings||{};
   const {rows, t}=danTotals(rok, S);
   const P=dePrognoza(rok);
-  const zaplatenePreddavky=r2(t.preddavokZP+t.danPreddavok);
+  const zaplatene=odlozZaplatene(t), zaplatenePreddavky=zaplatene.suma;
 
   return strazcaBanner()+`
     <div class="atool">
@@ -25306,7 +25344,7 @@ function sdPohladDane(rok){
       <div class="dphline"><span>Sociálne odvody</span><b>${eur(t.soc)}</b></div>
       <div class="dphline"><span>Daň z príjmu</span><b style="color:var(--warn)">${eur(t.dan)}</b></div>
       <div class="dphline" style="border-top:1px solid var(--line)"><span><b>Odvody + daň spolu</b></span><b>${eur(t.odvodyDan)}</b></div>
-      <div class="dphline"><span>Zaplatené preddavky (ZP + daň)</span><b>−${eur(zaplatenePreddavky)}</b></div>
+      <div class="dphline"><span>${zaplatene.label}</span><b>−${eur(zaplatenePreddavky)}</b></div>
       <div class="dphline" style="font-size:15px"><span><b>Doplatiť / odložiť</b></span><b style="color:var(--accent-deep)">${eur(t.odlozit)}</b></div>
       <div class="dphline" style="border-top:2px solid var(--line);font-size:15px"><span><b>Čistý príjem</b><br><span style="font-size:11.5px;color:var(--ink-soft);font-weight:400">fakturované mínus odvody a daň — náklady vyššie sa sem nezapočítavajú</span></span><b style="color:var(--pos)">${eur(t.cisty)}</b></div>
     </div>
@@ -42220,19 +42258,22 @@ const TERMIN_IKONA=Object.fromEntries(Object.entries(TERMIN_TYPY).map(([k,v])=>[
 // MÁ (kap. 47.9). Bez výpisu povie, že výpis chýba — nie že nezaplatené.
 const TERMIN_PLATBA_KAT={ zp:["preddavokZP"], sp:["preddavokSP"], dan:["preddavokDan"], dph:["odvodDPH"], auto:["danMotor"] };
 function terminPlatby(){
-  const out=[], zPohybov=new Set();
+  const out=[], zPohybov=new Set(), pohyby=[];
   (firmaData.vypis||[]).forEach(t=>{
     if(!t || t.smer!=="vydaj" || t.skryty) return;
     let R=null; try{ R=rozpoznajOdvod(t); }catch(e){ console.error("kalendár — rozpoznanie platby:", e); }
     if(!R) return;
     out.push({kategoria:R.kategoria, obdobie:R.obdobie, zaRok:R.zaRok,
       datum:String(t.datum||"").slice(0,10), suma:r2(+t.suma||0), kluc:txId(t)});
-    zPohybov.add(txId(t));
+    zPohybov.add(txId(t)); pohyby.push(t);
   });
-  // Výdavok z toho istého pohybu (interný doklad z importu) sa neráta druhýkrát.
+  // Výdavok z toho istého pohybu (interný doklad z importu) sa neráta druhýkrát —
+  // ani keď `zdrojPohyb` ukazuje na staré ID a väzbu nesie úhrada pohybu.
+  const pokryte=kluceVydavkovPohybov(pohyby);
   (firmaData.vydavky||[]).forEach(x=>{
     if(!x || !Object.values(TERMIN_PLATBA_KAT).some(k=>k.includes(x.kategoria))) return;
     if(x.zdrojPohyb && zPohybov.has(x.zdrojPohyb)) return;
+    if(pokryte.has(String(dokladKluc(x)))) return;
     out.push({kategoria:x.kategoria, obdobie:String(x.obdobie||String(x.datum||"").slice(0,7)), zaRok:vydavokZaRok(x),
       datum:String(x.datum||"").slice(0,10), suma:r2(+x.spolu||+x.bez||0), kluc:"v:"+(x.id||dokladKluc(x))});
   });
