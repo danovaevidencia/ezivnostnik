@@ -22,7 +22,13 @@
 //  nasadení: zmena = zvýšiť REGISTER_VERZIA a nasadiť `asistent` (155.18 b. 2).
 // ═══════════════════════════════════════════════════════════════════════════
 
-export const REGISTER_VERZIA = "2026-10-15.1";
+// 15. 10. 2026 (TC): obsah je už register TB (nástroje výkazu), ale verzia
+// ostáva 2026-10-11.2 — esm.sh bol mimo prevádzky („no space left on device“),
+// edge funkcia `asistent` sa nedala nasadiť a klient s novou verziou dostával
+// 409 od servera so starým registrom. Server počíta nástroje zo SVOJEJ kópie,
+// takže so starým číslom asistent beží ďalej (len bez nástrojov výkazu).
+// Po obnove esm.sh: nasadiť `asistent` (zoberie tento obsah) — čísla sa zhodujú.
+export const REGISTER_VERZIA = "2026-10-11.2";
 
 const OBDOBIE = {
   type: "string",
