@@ -2276,7 +2276,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.10.15-SZ";  // parser: „Číslo faktúry:“ a výslovná nulová daň zahraničného dodávateľa
+const APP_VERZIA = "2026.10.15-TA";  // KV B.1 aj so samozdanením zo zahraničia (služby § 15 ods. 1, tovar z EÚ)
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -35268,7 +35268,6 @@ function kontrolaPredPodanim(mk, typ){
   doklady.forEach(dk=>{
     if(VIEME_ZAPISAT.includes(dk.oddiel)) return;
     if(dk.smer==="vystup" && dk.plnenie && dk.plnenie!=="tuzemsko") return;  // do KV zámerne nepatrí
-    if(dk.oddiel==="B1" && samozdDruh(dk)!=="tuzemsky") return;   // zahraničné sa do KV neuvádza
     const k=dk.oddiel;
     if(!nevieme[k]) nevieme[k]={n:0,dan:0};
     nevieme[k].n++; nevieme[k].dan=r2(nevieme[k].dan+((dk.oddiel==="B1"?dk.danSamozdanenie:dk.dan)||0));
@@ -37043,7 +37042,8 @@ function dphPopisRozdielov(rozdiely){
 // Obsahuje VŠETKY údaje správne — je to úplná náhrada, na pôvodné podanie
 // sa neprihliada. Preto stačí zmeniť označenie, dáta sa generujú rovnako.
 // (Dodatočný, podávaný po lehote, obsahuje len rozdiely s kódmi opravy 1/2 —
-//  nie je zapracovaný, kým si neoveríme presný názov atribútu v XSD schéme FS.)
+//  atribút KOpr, dphRozdielyRiadkov; overené proti kv_dph_2025.xsd 15. 10. 2026,
+//  test_kv_b1_zahranicie.)
 function dphDruhPodania(mk){
   const u=((firmaData.dph||{})[mk]||{});
   return u.druhPodania || "R";
@@ -37170,9 +37170,21 @@ function dphGenerujKV(mk){
       TK:T.TK, TD:T.TD, Mn:T.Mn, MJ:T.MJ})}/>`);   // atr() prázdne hodnoty vynechá
   });
 
-  // B.1 — tuzemský prenos daňovej povinnosti (§ 69 ods. 12).
-  // Samozdanenie zo zahraničia sem NEPATRÍ — to sa vykazuje len v priznaní.
-  doklady.filter(d=>d.oddiel==="B1" && samozdDruh(d)==="tuzemsky").forEach(d=>{
+  // B.1 — VŠETKO, pri čom daň platí príjemca (§ 69 ods. 2, 3, 6, 7, 9 až 12):
+  // tuzemský prenos (§ 69 ods. 12) AJ služby od zahraničnej osoby z EÚ či
+  // tretieho štátu (§ 15 ods. 1) AJ tovar nadobudnutý z iného členského štátu
+  // (§ 11). Poučenie KVDPHv17, časť B.1 — overené 15. 10. 2026.
+  //
+  // 🔴 Do verzie TA tu bol filter samozdDruh(d)==="tuzemsky" s komentárom
+  // „samozdanenie zo zahraničia sem nepatrí, vykazuje sa len v priznaní“.
+  // Nestál na ničom (tabuľka v spec kap. 24 s odkazom na test, ktorý nikdy
+  // neexistoval) a náhľad KV (kvTeloHtml) pritom B.1 kreslil zo VŠETKÝCH
+  // dokladov B1 — človek videl Anthropic v B.1, do XML nešiel. Romanove KV za
+  // 07 a 08/2026 tak odišli bez B.1. Plný odpočet nie je výnimka: B.1 má stĺpec
+  // na daň aj na odpočítanú daň a uvádza sa „aj v prípade, ak nemá nárok na
+  // odpočítanie dane“ (to isté poučenie). Dod je pri B1 voliteľné a typ
+  // IcDphType berie aj IČ DPH tretích štátov; ak ho faktúra nemá, nevypĺňa sa.
+  doklady.filter(d=>d.oddiel==="B1").forEach(d=>{
     const dan=r2(d.danSamozdanenie||d.dan||0);
     // O = odpočítaná daň; pri doklade bez nároku 0, pri krátení pomerná časť
     // (`dphOdpocetSamozdanenia`). Atribút sa NEVYNECHÁVA: v kv_dph_2025.xsd je
