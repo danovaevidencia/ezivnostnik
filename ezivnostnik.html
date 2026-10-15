@@ -2276,7 +2276,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.10.15-SX";  // kontrola pred podaním KV: číslo faktúry raz a blokujúce, odsúhlasenie len nespárované príjmy
+const APP_VERZIA = "2026.10.15-SY";  // šablóna Oznámenie Sociálnej poisťovne v Dokumentoch (spec 156.14)
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -45396,8 +45396,67 @@ function splitPickTmp(strana, id){
 // ═══ ZMLUVY A DOKUMENTY — evidencia dôležitých firemných dokumentov ═══
 // Dáta: firmaData.dokumenty = [{id, nazov, typ, partner, platnostOd, platnostDo, poznamka, subor, pridane}]
 // Súbory sa ukladajú do Supabase Storage (bucket "dokumenty"), JSON drží len odkaz.
-const DOK_TYPY=["Zmluva","Dodatok","Zákazkový list","Poistka","Certifikát","Živnostenský list","GDPR","Faktúra/doklad","Iné"];
-const DOK_TYP_IKONA={"Zmluva":"📄","Dodatok":"📑","Zákazkový list":"📋","Poistka":"🛡","Certifikát":"🎖","Živnostenský list":"🪪","GDPR":"🔒","Faktúra/doklad":"🧾","Iné":"📎"};
+const DOK_TYPY=["Zmluva","Dodatok","Zákazkový list","Poistka","Certifikát","Živnostenský list","GDPR","Faktúra/doklad","Oznámenie Sociálnej poisťovne","Iné"];
+const DOK_TYP_IKONA={"Zmluva":"📄","Dodatok":"📑","Zákazkový list":"📋","Poistka":"🛡","Certifikát":"🎖","Živnostenský list":"🪪","GDPR":"🔒","Faktúra/doklad":"🧾","Oznámenie Sociálnej poisťovne":"🏛","Iné":"📎"};
+// ═══ OZNÁMENIE SOCIÁLNEJ POISŤOVNE — šablóna dokumentu (spec 156.14) ═══════
+// Z PDF (textová vrstva cez pdf.js) alebo z fotky (OCR v zariadení) vytiahne,
+// čo appka potrebuje na odvody: od kedy, mesačné poistné, vymeriavací základ,
+// rozpis po fondoch a platobné údaje. Človek polia vidí a môže opraviť; do
+// nastavení sa nič nezapíše bez jeho potvrdenia.
+// Číta VETY listu, nie rámček „Platobné údaje“ — v ňom extrakcia textu
+// prehadzuje štítky a hodnoty (pdftotext 15. 10. 2026: IBAN pod „Variabilný
+// symbol“, suma pod „Špecifický symbol“).
+// Rodné číslo sa NEČÍTA a nikam neukladá: v liste je, appka ho nepotrebuje.
+const DOK_OZNAMENIE_SP="Oznámenie Sociálnej poisťovne";
+const MESIACE_GEN=["januára","februára","marca","apríla","mája","júna","júla","augusta","septembra","októbra","novembra","decembra"];
+function parseOznamenieSP(text){
+  const t=String(text||"").replace(/\s+/g," ");   // \s zahŕňa aj nezlomiteľnú medzeru a zalomenia
+  const najdi=re=>{ const m=t.match(re); return m?m[1]:""; };
+  const suma=re=>{ const v=notifCislo(najdi(re)); return v==null?null:r2(v); };
+  const datumSk=s=>{ const m=String(s||"").match(/(\d{1,2})\. ?(\d{1,2})\. ?(\d{4})/); return m ? m[3]+"-"+String(+m[2]).padStart(2,"0")+"-"+String(+m[1]).padStart(2,"0") : ""; };
+  // „dňa 1. októbra 2026 Vám vzniklo“ — mesiac slovom, inak číslom
+  let vznikOd="";
+  const mv=t.match(/dňa (\d{1,2})\. ?([a-záäčďéíĺľňóôŕšťúýž]+) (\d{4}),? Vám vznik/i);
+  if(mv){ const mi=MESIACE_GEN.indexOf(mv[2].toLowerCase()); if(mi>=0) vznikOd=mv[3]+"-"+String(mi+1).padStart(2,"0")+"-"+String(+mv[1]).padStart(2,"0"); }
+  if(!vznikOd) vznikOd=datumSk(najdi(/dňa (\d{1,2}\. ?\d{1,2}\. ?\d{4}),? Vám vznik/i));
+  const o={
+    cislo: najdi(/Číslo: ?([0-9A-Z][0-9A-Z\-\/]{5,})/),
+    datum: datumSk(najdi(/Miesto a dátum: ?[^\/]{0,40}\/ ?(\d{1,2}\. ?\d{1,2}\. ?\d{4})/)),
+    vznikOd,
+    mesacne: suma(/mesačné poistné v sume ([\d ,.]+?) ?eur/i),
+    vz: suma(/vymeriavací základ[^.]{0,80}?vo výške ([\d ,.]+?) ?eur/i),
+    fondy:{
+      nemocenske: suma(/nemocenské poistenie v sume ([\d ,.]+?) ?eur/i),
+      starobne: suma(/starobné poistenie[^.]{0,90}?v sume ([\d ,.]+?) ?eur/i),
+      invalidne: suma(/invalidné poistenie v sume ([\d ,.]+?) ?eur/i),
+      rfs: suma(/rezervného fondu solidarity v sume ([\d ,.]+?) ?eur/i),
+    },
+    vs: najdi(/variabilným symbolom \(VS\) ?(\d{6,10})/i) || najdi(/Variabilný symbol: ?(\d{6,10})/i),
+    iban: (najdi(/na účet (SK\d{2}(?: ?\d{4}){5})/i)||"").replace(/ /g,""),
+    predlzenaLehota: /predĺžen\S* lehot/i.test(t),
+  };
+  o.jeOznamenie = /Sociáln\S* poisťovň/i.test(t) && !!(o.mesacne || o.vz);
+  return o;
+}
+// Sedí oznámenie samo so sebou a s výpočtom appky? Vracia vety na zobrazenie.
+// Nesúlad nie je dôvod odmietnuť — OCR sa mýli, človek opraví pole.
+function oznamenieSPKontrola(o){
+  const out=[];
+  if(!o || !(o.mesacne>0)) return out;
+  const F=o.fondy||{}, f=[F.nemocenske,F.starobne,F.invalidne,F.rfs];
+  if(f.every(x=>x!=null)){
+    const s=r2(f.reduce((a,x)=>a+x,0));
+    out.push(Math.abs(s-o.mesacne)<0.005 ? {ok:true, t:"Rozpis po fondoch sedí so sumou ("+eur(s)+")."}
+                                         : {ok:false, t:"Rozpis po fondoch dáva "+eur(s)+", nie "+eur(o.mesacne)+" — skontrolujte sumy."});
+  }
+  if(o.vz>0){
+    const rok=+String(o.vznikOd||"").slice(0,4)||new Date().getFullYear();
+    const v=socPoistneZVZ(o.vz, rok, (firmaData&&firmaData.settings)||{});
+    out.push(Math.abs(v-o.mesacne)<0.005 ? {ok:true, t:"Výpočet appky z vymeriavacieho základu "+eur(o.vz)+" dáva tú istú sumu."}
+                                         : {ok:false, t:"Z vymeriavacieho základu "+eur(o.vz)+" vychádza appke "+eur(v)+", v oznámení je "+eur(o.mesacne)+"."});
+  }
+  return out;
+}
 function dokEnsure(){ if(!Array.isArray(firmaData.dokumenty)) firmaData.dokumenty=[]; return firmaData.dokumenty; }
 function dokExpiracia(d){ // dni do expirácie, alebo null
   if(!d.platnostDo) return null;
@@ -45453,6 +45512,8 @@ function dokPridaj(idx, predloha, subor){
   const d = idx!=null ? dokEnsure()[idx] : (predloha ? JSON.parse(JSON.stringify(predloha)) : {});
   _dokPredvolenySubor = (idx==null && subor) ? subor : null;
   const zk=d.zakazka||{}, jeZL=d.typ===DOK_ZAKAZKOVY_LIST;
+  const sp=d.socPoistenie||{}, jeSP=d.typ===DOK_OZNAMENIE_SP;
+  _dokSpFondy = sp.fondy || null; _dokSpLehota = !!sp.predlzenaLehota;
   openModal(idx!=null?"Upraviť dokument":"Nový dokument", `
     <div class="mfield"><label>Názov</label><input id="dok_nazov" value="${esc(d.nazov||'')}" placeholder="napr. Rámcová zmluva s odberateľom"></div>
     <div class="mfield"><label>Typ</label><select id="dok_typ" onchange="dokTypZmeneny()">${DOK_TYPY.map(t=>`<option ${d.typ===t?'selected':''}>${t}</option>`).join('')}</select></div>
@@ -45476,6 +45537,25 @@ function dokPridaj(idx, predloha, subor){
         <div class="mfield"><label>E-mail na výkaz a faktúru</label><input id="dok_zemail" type="email" value="${esc(zk.email||'')}"></div>
       </div>
     </div>
+    <div id="dok_sp" style="display:${jeSP?'block':'none'};border-left:3px solid var(--line);padding-left:10px;margin:4px 0 10px">
+      <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:8px">Z oznámenia si appka vezme mesačné poistné a od kedy ho platíte — pre odhad dane, kalendár a kontrolu platieb. Rodné číslo z listu neukladá.</div>
+      <button type="button" class="aabtn" id="dok_sp_citaj" onclick="dokSpPrecitaj()" style="margin-bottom:8px">📄 Prečítať údaje zo súboru</button>
+      <div id="dok_sp_stav" style="font-size:11.5px;min-height:14px;margin-bottom:6px"></div>
+      <div class="mrow2">
+        <div class="mfield"><label>Poistné platíte od</label><input id="dok_spod" type="date" value="${esc(sp.vznikOd||'')}"></div>
+        <div class="mfield"><label>Mesačné poistné €</label><input id="dok_spmes" type="number" step="0.01" min="0" inputmode="decimal" oninput="dokSpKontrolaZobraz()" value="${esc(sp.mesacne!=null?String(sp.mesacne):'')}"></div>
+      </div>
+      <div class="mrow2">
+        <div class="mfield"><label>Vymeriavací základ €</label><input id="dok_spvz" type="number" step="0.01" min="0" inputmode="decimal" oninput="dokSpKontrolaZobraz()" value="${esc(sp.vz!=null?String(sp.vz):'')}"></div>
+        <div class="mfield"><label>Variabilný symbol</label><input id="dok_spvs" inputmode="numeric" value="${esc(sp.vs||'')}"></div>
+      </div>
+      <div class="mrow2">
+        <div class="mfield"><label>Číslo oznámenia</label><input id="dok_spcislo" value="${esc(sp.cislo||'')}"></div>
+        <div class="mfield"><label>Dátum oznámenia</label><input id="dok_spdatum" type="date" value="${esc(sp.datum||'')}"></div>
+      </div>
+      <div class="mfield"><label>Účet Sociálnej poisťovne (IBAN)</label><input id="dok_spiban" value="${esc(sp.iban||'')}"></div>
+      <div id="dok_sp_kontrola" style="font-size:11.5px;line-height:1.5"></div>
+    </div>
     <div class="mrow2">
       <div class="mfield"><label>Platnosť od</label><input id="dok_od" type="date" value="${esc((d.platnostOd||'').slice(0,10))}"></div>
       <div class="mfield"><label>Platnosť do</label><input id="dok_do" type="date" value="${esc((d.platnostDo||'').slice(0,10))}"></div>
@@ -45483,7 +45563,7 @@ function dokPridaj(idx, predloha, subor){
     <div class="mfield"><label>Poznámka (nepovinné)</label><input id="dok_pozn" value="${esc(d.poznamka||'')}" placeholder="detail"></div>
     <div class="mfield"><label>Súbor ${d.subor?'(nahradí existujúci)':''}</label>
       ${_dokPredvolenySubor?`<div style="font-size:12.5px;margin-bottom:4px">📎 Pripojený: <b>${esc(_dokPredvolenySubor.name||"súbor")}</b> <span style="color:var(--ink-soft)">(${Math.round((_dokPredvolenySubor.size||0)/1024)} kB) — výberom nižšie ho vymeníte</span></div>`:""}
-      <input id="dok_subor" type="file" accept=".pdf,.png,.jpg,.jpeg,.docx,.doc,.xlsx"></div>
+      <input id="dok_subor" type="file" accept=".pdf,.png,.jpg,.jpeg,.docx,.doc,.xlsx" onchange="dokSuborZmeneny(this)"></div>
     <div id="dok_uploadStav" style="font-size:11.5px;margin-top:4px;min-height:14px"></div>
   `, ()=>{
     // Súbor sa nahráva — druhé ťuknutie, zámok okna aj zatvorenie záložky rieši
@@ -45493,11 +45573,118 @@ function dokPridaj(idx, predloha, subor){
     return f ? nahravajRaz(()=>dokUloz(idx, f)) : dokUloz(idx, null);
   });
   zamOkno("dokumenty");
+  dokSpKontrolaZobraz();
+  // Súbor prišiel zvonku (zdieľanie, Schránka): PDF oznámenia sa rozpozná hneď.
+  if(_dokPredvolenySubor && idx==null) dokSuborZmeneny(null);
 }
 function dokTypZmeneny(){
-  const jeZL=(document.getElementById("dok_typ")||{}).value===DOK_ZAKAZKOVY_LIST;
+  const typ=(document.getElementById("dok_typ")||{}).value;
+  const jeZL=typ===DOK_ZAKAZKOVY_LIST, jeSP=typ===DOK_OZNAMENIE_SP;
   const z=document.getElementById("dok_zak"); if(z) z.style.display=jeZL?"block":"none";
+  const s=document.getElementById("dok_sp"); if(s) s.style.display=jeSP?"block":"none";
   const p=document.getElementById("dok_partner_pozn"); if(p) p.textContent=jeZL?"(odberateľ)":"(nepovinné)";
+}
+// ── Oznámenie Sociálnej poisťovne vo formulári (spec 156.14) ──
+let _dokSpFondy=null, _dokSpLehota=false;
+function dokSpSubor(){
+  const inp=document.getElementById("dok_subor");
+  return (inp && inp.files && inp.files[0]) || _dokPredvolenySubor || null;
+}
+async function dokSpTextZoSuboru(f, stav){
+  const meno=String(f.name||"").toLowerCase(), typ=String(f.type||"");
+  if(typ==="application/pdf" || meno.endsWith(".pdf")) return await pdfToText(await f.arrayBuffer());
+  if(typ.startsWith("image/") || /\.(png|jpe?g)$/.test(meno))
+    return await obrazokNaText(f, (p, popis)=>{ if(stav) stav.textContent=(typeof p==="number" ? "Čítam fotku… "+p+" %" : String(p||popis||"Čítam fotku…")); });
+  return "";
+}
+// Výber súboru: PDF sa skúsi prečítať hneď a keď je to oznámenie Sociálnej
+// poisťovne, typ sa prepne sám. Fotka sa automaticky nečíta (OCR trvá sekundy)
+// — len pri vybranom type oznámenia ponúkne tlačidlo.
+async function dokSuborZmeneny(){
+  const f=dokSpSubor(); if(!f) return;
+  const jePdf=String(f.type||"")==="application/pdf" || /\.pdf$/i.test(String(f.name||""));
+  const typEl=document.getElementById("dok_typ");
+  if(!jePdf){ if(typEl && typEl.value===DOK_OZNAMENIE_SP) dokSpStav("Fotku prečítate tlačidlom „Prečítať údaje zo súboru“.", ""); return; }
+  let o=null;
+  try{ o=parseOznamenieSP(await dokSpTextZoSuboru(f)); }
+  catch(e){ console.error("oznámenie SP — čítanie PDF:", e); return; }
+  if(!o || !o.jeOznamenie) return;
+  if(typEl && typEl.value!==DOK_OZNAMENIE_SP){ typEl.value=DOK_OZNAMENIE_SP; dokTypZmeneny(); }
+  dokSpVypln(o);
+}
+async function dokSpPrecitaj(){
+  const f=dokSpSubor();
+  if(!f){ dokSpStav("Najprv vyberte súbor oznámenia (PDF alebo fotku) nižšie v poli Súbor.", "warn"); return; }
+  const btn=document.getElementById("dok_sp_citaj"); if(btn) btn.disabled=true;
+  dokSpStav("Čítam súbor…", "");
+  try{
+    const text=await dokSpTextZoSuboru(f, document.getElementById("dok_sp_stav"));
+    const o=parseOznamenieSP(text);
+    if(!o.jeOznamenie){ dokSpStav("V súbore som oznámenie Sociálnej poisťovne nenašiel — údaje vyplňte ručne.", "warn"); return; }
+    dokSpVypln(o);
+  }catch(e){
+    console.error("oznámenie SP — čítanie súboru:", e);
+    dokSpStav("Súbor sa nepodarilo prečítať ("+(e&&e.message||e)+"). Údaje vyplňte ručne.", "neg");
+  }finally{ if(btn) btn.disabled=false; }
+}
+function dokSpStav(text, ton){
+  const s=document.getElementById("dok_sp_stav"); if(!s) return;
+  s.textContent=text; s.style.color = ton==="neg" ? "var(--neg)" : ton==="warn" ? "var(--warn)" : ton==="pos" ? "var(--pos)" : "var(--ink-soft)";
+}
+// Vyplní polia z prečítaného oznámenia. Názov, partnera a platnosť len keď sú
+// prázdne — človekov text sa neprepisuje.
+function dokSpVypln(o){
+  const nastav=(id,v)=>{ const el=document.getElementById(id); if(el && v!=null && v!=="") el.value=v; };
+  const prazdne=(id,v)=>{ const el=document.getElementById(id); if(el && !String(el.value||"").trim() && v) el.value=v; };
+  nastav("dok_spod", o.vznikOd); nastav("dok_spmes", o.mesacne!=null?String(o.mesacne):"");
+  nastav("dok_spvz", o.vz!=null?String(o.vz):""); nastav("dok_spvs", o.vs); nastav("dok_spiban", o.iban);
+  nastav("dok_spcislo", o.cislo); nastav("dok_spdatum", o.datum);
+  _dokSpFondy=o.fondy||null; _dokSpLehota=!!o.predlzenaLehota;
+  prazdne("dok_nazov", "Oznámenie Sociálnej poisťovne"+(o.mesacne?" — "+eur(o.mesacne)+" mesačne":"")+(o.vznikOd?" od "+fmtDatum(o.vznikOd):""));
+  prazdne("dok_partner", "Sociálna poisťovňa");
+  prazdne("dok_od", o.vznikOd);
+  // Výška platí rok: od 1. 7. (pri predĺženej lehote od 1. 10.) do dňa pred
+  // ďalšou zmenou. Platnosť do = pripomienka, že príde nové oznámenie.
+  if(o.vznikOd){ const d=new Date(o.vznikOd+"T12:00:00"); d.setFullYear(d.getFullYear()+1); d.setDate(d.getDate()-1);
+    prazdne("dok_do", d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")); }
+  const chyba=["vznikOd","mesacne","vz","vs"].filter(k=>!o[k]);
+  dokSpStav(chyba.length ? "Prečítané, ale chýba: "+chyba.map(k=>({vznikOd:"od kedy",mesacne:"mesačné poistné",vz:"vymeriavací základ",vs:"variabilný symbol"})[k]).join(", ")+" — doplňte ručne."
+                         : "✓ Údaje prečítané zo súboru — skontrolujte ich pred uložením.", chyba.length?"warn":"pos");
+  dokSpKontrolaZobraz();
+}
+function dokSpZFormulara(){
+  const hod=id=>String((document.getElementById(id)||{}).value||"").trim();
+  const cis=id=>{ const v=parseFloat(hod(id).replace(",",".")); return isFinite(v)?r2(v):null; };
+  return { vznikOd:hod("dok_spod"), mesacne:cis("dok_spmes"), vz:cis("dok_spvz"), vs:hod("dok_spvs").replace(/\s/g,""),
+           iban:hod("dok_spiban").replace(/\s/g,"").toUpperCase(), cislo:hod("dok_spcislo"), datum:hod("dok_spdatum"),
+           fondy:_dokSpFondy||null, predlzenaLehota:!!_dokSpLehota };
+}
+function dokSpKontrolaZobraz(){
+  const el=document.getElementById("dok_sp_kontrola"); if(!el) return;
+  const K=oznamenieSPKontrola(dokSpZFormulara());
+  el.innerHTML=K.map(k=>`<div style="color:${k.ok?'var(--pos)':'var(--warn)'}">${k.ok?'✓':'⚠'} ${esc(k.t)}</div>`).join("");
+}
+// Líši sa oznámenie od nastavení odvodov? (prázdne = nie je čo ponúknuť)
+function dokSpRozdiel(sp){
+  if(!sp || !(sp.mesacne>0) || !sp.vznikOd) return null;
+  const S=(firmaData&&firmaData.settings)||{};
+  const mes=String(sp.vznikOd).slice(0,7);
+  const od=String(S.socOdvodyOd||"");
+  const noveOd = (!od || od>mes) ? mes : od;
+  if(r2(+S.socOdvodyMes||0)===r2(sp.mesacne) && od===noveOd) return null;
+  return { mesacne:r2(sp.mesacne), od:noveOd, terazMes:r2(+S.socOdvodyMes||0), terazOd:od };
+}
+// Zapíše mesačné poistné a mesiac vzniku do nastavení. Mesiac vzniku sa
+// neposúva NESKÔR: oznámenie o novej výške od 1. 7. nemení, odkedy poistenie trvá.
+function dokSpNastavOdvody(idx){
+  const d=dokEnsure()[idx]; const R=dokSpRozdiel(d && d.socPoistenie);
+  if(!R) return false;
+  if(!mozemPisat("data")){ alert("Nastavenia sa neuložili — máte prístup len na čítanie."); return false; }
+  if(!firmaData.settings) firmaData.settings={};
+  firmaData.settings.socOdvodyMes=R.mesacne;
+  firmaData.settings.socOdvodyOd=R.od;
+  poZmene();
+  return true;
 }
 // Odberateľ z doterajších faktúr doplní IČO, DIČ, IČ DPH a adresu — len prázdne polia.
 function dokOdberatelVybrany(nazov){
@@ -45526,6 +45713,8 @@ async function dokUloz(idx, f){
     if(!zk.cislo){ alert("Zákazkový list potrebuje číslo zákazky — podľa neho si ho nájde výkaz."); return false; }
     zaznam.zakazka=zk;
   } else delete zaznam.zakazka;
+  if(zaznam.typ===DOK_OZNAMENIE_SP) zaznam.socPoistenie=dokSpZFormulara();
+  else delete zaznam.socPoistenie;
   // nahraj súbor ak je vybraný
   // Nahradený súbor sa maže až po uložení nového odkazu (č. 88): zmazaný hneď
   // po nahratí a zlyhaný zápis nechali dokument v cloude ukazovať do prázdna.
@@ -45555,6 +45744,20 @@ async function dokUloz(idx, f){
   poZmene(); appDokumenty();
   ulozeneUdalost("dokument", zaznam.id, zaznam.id);
   if(stary && stary!==zaznam.subor) dokladZmazOriginaly([stary]);
+  // Oznámenie SP: ponuka zapísať poistné do nastavení (spec 156.14). Až po
+  // uložení dokumentu a len keď sa líši — nastavenie sa dá kedykoľvek zmeniť späť.
+  const R=dokSpRozdiel(zaznam.socPoistenie);
+  if(R && mozemPisat("data")){
+    const i=zoznam.indexOf(zaznam);
+    setTimeout(()=>{
+      if(confirm("Nastaviť v appke sociálne odvody podľa oznámenia?\n\n"
+        +"Mesačne "+eur(R.mesacne)+" od "+R.od.slice(5,7)+"/"+R.od.slice(0,4)+".\n"
+        +"Dnes v nastaveniach: "+eur(R.terazMes)+(R.terazOd?" od "+R.terazOd.slice(5,7)+"/"+R.terazOd.slice(0,4):"")+".\n\n"
+        +"Podľa toho appka počíta odhad dane, termíny v kalendári a kontrolu platieb.")){
+        dokSpNastavOdvody(i); appDokumenty();
+      }
+    }, 60);
+  }
 }
 function dokDetail(idx){
   const d=dokEnsure()[idx]; if(!d) return;
@@ -45571,11 +45774,18 @@ function dokDetail(idx){
       ${d.zakazka?[["Číslo zákazky",d.zakazka.cislo],["Projekt",d.zakazka.projekt],["Sadzba",d.zakazka.sadzba?eur(d.zakazka.sadzba)+" / čld bez DPH":""],
         ["IČO",d.zakazka.ico],["DIČ",d.zakazka.dic],["IČ DPH",d.zakazka.icdph],["Adresa",d.zakazka.adresa],["Schvaľuje",d.zakazka.schvalil],["E-mail",d.zakazka.email]]
         .filter(x=>x[1]).map(x=>`<div class="arow" style="grid-template-columns:1fr 2fr"><div class="acol-muted">${x[0]}</div><div style="text-align:right">${esc(String(x[1]))}</div></div>`).join(''):''}
+      ${d.socPoistenie?(()=>{ const s=d.socPoistenie, F=s.fondy||{};
+        return [["Poistné od",s.vznikOd?fmtDatum(s.vznikOd):""],["Mesačné poistné",s.mesacne!=null?eur(s.mesacne):""],["Vymeriavací základ",s.vz!=null?eur(s.vz):""],
+          ["Rozpis",F.nemocenske!=null?"nemocenské "+eur(F.nemocenske)+" · starobné "+eur(F.starobne)+" · invalidné "+eur(F.invalidne)+" · rezervný fond "+eur(F.rfs):""],
+          ["Variabilný symbol",s.vs],["Účet",s.iban],["Číslo oznámenia",s.cislo],["Dátum oznámenia",s.datum?fmtDatum(s.datum):""]]
+          .filter(x=>x[1]).map(x=>`<div class="arow" style="grid-template-columns:1fr 2fr"><div class="acol-muted">${x[0]}</div><div style="text-align:right">${esc(String(x[1]))}</div></div>`).join("")
+          + oznamenieSPKontrola(s).map(k=>`<div class="arow" style="grid-template-columns:1fr"><div style="font-size:12px;color:${k.ok?'var(--pos)':'var(--warn)'}">${k.ok?'✓':'⚠'} ${esc(k.t)}</div></div>`).join(""); })():''}
       ${d.poznamka?`<div class="arow" style="grid-template-columns:1fr 2fr"><div class="acol-muted">Poznámka</div><div style="text-align:right">${esc(d.poznamka)}</div></div>`:''}
       ${d.suborNazov?`<div class="arow" style="grid-template-columns:1fr 2fr"><div class="acol-muted">Súbor</div><div style="text-align:right">${esc(d.suborNazov)}</div></div>`:''}
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       ${d.subor?`<button class="aabtn pri" onclick="dokOtvor(${idx})">👁 Otvoriť súbor</button>`:'<span style="font-size:12px;color:var(--ink-soft);align-self:center">Bez priloženého súboru</span>'}
+      ${dokSpRozdiel(d.socPoistenie)?`<button class="aabtn" onclick="if(dokSpNastavOdvody(${idx})){closeModal();dokDetail(${idx});}"${zam("data")}>⚙ Nastaviť odvody podľa oznámenia</button>`:''}
       <button class="aabtn" onclick="closeModal();dokPridaj(${idx})"${zam("dokumenty")}>✎ Upraviť</button>
       <div style="flex:1"></div>
       <button class="aabtn neg" onclick="dokZmaz(${idx})"${zam("dokumenty")}>🗑 Zmazať</button>
