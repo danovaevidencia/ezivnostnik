@@ -2276,7 +2276,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.10.15-SV";  // asistent: panel nad klávesnicou na mobile (spec 156.12).js, nástroje čítania, demo, skratka (spec 155)
+const APP_VERZIA = "2026.10.15-SW";  // sociálne poistenie podľa Sociálnej poisťovne (spec 156.13).js, nástroje čítania, demo, skratka (spec 155)
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -4318,40 +4318,84 @@ function pausalPorovnanie(rok){
 //  výdavkov. Časť odborných článkov píše „základ dane"; Sociálna poisťovňa
 //  hovorí jednoznačne o príjme. Pri paušalistovi je rozdiel dramatický.
 // ═══════════════════════════════════════════════════════════════════════════
+// ── Zaokrúhlenie Sociálnej poisťovne (spec 156.13) ─────────────────────────
+// Vymeriavací základ aj poistné každého fondu sa zaokrúhľujú na eurocent NADOL
+// (socpoist.sk, kalkulačka SZČO). Cez celé tisíciny, aby 0,29 € nevyšlo 0,28 €
+// pre binárnu reprezentáciu (0,29 × 100 = 28,999…).
+function centNadol(x){ return Math.floor(Math.round((+x||0)*1e6)/1e4)/100; }
+// Mesačné poistné SZČO z vymeriavacieho základu: súčet fondov, každý nadol.
+// 914,40 → 303,11 · 396,24 → 131,34 · 3 530,17 → 1 170,24 (sumy Sociálnej
+// poisťovne); 33,15 % z celku dáva v dvoch z troch prípadov o cent viac.
+function socPoistneZVZ(vz, rok, S){
+  const k=["socSadzbaNemocenske","socSadzbaStarobne","socSadzbaInvalidne","socSadzbaRFS"];
+  return r2(k.reduce((a,kl)=>a+centNadol((+vz||0)*sadzbaFirmy(kl, rok, S)), 0));
+}
+// Od kedy platí nový vymeriavací základ: 1. 7. roka po zdaňovacom období, pri
+// predĺženej lehote na podanie priznania 1. 10. (oznámenie SP 23. 9. 2026:
+// „mali ste predĺženú lehotu … vzniklo povinné poistenie 1. októbra“). Platí
+// rok — do 30. 6., resp. 30. 9. nasledujúceho roka.
+function socPlatnostVZ(rok){
+  const odklad=(typeof odkladPriznania==="function") ? !!odkladPriznania(+rok) : false;
+  const p=+rok+1;
+  return odklad ? {od:p+"-10-01", do:(p+1)+"-09-30", odklad:true}
+                : {od:p+"-07-01", do:(p+1)+"-06-30", odklad:false};
+}
 function odvodyPredpoved(rok){
   if(!firmaData) return null;
   const S=firmaData.settings||{};
-  const R=deRocnySuhrn(rok);
-  if(!R || !(R.prijmy>0)) return null;
   const rokPlatnosti=+rok+1;
 
-  // Čiastkový základ dane = príjmy − výdavky, PRED odpočtom odvodov. Vo vzorci
-  // Sociálnej poisťovne sa zaplatené poistné pripočítava späť; `deRocnySuhrn`
-  // ho v tejto fáze ešte neodpočítalo, takže hodnota je priamo použiteľná.
-  const jePausal = (typeof vydavkyRezimEfektivny==="function") && vydavkyRezimEfektivny()==="pausal";
-  const czd=r2(R.prijmy - (jePausal ? R.pausal : R.vydavkySkutSpolu));
-  const prijmyRozhodne=R.prijmy;
+  // ZDROJ ČÍSEL (spec 156.13). Sociálna poisťovňa počíta z PODANÉHO priznania:
+  // VZ = (čiastkový základ dane § 6 ods. 1 a 2 + zaplatené poistné) / 1,486 / 12.
+  // Kým bolo priznanie v appke len uložené a predpoveď ho nečítala, Romanovi
+  // vyšlo 4 087,35 € namiesto 3 530,17 € z oznámenia: súhrn evidencie mal za
+  // 2025 o 5 950 € iné príjmy a režim výdavkov sa bral dnešný (skutočné), nie
+  // ten za rok 2025 (paušál). Odhad použitý namiesto faktu nikde nesvieti (kap. 16).
+  const DP=((firmaData.danovePriznania||{})[String(rok)])||null;
+  let czd, prijmyRozhodne, zdroj;
+  if(DP && +DP.prijmy>0 && DP.zaklad!=null && DP.zaklad!==""){
+    // `poistne` majú staršie importy; nové nesú tú istú hodnotu
+    // (vydavkyPoistPar6ods11_ods1a2 — poistné SP aj ZP v r. 40) pod `preddavkyZP`.
+    const poistne = DP.poistne!=null ? (+DP.poistne||0) : (+DP.preddavkyZP||0);
+    czd=r2((+DP.zaklad||0)+poistne);
+    prijmyRozhodne=r2(+DP.prijmy||0);
+    zdroj="priznanie";
+  } else {
+    const R=deRocnySuhrn(rok);
+    if(!R || !(R.prijmy>0)) return null;
+    // Čiastkový základ dane = príjmy − výdavky, PRED odpočtom odvodov. Vo vzorci
+    // Sociálnej poisťovne sa zaplatené poistné pripočítava späť; `deRocnySuhrn`
+    // ho v tejto fáze ešte neodpočítalo, takže hodnota je priamo použiteľná.
+    // Režim výdavkov TOHO roka, nie dnešný (kap. 89.3).
+    const jePausal = (typeof vydavkyRezimEfektivny==="function") && vydavkyRezimEfektivny(rok)==="pausal";
+    czd=r2(R.prijmy - (jePausal ? R.pausal : R.vydavkySkutSpolu));
+    prijmyRozhodne=R.prijmy;
+    zdroj="evidencia";
+  }
+  const platnost=socPlatnostVZ(rok);
 
   const hranica=sadzbaFirmy("socHranicaPrijmu", rokPlatnosti, S);
   const oslobodenie=sadzbaFirmy("socOslobodenie", rokPlatnosti, S);
   const minVZ=sadzbaFirmy("socMinVZ", rokPlatnosti, S);
   const maxVZ=sadzbaFirmy("socMaxVZ", rokPlatnosti, S);
   const osobitnyVZ=sadzbaFirmy("socOsobitnyVZ", rokPlatnosti, S);
-  const socSadzba=sadzbaFirmy("socSadzba", rokPlatnosti, S);
-  const koef=1/(sadzbaFirmy("vzKoef", rokPlatnosti, S)||0.672948);
+  // Zákon delí koeficientom 1,486; sadzby nesú jeho prevrátenú hodnotu
+  // 0,672948. 1/0,672948 = 1,48599…, čo pri zaokrúhľovaní nadol vie posunúť
+  // cent — preto späť na tri desatinné miesta, presne 1,486.
+  const koef=Math.round(1/(sadzbaFirmy("vzKoef", rokPlatnosti, S)||0.672948)*1000)/1000;
 
   let socRezim, socVZ, socMes, socPoznamka;
   if(prijmyRozhodne<=oslobodenie){
     socRezim="oslobodeny"; socVZ=0; socMes=0;
     socPoznamka="Príjem nepresiahol "+eur(oslobodenie)+" — sociálne poistenie nevzniká.";
   } else if(prijmyRozhodne<=hranica){
-    socRezim="osobitny"; socVZ=osobitnyVZ; socMes=r2(osobitnyVZ*socSadzba);
+    socRezim="osobitny"; socVZ=osobitnyVZ; socMes=socPoistneZVZ(osobitnyVZ, rokPlatnosti, S);
     socPoznamka="Príjem nepresiahol "+eur(hranica)+" — použije sa osobitný vymeriavací základ (mikroodvody).";
   } else {
     socRezim="standardny";
-    const vzHrubo=czd>0 ? r2(czd/koef/12) : 0;
+    const vzHrubo=czd>0 ? centNadol(czd/koef/12) : 0;
     socVZ=Math.min(Math.max(vzHrubo, minVZ), maxVZ);
-    socMes=r2(socVZ*socSadzba);
+    socMes=socPoistneZVZ(socVZ, rokPlatnosti, S);
     socPoznamka = vzHrubo<minVZ ? "Vypočítaný základ je nižší než minimum — platí sa z minima "+eur(minVZ)+"."
                 : (vzHrubo>maxVZ ? "Vypočítaný základ presiahol maximum — platí sa zo stropu "+eur(maxVZ)+"." : "");
   }
@@ -4370,7 +4414,7 @@ function odvodyPredpoved(rok){
   const zpTeraz=r2(+S.preddavokZP||0);
 
   return {
-    rok:+rok, rokPlatnosti, odKedy:rokPlatnosti+"-07-01",
+    rok:+rok, rokPlatnosti, odKedy:platnost.od, doKedy:platnost.do, odklad:platnost.odklad, zdroj,
     czd, prijmy:prijmyRozhodne,
     soc:{rezim:socRezim, vz:socVZ, mes:socMes, teraz:socTeraz, zmena:r2(socMes-socTeraz), poznamka:socPoznamka,
          hranica, oslobodenie, minVZ, maxVZ},
@@ -4398,13 +4442,24 @@ function odvodovePrahy(rok){
   // kópia toho istého pravidla by sa časom rozišla s prvou.
 
   // ── sociálne poistenie ──
-  const platiSoc=(+S.socOdvodyMes||0)>0;
+  // Kto platí, hlášku nedostane (spec 43.22). „Platí“ = nastavená suma, platba
+  // Sociálnej poisťovni od mesiaca vzniku alebo zapísaný mesiac vzniku — nie len
+  // nastavená suma: Roman platil z banky s nulou v nastaveniach a appka mu
+  // hlásila „vznikne vám povinnosť“ (spec 156.13).
+  const platiSoc=spMesacne(S).plati || !!S.socOdvodyOd;
   if(!platiSoc){
     const hranica=sadzbaFirmy("socHranicaPrijmu", +rok+1, S);
+    const oslobodenie=sadzbaFirmy("socOslobodenie", +rok+1, S);
+    const pl=socPlatnostVZ(rok);
+    const odDna=(pl.odklad ? "1. októbra " : "1. júla ")+(+rok+1);
     if(R.prijmy>hranica)
       out.push({typ:"prekroceny", k:"socPrekroceny", t:"Príjem presiahol "+eur(hranica),
-        d:"Od 1. júla "+(+rok+1)+" vám vznikne povinnosť platiť sociálne odvody vypočítané zo základu dane."});
-    else if(blizko(R.prijmy, hranica))
+        d:"Od "+odDna+" platíte sociálne poistenie vypočítané zo základu dane."});
+    else if(R.prijmy>oslobodenie)
+      out.push({typ:"prekroceny", k:"socMikro", t:"Príjem presiahol "+eur(oslobodenie),
+        d:"Od "+odDna+" vám vznikne povinné sociálne poistenie — z osobitného základu (mikroodvod "
+          +eur(socPoistneZVZ(sadzbaFirmy("socOsobitnyVZ", +rok+1, S), +rok+1, S))+" mesačne)."});
+    if(R.prijmy<=hranica && blizko(R.prijmy, hranica))
       out.push({typ:"blizko", k:"socBlizko", t:"K hranici pre sociálne odvody chýba "+eur(r2(hranica-R.prijmy)),
         d:"Nad "+eur(hranica)+" príjmu sa odvody počítajú zo základu dane namiesto paušálnych mikroodvodov."});
   }
@@ -4892,8 +4947,9 @@ function dePrognoza(rok){
   const zpRok = zpZapl.zdroj==="vypis"
     ? r2(zpDoteraz/poslednyMesiac*12)      // extrapolácia skutočne zaplateného
     : r2((+S.preddavokZP||0)*12);          // fallback: preddavok × 12
-  let socMesiacov=12; if(S.socOdvodyOd){ const fm=parseInt(String(S.socOdvodyOd).split("-")[1])||13; socMesiacov=Math.max(0,12-fm+1); }
-  const socRok=r2((+S.socOdvodyMes||0)*socMesiacov);
+  // SOCIÁLNE: zaplatené + predpoklad na zvyšné mesiace (spOdhadRok) — nie len
+  // nastavená suma × mesiace, ktorá pri nule v nastaveniach dávala 0 € (156.13).
+  const socRok=spOdhadRok(rok, S);
   const odvodyRok=r2(zpRok+socRok);
   // režim výdavkov: paušál (60 %, max 20 000 €) vs skutočné — po rokoch
   const pausalMozny = pausalMoznyVRoku(rok);
@@ -4968,15 +5024,21 @@ function calcDanRow(mesiacIdx, rok, S, opt){
   // Sociálne odvody rovnako ako zdravotné: SKUTOČNE zaplatené má prednosť pred
   // nastavením. Zdroj je ten istý ako v ročnom súhrne — klasifikované pohyby
   // z banky plus doklady —, takže sa mesiac a rok nemôžu rozísť (kap. 83).
-  const _spZapl=zaplateneOdvodyRok(mk, "sp");
-  const soc = _spZapl.pocet>0 ? _spZapl.suma : spPredpoklad(mesiacIdx, rok, S);
-  const vyslZaklad=r2(ciastkZaklad-zdrav);                // výsledný základ dane (znížený o skutočné ZP)
+  const soc = spMesiac(mesiacIdx, rok, S);
+  // Výsledný základ dane — znížený o zdravotné AJ sociálne poistenie. Sociálne
+  // tu chýbalo: mesačná daň vyšla o soc × sadzba vyššia (spec 156.13). Ročný
+  // súhrn (deRocnySuhrn) ho odpočítaval vždy.
+  const vyslZaklad=r2(ciastkZaklad-zdrav-soc);
   // efektívna ročná sadzba (progresia nad 100 000 € príjmov), bez NČZD — kap. 45.1
   const sadzba=danSadzbaEfektivna(rok);
   const dan=r2(Math.max(vyslZaklad,0)*sadzba);
   const odvodyDan=r2(zdrav+dan+soc);                      // skutočné odvody + daň
-  // Odložiť = skutočné (zdrav+daň+soc) − už zaplatené preddavky (ZP + daň)
-  const odlozit=r2(odvodyDan-preddavokZP-danPreddMes);
+  // Odložiť = skutočné (zdrav+daň+soc) − pravidelné platby (preddavok ZP,
+  // preddavok na daň, sociálne poistenie). Sociálne nemá ročné zúčtovanie —
+  // čo sa zaplatí (alebo pravidelne zaplatí), je konečné, rovnako ako preddavok
+  // ZP sa tu odpočíta aj predpokladaný. Bez toho appka v októbri 2026 kázala
+  // Romanovi odložiť aj 1 170,24 €, ktoré už z účtu odišli (spec 156.13).
+  const odlozit=r2(odvodyDan-preddavokZP-danPreddMes-soc);
   // Čistý príjem = fakturované mínus odvody a daň. Náklady sa zámerne
   // neodpočítavajú — väčšinu z nich tvoria odpisy, čo nie je odliv peňazí.
   // Všade, kde sa toto číslo zobrazuje, musí byť povedané, že je pred nákladmi;
@@ -16774,15 +16836,51 @@ function spPredpoklad(mesiacIdx, rok, S){
   const zNastaveni=+((S||{}).socOdvodyMes)||0;
   if(zNastaveni>0) return zNastaveni;
   // posledná známa zaplatená SP pred týmto mesiacom
+  return spPoslednaPlatba(mk).suma;
+}
+// Posledná platba Sociálnej poisťovni (poistné, nie penále — `klasifikujPohyb`)
+// pred mesiacom `predMk`, voliteľne nie skôr než `odMk`.
+function spPoslednaPlatba(predMk, odMk){
   let posledna=0, poslednyMk="";
   (firmaData.vypis||[]).forEach(t=>{
     const d=String(t.datum||"");
-    if(t.smer!=="vydaj" || d.slice(0,7)>=mk) return;
+    if(t.smer!=="vydaj" || d.slice(0,7)>=predMk || (odMk && d.slice(0,7)<odMk)) return;
     const kl=klasifikujPohyb(t);
     if(!kl || kl.druh!=="odvodSP") return;
     if(d>poslednyMk){ poslednyMk=d; posledna=r2(+t.suma||0); }
   });
-  return posledna;
+  return {suma:posledna, datum:poslednyMk};
+}
+// Platí sociálne poistenie a koľko mesačne (spec 156.13). Nastavenie má
+// prednosť; pri nule rozhoduje platba Sociálnej poisťovni od mesiaca vzniku.
+// Roman mal povinnosť od 10/2026, platil z banky a v nastaveniach nulu — kalendár
+// preto termín nevytvoril a prahy hlásili „vznikne vám povinnosť“.
+function spMesacne(S){
+  S=S||{};
+  const nast=+S.socOdvodyMes||0;
+  if(nast>0) return {plati:true, suma:nast, zdroj:"nastavenie"};
+  const od=String(S.socOdvodyOd||"");
+  if(!od) return {plati:false, suma:0, zdroj:""};
+  const p=spPoslednaPlatba("9999-12", od);
+  return p.suma>0 ? {plati:true, suma:p.suma, zdroj:"platba"} : {plati:false, suma:0, zdroj:""};
+}
+// Sociálne poistenie MESIACA: skutočne zaplatené, inak predpoklad. Jedno pravidlo
+// pre mesačný výpočet (calcDanRow) aj ročné odhady (spOdhadRok) — kap. 83.
+function spMesiac(mesiacIdx, rok, S){
+  const mk=rok+"-"+String(mesiacIdx+1).padStart(2,"0");
+  const _spZapl=zaplateneOdvodyRok(mk, "sp");
+  return _spZapl.pocet>0 ? _spZapl.suma : spPredpoklad(mesiacIdx, rok, S);
+}
+// Sociálne poistenie ROKA pre odhady (dePrognoza, prognozaRok). Dovtedy brali
+// len nastavenú sumu × mesiace a pri nule v nastaveniach (platba v banke)
+// počítali 0 € — odhad dane 2026 bol o 526,61 € vyšší (spec 156.13).
+// Uzavretý rok so sumou z podaného priznania (odvodyRoky) berie tú.
+function spOdhadRok(rok, S){
+  const Z=zaplateneOdvodyRok(String(rok), "sp");
+  if(Z.zdroj==="priznanie") return Z.suma;
+  let s=0;
+  for(let mi=0; mi<12; mi++) s+=spMesiac(mi, +rok, S);
+  return r2(s);
 }
 
 function kategoriaOvplyvnujeZaklad(x){
@@ -17572,11 +17670,35 @@ function rozpoznajOdvod(tx){
   for(const P of ODVOD_PROTISTRANY){
     if(P.re.test(proti)){
       const r=+String(tx.datum||"").slice(0,4)||null;
-      return {kategoria:P.kategoria, obdobie:String(tx.datum||"").slice(0,7), zaRok:r,
-              preco:"protistrana \u201e"+String(tx.proti||"").slice(0,30)+"\u201c"};
+      if(P.odvod==="sp" && jeSpPenale(tx))
+        return {kategoria:"neovplyv", obdobie:String(tx.datum||"").slice(0,7), zaRok:r,
+                preco:"Soci\u00e1lna pois\u0165ov\u0148a \u00b7 KS 1118 \u2014 pen\u00e1le alebo pokuta, nie je da\u0148ov\u00fdm v\u00fddavkom"};
+      const obdSS = P.odvod==="sp" ? spObdobieZoSS(tx) : "";
+      return {kategoria:P.kategoria, obdobie:obdSS || String(tx.datum||"").slice(0,7), zaRok:r,
+              preco:"protistrana \u201e"+String(tx.proti||"").slice(0,30)+"\u201c"+(obdSS?" \u00b7 \u0160S "+String(tx.ss||"").trim()+" \u2192 "+obdSS:"")};
     }
   }
   return null;
+}
+// Soci\u00e1lna pois\u0165ov\u0148a: kon\u0161tantn\u00fd symbol 1118 = pokuta alebo pen\u00e1le na z\u00e1klade
+// rozhodnutia (3118 poistn\u00e9, 3114 poistn\u00e9 na z\u00e1klade rozhodnutia) \u2014 ozn\u00e1menie
+// o vzniku poistenia SZ\u010cO. Pen\u00e1le nie je poistn\u00e9 ani da\u0148ov\u00fd v\u00fddavok.
+function jeSpPenale(tx){ return String((tx||{}).ks||"").trim().replace(/^0+/,"")==="1118"; }
+// Mesiac, ZA KTOR\u00dd je poistn\u00e9, zo \u0161pecifick\u00e9ho symbolu. MMRRRR alebo RRRRMM;
+// \u0160S 88 (trval\u00fd pr\u00edkaz) = platba od 9. d\u0148a mesiaca do 8. d\u0148a nasleduj\u00faceho
+// patr\u00ed k tomu mesiacu. Bez \u0160S pr\u00e1zdny re\u0165azec \u2014 rozhodne mesiac \u00fahrady.
+function spObdobieZoSS(tx){
+  const ss=String((tx||{}).ss||"").trim(), d=String((tx||{}).datum||"");
+  let m=ss.match(/^(0[1-9]|1[0-2])(20\d{2})$/);
+  if(m) return m[2]+"-"+m[1];
+  m=ss.match(/^(20\d{2})(0[1-9]|1[0-2])$/);
+  if(m) return m[1]+"-"+m[2];
+  if(ss==="88" && /^\d{4}-\d{2}-\d{2}/.test(d)){
+    const y=+d.slice(0,4), mo=+d.slice(5,7), den=+d.slice(8,10);
+    if(den>8) return d.slice(0,7);
+    return mo===1 ? (y-1)+"-12" : y+"-"+String(mo-1).padStart(2,"0");
+  }
+  return "";
 }
 
 // Dokedy máme bankové dáta. Rozlišuje „platba nie je" od „výpis ešte nemám" —
@@ -22885,9 +23007,9 @@ function prognozaRok(rok){
   const vydavkyRealRok=r2((firmaData.vydavky||[]).filter(x=>vydavokVRoku(x, rok)).reduce((a,x)=>a+vydavokDoZakladu(x),0)+vydavkyDphInehoObdobia(String(rok)));
   const vydavkyRok=r2(vydavkyRealRok+odpisRok);
   const zdravRok=r2(zdravSkut*faktor);
-  let socMesiacov=0;
-  if(S.socOdvodyOd){ const fm=parseInt(String(S.socOdvodyOd).split("-")[1])||13; socMesiacov=Math.max(0,12-fm+1); }
-  const socRok=r2((+S.socOdvodyMes||0)*socMesiacov);
+  // Sociálne tým istým pravidlom ako dePrognoza a mesačný výpočet (spec 156.13);
+  // `socSkut` je ten istý súčet cez calcDanRow — jedno pravidlo, dva súčty.
+  const socRok=spOdhadRok(+rok, S);
   const preddavkyZPRok=r2((+S.preddavokZP||0)*12);
   const preddavkyDanRok=r2(preddavkyDanSkut*faktor);
   const ciastkovyZaklad=r2(prijmyRok-vydavkyRok);
@@ -24923,9 +25045,12 @@ function odvodyPredpovedHtml(rok){
   }[O.soc.rezim];
 
   return `<div class="card" style="margin-bottom:14px">
-    <div class="ch">Odvody od 1. júla ${O.rokPlatnosti}</div>
+    <div class="ch">Odvody od ${O.odklad?"1. októbra":"1. júla"} ${O.rokPlatnosti}</div>
     <div class="csub" style="margin-bottom:12px">
       Vymeriavajú sa z priznania za ${O.rok}, nie z toho, čo zarobíte budúci rok.
+      ${O.zdroj==="priznanie"
+        ? "Počítané z <b>podaného priznania</b> (príjmy "+eur(O.prijmy)+", základ a zaplatené poistné "+eur(O.czd)+")."
+        : "Počítané z evidencie v appke — po načítaní podaného priznania sa spresní."}
       ${O.predbezne
         ? "<b>Rok ešte beží</b>, takže čísla porastú — berte ich ako priebežný odhad."
         : "Rok je uzavretý, takže ak sa priznanie nezmení, toto sú konečné čísla."}
@@ -30460,6 +30585,9 @@ function klasifikujPohyb(tx){
   // Vzory odvodov sú spoločné s tvorbou výdavku — dva zoznamy sa rozišli
   // a nedoplatok cez jeden prešiel a cez druhý nie (viď ODVODY_VZORY).
   const VZ=odvodVzorPre(s);
+  // Penále a pokuta Sociálnej poisťovne (KS 1118) nie sú poistné: nie sú daňovým
+  // výdavkom a nesmú sa započítať do zaplateného poistného (spec 156.13).
+  if(VZ && VZ.druh==="odvodSP" && jeSpPenale(tx)) return {druh:"penaleSP", kategoria:"neovplyv", istota:"ista", preco:"Sociálna poisťovňa · KS 1118 — penále alebo pokuta"};
   if(VZ) return {druh:VZ.druh, kategoria:VZ.druh, istota:"ista", preco:VZ.preco};
   if(/union\.sk|pillow|allianz|kooperativa|axa|generali|uniqa|poist/.test(s)) return {druh:"poistenie", kategoria:"prevadzka", istota:"mozna", preco:"poistenie"};
   const mojePriezvisko=((firmaData.meta&&firmaData.meta.nazov)||"").toLowerCase();
@@ -41828,9 +41956,14 @@ function danoveTerminy(dnes, s, mesiacovDopredu){
     }
     // Zdravotné odvody — do 8. za predošlý mesiac
     list.push({d:posunNaPracovnyDen(new Date(rok,mesiac,8)), typ:"zp", nazov:"Zdravotné odvody", detail:(s.preddavokZP?eur(+s.preddavokZP):"preddavok ZP"), auto:true, obd:kodMes, ocakavane:+s.preddavokZP||0});
-    // Sociálne odvody — do 8. (ak ich platí)
-    if(+s.socOdvodyMes>0){
-      list.push({d:posunNaPracovnyDen(new Date(rok,mesiac,8)), typ:"sp", nazov:"Sociálne odvody", detail:eur(+s.socOdvodyMes), auto:true, obd:kodMes, ocakavane:+s.socOdvodyMes||0});
+    // Sociálne odvody — do 8. za predošlý mesiac, ak ich platí, a až za mesiace
+    // od vzniku poistenia (socOdvodyOd). Suma z nastavenia, inak z poslednej
+    // platby (spMesacne). Predtým: bez sumy v nastaveniach žiadny termín, a so
+    // sumou aj termín 8. 10. za september, hoci poistenie vzniklo 1. 10. — ten
+    // si podľa okna párovania zobral platbu za október (spec 156.13).
+    const SP=spMesacne(s);
+    if(SP.plati && (!s.socOdvodyOd || kodMes>=String(s.socOdvodyOd))){
+      list.push({d:posunNaPracovnyDen(new Date(rok,mesiac,8)), typ:"sp", nazov:"Sociálne odvody", detail:eur(SP.suma), auto:true, obd:kodMes, ocakavane:SP.suma});
     }
     // Preddavok na daň z príjmov — štvrťročne do konca mesiaca (ak platí preddavky)
     if(+s.preddavokDanQ>0 && [2,5,8,11].includes(mesiac)){
@@ -42144,7 +42277,7 @@ function stavStitok(o, styl){
 // Názvy klasifikácií boli natvrdo na dvoch miestach (Banka, Cashflow) —
 // tá istá mapa dvakrát je presne to, čo sa vždy rozíde.
 const KLAS_NAZVY={dph:"DPH", danPrijem:"daň", odvodZP:"odvody ZP",
-                  odvodSP:"odvody SP", poistenie:"poistenie",
+                  odvodSP:"odvody SP", penaleSP:"penále SP", poistenie:"poistenie",
                   transakcnaDan:"transakčná daň", poplatokBanky:"poplatok banky",
                   urokDebetny:"debetný úrok", danZUroku:"daň z úroku"};
 function pohybStav(tx){

@@ -87,7 +87,20 @@ const SADZBY = {
   // pre tých, čo nedosiahli hranicu príjmu.
   socSadzba:      {n:"Sadzba sociálneho poistenia SZČO", sk:"odvody", mienaSa:"zriedka", overenost:"zdroj", kontrola:"2026-07-31",
     h:[{od:"2025-01-01", v:0.3315, zdroj:"33,15 % — súčet sadzieb všetkých fondov SZČO (Sociálna poisťovňa)"}]},
-  socMinVZ:       {n:"Min. mesačný vymeriavací základ SP", sk:"odvody", mienaSa:"rocne", overenost:"zdroj", kontrola:"2026-07-31",
+  // Poistné sa NEPOČÍTA ako 33,15 % z celku. Sociálna poisťovňa ráta každý fond
+  // zvlášť a každý zaokrúhľuje na eurocent nadol (oznámenie o vzniku poistenia
+  // 23. 9. 2026: 155,32 + 635,43 + 211,81 + 167,68 = 1 170,24 € z VZ 3 530,17 €;
+  // 33,15 % z celku dá 1 170,25 €). Súčet štyroch sadzieb = socSadzba — stráži
+  // test_soc_poistenie. Spec 156.13.
+  socSadzbaNemocenske:{n:"Sadzba nemocenského poistenia SZČO", sk:"odvody", mienaSa:"zriedka", overenost:"zdroj", kontrola:"2026-10-15",
+    h:[{od:"2025-01-01", v:0.044, zdroj:"4,4 % — oznámenie Sociálnej poisťovne SZČO (rozpis poistného)"}]},
+  socSadzbaStarobne:{n:"Sadzba starobného poistenia SZČO (vrátane príspevkov na SDS)", sk:"odvody", mienaSa:"zriedka", overenost:"zdroj", kontrola:"2026-10-15",
+    h:[{od:"2025-01-01", v:0.18, zdroj:"18 % — oznámenie Sociálnej poisťovne SZČO (rozpis poistného)"}]},
+  socSadzbaInvalidne:{n:"Sadzba invalidného poistenia SZČO", sk:"odvody", mienaSa:"zriedka", overenost:"zdroj", kontrola:"2026-10-15",
+    h:[{od:"2025-01-01", v:0.06, zdroj:"6 % — oznámenie Sociálnej poisťovne SZČO (rozpis poistného)"}]},
+  socSadzbaRFS:   {n:"Sadzba do rezervného fondu solidarity SZČO", sk:"odvody", mienaSa:"zriedka", overenost:"zdroj", kontrola:"2026-10-15",
+    h:[{od:"2025-01-01", v:0.0475, zdroj:"4,75 % — oznámenie Sociálnej poisťovne SZČO (rozpis poistného)"}]},
+  socMinVZ:      {n:"Min. mesačný vymeriavací základ SP", sk:"odvody", mienaSa:"rocne", overenost:"zdroj", kontrola:"2026-07-31",
     h:[{od:"2025-01-01", v:715, zdroj:"50 % priemernej mzdy za 2023"},
        {od:"2026-01-01", v:914.40, zdroj:"60 % priemernej mzdy za 2024 (1 524 €) — socpoist.sk, tabuľky od 1. 1. 2026"}]},
   socMaxVZ:       {n:"Max. mesačný vymeriavací základ SP", sk:"odvody", mienaSa:"rocne", overenost:"zdroj", kontrola:"2026-07-31",
