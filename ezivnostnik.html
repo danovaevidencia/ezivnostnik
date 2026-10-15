@@ -2276,7 +2276,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.10.15-SW";  // sociálne poistenie podľa Sociálnej poisťovne (spec 156.13).js, nástroje čítania, demo, skratka (spec 155)
+const APP_VERZIA = "2026.10.15-SX";  // kontrola pred podaním KV: číslo faktúry raz a blokujúce, odsúhlasenie len nespárované príjmy
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -35166,11 +35166,14 @@ function kontrolaPredPodanim(mk, typ){
     if((+dk.dan)>0 && (+dk.zaklad)<=0) chyby.push({text:`Doklad „${dk.cislo||dk.partner||"—"}" má DPH ${eur(dk.dan)}, ale nulový/záporný základ.`, detail:"Základ dane musí byť kladný."});
     // ── ČÍSLO FAKTÚRY: schéma predpisuje `\S{1,32}` a atribút je povinný ──
     // Súhrnné oddiely (B.3.1 bločky, D.1/D.2 tržby) číslo nemajú a nepotrebujú.
+    // Obe chyby BLOKUJÚ — portál súbor odmietne. Chýbajúce číslo sa hlási len TU;
+    // do 15. 10. 2026 ho hlásila aj kontrola POVINNE nižšie a ten istý doklad
+    // bol v okne dvakrát, raz ako „povinný údaj“, raz ako „chyba“.
     if(!["B31","D1","D2"].includes(dk.oddiel)){
       const c=String(dk.cislo||"").trim();
-      if(!c) chyby.push({text:`Doklad „${dk.partner||"—"}" (${eur(dk.zaklad)}) nemá číslo faktúry.`,
-        detail:"V oddiele "+dk.oddiel+" je poradové číslo faktúry povinné — bez neho výkaz neprejde validáciou a FS ho nespáruje s dokladom protistrany.", zdrojId:dk.zdrojId||""});
-      else if(c.length>32 || /\s/.test(c)) chyby.push({text:`Doklad „${dk.partner||c}" má číslo, ktoré schéma nepripúšťa: ${c.length>40?c.slice(0,40)+"…":c}`,
+      if(!c) chyby.push({blokuje:true, text:`Doklad „${dk.partner||"—"}“ (${eur(dk.zaklad)}) nemá číslo faktúry.`,
+        detail:"V oddiele "+dk.oddiel+" je číslo faktúry povinné — portál Finančnej správy výkaz bez neho odmietne. Opíšte ho z faktúry dodávateľa.", zdrojId:dk.zdrojId||""});
+      else if(c.length>32 || /\s/.test(c)) chyby.push({blokuje:true, text:`Doklad „${dk.partner||c}“ má číslo, ktoré schéma nepripúšťa: ${c.length>40?c.slice(0,40)+"…":c}`,
         detail:"Poradové číslo faktúry smie mať najviac 32 znakov a nesmie obsahovať medzery (\\S{1,32}). Portál FS taký výkaz odmietne.", zdrojId:dk.zdrojId||""});
     }
   });
@@ -35188,6 +35191,7 @@ function kontrolaPredPodanim(mk, typ){
   const NAZOV_POLA={cislo:"číslo dokladu", datum:"dátum", opravujeDoklad:"číslo opravovanej faktúry"};
   doklady.forEach(dk=>{
     (POVINNE[dk.oddiel]||[]).forEach(pole=>{
+      if(pole==="cislo") return;   // hlási kontrola ČÍSLO FAKTÚRY vyššie (aj s limitom schémy)
       if(String(dk[pole]||"").trim()) return;
       chyby.push({
         blokuje:true,
@@ -35326,14 +35330,20 @@ function kontrolaPredPodanim(mk, typ){
   if(typ==="dp"){ const v=dphPrechodVeta(mk); if(v) podozrenia.push({text:v, detail:"Appka mesiac nerozdelila: doklady z dní pred registráciou sú v priznaní bez odpočtu, hlavička je za platiteľa."}); }
 
   // ── ODSÚHLASENIE S REALITOU ──
-  // príjmy v evidencii vs. čo prišlo na účet (ak je banka)
+  // Príjem na účte bez faktúry = možno chýba faktúra (alebo tržba na výstupe).
+  // Do 15. 10. 2026 sa tu porovnávalo „fakturované v mesiaci“ so VŠETKÝM, čo
+  // v mesiaci prišlo na účet — vrátane úhrad faktúr z minulých mesiacov,
+  // vkladov, ignorovaných a skrytých pohybov. Rozdiel tak bol z veľkej
+  // časti len časový posun a nález sa dal len odkliknúť. Teraz sa hlásia iba
+  // príjmy, ktoré nie sú vybavené (bez priradenej faktúry, bez klasifikácie,
+  // neignorované) — tie sú presne to, čo môže chýbať vo výkaze.
   if((d.vypis||[]).length){
-    const prijmyEvid=(d.faktury||[]).filter(f=>faktObdobie(f)===mk).reduce((a,f)=>a+(+f.spolu||0),0);
-    const prijmyBanka=(d.vypis||[]).filter(t=>t.smer==="prijem"&&String(t.datum||"").slice(0,7)===mk).reduce((a,t)=>a+(+t.suma||0),0);
-    if(prijmyEvid>0 && prijmyBanka>0){
-      const rozdiel=Math.abs(prijmyEvid-prijmyBanka);
-      if(rozdiel > prijmyEvid*0.15 && rozdiel>50) odsuhlasenie.push({text:`Fakturované ${eur(prijmyEvid)} vs. prišlo na účet ${eur(prijmyBanka)} (rozdiel ${eur(rozdiel)}).`, detail:"Časový posun úhrad je bežný, ale skontroluj, či ti nechýba faktúra alebo platba."});
-    }
+    const otvorene=(d.vypis||[]).filter(t=>t.smer==="prijem" && String(t.datum||"").slice(0,7)===mk
+      && !pohybStav(t).spar);
+    const suma=r2(otvorene.reduce((a,t)=>a+(+t.suma||0),0));
+    if(otvorene.length && suma>50) odsuhlasenie.push({
+      text:`${otvorene.length} ${otvorene.length===1?"príjem":(otvorene.length<5?"príjmy":"príjmov")} na účte v tomto období (spolu ${eur(suma)}) ${otvorene.length===1?"nemá":"nemajú"} priradenú faktúru.`,
+      detail:"Ak ide o úhradu faktúry, priraďte ju v Banke. Ak nie (vklad, vrátenie, súkromná platba), označte to tam — inak tu nález ostane."});
   }
 
   return {chyby, podozrenia, odsuhlasenie};
