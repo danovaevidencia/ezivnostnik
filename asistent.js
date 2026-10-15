@@ -19,7 +19,9 @@
 
 const ASISTENT_MAX_KOL = 8;                 // 155.3.1 — strop aj na serveri
 const ASISTENT_RIADKOV = 15;                // preModel: najviac riadkov (155.3.4)
-const ASISTENT_FAZA = 1;                    // F1 — čítanie a ukáž
+// F2 od 15. 10. 2026 — modelu idú len AKTÍVNE nástroje fázy ≤ 2 (register):
+// výkaz → faktúra, protokol, rozdelenie. Ostatné F2 ostávajú vypnuté (A4).
+const ASISTENT_FAZA = 2;
 
 // Demo (O2): nahraté odpovede — model sa nevolá, nástroje bežia naostro nad
 // demo firmou. Čísla sú len na karte (R2), text je všeobecný.
@@ -231,13 +233,66 @@ const ASISTENT_VYKONAJ = {
       if (!asVMesiacoch(P.O, m)) return;
       if (v.zakazka && !hladajZhoda(v.zakazka, w.zakazka, w.projekt)) return;
       const fi = vykazFakturaIdx(w), f = fi >= 0 ? (firmaData.faktury || [])[fi] : null;
-      riadky.push({ idx, id: w.id || null, mesiac: m, stav: vykazStav(w), cld: r2(vykazClovekodni(w)), odberatel: (vykazOdberatel(w) || {}).nazov || "", zakazka: w.zakazka || "", projekt: w.projekt || "", faktura: f ? (f.cislo || "") : null });
+      // od–do z jedného pravidla (vykazObdobieRozsah) — bez nich model obdobie
+      // HÁDAL z mesiaca („je to celý október“, 15. 10. 2026; R1)
+      const rz = vykazObdobieRozsah(w);
+      riadky.push({ idx, kluc: w.id || String(idx), mesiac: m, od: rz.od || null, do: rz.do || null, stav: vykazStav(w), cld: r2(vykazClovekodni(w)), odberatel: (vykazOdberatel(w) || {}).nazov || "", zakazka: w.zakazka || "", projekt: w.projekt || "", faktura: f ? (f.cislo || "") : null, obdobieTxt: vykazObdobieKratko(w) });
     });
-    riadky.sort((a, b) => String(b.mesiac).localeCompare(String(a.mesiac)));
+    riadky.sort((a, b) => String(b.od || b.mesiac).localeCompare(String(a.od || a.mesiac)));
     const o = asOrez(riadky);
-    const preModel = { pocet: riadky.length, riadky: o.riadky, orezane: o.orezane };
-    return asVysledok(preModel, { nazov: "Výkazy" + (P.O ? " · " + P.O.nazov : ""), riadky: riadky.map(r => [r.mesiac, r.zakazka || r.projekt, r.odberatel, String(r.cld).replace(".", ","), r.stav, r.faktura || "—"]),
-      hlavicka: ["Mesiac", "Zákazka", "Odberateľ", "Čld", "Stav", "Faktúra"], akcie: riadky.slice(0, 5).map(r => ({ l: "Otvoriť výkaz " + r.mesiac, fn: () => editVykaz(r.idx) })) });
+    const preModel = { pocet: riadky.length, riadky: o.riadky.map(r => ({ kluc: r.kluc, mesiac: r.mesiac, od: r.od, do: r.do, stav: r.stav, cld: r.cld, odberatel: r.odberatel, zakazka: r.zakazka, projekt: r.projekt, faktura: r.faktura })), orezane: o.orezane };
+    return asVysledok(preModel, { nazov: "Výkazy" + (P.O ? " · " + P.O.nazov : ""), riadky: riadky.map(r => [r.obdobieTxt, r.zakazka || r.projekt, r.odberatel, String(r.cld).replace(".", ","), r.stav, r.faktura || "—"]),
+      hlavicka: ["Obdobie", "Zákazka", "Odberateľ", "Čld", "Stav", "Faktúra"], akcie: riadky.slice(0, 5).map(r => ({ l: "Otvoriť výkaz " + r.obdobieTxt, fn: () => editVykaz(r.idx) })) });
+  },
+
+  // ── F2: výkaz → faktúra, protokol, rozdelenie (15. 10. 2026) ──────────────
+  // Návrh otvorí editor faktúry (uloží človek); protokol a rozdelenie sú karta
+  // s ukážkou a tlačidlom (R4). Zápis robí tlačidlo — funkcie asKlik* mimo
+  // tela nástroja (test_asistent_register kontroluje telo, 155.4.4).
+  faktura_z_vykazu(v) {
+    v = v || {};
+    const i = asNajdiVykaz(v.vykaz); if (i < 0) return asVysledok({ chyba: "výkaz sa nenašiel — najprv nástroj vykazy (kluc)" });
+    if (!mozemPisat("faktury")) return asVysledok({ dostupne: false, dovod: "nemáte právo vystavovať faktúry v tejto firme" });
+    const w = firmaData.vykazy[i], uz = vykazFakturaPrepojena(w);
+    if (uz) return asVysledok({ otvorene: false, uzVyfakturovany: uz.cislo || "", dovod: "k výkazu už je faktúra — druhú nevystavuj, opýtaj sa človeka" },
+      { nazov: "Výkaz " + vykazObdobieKratko(w) + " už má faktúru " + (uz.cislo || ""), akcie: [{ l: "Otvoriť faktúru " + (uz.cislo || ""), fn: () => asKlikOtvorFakturu(uz) }] });
+    const sadzba = vykazSadzba(w);
+    if (!sadzba) return asVysledok({ otvorene: false, chyba: "zákazka nemá sadzbu za človekodeň — doplní sa v zákazkovom liste (Dokumenty) alebo v Nastaveniach" });
+    const k = vykazFakturaPredloha(w);
+    editFaktura(null, k);
+    const cld = r2(vykazClovekodni(w));
+    return asVysledok({ otvorene: "editor faktúry — uloží človek", vykaz: w.id || String(i), obdobie: vykazObdobieKratko(w), clovekodni: cld, sadzba, dodanie: k.dodanie || null },
+      { nazov: "Faktúra z výkazu · " + vykazObdobieKratko(w), suhrn: [["Človekodní", cldTxt(cld)], ["Sadzba", eur(sadzba)], ["Dodanie", k.dodanie ? fmtDatum(k.dodanie) : "—"], ["Uloží", "vy v otvorenom editore"]] });
+  },
+
+  protokol(v) {
+    v = v || {};
+    const i = asNajdiVykaz(v.vykaz); if (i < 0) return asVysledok({ chyba: "výkaz sa nenašiel — najprv nástroj vykazy (kluc)" });
+    const w = firmaData.vykazy[i], kluc = w.id || String(i);
+    const Z = vykazProtokolZaznam(w);
+    if (Z.chyba) return asVysledok({ chyba: Z.chyba });
+    const p = Z.p;
+    const uz = (firmaData.protokoly || []).some(x => x && x.cislo && x.cislo === p.cislo);
+    return asVysledok({ vykaz: kluc, cislo: p.cislo, obdobie: p.obdobie, clovekodni: p.dni, sadzba: p.tarifa, suma: p.suma, uzZapisany: uz, zapise: "človek tlačidlom na karte" },
+      { nazov: "Akceptačný protokol · " + (p.obdobie || ""),
+        suhrn: [["Číslo", p.cislo || "—"], ["Človekodní", cldTxt(p.dni)], ["Sadzba", p.tarifa ? eur(p.tarifa) : "chýba"], ["Hodnota bez DPH", eur(p.suma)], ["Objednávateľ", p.objednavatel || "—"]]
+          .concat(uz ? [["Pozor", "protokol s týmto číslom už je zapísaný"]] : []),
+        akcie: [{ l: uz ? "Zapísať znova" : "Zapísať protokol", fn: () => asKlikProtokol(kluc) }, { l: "↧ Protokol (Word)", fn: () => asKlikProtokolWord(kluc) }] });
+  },
+
+  rozdel_vykaz(v) {
+    v = v || {};
+    const i = asNajdiVykaz(v.vykaz); if (i < 0) return asVysledok({ chyba: "výkaz sa nenašiel — najprv nástroj vykazy (kluc)" });
+    const w = firmaData.vykazy[i], kluc = w.id || String(i);
+    const Z = vykazRozdel(w, v.do);
+    if (Z.chyba) return asVysledok({ chyba: Z.chyba });
+    const cast = x => x ? { obdobie: x.obdobie, od: x.od, do: x.do, dni: x.dni, clovekodni: r2(x.cld) } : null;
+    return asVysledok({ vykaz: kluc, prva: cast(Z.prva), druha: cast(Z.druha), odoslany: Z.odoslany, rozdeli: "človek tlačidlom na karte" },
+      { nazov: (Z.druha ? "Rozdeliť výkaz k " : "Zúžiť obdobie výkazu do ") + fmtDatum(Z.datum),
+        riadky: [[Z.prva.obdobie, cldTxt(Z.prva.cld), "pôvodný výkaz"]].concat(Z.druha ? [[Z.druha.obdobie, cldTxt(Z.druha.cld), "nový výkaz"]] : []),
+        hlavicka: ["Obdobie", "Čld", ""],
+        suhrn: Z.odoslany ? [["Pozor", "protokol za celé obdobie už odišiel odberateľovi — pošlite mu nový"]] : [],
+        akcie: [{ l: Z.druha ? "✂ Rozdeliť výkaz" : "Zúžiť obdobie", fn: () => asKlikRozdel(kluc, Z.datum) }] });
   },
 
   odberatelia(v) {
@@ -330,6 +385,57 @@ function asSpustAkciu(fn) {
   } catch (e) { console.error("asistent — akcia karty:", e); alert("Akciu sa nepodarilo spustiť: " + (e && e.message || e)); }
 }
 
+// Výkaz podľa kľúča z nástroja vykazy: id výkazu, inak poradie (staršie bez id).
+function asNajdiVykaz(kluc) {
+  const V = firmaData.vykazy || [], k = String(kluc == null ? "" : kluc).trim();
+  if (!k) return -1;
+  const j = V.findIndex(w => w && w.id === k); if (j >= 0) return j;
+  return /^\d+$/.test(k) && V[+k] ? +k : -1;
+}
+// ── tlačidlá kariet F2 (klik človeka, R4) — mimo tela nástrojov ─────────────
+function asKlikOtvorFakturu(f) { const i = (firmaData.faktury || []).indexOf(f); if (i >= 0) editFaktura(i); }
+function asKlikProtokolWord(kluc) { const i = asNajdiVykaz(kluc); if (i < 0) { alert("Výkaz sa nenašiel."); return; } exportProtokolDocx(i); }
+function asKlikProtokol(kluc) {
+  const i = asNajdiVykaz(kluc); if (i < 0) { alert("Výkaz sa nenašiel."); return; }
+  const Z = vykazProtokolZapis(i); if (!Z) return;
+  asPridaj(asKartaHtml({ nazov: "✓ Protokol zapísaný", suhrn: [["Číslo", Z.p.cislo || "—"], ["Človekodní", cldTxt(Z.p.dni)], ["Hodnota bez DPH", eur(Z.p.suma)]],
+    akcie: [{ l: "↧ Protokol (Word)", fn: () => asKlikProtokolWord(kluc) }] }), "asKarta");
+}
+function asKlikRozdel(kluc, datum) {
+  const i = asNajdiVykaz(kluc); if (i < 0) { alert("Výkaz sa nenašiel."); return; }
+  const Z = vykazRozdelUloz(i, datum); if (!Z) return;
+  const k1 = Z.prva.id || String(i);
+  // Ďalší krok ponúkne karta (bez modelu): faktúra a protokol za prvú časť.
+  asPridaj(asKartaHtml({ nazov: "✓ Výkaz " + (Z.druha ? "rozdelený" : "zúžený"),
+    suhrn: [["Výkaz", Z.prva.obdobie + " · " + cldTxt(Z.prva.cld) + " čld"]].concat(Z.druha ? [["Nový výkaz", Z.druha.obdobie + " · " + cldTxt(Z.druha.cld) + " čld"]] : []),
+    akcie: [{ l: "🧾 Faktúra za " + vykazObdobieKratko(Z.prva), fn: () => asKlikFaktura(k1) }, { l: "Protokol za " + vykazObdobieKratko(Z.prva), fn: () => asKlikProtokolNahlad(k1) }] }), "asKarta");
+}
+function asKlikFaktura(kluc) { const i = asNajdiVykaz(kluc); if (i < 0) { alert("Výkaz sa nenašiel."); return; } vykazVystavFakturu(i); }
+function asKlikProtokolNahlad(kluc) { const out = ASISTENT_VYKONAJ.protokol({ vykaz: kluc }); if (out && out.preKartu) asPridaj(asKartaHtml(out.preKartu), "asKarta"); else asSprava(String((out && out.preModel && out.preModel.chyba) || "Protokol sa nedá pripraviť."), "chyba"); }
+
+// ── kontext obrazovky (15. 10. 2026) — kde v appke človek je, keď píše vetu.
+// Ide pri KAŽDEJ vete ako blok pred ňou (nie do prvej správy: tá je predpona
+// cache a meniť ju v polovici rozhovoru by cache zahodilo). Len modul a
+// označenie otvoreného záznamu — obsah si model vyžiada nástrojom (zásady 1.26).
+function asObrazovka() {
+  const m = (typeof modulNaObrazovke === "function") ? modulNaObrazovke() : null;
+  if (!m) return null;
+  const o = { modul: m, nazov: (APPS[m] || {}).n || m };
+  try {
+    const E = (typeof _vykazEdit !== "undefined") ? _vykazEdit : null;
+    if (E && !E.nova && E.idx != null && document.querySelector(".modal.on")) {
+      const w = (firmaData.vykazy || [])[E.idx]; if (w) o.zaznam = { typ: "vykaz", kluc: w.id || String(E.idx) };
+    }
+  } catch (_) {}
+  return o;
+}
+function asKdeAktualizuj() {
+  const el = document.getElementById("asKde"); if (!el) return;
+  const o = demoMode ? null : asObrazovka();
+  el.style.display = o ? "" : "none";
+  el.textContent = o ? "V module " + o.nazov + (o.zaznam ? " · otvorený výkaz" : "") + " — otázky sa môžu týkať toho, čo tu vidíte." : "";
+}
+
 // ── kontext pre model (155.3.3) — bez mien partnerov a súm ──────────────────
 function asKontext() {
   const plan = aktualnyPlan();
@@ -353,6 +459,7 @@ const ASISTENT_CSS = `
 #asistent .asHlava b{font-size:15px}
 #asistent .asHlava .sp{flex:1}
 #asistent .asX{border:0;background:transparent;font-size:20px;cursor:pointer;color:var(--ink-soft);padding:2px 6px}
+#asistent .asKde{padding:6px 12px;font-size:12px;line-height:1.35;color:var(--ink-soft);background:var(--paper);border-bottom:1px solid var(--line-soft)}
 #asistent .asTelo{flex:1;overflow:auto;display:flex;flex-direction:column}
 #asistent .asLog{padding:10px 12px;display:flex;flex-direction:column;gap:8px}
 #asistent .asLog:empty{display:none}
@@ -394,6 +501,7 @@ function asVytvor() {
     <div class="asHlava"><b>Asistent</b><span class="sp"></span>
       <button class="asNova" id="asNova" onclick="ASISTENT.nova()" title="Začať novú konverzáciu" style="display:none">Nová</button>
       <button class="asX" onclick="ASISTENT.zavri()" title="Zavrieť" aria-label="Zavrieť asistenta">✕</button></div>
+    <div class="asKde" id="asKde" style="display:none"></div>
     <div class="asTelo" id="asTelo" data-scroll="asTelo">
       <div class="asUvod" id="asUvod">
         <h3>Čo pre vás mám nájsť?</h3>
@@ -469,6 +577,9 @@ function asNavrhySkupiny() {
   const ma = m => { try { return modulPovolenyPreModul(m); } catch (_) { return true; } };
   const platca = (() => { try { return !!dphRegistracia(); } catch (_) { return false; } })();
   const S = [];
+  // Otvorené z modulu Výkazy (15. 10. 2026): najprv to, čo sa tam robí.
+  const obr = asObrazovka();
+  if (obr && obr.modul === "vykazy" && ma("vykazy")) S.push({ n: "K výkazom", v: [{ t: "Vystav faktúru k poslednému výkazu" }, { t: "Priprav akceptačný protokol k poslednému výkazu" }, { t: "Rozdeľ posledný výkaz k 15. dňu mesiaca" }] });
   const teraz = [];
   try { const n = (zbierNotifikacie() || []).length; if (n) teraz.push({ t: "Čo mám teraz vybaviť?", p: n === 1 ? "1 upozornenie" : n + (n < 5 ? " upozornenia" : " upozornení") }); } catch (_) {}
   try { const T = danoveTerminy(new Date(), firmaData.settings || {}, 1) || []; if (T[0]) teraz.push({ t: "Kedy mám najbližší termín?", p: String(T[0].nazov || "") + (T[0].d instanceof Date ? " · " + T[0].d.getDate() + ". " + (T[0].d.getMonth() + 1) + "." : "") }); } catch (_) {}
@@ -529,7 +640,8 @@ async function asBehCloud(veta) {
     catch (e) { console.error("asistent — register:", e); asSprava("Register nástrojov sa nenačítal — skúste o chvíľu.", "chyba"); return; }
   }
   _as.vetaId = asUuid(); _as.kolo = 1;
-  _as.historia.push({ role: "user", content: veta });
+  const obr = asObrazovka();
+  _as.historia.push({ role: "user", content: obr ? [{ type: "text", text: "OBRAZOVKA " + JSON.stringify(obr) }, { type: "text", text: veta }] : veta });
   const cakam = asSprava("…", "on");
   try {
     while (_as.kolo <= ASISTENT_MAX_KOL) {
@@ -575,7 +687,7 @@ const ASISTENT = {
     const el = asVytvor();
     el.classList.add("on"); _as.otvoreny = true;
     asPodlaKlavesnice();
-    asNavrhy(); asPoznamka();
+    asKdeAktualizuj(); asNavrhy(); asPoznamka();
     const v = document.getElementById("asVstup");
     if (veta) { v.value = veta; ASISTENT.posliZPola(); } else if (window.innerWidth >= 900) v.focus();
   },
@@ -586,6 +698,7 @@ const ASISTENT = {
   async posli(veta) {
     veta = String(veta || "").trim(); if (!veta || _as.bezi) return;
     if (!_as.otvoreny) ASISTENT.otvor();
+    asKdeAktualizuj();   // na desktope ostáva panel otvorený aj pri prechode medzi modulmi
     const btn = document.getElementById("asPosli");
     _as.bezi = true; if (btn) btn.disabled = true;
     asSprava(veta, "ja");

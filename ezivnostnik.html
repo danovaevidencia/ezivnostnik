@@ -1067,6 +1067,10 @@ h1,h2,h3,h4,.chead,.wbig,.sbox .sn,.sp-title b,.splittitle{text-wrap:balance}
 .appnavod-ic{width:24px;height:24px;border-radius:50%;background:var(--brand);color:var(--paper);display:grid;place-items:center;font-size:14px;line-height:1}
 .appnavod:hover .appnavod-ic{background:var(--paper);color:var(--brand)}
 @media(max-width:560px){.appnavod{margin-left:auto;order:4}}
+/* Asistent v hlavičke modulu (15. 10. 2026) — dovtedy len v lište Prehľadu */
+.appasist{width:34px;height:34px;border-radius:17px;border:1.5px solid var(--brand);background:var(--brand-lite);color:var(--brand);display:grid;place-items:center;cursor:pointer;flex:none;padding:0}
+.appasist:hover{background:var(--brand);color:var(--paper)}
+@media(max-width:560px){.appasist{order:4}}
 /* ═══ NÁVODY ═══ */
 .nv-uvod{font-size:13.5px;color:var(--ink-soft);margin:2px 2px 6px;line-height:1.5}
 .nv-sk{font-size:11.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--ink-soft);margin:18px 2px 8px}
@@ -2276,7 +2280,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.10.15-TA";  // KV B.1 aj so samozdanením zo zahraničia (služby § 15 ods. 1, tovar z EÚ)
+const APP_VERZIA = "2026.10.15-TB";  // asistent v hlavičke modulov s kontextom obrazovky; výkaz za časť mesiaca (rozdelenie), faktúra a protokol cez asistenta
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -10453,7 +10457,12 @@ function appHlavicka(id, akcie){
   const a=APPS[id];
   const navod=NAVODY_MODULY.has(id)
     ? `<button class="appnavod" onclick="otvorNavod('${id}')" title="Návod: ${esc(a.n)}" aria-label="Návod k modulu ${esc(a.n)}"><span class="appnavod-ic" aria-hidden="true">?</span>Návod</button>` : "";
-  return `<div class="appbar"><button class="appback" onclick="domov()">‹</button><div class="appic" style="background:${a.c}">${a.ic}</div><div class="apptitle"><h2>${a.n}</h2><div class="crumb" id="appCrumb"></div></div><div class="sp"></div>${navod}<div class="appacts">${akcie||""}</div></div>`;
+  // Asistent priamo v module (15. 10. 2026): panel vie, v ktorom module ste
+  // (asObrazovka v asistent.js). Kreslené SVG ako v lište — glyf iskry má
+  // v systémových fontoch diery (kap. 43.29).
+  const asist=(id!=="navody" && asistentDostupny())
+    ? `<button class="appasist" onclick="asistentOtvor()" title="Asistent — opýtajte sa k tomuto modulu" aria-label="Asistent k modulu ${esc(a.n)}"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M12 3.5 13.9 9.6 20 11.5 13.9 13.4 12 19.5 10.1 13.4 4 11.5 10.1 9.6Z"/><path d="M19 3v3M17.5 4.5h3"/></svg></button>` : "";
+  return `<div class="appbar"><button class="appback" onclick="domov()">‹</button><div class="appic" style="background:${a.c}">${a.ic}</div><div class="apptitle"><h2>${a.n}</h2><div class="crumb" id="appCrumb"></div></div><div class="sp"></div>${asist}${navod}<div class="appacts">${akcie||""}</div></div>`;
 }
 
 // ═══ A1 — ŠÍRKA PODĽA OBSAHU (kap. 48.4) ═══════════════════════════════
@@ -11077,8 +11086,7 @@ function buildProtokolDocx(w,D){
   const dnesSk=new Date().toLocaleDateString("sk-SK");
   // mesiac z jedného pravidla (vykazMesiac) — regex `(\d{2})[\/.](\d{4})`
   // nechytal „1. 7. 2026“ ani „1.7.2026“ a protokol ostal bez mesiaca
-  const vm=vykazMesiac(w);
-  const nadpis="Akceptačný protokol"+(vm?("_"+vm.slice(5,7)+"_"+vm.slice(0,4)):"");
+  const nadpis=vykazProtokolCislo(w)||"Akceptačný protokol";
   const TABPOS=1900;
   const tabStops=[{type:"left",position:TABPOS}];
   const tab=(label,val,bold)=>new Paragraph({tabStops,children:[new TextRun({text:label,bold:true}),new TextRun({text:"\t"+(val||""),bold:!!bold})]});
@@ -11151,7 +11159,7 @@ function vykazProtokolPdfModel(w){
   const m=firmaData.meta||{}, ODB=vykazOdberatel(w), vm=vykazMesiac(w);
   const dni=vykazClovekodni(w), tarifa=vykazSadzba(w);
   return {
-    nadpis:"Akceptačný protokol", cislo:vm?vm.slice(5,7)+"/"+vm.slice(0,4):"",
+    nadpis:"Akceptačný protokol", cislo:vm?vykazObdobieKratko(w):"",
     meta:[["Zákazka",w.zakazka],["Projekt",w.projekt===VYKAZ_Z_KALENDARA?"":w.projekt],["Obdobie",w.obdobie]],
     strany:[{titulok:"Objednávateľ", riadky:[ODB.nazov, ODB.adresa, ODB.ico?"IČO "+ODB.ico:"", ODB.icdph?"IČ DPH "+ODB.icdph:""]},
             {titulok:"Dodávateľ", riadky:[m.nazov, m.adresa, m.ico?"IČO "+m.ico:"", m.icdph?"IČ DPH "+m.icdph:""]}],
@@ -11544,11 +11552,91 @@ function vykazFakturaPrepojena(w){
   const F=firmaData.faktury||[];
   return (w.fakturaId && F.find(f=>f.id===w.fakturaId)) || (w.faktura && F.find(f=>String(f.cislo)===String(w.faktura))) || null;
 }
-// Posledný deň mesiaca výkazu — dátum dodania služby za mesiac.
+// Dátum dodania služby: posledný deň mesiaca výkazu — pri výkaze za ČASŤ
+// mesiaca (polmesačná fakturácia, 15. 10. 2026) koniec jeho obdobia.
 function vykazDodanie(w){
   const vm=vykazMesiac(w); if(!vm) return "";
   const den=new Date(+vm.slice(0,4), +vm.slice(5,7), 0).getDate();
-  return vm+"-"+String(den).padStart(2,"0");
+  const cast=vykazCastMesiaca(w);
+  return cast ? cast.do : vm+"-"+String(den).padStart(2,"0");
+}
+// ── Výkaz za časť mesiaca (Roman 15. 10. 2026) ─────────────────────────────
+// „Protokol a faktúra za 1.–15. 10.“ — výkaz ostáva JEDEN výkaz s jedným
+// obdobím, protokolom a faktúrou; polmesiac je výkaz s obdobím od–do vnútri
+// mesiaca. Vráti {od, do} len vtedy, keď obe hranice ležia v mesiaci výkazu
+// a nepokrývajú ho celý. Výkaz cez dva mesiace (import 29. 6. – 30. 7.) sa
+// správa ako doteraz — mesiac s väčšinou dní, dodanie na jeho konci.
+function vykazCastMesiaca(w){
+  if(!w || !w.od || !w.do) return null;
+  const vm=vykazMesiac(w); if(!vm) return null;
+  const od=String(w.od).slice(0,10), doD=String(w.do).slice(0,10);
+  if(od.slice(0,7)!==vm || doD.slice(0,7)!==vm) return null;
+  const koniec=vm+"-"+String(new Date(+vm.slice(0,4), +vm.slice(5,7), 0).getDate()).padStart(2,"0");
+  if(od===vm+"-01" && doD===koniec) return null;
+  return {od, do:doD};
+}
+// Obdobie na položku faktúry a do PDF: „10/2026“, pri časti mesiaca „1.–15. 10. 2026“.
+function vykazObdobieKratko(w){
+  const vm=vykazMesiac(w), cast=vykazCastMesiaca(w);
+  if(cast) return (+cast.od.slice(8,10))+".–"+(+cast.do.slice(8,10))+". "+(+vm.slice(5,7))+". "+vm.slice(0,4);
+  return vm ? vm.slice(5,7)+"/"+vm.slice(0,4) : (w&&w.obdobie||"");
+}
+// Číslo akceptačného protokolu — JEDNO pravidlo pre Word, PDF, záznam aj
+// import. Dva polmesačné protokoly by inak mali rovnaké číslo.
+function vykazProtokolCislo(w){
+  const vm=vykazMesiac(w); if(!vm) return "";
+  const cast=vykazCastMesiaca(w);
+  return "Akceptačný protokol_"+vm.slice(5,7)+"_"+vm.slice(0,4)+(cast ? "_"+cast.od.slice(8,10)+"-"+cast.do.slice(8,10) : "");
+}
+// Rozdelí výkaz k dátumu — ČISTÉ jadro (neukladá, nepýta sa): dni do dátumu
+// ostanú v pôvodnom výkaze (s jeho id, stavom a väzbami), dni po ňom prejdú
+// do nového výkazu s vlastným id a bez stavu. Bez dní po dátume len zúži
+// obdobie. Vyfakturovaný výkaz sa nedelí — faktúra by s ním prestala sedieť.
+function vykazRozdel(w, datumDo){
+  const d=String(datumDo||"").slice(0,10);
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) return {chyba:"Chýba dátum, ku ktorému sa má výkaz rozdeliť."};
+  const pf=vykazFakturaPrepojena(w);
+  if(pf) return {chyba:"Výkaz je už vyfakturovaný faktúrou "+(pf.cislo||"")+" — po rozdelení by s ňou nesedel."};
+  const r=vykazObdobieRozsah(w), poz=w.polozky||[];
+  const den=p=>String(p.datum||"").slice(0,10);
+  if(r.od && d<r.od) return {chyba:"Dátum "+fmtDatum(d)+" je pred začiatkom výkazu ("+fmtDatum(r.od)+")."};
+  const zvysok=poz.filter(p=>den(p)>d);
+  if(!zvysok.length && r.do && d>=r.do) return {chyba:"Po "+fmtDatum(d)+" výkaz nemá žiadny deň ani obdobie — niet čo oddeliť."};
+  const kopia=x=>JSON.parse(JSON.stringify(x));
+  const prva=kopia(w);
+  prva.polozky=kopia(poz.filter(p=>den(p)<=d));
+  if(!prva.polozky.length) return {chyba:"Do "+fmtDatum(d)+" výkaz nemá žiadny deň."};
+  prva.od=r.od||den(prva.polozky[0])||d; prva.do=d; prva.obdobie=vykazObdobieText(prva.od, prva.do);
+  vykazPrepocitaj(prva);
+  let druha=null;
+  if(zvysok.length){
+    druha=kopia(w);
+    ["id","faktura","fakturaId","odoslane","podpisany"].forEach(k=>{ delete druha[k]; });
+    druha.polozky=kopia(zvysok);
+    const n=new Date(+d.slice(0,4), +d.slice(5,7)-1, +d.slice(8,10)+1);
+    druha.od=n.getFullYear()+"-"+String(n.getMonth()+1).padStart(2,"0")+"-"+String(n.getDate()).padStart(2,"0");
+    // koniec: pôvodný koniec obdobia, ak leží za dátumom; inak koniec mesiaca posledného dňa
+    const posl=zvysok.map(den).filter(Boolean).sort().pop()||druha.od;
+    druha.do=(r.do && r.do>d) ? r.do : posl.slice(0,7)+"-"+String(new Date(+posl.slice(0,4), +posl.slice(5,7), 0).getDate()).padStart(2,"0");
+    druha.obdobie=vykazObdobieText(druha.od, druha.do);
+    vykazZaistiId(druha);
+    vykazPrepocitaj(druha);
+  }
+  return {prva, druha, datum:d, odoslany:!!w.odoslane};
+}
+// Zápis rozdelenia — volá ho editor výkazu a tlačidlo na karte asistenta
+// (klik človeka, R4). Vráti výsledok vykazRozdel alebo null.
+function vykazRozdelUloz(idx, datumDo){
+  if(!strazZapis("vykazy")) return null;
+  const w=(firmaData.vykazy||[])[idx]; if(!w){ alert("Výkaz sa nenašiel."); return null; }
+  const Z=vykazRozdel(w, datumDo);
+  if(Z.chyba){ alert(Z.chyba); return null; }
+  firmaData.vykazy[idx]=Z.prva;
+  if(Z.druha) firmaData.vykazy.splice(idx+1, 0, Z.druha);
+  poZmene();
+  if(modulNaObrazovke()==="vykazy") appVykazy();
+  cloudMsg("Výkaz rozdelený: "+Z.prva.obdobie+(Z.druha?" a "+Z.druha.obdobie:"")+".","ok");
+  return Z;
 }
 // ── Obdobie od–do (Roman 9. 10. 2026) ──────────────────────────────────────
 // Editor má dva dátumy namiesto voľného textu. `w.obdobie` ostáva ako text
@@ -11583,7 +11671,7 @@ function vykazFakturaPredloha(w){
   const pole=(kluc,hod)=>{ if(hod && (ODB.zList || !k[kluc])) k[kluc]=hod; };
   pole("odberatel",ODB.nazov); pole("ico",ODB.ico); pole("icdph",ODB.icdph); pole("dic",ODB.dic); pole("adresa",ODB.adresa);
   const dod=vykazDodanie(w); if(dod) k.dodanie=dod;
-  const obd=vm ? vm.slice(5,7)+"/"+vm.slice(0,4) : (w.obdobie||"");
+  const obd=vykazObdobieKratko(w);   // „10/2026“, pri časti mesiaca „1.–15. 10. 2026“
   const nazov=[w.projekt||"Služby", w.zakazka?"zákazka "+w.zakazka:"", obd].filter(Boolean).join(" · ");
   k.polozky=[{ nazov, mn:vykazClovekodni(w), mj:"človekodeň", cena:vykazSadzba(w) }];
   if(vzor && vzor.polozky && vzor.polozky[0]){
@@ -11754,6 +11842,18 @@ function vykazUlozHlavicku(){
     w.obdobie=vykazObdobieText(w.od, w.do);
   }
 }
+function vykZmenObdobie(){ vykazUlozHlavicku(); prekresliSoScrollom(renderVykazEditor); }
+// Polmesačný výkaz z editora: zúžené obdobie + dni po jeho konci → nový výkaz.
+// Rozpísaný výkaz sa najprv uloží (ako pri protokole), potom sa rozdelí.
+function vykRozdelMimo(){
+  const E=_vykazEdit; if(!E || E.nova) return;
+  if(!strazZapis("vykazy")) return;
+  vykazUlozHlavicku();
+  const doD=String(E.w.do||"").slice(0,10); if(!doD) return;
+  firmaData.vykazy[E.idx]=vykazPrepocitaj(E.w);
+  closeModal(); _vykazEdit=null;
+  if(!vykazRozdelUloz(E.idx, doD)){ poZmene(); appVykazy(); }
+}
 function vykZmenMd(pole, hodnota){
   const w=_vykazEdit && _vykazEdit.w; if(!w) return;
   vykazUlozHlavicku();
@@ -11787,9 +11887,22 @@ function renderVykazEditor(){
       <div class="mfield"><label>Pracovník</label><input id="m_pracovnik" value="${esc(w.pracovnik||'')}"></div>
     </div>
     <div class="mrow2">
-      <div class="mfield"><label>Obdobie od</label><input id="m_od" type="date" value="${esc(String(w.od||'').slice(0,10))}"></div>
-      <div class="mfield"><label>Obdobie do</label><input id="m_do" type="date" value="${esc(String(w.do||'').slice(0,10))}"></div>
+      <div class="mfield"><label>Obdobie od</label><input id="m_od" type="date" value="${esc(String(w.od||'').slice(0,10))}" onchange="vykZmenObdobie()"></div>
+      <div class="mfield"><label>Obdobie do</label><input id="m_do" type="date" value="${esc(String(w.do||'').slice(0,10))}" onchange="vykZmenObdobie()"></div>
     </div>
+    ${(()=>{
+      // Dni mimo obdobia sa do výkazu aj fakturácie počítajú ďalej — appka ich
+      // potichu neodfiltruje (zmenilo by to sumu), povie to a ponúkne presun.
+      const odE=String(w.od||"").slice(0,10), doE=String(w.do||"").slice(0,10);
+      const den=p=>String(p.datum||"").slice(0,10);
+      const mimo=poz.filter(p=>den(p) && ((doE && den(p)>doE) || (odE && den(p)<odE)));
+      if(!mimo.length) return "";
+      const poKonci=doE ? poz.filter(p=>den(p)>doE).length : 0;
+      return `<div style="background:var(--sfc-warn);border-radius:8px;padding:8px 11px;margin:2px 0 8px;font-size:12px;color:var(--ink)">
+        ⚠ ${mimo.length} ${mimo.length===1?"deň je":(mimo.length<5?"dni sú":"dní je")} mimo obdobia (${mimo.slice(0,4).map(p=>esc(fmtDatum(den(p)))).join(", ")}${mimo.length>4?"…":""}) — do výkazu aj fakturácie sa stále počítajú.
+        ${!nova&&poKonci?`<div style="margin-top:6px"><button class="aabtn" onclick="vykRozdelMimo()">✂ Presunúť dni po ${esc(fmtDatum(doE))} do nového výkazu</button></div>`:""}
+      </div>`;
+    })()}
 
     <div class="mfield" style="margin-top:12px">
       <label>Ako sa počíta človekodeň</label>
@@ -11996,11 +12109,28 @@ function vykazProtokolZaznam(vykaz){
     miesto:M.obec||"", text:""
   };
   // číslo z mesiaca výkazu (jedno pravidlo s Word protokolom), dátum = koniec obdobia
-  const vm=vykazMesiac(w);
-  if(vm) p.cislo="Akceptačný protokol_"+vm.slice(5,7)+"_"+vm.slice(0,4);
+  p.cislo=vykazProtokolCislo(w);
   const m=(w.obdobie||"").match(/(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4}).*?(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})/);
   if(m) p.datum=m[6]+"-"+String(+m[5]).padStart(2,"0")+"-"+String(+m[4]).padStart(2,"0");
   return {p, w, tarifa};
+}
+// Zápis záznamu protokolu — jedno miesto pre editor výkazu aj kartu asistenta.
+function vykazProtokolUloz(idx, Z){
+  if(idx!=null && firmaData.vykazy && firmaData.vykazy[idx]) firmaData.vykazy[idx]=Z.w;
+  if(!firmaData.protokoly) firmaData.protokoly=[];
+  firmaData.protokoly.unshift(Z.p);
+  poZmene();
+}
+// Protokol k ULOŽENÉMU výkazu — tlačidlo na karte asistenta (klik človeka, R4).
+// Bez otázky a bez alertu: ukážkou bola karta, výsledok povie volajúci.
+function vykazProtokolZapis(idx){
+  if(!strazZapis("vykazy")) return null;
+  const w=(firmaData.vykazy||[])[idx]; if(!w){ alert("Výkaz sa nenašiel."); return null; }
+  const Z=vykazProtokolZaznam(w);
+  if(Z.chyba){ alert(Z.chyba); return null; }
+  vykazProtokolUloz(idx, Z);
+  if(modulNaObrazovke()==="vykazy") appVykazy();
+  return Z;
 }
 function vykazNaProtokol(){
   if(!strazZapis("vykazy")) return;
@@ -12013,10 +12143,8 @@ function vykazNaProtokol(){
   const Z=vykazProtokolZaznam(E.w||{});
   if(Z.chyba){ alert(Z.chyba); return; }
   const w=Z.w, p=Z.p, tarifa=Z.tarifa;
-  if(!E.nova && E.idx!=null && firmaData.vykazy && firmaData.vykazy[E.idx]) firmaData.vykazy[E.idx]=w;
-  if(!firmaData.protokoly) firmaData.protokoly=[];
-  firmaData.protokoly.unshift(p);
-  closeModal(); _vykazEdit=null; poZmene();
+  vykazProtokolUloz(E.nova ? null : E.idx, Z);
+  closeModal(); _vykazEdit=null;
   alert("Akceptačný protokol vytvorený: "+cldTxt(w.cld)+" človekodní"+
         (w.cld!==w.dni?" ("+w.hodiny+" h / "+vykazMdHodin(w)+" h na MD, "+w.dni+" dní)":"")+
         (tarifa?" · "+eur(p.suma):"")+
@@ -12375,6 +12503,10 @@ function vykazNajdiPodobny(p){
   const mes=vykazMesiac({obdobie:p.obdobie, polozky:p.polozky||[]});
   if(!mes) return -1;
   const vyk=firmaData.vykazy||[];
+  // Polmesačné výkazy (15. 10. 2026): v jednom mesiaci môžu byť dva výkazy
+  // tej istej zákazky — rozhodne zhodné obdobie, až potom mesiac a zákazka.
+  const obd=String(p.obdobie||"").replace(/\s+/g,"");
+  if(obd){ const j=vyk.findIndex(w=>String(w.obdobie||"").replace(/\s+/g,"")===obd); if(j>=0) return j; }
   let zaloha=-1;
   for(let i=0;i<vyk.length;i++){
     if(vykazMesiac(vyk[i])!==mes) continue;
@@ -12494,10 +12626,9 @@ function vykazImportPotvrd(akoNovy){
   const wP=idx>=0 ? firmaData.vykazy[idx] : null;
   const zakl=wP || {obdobie:p.obdobie||"", polozky:[]};
   const ODB=vykazOdberatel(zakl);
-  const vm=vykazMesiac(wP || {obdobie:p.obdobie||"", polozky:[]});
   const tarifa=p.tarifa!=null?p.tarifa:vykazSadzba(zakl);
   const zaznam={
-    cislo: vm?("Akceptačný protokol_"+vm.slice(5,7)+"_"+vm.slice(0,4)):"",
+    cislo: vykazProtokolCislo(zakl),
     datum: new Date().toISOString().slice(0,10),
     obdobie:p.obdobie||"", pracovnik:(wP&&wP.pracovnik)||M.nazov||"",
     dni:p.cld, tarifa, suma:p.suma!=null?p.suma:r2(p.cld*tarifa),
@@ -21879,7 +22010,8 @@ const DOKUMENTY={
   // `novinka` ukáže okno súhlasu — čo sa vo verzii zmenilo, jednou vetou
   podmienky:{url:"podmienky.html",     n:"Obchodné podmienky",      verzia:"1.11",
              novinka:"Pribudla platba predplatného prevodom a súhlas s tým, že vám faktúry doručujeme elektronicky — e-mailom a v aplikácii."},
-  sukromie: {url:"sukromie.html",      n:"Ochrana osobných údajov", verzia:"1.25"},
+  sukromie: {url:"sukromie.html",      n:"Ochrana osobných údajov", verzia:"1.26",
+             novinka:"Asistent spolu s vašou vetou dostane aj to, v ktorom module aplikácie práve ste, a interné označenie záznamu, ktorý máte otvorený — nie jeho obsah."},
   zmazanie: {url:"zmazanie-uctu.html", n:"Zmazanie účtu a údajov"},
 };
 // Záznam súhlasu k účtu (ROZHODNUTIA č. 52). Zmluva vzniká vytvorením účtu
@@ -21930,11 +22062,21 @@ async function suhlasSkontroluj(user){
       }
       throw error;
     }
-    if(suhlasChybajuce(data).length) suhlasOknoUkaz("");
+    _suhlasChyba=suhlasChybajuce(data);
+    if(_suhlasChyba.length) suhlasOknoUkaz("");
   }catch(e){
     // Hláška by rušila pri práci, ktorá s ňou nesúvisí — stačí konzola.
     console.error("Prijatie podmienok sa nepodarilo overiť:", e);
   }
+}
+// Novinky len tých dokumentov, ktoré čakajú na prijatie (15. 10. 2026: zásady
+// 1.26 — kto už prijal podmienky 1.11, nemá čítať ich novinku znova). Okno
+// z platby nevie, čo chýba, ukáže všetky.
+let _suhlasChyba=null;
+function suhlasNovinky(){
+  const kluce=_suhlasChyba&&_suhlasChyba.length ? _suhlasChyba : Object.keys(SUHLAS_DOKUMENT);
+  const viac=kluce.filter(k=>DOKUMENTY[SUHLAS_DOKUMENT[k]].novinka).length>1;
+  return kluce.map(k=>DOKUMENTY[SUHLAS_DOKUMENT[k]]).filter(D=>D.novinka).map(D=>({k:viac?D.n:"", t:D.novinka}));
 }
 function suhlasOknoUkaz(chyba){
   let o=document.getElementById("suhlasOkno");
@@ -21945,7 +22087,7 @@ function suhlasOknoUkaz(chyba){
       <button class="modalx" onclick="suhlasZavri()" title="Zavrieť">✕</button></div>
     <div class="modalbd" style="font-size:13.5px;line-height:1.55">
       <p style="margin-bottom:10px">Prosíme o potvrdenie aktuálnych dokumentov: ${dokumentOdkaz("podmienky", d.podmienky.n+" (verzia "+d.podmienky.verzia+")")} a ${dokumentOdkaz("sukromie", d.sukromie.n+" (verzia "+d.sukromie.verzia+")")}.</p>
-      ${d.podmienky.novinka?`<p style="margin-bottom:10px"><b>Čo je nové:</b> ${esc(d.podmienky.novinka)}</p>`:""}
+      ${suhlasNovinky().map(x=>`<p style="margin-bottom:10px"><b>Čo je nové${x.k?" — "+esc(x.k):""}:</b> ${esc(x.t)}</p>`).join("")}
       <p style="margin-bottom:10px">Stlačením „Prijímam“ prijímate obchodné podmienky a potvrdzujete, že ste sa oboznámili so zásadami ochrany osobných údajov. K účtu sa uloží verzia a čas prijatia.</p>
       <p style="color:var(--ink-soft);font-size:12.5px">Okno môžete zavrieť a pracovať ďalej — k dátam máte prístup aj tak. Ponúkneme ho znova pri ďalšom prihlásení.</p>
       ${chyba?`<div class="cloudmsg err">${esc(chyba)}</div>`:""}

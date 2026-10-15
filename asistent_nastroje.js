@@ -22,7 +22,7 @@
 //  nasadení: zmena = zvýšiť REGISTER_VERZIA a nasadiť `asistent` (155.18 b. 2).
 // ═══════════════════════════════════════════════════════════════════════════
 
-export const REGISTER_VERZIA = "2026-10-11.2";
+export const REGISTER_VERZIA = "2026-10-15.1";
 
 const OBDOBIE = {
   type: "string",
@@ -97,7 +97,7 @@ export const ASISTENT_NASTROJE = [
   },
   {
     meno: "vykazy", druh: "citanie", faza: 1, aktivny: true, model: "rychly", moduly: ["vykazy"],
-    popis: "Výkazy prác: stav (návrh, odoslaný, podpísaný, vyfakturovaný), človekodne, odberateľ, prepojená faktúra.",
+    popis: "Výkazy prác: kluc, obdobie od–do, stav (návrh, odoslaný, podpísaný, vyfakturovaný), človekodne, odberateľ, prepojená faktúra. Obdobie výkazu ber z od–do, nie z mesiaca.",
     vstup: { type: "object", properties: { obdobie: OBDOBIE, zakazka: { type: "string" } } },
   },
   {
@@ -178,14 +178,23 @@ export const ASISTENT_NASTROJE = [
     vstup: { type: "object", properties: { subor_id: { type: "string" }, mesiac: OBDOBIE }, required: ["subor_id"] },
   },
   {
-    meno: "protokol", druh: "zapis_karta", faza: 2, aktivny: false, model: "rychly", moduly: ["vykazy"], zapis: "vykazy",
-    popis: "Ukáže náhľad akceptačného protokolu k výkazu; zapíše ho človek tlačidlom na karte.",
-    vstup: { type: "object", properties: { vykaz: { type: "string", description: "id výkazu" } }, required: ["vykaz"] },
+    meno: "protokol", druh: "zapis_karta", faza: 2, aktivny: true, model: "rychly", moduly: ["vykazy"], zapis: "vykazy",
+    popis: "Ukáže náhľad akceptačného protokolu k výkazu (číslo, obdobie, človekodne, suma); zapíše ho človek tlačidlom na karte. Protokol je vždy za celé obdobie výkazu — za časť obdobia najprv rozdel_vykaz.",
+    vstup: { type: "object", properties: { vykaz: { type: "string", description: "kluc výkazu z nástroja vykazy" } }, required: ["vykaz"] },
   },
   {
-    meno: "faktura_z_vykazu", druh: "navrh", faza: 2, aktivny: false, model: "rychly", moduly: ["vykazy", "faktury"], zapis: "faktury",
-    popis: "Otvorí editor faktúry predvyplnený z výkazu (človekodne × sadzba zákazky).",
-    vstup: { type: "object", properties: { vykaz: { type: "string" } }, required: ["vykaz"] },
+    meno: "faktura_z_vykazu", druh: "navrh", faza: 2, aktivny: true, model: "rychly", moduly: ["vykazy", "faktury"], zapis: "faktury",
+    popis: "Otvorí editor faktúry predvyplnený z výkazu (človekodne × sadzba zákazky, dodanie = koniec obdobia výkazu). Uloží ho človek. Faktúra je vždy za celé obdobie výkazu — za časť obdobia najprv rozdel_vykaz.",
+    vstup: { type: "object", properties: { vykaz: { type: "string", description: "kluc výkazu z nástroja vykazy" } }, required: ["vykaz"] },
+  },
+  {
+    meno: "rozdel_vykaz", druh: "zapis_karta", faza: 2, aktivny: true, model: "rychly", moduly: ["vykazy"], zapis: "vykazy",
+    popis: "Ukáže, ako by sa výkaz rozdelil k dátumu: dni do dátumu ostanú vo výkaze, dni po ňom prejdú do nového výkazu (polmesačná fakturácia). Rozdelí ho človek tlačidlom na karte; potom ponúkne faktúru a protokol za prvú časť.",
+    vstup: {
+      type: "object",
+      properties: { vykaz: { type: "string", description: "kluc výkazu z nástroja vykazy" }, do: { type: "string", description: "posledný deň prvej časti, RRRR-MM-DD — z vety človeka, nedomýšľaj" } },
+      required: ["vykaz", "do"],
+    },
   },
   {
     meno: "email_k_vykazu", druh: "navrh", faza: 2, aktivny: false, model: "rychly", moduly: ["vykazy"], zapis: "vykazy",

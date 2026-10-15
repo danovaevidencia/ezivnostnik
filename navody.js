@@ -144,10 +144,12 @@ vykazy: {
       kedy: "Klient chce k faktúre výkaz alebo akceptačný protokol.",
       kroky: [
         { text: "Na karte výkazu ťuknite na <b>↧ Výkaz (Word)</b> alebo <b>↧ Výkaz (XLSX)</b>.", tlacidlo: "Výkaz (Word)", snimka: "vykazy-export-1" },
-        { text: "Faktúru vystavte vo Faktúrach — [[navod:faktury/vystavit|ako vystaviť faktúru]]. Z výkazu ju appka sama nevystaví." },
+        { text: "Na tej istej karte ťuknite na <b>🧾 Vystaviť faktúru</b>. Appka otvorí faktúru predvyplnenú z výkazu — odberateľ, človekodne × sadzba zákazky, dátum dodania. Skontrolujte ju a uložte.", tlacidlo: "Vystaviť faktúru" },
       ],
       tip: "Na karte výkazu appka ukáže, či počet dní sedí s faktúrou za ten mesiac — preklep v počte dní tak nájdete skôr než klient.",
       podrobnosti: [
+        { nadpis: "Fakturujete po polmesiacoch",
+          html: "<p>V editore výkazu zmeňte <b>Obdobie do</b> (napríklad na 15. deň). Ak má výkaz dni aj po tomto dátume, appka ponúkne <b>✂ Presunúť dni … do nového výkazu</b>. Faktúra a protokol prvej časti potom nesú obdobie 1.–15. a dodanie k 15. dňu.</p>" },
         { nadpis: "Akceptačný protokol",
           html: "<p>Na karte je aj <b>↧ Akceptačný protokol (Word)</b> — potvrdenie, že klient prácu prevzal.</p>" },
         { nadpis: "Klient výkaz upravil",
