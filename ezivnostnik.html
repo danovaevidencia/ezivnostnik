@@ -2276,7 +2276,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.10.15-SY";  // šablóna Oznámenie Sociálnej poisťovne v Dokumentoch (spec 156.14)
+const APP_VERZIA = "2026.10.15-SZ";  // parser: „Číslo faktúry:“ a výslovná nulová daň zahraničného dodávateľa
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -38209,6 +38209,12 @@ function parseFakturaText(text){
   // reverse charge detekcia (zahraničný doklad bez SK DPH)
   const jeReverseCharge=/reverse charge|reverse-charge|prenesenie daňovej povinnosti|prenesenie danovej povinnosti|tax to be paid on reverse/i.test(t);
   const jeAnglicka=/\b(Invoice|Bill to|Subtotal|Amount due|Date of issue)\b/i.test(t) && !/Faktúra|Dodávateľ|Odberateľ/i.test(t);
+  // Doklad výslovne uvádza nulovú daň („Daň (0%) 0,00 €“, „VAT 0% 0.00“).
+  const nulovaDanVyslovne=/(?:Daň|Dan|DPH|VAT|Tax)[ \t]*\(?[ \t]*0[ \t]*%[ \t]*\)?[ \t]*:?[ \t]*(?:EUR|€)?[ \t]*0[,.]00\b/i.test(t);
+  // Dodávateľ mimo Slovenska: adresa v cudzej krajine alebo nie-slovenské IČ DPH
+  // (Google LLC má „IČ DPH: EU372000041“ — registrácia v osobitnej úprave OSS).
+  const cudziDodavatel=/\b(United States|USA|Ireland|Germany|Deutschland|Netherlands|Luxembourg|Czech Republic|Czechia|Poland|Austria|France|United Kingdom)\b/.test(t)
+    || /(?:I[ČC][ \t]*DPH|VAT[ \t]*(?:ID|No|Number))[ \t]*:?[ \t]*(?!SK)[A-Z]{2}[ \t]*\d{6,}/i.test(t);
   if(!R.partner && (jeAnglicka||jeReverseCharge)){
     // dodávateľ z anglickej faktúry: prvý riadok pred adresou / pred "Bill to"
     let am=t.match(/^([A-Z][A-Za-z0-9&.,\- ]{2,45}?(?:,?\s*(?:PBC|Inc|Inc\.|LLC|Ltd|Ltd\.|GmbH|B\.V\.|S\.A\.|Corp|Corp\.|Co\.|Limited)))\b/m);
@@ -38242,6 +38248,10 @@ function parseFakturaText(text){
   const CIS_JADRO = "([A-Z0-9][A-Z0-9\\/]*(?:[ \\t]*[-\\/][ \\t]*[A-Z0-9]+)*)";
   const cisVzory=[
     new RegExp("Faktúra[ \\t]*(?:č\\.|číslo)[ \\t]*:?[ \\t]*"+CIS_JADRO,"ig"),
+    // Obrátený tvar „Číslo faktúry: 3917066949384240-1“ (Google a iné slovenské
+    // preklady). Do 15. 10. 2026 chýbal a faktúra Google prišla bez čísla —
+    // v oddiele B.1 kontrolného výkazu je pritom povinné.
+    new RegExp("Číslo[ \\t]+fakt[úu]ry[ \\t]*:?[ \\t]*"+CIS_JADRO,"ig"),
     new RegExp("FAKT[ÚU]RA[ \\t]*:?[ \\t]*([0-9][0-9\\-\\/ \\t]{3,})","ig"),   // KROS/OMEGA
     new RegExp("Invoice[ \\t]*(?:number|#|no\\.?)[ \\t]*:?[ \\t]*"+CIS_JADRO,"ig"),
     new RegExp("Invoice[ \\t]*(?:number|#|no\\.?)[ \\t]*:?[ \\t]*\\n[ \\t]*"+CIS_JADRO,"ig"),
@@ -38502,7 +38512,11 @@ function parseFakturaText(text){
     R.samozdanenieTyp="tuzemsky";
   }
   // ── reverse charge: zahraničný doklad, DPH = 0, samozdanenie ──
-  else if(jeReverseCharge || (jeAnglicka && R.dph===0)){
+  // Tretí prípad (15. 10. 2026, faktúra Google za Google Play): doklad je
+  // PO SLOVENSKY, takže `jeAnglicka` neplatí, a vetu o reverse charge nemá —
+  // má len „Daň (0%) 0,00 €“ a adresu v USA. Appka ho vzala ako tuzemský
+  // bloček a 21,59 € rozdelila na 17,55 + 23 % DPH, hoci daň nebola žiadna.
+  else if(jeReverseCharge || (jeAnglicka && R.dph===0) || (nulovaDanVyslovne && cudziDodavatel)){
     R.zahranicny=true;
     R.druh="Došlá faktúra";
     R.bez=R.spolu;   // celá suma je základ (bez DPH)
@@ -38516,7 +38530,10 @@ function parseFakturaText(text){
     // pri označenom nesúlade nechávame prečítanú celkovú sumu — používateľ ju vidí
 // v upozornení a rozhodne sám; prepísanie by mu zobrazilo iné číslo než doklad
 if(!R._sumyNesedia && R.bez>0 && R.spolu>0 && Math.abs(R.spolu-(R.bez+R.dph))>1){ R.spolu=r2(R.bez+R.dph); }
-    if(!R.bez && R.spolu){ R.bez=r2(R.spolu/1.23); R.dph=r2(R.spolu-R.bez); }
+    // Odhad 23 % len vtedy, keď doklad o dani nič nehovorí. Výslovná nulová
+    // daň je fakt, nie chýbajúci údaj — prepísať ju odhadom je tichá zámena.
+    if(!R.bez && R.spolu && nulovaDanVyslovne){ R.bez=R.spolu; R.dph=0; }
+    else if(!R.bez && R.spolu){ R.bez=r2(R.spolu/1.23); R.dph=r2(R.spolu-R.bez); }
   }
   // PHM (pohonné hmoty) — rozpoznaj litre z bločku za palivo
   // hľadá vzory ako "34,52 L", "34.52 l", "Objem: 34,5 l", "Natural 95 ... 34,52"
