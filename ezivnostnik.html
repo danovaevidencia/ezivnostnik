@@ -2283,7 +2283,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.10.16-TF";  // daňový úrad z číselníka FS v Nastaveniach, kontrola úradu mimo číselníka, preklik z podania do Nastavení
+const APP_VERZIA = "2026.10.16-TG";  // ročné zúčtovanie ZP bez januárovej platby za december minulého roka, Priznania s odhadom roka zo Štatistík
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -5013,10 +5013,43 @@ function dePrognoza(rok){
 // a bez toho, že doplatok je splatný až po lehote priznania. Teraz: preddavky,
 // ktoré ešte prídu (kalendár, bez zaplatených), odhad doplatku dane a
 // nedoplatku ZP so splatnosťou a hranica 100 000 € s oboma scenármi.
+// Preddavok ZP SZČO za mesiac je splatný do 8. dňa nasledujúceho mesiaca
+// (§ 24 ods. 1 zák. 580/2004) — platba v januári je za december minulého roka,
+// aj po termíne. Okno kalendára (termín + 7 dní) na to nestačí: Roman platí
+// kartou v rôznych dňoch a preddavok za december 2025 (107,25 € — sadzba 2025)
+// zaplatil 23. 1. 2026. Výnimka: kto v roku `rok` ešte preddavky neplatil, ten
+// v decembri nepodnikal a januárová platba je záloha za január.
+function zpPlatilVRoku(rok){
+  return (firmaData.vydavky||[]).some(x=>x.kategoria==="preddavokZP" && String(x.datum||"").slice(0,4)===String(rok));
+}
+function zpPlatbyZaDecember(rok){
+  if(!zpPlatilVRoku(+rok)) return 0;
+  const jan=(+rok+1)+"-01";
+  return r2((firmaData.vydavky||[]).filter(x=>x.kategoria==="preddavokZP" && vydavokZaRok(x)===+rok+1
+    && String(x.datum||"").slice(0,7)===jan).reduce((a,x)=>a+r2(+x.spolu || +x.bez || 0),0));
+}
+// Preddavky ZP ZA rok pre ročné zúčtovanie (spec 156.19, L1). `t.preddavokZP`
+// sú platby ZAPLATENÉ v roku (aj predpoklad mesiaca bez výpisu): bez januárovej
+// za december minulého roka, s januárovou budúceho roka za december tohto.
+// Dovtedy výhľad rátal 13 preddavkov — januárový za december minulého roka aj
+// plánovaný januárový budúceho — a nedoplatok ZP vyšiel o jeden nižší.
+// Základ dane sa nemení: poistné je výdavkom v roku úhrady (zpZaplatene).
+function zpPreddavkyZaRok(rok, rows, t){
+  const jan=(rows||[])[0]||{};
+  let zaMinuly=0;
+  if(jan.aktivny){
+    const p=zpPlatbyZaDecember(+rok-1);
+    // január bez výpisu: predpoklad preddavku stojí za platbu za december
+    zaMinuly = p>0 ? Math.min(p, +jan.preddavokZP||0)
+      : ((uhradeneVMesiaci(0, +rok).zp>0 || !zpPlatilVRoku(+rok-1)) ? 0 : r2(+jan.preddavokZP||0));
+  }
+  return r2((+t.preddavokZP||0) - zaMinuly + zpPlatbyZaDecember(+rok));
+}
 function danRokVyhlad(rok){
   const S=firmaData.settings||{};
   const P=dePrognoza(+rok); if(!P) return null;
-  const {t}=danTotals(+rok, S);
+  const {t, rows}=danTotals(+rok, S);
+  const zpZaRok=zpPreddavkyZaRok(+rok, rows, t);
   const dnes=new Date();
   let T=[];
   if(+rok===dnes.getFullYear()){
@@ -5040,10 +5073,10 @@ function danRokVyhlad(rok){
   const danPasma=deVypocetDane(P.zaklad, S, +rok, hranica+0.01).dan;
   const mesDoLehoty=Math.max(1, (lehota.getFullYear()-dnes.getFullYear())*12 + lehota.getMonth()-dnes.getMonth());
   const doplatokDane=r2(P.dan - t.danPreddavok - planDan);
-  const nedoplatokZP=r2(zpRokVzniknute - t.preddavokZP - planZP);
+  const nedoplatokZP=r2(zpRokVzniknute - zpZaRok - planZP);
   return {T, planZP, planSP, planDan, planSpolu:r2(planZP+planSP+planDan), zpRokVzniknute, nedoplatokZP, doplatokDane,
     lehota, mesDoLehoty, hranica, prijmyOdhad:P.rocPrijmy, nadHranicou:P.rocPrijmy>hranica, rozdielHranica:r2(P.rocPrijmy-hranica),
-    dan15, danPasma, danOdhad:P.dan, zaplateneDan:t.danPreddavok, zaplateneZP:t.preddavokZP,
+    dan15, danPasma, danOdhad:P.dan, zaplateneDan:t.danPreddavok, zaplateneZP:zpZaRok,
     naOdlozenieMes:r2((Math.max(0, doplatokDane)+Math.max(0, nedoplatokZP))/mesDoLehoty)};
 }
 function danRokVyhladHtml(rok){
@@ -23295,46 +23328,41 @@ function parseDPFO(xmlText){
 // + danZoZakladu, sadzby zo sadzby.js). Predtým tu boli NČZD konštanty roku
 // 2026 natvrdo v kóde a kľúče zpKoeficient/zpSadzba2026, ktoré nikto
 // nezapisoval — štvrtá kópia toho istého pravidla (kap. 45.1).
+//
+// 🔴 16. 10. 2026 (spec 156.19, L4): Priznania mali TRETIU extrapoláciu roka —
+// príjmy z vystavených faktúr × 12/mesiace s faktúrou, ZP vzniknuté po mesiacoch,
+// preddavky ZP z nastavenia × 12 a preddavky dane × faktor. Iné čísla než
+// Štatistiky pri tom istom roku. Teraz je to dePrognoza (príjmy podľa úhrady,
+// zaplatené poistné) + danRokVyhlad (preddavky zaplatené a plánované, ročné
+// zúčtovanie ZP) — Priznania len skladajú riadky tabuľky.
 function prognozaRok(rok){
   const S=firmaData.settings||{};
-  const faktury=(firmaData.faktury||[]).filter(f=>faktVRoku(f, rok));
-  const prijmySkut=r2(faktury.reduce((a,f)=>a+(+f.bez||0),0));
-  const mesiaceSFakturou=new Set(faktury.map(f=>faktObdobie(f)));
-  const mesDoteraz=Math.max(mesiaceSFakturou.size,1);
-  const faktor=12/mesDoteraz;
-  // skutočné odvody z evidencie (naša calcDanRow)
-  let zdravSkut=0, socSkut=0, preddavkyDanSkut=0;
-  for(let mi=0;mi<12;mi++){ const c=calcDanRow(mi,+rok,S); zdravSkut+=c.zdrav; socSkut+=c.soc; preddavkyDanSkut+=c.danPreddavok; }
-  const prijmyRok=r2(prijmySkut*faktor);
-  const odpisRok=odpisDaneRok(rok, S).rok;
-  const vydavkyRealRok=r2((firmaData.vydavky||[]).filter(x=>vydavokVRoku(x, rok)).reduce((a,x)=>a+vydavokDoZakladu(x),0)+vydavkyDphInehoObdobia(String(rok)));
-  const vydavkyRok=r2(vydavkyRealRok+odpisRok);
-  const zdravRok=r2(zdravSkut*faktor);
-  // Sociálne tým istým pravidlom ako dePrognoza a mesačný výpočet (spec 156.13);
-  // `socSkut` je ten istý súčet cez calcDanRow — jedno pravidlo, dva súčty.
-  const socRok=spOdhadRok(+rok, S);
-  const preddavkyZPRok=r2((+S.preddavokZP||0)*12);
-  const preddavkyDanRok=r2(preddavkyDanSkut*faktor);
+  const P=dePrognoza(+rok);
+  let V=null;
+  if(P){ try{ V=danRokVyhlad(+rok); }catch(e){ console.error("prognóza roka — výhľad:", e); } }
+  const mesDoteraz=P ? P.poslednyMesiac : 0;
+  const prijmyRok=P ? P.rocPrijmy : 0;
+  const vydavkyRok=P ? r2(P.pausalRezim ? P.pausalVydavok : P.rocVydavkySpolu) : 0;
   const ciastkovyZaklad=r2(prijmyRok-vydavkyRok);
-  const zakladPoOdvodoch=r2(ciastkovyZaklad-zdravRok-socRok);
+  const zakladPoOdvodoch=P ? P.zaklad : 0;       // po ZAPLATENOM zdravotnom a sociálnom
   const D=deVypocetDane(Math.max(0,zakladPoOdvodoch), S, +rok, prijmyRok);
   const nezdanit=Math.min(D.nczd, Math.max(zakladPoOdvodoch,0));
   const zakladDane=Math.max(r2(zakladPoOdvodoch-nezdanit),0);
   const dan=D.danPredBonusom;   // polia zrkadlia DPFO r96 — daň PRED bonusom na deti
   const koef=sadzbaFirmy("vzKoef", +rok, S);          // 0,672948 = 1/1,486
-  const zpSadzba=sadzbaFirmy("zdravSadzba", +rok, S);
   const vymZaklad=ciastkovyZaklad>0?r2(ciastkovyZaklad*koef):0;
-  const zdravRocny=r2(vymZaklad*zpSadzba);
-  const zdravNedoplatok=r2(zdravRocny-preddavkyZPRok);
+  const zdravRocny=V ? V.zpRokVzniknute : r2(vymZaklad*sadzbaFirmy("zdravSadzba", +rok, S));
+  const preddavkyZP=V ? r2(V.zaplateneZP+V.planZP) : 0;
+  const preddavkyDan=V ? r2(V.zaplateneDan+V.planDan) : 0;
   return {
     rok:String(rok), zdroj:"Prognóza (odhad za celý rok)",
-    mesDoteraz, faktor:r2(faktor),
-    prijmySkut, prijmy:prijmyRok, vydavky:vydavkyRok,
+    mesDoteraz, faktor:mesDoteraz ? r2(12/mesDoteraz) : 0,
+    prijmySkut:P ? r2(P.doterajsiePrijmy) : 0, prijmy:prijmyRok, vydavky:vydavkyRok,
     zaklad:ciastkovyZaklad, zakladPoOdvodoch, ostatne:"",
     nezdanitCast:nezdanit, zakladDane,
     danCelkom:dan, danovaPovinnost:dan,
-    preddavkyZaplatene:preddavkyDanRok, danNaUhradu:r2(dan-preddavkyDanRok),
-    zdrav:zdravRocny, soc:socRok, preddavkyZP:preddavkyZPRok, zdravNedoplatok, vymZaklad,
+    preddavkyZaplatene:preddavkyDan, danNaUhradu:r2(D.dan-preddavkyDan),   // po bonuse, ako doplatok vo výhľade
+    zdrav:zdravRocny, soc:P ? P.socRok : spOdhadRok(+rok, S), preddavkyZP, zdravNedoplatok:r2(zdravRocny-preddavkyZP), vymZaklad,
   };
 }
 function importDanovePriznanie(){
@@ -25290,7 +25318,7 @@ function appPriznania(){
       <div class="aminbox"><div class="al">Nedoplatok zdravotné ${aktualnyRok}</div><div class="av">${eur(prog.zdravNedoplatok)}</div><div style="font-size:10px;color:var(--ink-soft)">ročné zúčtovanie (odhad)</div></div>
     </div>
     <div style="background:var(--sfc-warn);border-left:3px solid #c9a84a;border-radius:8px;padding:11px 14px;margin:12px 0;font-size:12.5px">
-      <b>Pasívny prehľad.</b> Minulé roky sú načítané z oficiálnych XML priznaní (DPFO typ B) z Finančnej správy. Rok ${aktualnyRok} je <b>odhad za celý rok</b> — skutočnosť za doterajších ${prog.mesDoteraz} mes. sa extrapoluje na 12 (×${prog.faktor}). Slúži na orientáciu, nenahrádza priznanie ani daňového poradcu.
+      <b>Pasívny prehľad.</b> Minulé roky sú načítané z oficiálnych XML priznaní (DPFO typ B) z Finančnej správy. Rok ${aktualnyRok} je <b>odhad za celý rok</b>, ten istý ako v Štatistikách: príjmy (podľa úhrady) a výdavky doterajších ${prog.mesDoteraz} mes. sa predĺžia priemerom na 12, poistné a preddavky sa berú zo skutočných platieb a z kalendára termínov. Slúži na orientáciu, nenahrádza priznanie ani daňového poradcu.
     </div>
     ${pbArchivHtml()}
     <div class="card">
