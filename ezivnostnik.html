@@ -2283,7 +2283,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.10.15-TE";  // ročný model dane a odvodov (kumulatívny základ, odpis 1/12, zaplatené poistné), výhľad roka a hranica 100 000 €, jeden hárok XLSX
+const APP_VERZIA = "2026.10.16-TF";  // daňový úrad z číselníka FS v Nastaveniach, kontrola úradu mimo číselníka, preklik z podania do Nastavení
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -22611,9 +22611,20 @@ function appData(){
       <div class="mfield"><label>Platiteľom DPH od</label><input id="set_dphPlatcaOd" type="date" value="${esc((d.settings||{}).dphPlatcaOd||'')}">
         <div style="font-size:11.5px;color:var(--ink-soft);margin-top:4px">Dátumy z osvedčení o registrácii. Kto bol najprv registrovaný podľa § 7a a potom sa stal platiteľom, vyberie vyššie platiteľa a vyplní „§ 7a od“ aj „Platiteľom DPH od“ — obdobie § 7a skončí deň predtým a staré mesiace appka počíta tak, ako vtedy platilo. Bez dátumov platí voľba vyššie pre všetky mesiace. „Platiteľom DPH od“ rozhoduje aj o paušálnych výdavkoch v roku registrácie (§ 6 ods. 10 zákona o dani z príjmov).</div>
         <div id="set_dphDatumyStav" style="font-size:11.5px;color:var(--neg);margin-top:4px">${esc(dphObdobiaPrekryv())}</div></div>
-      ${jeRegistrovanyDPH()?`<div class="mfield"><label>Daňový úrad</label>
-        <input id="set_danovyUrad" value="${esc((d.meta||{}).danovyUrad||'')}" placeholder="napr. Žilina">
-        <div style="font-size:11.5px;color:var(--ink-soft);margin-top:4px">Vypĺňa sa do hlavičky priznania k DPH a súhrnného výkazu. Appka si ho nedomýšľa — prázdny je lepší než cudzí.</div></div>`:''}
+      ${jeRegistrovanyDPH()?(()=>{
+        // Výber z číselníka FS. Stará voľne písaná hodnota mimo neho (napr.
+        // „Senec“) sa NEPREPÍŠE potichu — ostane vybraná s výzvou, kým ju
+        // človek nezmení; kontrola pred podaním ju hlási.
+        const du=String((d.meta||{}).danovyUrad||""), mimo=du && !danovyUradPlatny(du);
+        return `<div class="mfield"><label>Daňový úrad</label>
+        <select id="set_danovyUrad">
+          <option value=""${du?"":" selected"}>— vyberte —</option>
+          ${DANOVE_URADY.map(u=>`<option value="${esc(u)}"${u===du?" selected":""}>${esc(u)}</option>`).join("")}
+          ${mimo?`<option value="${esc(du)}" selected>${esc(du)} — nie je v číselníku FS</option>`:""}
+        </select>
+        ${mimo?`<div style="font-size:11.5px;color:var(--neg);margin-top:4px">Portál FS „${esc(du)}“ nepozná a v podaní by úrad ostal prázdny. Pracovisko (napr. Senec, Pezinok) patrí pod krajský úrad — vyberte ho.</div>`:""}
+        <div style="font-size:11.5px;color:var(--ink-soft);margin-top:4px">Krajský daňový úrad podľa sídla (bydliska) — vypĺňa sa do hlavičky priznania k DPH a súhrnného výkazu. Číselník je ten istý ako na portáli Finančnej správy.</div></div>`;
+      })():''}
     </div>
 
     <div class="card">
@@ -35021,6 +35032,12 @@ function dphMeta(){
           danovyUrad:m.danovyUrad||"", opravnenaOsoba:m.opravnenaOsoba||""};
 }
 
+// Číselník daňových úradov eFormulára FS (DPHv25, select #danovyUrad; overené
+// 16. 10. 2026). Schéma má voľný text, ale portál pri načítaní XML berie len
+// tieto hodnoty — „Senec“ (pracovisko DÚ Bratislava) ostal po načítaní prázdny.
+const DANOVE_URADY=["Banská Bystrica","Bratislava","Košice","Nitra","Prešov","Trenčín","Trnava","Žilina","Úrad pre vybrané hospodárske subjekty"];
+function danovyUradPlatny(u){ return DANOVE_URADY.includes(String(u||"")); }
+
 // Čo v identifikácii daňovníka chýba — volať PRED generovaním XML.
 // Kontrola bez spúšťača je horšia než žiadna (kap. 16), preto vracia
 // zoznam na zobrazenie, nie iba true/false.
@@ -35033,19 +35050,42 @@ function dphMeta(){
 // Kontrolný výkaz ho v schéme NEMÁ, takže sa pri ňom nesmie pýtať: blokovať
 // export kvôli poľu, ktoré v tom dokumente nie je, je falošný poplach — a ten
 // naučí preskakovať aj pravé nálezy.
-function dphMetaChyba(typ){
+// 🔴 16. 10. 2026: vyplnený nestačí — portál FS pozná len číselník
+// DANOVE_URADY a hodnotu mimo neho pri načítaní XML zahodí. Každý nález nesie
+// pole v Nastaveniach, kam ho doplniť (tlačidlo „Doplniť v Nastaveniach“
+// namiesto vety „choďte si to vyplniť“).
+function dphMetaChybaPolia(typ){
   const M=dphMeta(), ch=[];
-  if(!M.icdph) ch.push("IČ DPH");
-  if(!M.nazov) ch.push("názov firmy");
-  if(!M.ulica) ch.push("ulica");
-  if(!M.obec)  ch.push("obec");
-  if(!M.psc)   ch.push("PSČ");
-  if((typ==="dp"||typ==="sv") && !M.danovyUrad) ch.push("daňový úrad");
+  const p=(t, pole)=>ch.push({t, pole});
+  if(!M.icdph) p("IČ DPH", "set_icdph");
+  if(!M.nazov) p("názov firmy", "set_nazov");
+  if(!M.ulica) p("ulica", "set_adresa");
+  if(!M.obec)  p("obec", "set_adresa");
+  if(!M.psc)   p("PSČ", "set_adresa");
+  if(typ==="dp"||typ==="sv"){
+    if(!M.danovyUrad) p("daňový úrad", "set_danovyUrad");
+    else if(!danovyUradPlatny(M.danovyUrad)) p("daňový úrad („"+M.danovyUrad+"“ portál FS nepozná — vyberte krajský úrad z číselníka)", "set_danovyUrad");
+  }
   // 🔴 13. 9. 2026: DIČ zapisuje `dphGenerujDP` do <dic>, ale nič ho nepýtalo —
   // rovnaká trieda chyby ako daňový úrad vyššie. Len priznanie: kontrolný výkaz
   // DIČ nemá a súhrnný výkaz dáva do <dic> IČ DPH bez „SK".
-  if(typ==="dp" && !M.dic) ch.push("DIČ");
+  if(typ==="dp" && !M.dic) p("DIČ", "set_dic");
   return ch;
+}
+function dphMetaChyba(typ){ return dphMetaChybaPolia(typ).map(x=>x.t); }
+// Nálezy pre okno kontroly pred podaním — po jednom na pole v Nastaveniach
+// (ulica, obec a PSČ sú jedno pole adresy), blokujúce, s preklikom.
+function dphMetaNalezy(typ){
+  const po={};
+  dphMetaChybaPolia(typ).forEach(x=>{ (po[x.pole]=po[x.pole]||[]).push(x.t); });
+  return Object.keys(po).map(pole=>({blokuje:true, pole,
+    text:"V údajoch firmy chýba: "+po[pole].join(", ")+".",
+    detail:"Bez toho portál Finančnej správy hlavičku podania nevyplní alebo súbor odmietne."}));
+}
+// Preklik z podania rovno na pole v Nastaveniach (modul „data“), so zvýraznením.
+function dphOtvorNastaveniaPole(pole){
+  try{ closeModal(); }catch(_){}
+  nvOtvorModul("data", pole||"set_nazov");
 }
 
 // XML: Kontrolný výkaz DPH (verne zo starej appky)
@@ -35433,6 +35473,9 @@ function kontrolaPredPodanim(mk, typ){
   const P=dphParsujObdobie(mk);
   const doklady=dphZberObdobie(mk);
   const [rok,mes]=[P.rok, P.mesiac||((P.stvrtrok-1)*3+1)];
+  // Údaje firmy do hlavičky — tu, nie až v dphStiahni: okno kontroly vie
+  // ponúknuť preklik do Nastavení, alert nie (16. 10. 2026).
+  chyby.push(...dphMetaNalezy(typ));
   // štvrťročné podanie stojí na troch mesiacoch — neuzavretý mesiac znamená,
   // že sa doň ešte dá omylom zapísať doklad po vygenerovaní XML
   if(P.stvrtrok){
@@ -37232,10 +37275,14 @@ function dphStiahni(typ, mk){
   // nedopĺňa nič za používateľa (viď tam), chýbajúca adresa alebo IČ DPH
   // by prešli do XML ako prázdne elementy a odmietla by ich až finančná
   // správa — po podaní, s nejasnou hláškou.
-  const chyba=dphMetaChyba(typ);
+  // Bežne to zachytí už okno kontroly (dphExport); toto je poistka pre
+  // priame volanie — tiež s preklikom, nie s vetou „choďte do Nastavení“.
+  const chyba=dphMetaChybaPolia(typ);
   if(chyba.length){
-    alert("Vo výkaze by chýbala identifikácia daňovníka:\n\n• "+chyba.join("\n• ")+
-          "\n\nDoplňte to v Nastaveniach (údaje firmy) a skúste znova.");
+    openModal("⛔ Podanie sa nedá vygenerovať", `
+      <div class="csub" style="margin-bottom:12px">Vo výkaze by chýbala identifikácia daňovníka:</div>
+      ${chyba.map(x=>`<div style="font-size:12.5px;margin:0 0 4px">• ${esc(x.t)}</div>`).join("")}
+      <button class="aabtn pri" style="margin-top:12px" onclick="dphOtvorNastaveniaPole('${esc(String(chyba[0].pole).replace(/'/g,""))}')">Doplniť v Nastaveniach</button>`, null);
     return;
   }
   const xml = typ==="kv" ? dphGenerujKV(mk) : (typ==="sv" ? svGeneruj(mk) : dphGenerujDP(mk));
@@ -37413,6 +37460,7 @@ function dphExport(typ, mk){
         <div style="font-size:12.5px;color:var(--ink)">${esc(p.text)}</div>
         ${p.detail?`<div style="font-size:11px;color:var(--ink-soft);margin-top:2px">${esc(p.detail)}</div>`:""}
         ${(p.zdrojId||p.cislo)?`<button class="aabtn" style="padding:4px 10px;font-size:11.5px;margin-top:7px" onclick="kvOpravDoklad('${esc(String(p.zdrojId||"").replace(/'/g,""))}','${esc(String(p.cislo||"").replace(/'/g,""))}')">Opraviť doklad</button>`:""}
+        ${p.pole?`<button class="aabtn" style="padding:4px 10px;font-size:11.5px;margin-top:7px" onclick="dphOtvorNastaveniaPole('${esc(String(p.pole).replace(/'/g,""))}')">Doplniť v Nastaveniach</button>`:""}
       </div>`).join("")}
     </div>`;
   };
@@ -37430,7 +37478,7 @@ function dphExport(typ, mk){
     ${sekcia("Odsúhlasenie s realitou","#3a6ea5","🔵",n.odsuhlasenie)}
     <div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;padding-top:10px;border-top:1px solid var(--line-soft)">
       ${blok.length
-        ? "Doplňte chýbajúce údaje na dokladoch a skúste znova."
+        ? "Doplňte chýbajúce údaje — tlačidlo pri položke otvorí doklad alebo pole v Nastaveniach — a skúste znova."
         : "Potvrdením <b>stiahneš XML aj tak</b>. Ak chceš najprv opraviť, zatvor toto okno (×)."}
     </div>
   `;
@@ -37876,10 +37924,7 @@ function svZaznamExport(kod){
 // Tvar výsledku je zámerne rovnaký, takže `dphExport` ho vie zobraziť bez zmeny.
 function svKontrola(kod){
   const chyby=[], podozrenia=[], odsuhlasenie=[];
-  const chybaMeta=dphMetaChyba("sv");
-  if(chybaMeta.length) chyby.push({blokuje:true,
-    text:"Chýba identifikácia daňovníka: "+chybaMeta.join(", ")+".",
-    detail:"Doplňte údaje firmy v Nastaveniach — bez nich portál Finančnej správy súbor odmietne."});
+  chyby.push(...dphMetaNalezy("sv"));
 
   const doklady=svZberObdobie(kod);
   if(!doklady.length) chyby.push({blokuje:true,

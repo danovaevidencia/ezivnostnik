@@ -523,15 +523,15 @@ dph: {
     {
       id: "udaje",
       nazov: "Doplniť údaje firmy, bez ktorých súbor nevznikne",
-      kedy: "Raz, pred prvým podaním — alebo keď appka napíše, že vo výkaze by chýbala identifikácia daňovníka.",
+      kedy: "Raz, pred prvým podaním — alebo keď kontrola pred podaním ukáže tlačidlo Doplniť v Nastaveniach.",
       kroky: [
         { text: "V [[app:data#set_adresa|nastaveniach firmy]] vyplňte adresu v tvare <b>Ulica číslo, PSČ Obec</b>.", snimka: "dph-udaje-1",
           tip: "Z tohto jedného riadku appka berie do XML ulicu (pred prvou čiarkou) a PSČ s obcou (za poslednou čiarkou)." },
-        { text: "Vyplňte [[app:data#set_danovyUrad|daňový úrad]].", tlacidlo: "Daňový úrad", snimka: "dph-udaje-2",
-          tip: "Kontrolný výkaz sa stiahne aj bez neho, priznanie k DPH a súhrnný výkaz nie." },
+        { text: "Vyberte [[app:data#set_danovyUrad|daňový úrad]] — krajský úrad podľa sídla.", tlacidlo: "Daňový úrad", snimka: "dph-udaje-2",
+          tip: "Ponuka je číselník Finančnej správy. Pracovisko (napr. Senec, Pezinok) v nej nie je — patrí pod krajský úrad. Kontrolný výkaz sa stiahne aj bez úradu, priznanie k DPH a súhrnný výkaz nie." },
         { text: "Ťuknite na <b>Uložiť všetky nastavenia</b>.", tlacidlo: "Uložiť všetky nastavenia" },
       ],
-      tip: "IČ DPH, názov firmy, ulicu, obec a PSČ appka overí pred každým stiahnutím — keď niečo chýba, povie čo.",
+      tip: "IČ DPH, názov firmy, ulicu, obec a PSČ appka overí pred každým stiahnutím — keď niečo chýba, povie čo a tlačidlom Doplniť v Nastaveniach otvorí rovno to pole.",
       podrobnosti: [
         { nadpis: "Ostatné údaje firmy",
           html: "<p>Tu sú len údaje, ktoré potrebujú podania k DPH. Doplnenie z registra, IBAN a ostatné opisuje [[navod:data/firma|návod k údajom firmy]].</p>" },

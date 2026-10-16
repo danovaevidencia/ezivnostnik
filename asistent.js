@@ -168,9 +168,12 @@ const ASISTENT_VYKONAJ = {
       nalezy.forEach(n => (n.akcia || []).forEach(a => akcie.push({ l: a.l, fn: a.fn })));
     } else if (v.rozsah === "dph") {
       const mk = P.O.kod; const K = kontrolaPredPodanim(mk, "dp");
-      nalezy = (K.chyby || []).map(x => ({ typ: "chyba", text: x.text, detail: x.detail, zdrojId: x.zdrojId, blokuje: !!x.blokuje }))
+      nalezy = (K.chyby || []).map(x => ({ typ: "chyba", text: x.text, detail: x.detail, zdrojId: x.zdrojId, pole: x.pole, blokuje: !!x.blokuje }))
         .concat((K.podozrenia || []).map(x => ({ typ: "pozor", text: x.text, detail: x.detail, zdrojId: x.zdrojId })));
-      nalezy.forEach(n => { if (n.zdrojId) akcie.push({ l: "Opraviť: " + String(n.text).slice(0, 40), fn: "kvOpravDoklad(" + JSON.stringify(n.zdrojId) + ")" }); });
+      nalezy.forEach(n => {
+        if (n.zdrojId) akcie.push({ l: "Opraviť: " + String(n.text).slice(0, 40), fn: "kvOpravDoklad(" + JSON.stringify(n.zdrojId) + ")" });
+        else if (n.pole) akcie.push({ l: "Doplniť v Nastaveniach", fn: "dphOtvorNastaveniaPole(" + JSON.stringify(n.pole) + ")" });
+      });
     } else {
       nalezy = (P.O.mesiace.length === 1 ? P.O.mesiace : [P.O.mesiace[P.O.mesiace.length - 1]])
         .flatMap(mk => uzavierkaKontroly(mk).filter(n => !nalezSkryty("mesiac", n.k)).map(n => ({ k: n.k, typ: n.typ, text: n.t, detail: n.d, mesiac: mk })));
