@@ -2283,7 +2283,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.10.16-TG";  // ročné zúčtovanie ZP bez januárovej platby za december minulého roka, Priznania s odhadom roka zo Štatistík, sadzby 2027, kalendár: neskorá platba ZP/SP k najstaršiemu termínu
+const APP_VERZIA = "2026.10.16-TH";  // náhľad KV a priznania DPH z toho istého výpočtu ako súbor, riadky priznania podľa sadzby (r01/r01a, r09, r18a/r20a)
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -34956,6 +34956,8 @@ function dphSumare(doklady){
     r13:0, r14:0, r15:0, prenos69:0, euSluzby:0,
     vstup23:0, vstup19:0, vstup5:0, vstup10:0,
     vystup23:0, vystup19:0, vystup10:0, vystup5:0,
+    // základ dodania podľa sadzby — priznanie má pre každú vlastný riadok (r01/r01a/r03)
+    vystupZ23:0, vystupZ19:0, vystupZ10:0, vystupZ5:0,
     samozdZaklad:0, samozdDan:0,
     // samozdanenie rozdelené podľa druhu a sadzby — každý ide do iných riadkov priznania
     sz:{ sluzba:{z19:0,d19:0,z23:0,d23:0}, euTovar:{z19:0,d19:0,z23:0,d23:0}, tuzemsky:{z19:0,d19:0,z23:0,d23:0} },
@@ -35009,6 +35011,8 @@ function dphSumare(doklady){
     if(d.smer==="vystup" && !["A1","D1","D2"].includes(d.oddiel)) return;
     if(d.smer==="vystup"){ S.vystupZaklad=r2(S.vystupZaklad+d.zaklad); S.vystupDan=r2(S.vystupDan+d.dan);
       const s=+d.sadzba||23; if(s===23)S.vystup23=r2(S.vystup23+d.dan); else if(s===19)S.vystup19=r2(S.vystup19+d.dan); else if(s===10)S.vystup10=r2(S.vystup10+d.dan); else if(s===5)S.vystup5=r2(S.vystup5+d.dan);
+      const kz = s===19 ? "vystupZ19" : s===5 ? "vystupZ5" : s===10 ? "vystupZ10" : "vystupZ23";
+      S[kz]=r2(S[kz]+d.zaklad);
     } else {
       // do odpočtu len oddiely s nárokom (B2/B31), nie opravy C2
       if(["B2","B31","B32"].includes(d.oddiel)){
@@ -35504,6 +35508,14 @@ function kontrolaPredPodanim(mk, typ){
   // Údaje firmy do hlavičky — tu, nie až v dphStiahni: okno kontroly vie
   // ponúknuť preklik do Nastavení, alert nie (16. 10. 2026).
   chyby.push(...dphMetaNalezy(typ));
+  // Náhľad a súbor KV z toho istého výberu (kvRiadky) — keby sa rozišli, je to
+  // chyba appky, ktorú človek inak neuvidí: B.1 bol v náhľade a v súbore nie
+  // (07–08/2026, spec 156.23). Chyba, nie blokovanie — lehota podania beží.
+  if(typ==="kv"){
+    const rz=kvNahladRozdiely(doklady);
+    if(rz.length) chyby.push({text:"Súbor kontrolného výkazu by sa líšil od náhľadu: "+kvNahladRozdielyText(rz)+".",
+      detail:"Je to chyba appky, nie vašich dokladov. Súbor zatiaľ nepodávajte a napíšte nám cez Spätnú väzbu — opravíme to."});
+  }
   // štvrťročné podanie stojí na troch mesiacoch — neuzavretý mesiac znamená,
   // že sa doň ešte dá omylom zapísať doklad po vygenerovaní XML
   if(P.stvrtrok){
@@ -36472,6 +36484,61 @@ function rocnaKontrola(rok){
 }
 
 // ═══ NÁHĽAD PRIZNANIA DPH — replika formulára FS s číslami riadkov ═══
+// Riadky náhľadu priznania DPH — čísla a popisy podľa tlačiva DPHv25
+// (form.616.sb.xslt eFormulára FS, 16. 10. 2026). Hodnoty berie z dpRiadky,
+// teda z toho istého výpočtu ako súbor. `vzdy` = riadok sa ukáže aj s nulou.
+const DP_NAHLAD_RIADKY=[
+  {sek:"Daň na výstupe"},
+  {z:"r01", d:"r02", p:"Dodanie tovaru a služby (§ 8, § 9) — znížená sadzba 19 %"},
+  {z:"r01a", d:"r02a", p:"Dodanie tovaru a služby (§ 8, § 9) — znížená sadzba 5 %"},
+  {z:"r03", d:"r04", p:"Dodanie tovaru a služby (§ 8, § 9) — základná sadzba 23 %"},
+  {z:"r05", d:"r06", p:"Nadobudnutie tovaru z iného členského štátu (§ 11) — 19 %"},
+  {z:"r05a", d:"r06a", p:"Nadobudnutie tovaru z iného členského štátu (§ 11) — 5 %"},
+  {z:"r07", d:"r08", p:"Nadobudnutie tovaru z iného členského štátu (§ 11) — 23 %"},
+  {z:"r09", d:"r10", p:"Plnenie, pri ktorom daň platí príjemca (§ 69 ods. 2, 3, 9 až 12) — 19 %"},
+  {z:"r09a", d:"r10a", p:"Plnenie, pri ktorom daň platí príjemca (§ 69 ods. 2, 3, 9 až 12) — 5 %"},
+  {z:"r09b", d:"r10b", p:"Plnenie, pri ktorom daň platí príjemca (§ 69 ods. 2, 3, 9 až 12) — 23 %"},
+  {z:"r11", d:"r12", p:"Trojstranný obchod, daň platí druhý odberateľ (§ 69 ods. 7) — 19 %"},
+  {z:"r11a", d:"r12a", p:"Trojstranný obchod, daň platí druhý odberateľ (§ 69 ods. 7) — 5 %"},
+  {z:"r11b", d:"r12b", p:"Trojstranný obchod, daň platí druhý odberateľ (§ 69 ods. 7) — 23 %"},
+  {z:"r11c", d:"r12c", p:"Dovoz tovaru, daň podľa § 84a ods. 3 — 19 %"},
+  {z:"r11d", d:"r12d", p:"Dovoz tovaru, daň podľa § 84a ods. 3 — 5 %"},
+  {z:"r11e", d:"r12e", p:"Dovoz tovaru, daň podľa § 84a ods. 3 — 23 %"},
+  {z:"r13", p:"Dodanie tovaru a služby s oslobodením od dane (§ 43, 46, 47 a ďalšie)"},
+  {z:"r14", p:"z toho dodanie tovaru do iného členského štátu (§ 43 ods. 1 a 4)"},
+  {z:"r15", p:"z toho vývoz a služby s ním spojené (§ 46, 47, 48 ods. 8)"},
+  {d:"r16", p:"Daň podľa § 48ca ods. 2, § 48d ods. 15 a § 48e"},
+  {d:"r17", p:"Daň celkom", styl:"sub", vzdy:"17"},
+  {sek:"Odpočítanie dane"},
+  {d:"r18", p:"Odpočítanie dane celkom (§ 49 až 52, § 54 až 54d) — 19 %"},
+  {d:"r18a", p:"Odpočítanie dane celkom (§ 49 až 52, § 54 až 54d) — 5 %"},
+  {d:"r19", p:"Odpočítanie dane celkom (§ 49 až 52, § 54 až 54d) — 23 %"},
+  {d:"r20", p:"z toho z prijatých faktúr (§ 51 ods. 1 písm. a) — 19 %"},
+  {d:"r20a", p:"z toho z prijatých faktúr (§ 51 ods. 1 písm. a) — 5 %"},
+  {d:"r21", p:"z toho z prijatých faktúr (§ 51 ods. 1 písm. a) — 23 %"},
+  {d:"r22", p:"Daň zaplatená colnému orgánu pri dovoze — 19 %"},
+  {d:"r22a", p:"Daň zaplatená colnému orgánu pri dovoze — 5 %"},
+  {d:"r23", p:"Daň zaplatená colnému orgánu pri dovoze — 23 %"},
+  {d:"r23a", p:"Daň podľa § 84a ods. 3 pri dovoze — 19 %"},
+  {d:"r23b", p:"Daň podľa § 84a ods. 3 pri dovoze — 5 %"},
+  {d:"r23c", p:"Daň podľa § 84a ods. 3 pri dovoze — 23 %"},
+  {sek:"Opravy"},
+  {z:"r24", p:"Rozdiel v základe dane (§ 25 ods. 1 až 3, § 65 ods. 10 a 11)"},
+  {d:"r25", p:"Rozdiel v dani (§ 25 ods. 1 až 3, § 65 ods. 10 a 11)"},
+  {z:"r26", p:"Rozdiel v základe dane (§ 25a)"},
+  {d:"r27", p:"Rozdiel v dani (§ 25a)"},
+  {d:"r28", p:"Oprava odpočítanej dane (§ 53 a 53a)"},
+  {d:"r29", p:"Oprava odpočítanej dane (§ 53b)"},
+  {d:"r30", p:"Odpočítanie dane pri registrácii platiteľa (§ 55)"},
+  {d:"r31", p:"Vrátenie dane cestujúcim pri vývoze (§ 60)"},
+  {sek:"Výsledok"},
+  {d:"r32", p:"Vlastná daňová povinnosť", styl:"pay", vzdy:"32"},
+  {d:"r33", p:"Nadmerný odpočet", styl:"ret", vzdy:"33"},
+  {d:"r34", p:"Nadmerný odpočet odpočítaný od vlastnej daňovej povinnosti (§ 79)"},
+  {d:"r35", p:"Vlastná daňová povinnosť na úhradu", styl:"pay"},
+  {d:"r36", p:"Dodatočné priznanie: rozdiel oproti poslednej známej povinnosti (+/−)"},
+  {d:"r37", p:"Dodatočné priznanie: daň na úhradu (+/−)"},
+];
 function dpTeloHtml(mk){
   const P=dphParsujObdobie(mk);
   const rok=P.rok, mes=P.mesiac;
@@ -36479,9 +36546,9 @@ function dpTeloHtml(mk){
   const S=dphSumare(doklady);
   const m=dphMeta();
   const eur2=v=>(+v||0).toFixed(2).replace(".",",");
-  const vystupZ=r2(S.vystupZaklad), vystupD=r2(S.vystupDanCelkom), vstupZ=r2(S.vstupZaklad), vstupD=r2(S.vstupDanCelkom);
-  const povinnost=r2(vystupD-vstupD);
-  const oprVystZ=r2(S.opravaVystupZaklad), oprVystD=r2(S.opravaVystupDan), oprOdp=r2(S.opravaOdpocet);
+  // Riadky a sumy sú TIE ISTÉ, ktoré idú do súboru (dpRiadky) — do TH mal
+  // náhľad vlastné čísla riadkov a vzorce (spec 156.23).
+  const D=dpRiadky(mk), V=D.V, povinnost=D.povinnost;
   const rr=(cislo, popis, zaklad, dan, zvyrazni)=>`
     <div class="dpf-r ${zvyrazni||''}">
       <span class="dpf-rn">r. ${cislo}</span>
@@ -36504,27 +36571,17 @@ function dpTeloHtml(mk){
 
     <div class="dpf-thd"><span class="dpf-rn"></span><span class="dpf-rp">Položka</span><span class="dpf-rz">Základ dane</span><span class="dpf-rd">Daň</span></div>
 
-    <div class="pbf-sec" style="background:#4a7a4a">Daň na výstupe (dodanie)</div>
-    ${rr("03","Dodanie tovarov a služieb – základná sadzba 23 %", vystupZ, S.vystupDan)}
-    ${S.vystup19?rr("03b","Dodanie – znížená sadzba 19 %", null, S.vystup19):""}
-    ${(oprVystZ||oprVystD)?rr("24","Oprava základu dane (vystavený dobropis)", oprVystZ, null):""}
-    ${(oprVystZ||oprVystD)?rr("25","Oprava dane (vystavený dobropis)", null, oprVystD):""}
-    ${rr("17","Daň celkom na výstupe", null, vystupD, "sub")}
+    ${DP_NAHLAD_RIADKY.map(x=>{
+      if(x.sek) return `<div class="pbf-sec" style="background:#4a7a4a">${x.sek}</div>`;
+      const z=x.z?V[x.z]:"", d=x.d?V[x.d]:"";
+      const vzdy = x.vzdy==="17" || (x.vzdy==="32" && povinnost>=0) || (x.vzdy==="33" && povinnost<0);
+      if(!z && !d && !vzdy) return "";
+      const cislo=[x.z,x.d].filter(Boolean).map(k=>k.slice(1)).join(" / ");
+      return rr(cislo, x.p, x.z ? (z||0) : null, x.d ? (d||0) : null, x.styl);
+    }).join("")}
+    ${D.ziadaVratenie?`<div class="dpf-r"><span class="dpf-rn"></span><span class="dpf-rp">✓ Žiadate o vrátenie nadmerného odpočtu (§ 79 ods. 2)</span><span class="dpf-rz"></span><span class="dpf-rd"></span></div>`:""}
 
-    <div class="pbf-sec" style="background:#4a7a4a">Odpočítanie dane (nákup)</div>
-    ${rr("19","Odpočítanie dane – prijaté plnenia", vstupZ, r2(S.vstupDan))}
-    ${oprOdp?rr("28","Oprava odpočítanej dane (prijatý dobropis)", null, oprOdp):""}
-    ${rr("21","Odpočítateľná daň celkom", null, vstupD, "sub")}
-
-    <div class="pbf-sec" style="background:#4a7a4a">Výsledok</div>
-    ${povinnost>=0
-      ? rr("32","Vlastná daňová povinnosť", null, povinnost, "pay")
-      : rr("33","Nadmerný odpočet", null, -povinnost, "ret")}
-    ${(povinnost>0 && dphOdpocetZMinula(mk))?rr("34","Odpočet nadmerného odpočtu z minulého obdobia", null, -r2(Math.min(dphOdpocetZMinula(mk),povinnost))):""}
-    ${povinnost>0?rr("35","Daň na úhradu", null, r2(povinnost-Math.min(dphOdpocetZMinula(mk),povinnost)), "pay"):""}
-    ${(povinnost<0 && dphOdpocty(mk).vratit)?`<div class="dpf-r"><span class="dpf-rn"></span><span class="dpf-rp">✓ Žiadate o vrátenie nadmerného odpočtu (§ 79 ods. 2)</span><span class="dpf-rz"></span><span class="dpf-rd"></span></div>`:""}
-
-    <div class="kvf-note">Vizuálny náhľad pre kontrolu — nie oficiálne tlačivo. Na podanie použite vygenerované XML pre portál Finančnej správy. Zjednodušený náhľad hlavných riadkov.</div>
+    <div class="kvf-note">Vizuálny náhľad pre kontrolu — nie oficiálne tlačivo. Riadky a sumy sú tie isté, ktoré idú do XML pre portál Finančnej správy; prázdne riadky sa nezobrazujú.</div>
   </div>`;
   return html;
 }
@@ -36807,6 +36864,32 @@ function dphNahladFormular(mk, tab){
 // spätná kompatibilita, keby na to niečo ešte odkazovalo
 function dpDphNahladFormular(mk){ dphNahladFormular(mk, "dp"); }
 
+// Koľko riadkov SÚBORU náhľad KV nakreslí, po oddieloch — týmto pravidlom
+// kvTeloHtml rozhoduje, ktoré bloky ukáže. Súhrnné oddiely (B.3.1, D.2) majú
+// v súbore jeden riadok. Do TH sa bloky kreslili podľa nenulových súčtov
+// (B.1 len pri samozdanenej dani) a A.2 vôbec — oddiel mohol byť v súbore
+// a v náhľade nie, alebo naopak (spec 156.23).
+function kvNahladZobrazene(doklady){
+  const p=od=>doklady.filter(d=>d.oddiel===od).length;
+  const Z={};
+  ["A1","A2","B1","B2","C1","C2"].forEach(od=>{ Z[od]=p(od); });
+  Z.B31=p("B31") ? 1 : 0; Z.D2=p("D2") ? 1 : 0;
+  return Z;
+}
+// Oddiely, v ktorých by sa súbor líšil od náhľadu (počet riadkov). Prázdne =
+// náhľad ukazuje presne to, čo odíde. Porovnávajú sa plné riadky (kvRiadky),
+// nie súbor dodatočného výkazu, ktorý nesie len rozdiely.
+function kvNahladRozdiely(doklady, Z){
+  Z=Z||kvNahladZobrazene(doklady);
+  const R=kvRiadky(doklady);
+  const NAZOV={A1:"A.1",A2:"A.2",B1:"B.1",B2:"B.2",B31:"B.3.1",B32:"B.3.2",C1:"C.1",C2:"C.2",D1:"D.1",D2:"D.2"};
+  const rozd=Object.keys(R).map(k=>({k, oddiel:NAZOV[k]||k, nahlad:Z[k]||0, subor:R[k].length})).filter(x=>x.nahlad!==x.subor);
+  if(rozd.length) console.error("KV: súbor sa líši od náhľadu", rozd);
+  return rozd;
+}
+function kvNahladRozdielyText(rozd){
+  return rozd.map(x=>x.oddiel+" — v náhľade "+x.nahlad+", v súbore "+x.subor).join("; ");
+}
 function kvTeloHtml(mk){
   _kvMk=mk;
   const P=dphParsujObdobie(mk);
@@ -36816,6 +36899,7 @@ function kvTeloHtml(mk){
   const m=dphMeta();
   const eur2=v=>(+v||0).toFixed(2).replace(".",",");
   const pocet=(od)=>doklady.filter(d=>d.oddiel===od).length;
+  const Z=kvNahladZobrazene(doklady), rozdiel=kvNahladRozdiely(doklady, Z);
   // riadky oddielu (detail dokladov)
   const riadkyOddiel=(od, stlpce)=>{
     const dk=doklady.filter(d=>d.oddiel===od);
@@ -36847,33 +36931,39 @@ function kvTeloHtml(mk){
       <div class="kvf-row"><span class="kvf-lbl">Druh výkazu</span><span class="kvf-val ${dphDruhPodania(mk)==="O"?"zvyraz":""}">${dphDruhPodania(mk)==="O"?"Opravný (O)":"Riadny (R)"}</span></div>
     </div>
 
+    ${rozdiel.length ? `<div class="kvf-rozdiel" style="background:var(--sfc-warn);border-left:3px solid #b3231c;border-radius:8px;padding:10px 12px;margin:10px 0;font-size:12.5px;color:var(--ink)"><b>⚠ Súbor by sa líšil od tohto náhľadu:</b> ${esc(kvNahladRozdielyText(rozdiel))}. Je to chyba appky, nie vašich dokladov — súbor zatiaľ nepodávajte a napíšte nám cez Spätnú väzbu.</div>` : ""}
+
     ${dphOddielBlok("A.1", "Dodanie tovarov a služieb (§ 8, § 9)", pocet("A1"), S.A1,
       _kvRezim==="doklady" ? kvStranaHtml("A1", doklady.filter(d=>d.oddiel==="A1")) : `
       <table class="kvf-tbl"><thead><tr><th>IČ DPH odberateľa</th><th>Č. faktúry</th><th>Dátum</th><th class="num">Základ</th><th class="num">Daň</th><th class="num">Sadzba</th></tr></thead>
       <tbody>${riadkyOddiel("A1",6)}</tbody></table>`)}
+
+    ${Z.A2 ? dphOddielBlok("A.2", "Dodanie s prenosom daňovej povinnosti na odberateľa (§ 69 ods. 12)", Z.A2, S.A2, `
+      <table class="kvf-tbl"><thead><tr><th>IČ DPH odberateľa</th><th>Č. faktúry</th><th>Dátum</th><th class="num">Základ</th></tr></thead>
+      <tbody>${doklady.filter(d=>d.oddiel==="A2").map(d=>`<tr><td>${esc(d.icDph||"—")}</td><td>${esc(d.cislo||"—")}</td><td>${fmtDatum(d.datum)}</td><td class="num">${eur2(d.zaklad)}</td></tr>`).join("")}</tbody></table>`) : ""}
 
     ${dphOddielBlok("B.2", "Prijaté plnenia – odpočet dane (došlé faktúry)", pocet("B2"), S.B2,
       _kvRezim==="doklady" ? kvStranaHtml("B2", doklady.filter(d=>d.oddiel==="B2")) : `
       <table class="kvf-tbl"><thead><tr><th>IČ DPH dodávateľa</th><th>Č. faktúry</th><th>Dátum</th><th class="num">Základ</th><th class="num">Daň</th><th class="num">Sadzba</th></tr></thead>
       <tbody>${riadkyOddiel("B2",6)}</tbody></table>`)}
 
-    ${(S.B31&&(S.B31.z||S.B31.d)) ? dphOddielBlok("B.3.1", "Zjednodušené doklady (bločky) – súhrnne", pocet("B31"), S.B31, `
+    ${Z.B31 ? dphOddielBlok("B.3.1", "Zjednodušené doklady (bločky) – súhrnne", pocet("B31"), S.B31, `
       <table class="kvf-tbl"><thead><tr><th colspan="2">Súhrn za všetky zjednodušené doklady</th><th class="num">Základ spolu</th><th class="num">Daň spolu</th></tr></thead>
       <tbody><tr><td colspan="2">${pocet("B31")} dokladov</td><td class="num">${eur2(S.B31.z)}</td><td class="num">${eur2(S.B31.d)}</td></tr></tbody></table>`) : ""}
 
-    ${(S.samozdDan) ? dphOddielBlok("B.1", "Samozdanenie (reverse charge, § 69)", doklady.filter(d=>d.oddiel==="B1").length, {z:S.samozdZaklad,d:S.samozdDan}, `
+    ${Z.B1 ? dphOddielBlok("B.1", "Samozdanenie (reverse charge, § 69)", Z.B1, {z:S.samozdZaklad,d:S.samozdDan}, `
       <table class="kvf-tbl"><thead><tr><th>Doklad</th><th>Dátum</th><th class="num">Základ</th><th class="num">Daň</th></tr></thead>
       <tbody>${riadkyOddiel("B1",4)}</tbody></table>`) : ""}
 
-    ${(S.C1&&(S.C1.z||S.C1.d)) ? dphOddielBlok("C.1", "Opravy k vystaveným faktúram (dobropisy)", pocet("C1"), S.C1, `
+    ${Z.C1 ? dphOddielBlok("C.1", "Opravy k vystaveným faktúram (dobropisy)", pocet("C1"), S.C1, `
       <table class="kvf-tbl"><thead><tr><th>Doklad</th><th>Opravuje</th><th>Dátum</th><th class="num">Základ</th><th class="num">Daň</th></tr></thead>
       <tbody>${doklady.filter(d=>d.oddiel==="C1").map(d=>`<tr><td>${esc(d.cislo||"—")}</td><td>${esc(d.opravujeDoklad||"—")}</td><td>${fmtDatum(d.datum)}</td><td class="num">${eur2(d.zaklad)}</td><td class="num">${eur2(d.dan)}</td></tr>`).join("")||`<tr><td colspan="5" style="text-align:center;color:#5f6f6f;padding:8px;font-style:italic">— žiadne doklady —</td></tr>`}</tbody></table>`) : ""}
 
-    ${(S.C2&&(S.C2.z||S.C2.d)) ? dphOddielBlok("C.2", "Opravy k prijatým faktúram (dobropisy od dodávateľov)", pocet("C2"), S.C2, `
+    ${Z.C2 ? dphOddielBlok("C.2", "Opravy k prijatým faktúram (dobropisy od dodávateľov)", pocet("C2"), S.C2, `
       <table class="kvf-tbl"><thead><tr><th>Doklad</th><th>Opravuje</th><th>Dátum</th><th class="num">Základ</th><th class="num">Daň</th></tr></thead>
       <tbody>${doklady.filter(d=>d.oddiel==="C2").map(d=>`<tr><td>${esc(d.cislo||"—")}</td><td>${esc(d.opravujeDoklad||"—")}</td><td>${fmtDatum(d.datum)}</td><td class="num">${eur2(d.zaklad)}</td><td class="num">${eur2(d.dan)}</td></tr>`).join("")}</tbody></table>`) : ""}
 
-    ${(S.D2&&(S.D2.z||S.D2.d)) ? dphOddielBlok("D.2", "Tržby pre nepodnikateľov – súhrnne", pocet("D2"), S.D2, `
+    ${Z.D2 ? dphOddielBlok("D.2", "Tržby pre nepodnikateľov – súhrnne", pocet("D2"), S.D2, `
       <table class="kvf-tbl"><thead><tr><th colspan="2">Súhrn za faktúry bez IČO odberateľa</th><th class="num">Základ spolu</th><th class="num">Daň spolu</th></tr></thead>
       <tbody><tr><td colspan="2">${pocet("D2")} dokladov</td><td class="num">${eur2(S.D2.z)}</td><td class="num">${eur2(S.D2.d)}</td></tr></tbody></table>`) : ""}
 
@@ -37520,11 +37610,12 @@ function dphVysvetlivky(){
   `, null);
 }
 
-function dphGenerujKV(mk){
-  const P=dphParsujObdobie(mk);
-  const rok=P.rok, mes=P.mesiac;
-  const doklady=dphZberObdobie(mk);
-  const m=dphMeta();
+// Riadky kontrolného výkazu po oddieloch — JEDINÝ výber dokladov do súboru.
+// Číta ho generátor (dphGenerujKV) aj kontrola, že náhľad ukazuje to isté
+// (kvNahladRozdiely). Do verzie TH si generátor vyberal doklady sám a náhľad
+// sám: filter „len tuzemský prenos“ bol len v generátore, náhľad ukazoval B.1
+// a súbor ho nemal (spec 156.23, kap. 16).
+function kvRiadky(doklady){
   const esc=xmlEsc;
   const n=v=>(+v||0).toFixed(2);
   // ── PORADIE ELEMENTOV JE PREDPÍSANÉ SCHÉMOU ──
@@ -37605,6 +37696,14 @@ function dphGenerujKV(mk){
       ZZn:n(sc(zniz,"zaklad")), DZn:n(sc(zniz,"dan"))})}/>`);
   }
 
+  return R;
+}
+function dphGenerujKV(mk){
+  const P=dphParsujObdobie(mk);
+  const rok=P.rok, mes=P.mesiac;
+  const m=dphMeta();
+  const esc=xmlEsc;
+  const R=kvRiadky(dphZberObdobie(mk));
   let riadky=["A1","A2","B1","B2","B31","B32","C1","C2","D1","D2"]
     .flatMap(k=>R[k]).join("\r\n")+(Object.values(R).some(a=>a.length)?"\r\n":"");
   // Dodatočný výkaz nesie len rozdiely oproti poslednému podaniu — s kódmi opravy.
@@ -37627,13 +37726,14 @@ function dphGenerujKV(mk){
 }
 
 // XML: Daňové priznanie DPH (verne)
-function dphGenerujDP(mk){
-  const P=dphParsujObdobie(mk);
-  const rok=P.rok, mes=P.mesiac;
+// Hodnoty riadkov priznania DPH (DPHv25) — JEDEN výpočet pre súbor
+// (dphGenerujDP) aj náhľad (dpTeloHtml). Do TH mal náhľad vlastné riadky
+// a vzorce (r. 19 „odpočítanie“ so základom, r. 21 „celkom“, „03b“) — iné
+// čísla než súbor; tá istá trieda chyby ako B.1 v kontrolnom výkaze
+// (spec 156.23). Vracia hodnoty už vo formáte súboru (prázdne = nula).
+function dpRiadky(mk){
   const doklady=dphZberObdobie(mk);
   const S=dphSumare(doklady);
-  const m=dphMeta();
-  const esc=xmlEsc;
   const n=v=>(+v||0)===0?"":(+v||0).toFixed(2);
   // r03/r04 = všetky zdaniteľné dodania (A.1 + tržby nepodnikateľom D.1/D.2),
   // nie len A.1 — inak by faktúra vystavená občanovi z priznania vypadla.
@@ -37666,15 +37766,6 @@ function dphGenerujDP(mk){
   const odp19=r2(S.vstup19), odp23=r2(S.vstup23);
   const odpFakt19=r2(odp19-(S.vstupSamozd19||0)), odpFakt23=r2(odp23-(S.vstupSamozd23||0));
   const povinnost=r2((danCelkom+oprVystD)-(vstupD+oprOdpocet));
-  // Dátum v hlavičke musí sedieť na tvar D.M.RRRR, ktorý predpisuje schéma.
-  // Skladáme ho ručne — toLocaleDateString sa v rôznych prehliadačoch líši
-  // (medzery, vedúce nuly) a podanie by kvôli tomu mohlo neprejsť validáciou.
-  // DD.MM.RRRR s vedúcimi nulami. Schéma pripúšťa aj jednomiestny tvar
-  // (pattern má nulu voliteľnú), ale validácia portálu ho odmieta — a to sa
-  // ukáže až pri podaní, nie pri kontrole proti XSD.
-  const _d=new Date();
-  const _dv=n=>String(n).padStart(2,"0");
-  const dnes=_dv(_d.getDate())+"."+_dv(_d.getMonth()+1)+"."+_d.getFullYear();   // DD.MM.RRRR
   // ── ŠTRUKTÚRA JE PREDPÍSANÁ SCHÉMOU FS (dph2025.xsd) ──
   // <hlavicka> aj <telo> sú <sequence> a VŠETKY elementy sú povinné — aj tie,
   // ktoré sú prázdne. Predtým appka vypisovala len vyplnené riadky, čo znamená,
@@ -37687,15 +37778,29 @@ function dphGenerujDP(mk){
 
   const V={};                                     // hodnoty, ktoré appka vie vyplniť
   const dajD=(k,v)=>{ const x=n(v); if(x) V[k]=x; };
-  dajD("r03", vystupZ);  dajD("r04", vystupD);
+  // Dodanie podľa sadzby (§ 27: ods. 1 = 23 %, ods. 2 = 19 %, ods. 3 = 5 %;
+  // poučenie DPHv25, form.616.sb.xslt — overené 16. 10. 2026): r01/r02 = 19 %,
+  // r01a/r02a = 5 %, r03/r04 = 23 %. Do TH išlo všetko do r03/r04 — dodanie
+  // so zníženou sadzbou sedelo v riadku základnej sadzby. Bývalých 10 %
+  // (do 2024) ostáva v r03/r04, DPHv25 túto sadzbu nemá.
+  dajD("r01", S.vystupZ19);  dajD("r02", S.vystup19);
+  dajD("r01a", S.vystupZ5);  dajD("r02a", S.vystup5);
+  dajD("r03", r2(vystupZ-(S.vystupZ19||0)-(S.vystupZ5||0)));
+  dajD("r04", r2(vystupD-(S.vystup19||0)-(S.vystup5||0)));
   dajD("r05", euZ19);    dajD("r06", euD19);
   dajD("r07", euZ23);    dajD("r08", euD23);
-  dajD("r09a", prZ19);   dajD("r10a", prD19);
+  // r09/r10 = 19 % (§ 27 ods. 2), r09a/r10a = 5 % (ods. 3). Do TH išlo 19 %
+  // do r09a/r10a — teda do riadku 5 %. Samozdanenie 5 % appka zatiaľ nesleduje
+  // (dphSumare ho počíta k 23 %).
+  dajD("r09", prZ19);    dajD("r10", prD19);
   dajD("r09b", prZ23);   dajD("r10b", prD23);
   dajD("r13", S.r13); dajD("r14", S.r14); dajD("r15", S.r15);
   dajD("r17", danCelkom);
   dajD("r18", odp19);    dajD("r19", odp23);
   dajD("r20", odpFakt19);dajD("r21", odpFakt23);
+  // odpočet pri 5 % (r18a, z toho z faktúr r20a) — do TH sa do povinnosti rátal,
+  // ale v riadkoch chýbal a súčet riadkov nesedel s výsledkom
+  dajD("r18a", S.vstup5); dajD("r20a", S.vstup5);
   dajD("r24", oprVystZ); dajD("r25", oprVystD);
   dajD("r28", oprOdpocet);
   // ── VYSPORIADANIE ──
@@ -37714,6 +37819,23 @@ function dphGenerujDP(mk){
     if(pp){ const rozdiel=r2(povinnost-(+pp.povinnost||0));
       if(Math.abs(rozdiel)>=0.005){ V.r36=n(rozdiel); V.r37=n(rozdiel); } }
   }
+  return {V, RIADKY_TELA, ziadaVratenie, povinnost};
+}
+function dphGenerujDP(mk){
+  const P=dphParsujObdobie(mk);
+  const rok=P.rok, mes=P.mesiac;
+  const m=dphMeta();
+  const esc=xmlEsc;
+  const {V, RIADKY_TELA, ziadaVratenie}=dpRiadky(mk);
+  // Dátum v hlavičke musí sedieť na tvar D.M.RRRR, ktorý predpisuje schéma.
+  // Skladáme ho ručne — toLocaleDateString sa v rôznych prehliadačoch líši
+  // (medzery, vedúce nuly) a podanie by kvôli tomu mohlo neprejsť validáciou.
+  // DD.MM.RRRR s vedúcimi nulami. Schéma pripúšťa aj jednomiestny tvar
+  // (pattern má nulu voliteľnú), ale validácia portálu ho odmieta — a to sa
+  // ukáže až pri podaní, nie pri kontrole proti XSD.
+  const _d=new Date();
+  const _dv=n=>String(n).padStart(2,"0");
+  const dnes=_dv(_d.getDate())+"."+_dv(_d.getMonth()+1)+"."+_d.getFullYear();   // DD.MM.RRRR
   const telo=RIADKY_TELA.map(k=>{
     if(k==="__splnenie") return `<splneniePodmienok>${ziadaVratenie?1:0}</splneniePodmienok>`;
     return V[k] ? `<${k}>${V[k]}</${k}>` : `<${k} />`;
