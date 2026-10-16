@@ -2283,7 +2283,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.10.16-TG";  // ročné zúčtovanie ZP bez januárovej platby za december minulého roka, Priznania s odhadom roka zo Štatistík, sadzby 2027
+const APP_VERZIA = "2026.10.16-TG";  // ročné zúčtovanie ZP bez januárovej platby za december minulého roka, Priznania s odhadom roka zo Štatistík, sadzby 2027, kalendár: neskorá platba ZP/SP k najstaršiemu termínu
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -42480,7 +42480,18 @@ function terminyStav(list, dnes){
   try{ pokr=vypisPokrytie(); }catch(e){ console.error("kalendár — pokrytie výpisov:", e); }
   const mam=new Set(pokr.mesiace||[]), pouzite=new Set();
   const dnesIso=terminIsoDen(dnes||new Date());
-  list.slice().sort((a,b)=>a.d-b.d).forEach(t=>{
+  // Skryté termíny ZP a SP za dva mesiace pred zoznamom: neskorú platbu za
+  // minulý mesiac si vezmú ony, nie prvý termín zoznamu (kalendár začína
+  // aktuálnym mesiacom). Stav sa im počíta, ale do zoznamu sa nevracajú.
+  let skryte=[];
+  const prvy=list.filter(t=>t.auto && (t.typ==="zp"||t.typ==="sp")).reduce((a,t)=>(!a || t.d<a) ? t.d : a, null);
+  if(prvy){
+    try{
+      skryte=danoveTerminy(new Date(prvy.getFullYear(), prvy.getMonth()-2, 1), firmaData.settings||{}, 1)
+        .filter(t=>t.auto && (t.typ==="zp"||t.typ==="sp") && t.d<prvy && !list.some(x=>x.typ===t.typ && x.obd===t.obd));
+    }catch(e){ console.error("kalendár — skryté termíny:", e); }
+  }
+  list.concat(skryte).sort((a,b)=>a.d-b.d).forEach(t=>{
     t.stav=null;
     if(!t.auto || !t.obd) return;
     try{ t.stav=terminStavJeden(t, P, pouzite, mam, pokr.do, dnesIso); }
@@ -42494,10 +42505,30 @@ function terminStavJeden(t, P, pouzite, mam, pokrytieDo, dnesIso){
   const vezmi=(f)=>{ const z=P.filter(p=>kat.includes(p.kategoria) && !pouzite.has(p.kluc) && f(p)); z.forEach(p=>pouzite.add(p.kluc)); return z; };
   let platby=[];
   if(t.typ==="zp" || t.typ==="sp"){
+    // Platba patrí NAJSTARŠIEMU nezaplatenému termínu — tak ju započíta aj
+    // poisťovňa. Termín si vezme prvú nepoužitú platbu od mesiaca pred ním až
+    // po ďalší termín (aj po lehote: Roman zaplatil december 2025 až 23. 1.),
+    // ďalšie len v bežnom okne do termínu + 7 dní a kým chýba očakávaná suma.
+    // Dovtedy si každý termín bral VŠETKY platby okna do termínu + 7 dní —
+    // platba z 23. 1. padla k termínu 8. 2. spolu s februárovou a termín
+    // za december ostal nezaplatený (spec 156.21).
     const od=new Date(t.d); od.setMonth(od.getMonth()-1);
     const doD=new Date(t.d); doD.setDate(doD.getDate()+7);
-    const odIso=terminIsoDen(od), doIso=terminIsoDen(doD);
-    platby=vezmi(p=>p.datum>odIso && p.datum<=doIso);
+    const neskoro=new Date(t.d); neskoro.setMonth(neskoro.getMonth()+1);
+    const odIso=terminIsoDen(od), doIso=terminIsoDen(doD), neskoroIso=terminIsoDen(neskoro);
+    // Neskorú platbu si termín vezme len vtedy, keď výpis pokrýva jeho lehotu —
+    // vieme, že v nej nič neprišlo. Bez výpisu by termín bez dát (aj skrytý)
+    // vzal včasnú platbu nasledujúceho termínu a posunul všetky ďalšie. A len
+    // keď už predtým nejaká platba toho druhu bola: termín pred začatím
+    // podnikania by si inak vzal prvú platbu nového živnostníka.
+    const vieme=mam.has(doIso.slice(0,7)) && pokrytieDo && String(pokrytieDo)>=doIso
+      && P.some(p=>kat.includes(p.kategoria) && p.datum<dIso);
+    const kand=P.filter(p=>kat.includes(p.kategoria) && !pouzite.has(p.kluc) && p.datum>odIso && p.datum<=(vieme ? neskoroIso : doIso));
+    let s=0;
+    for(const p of kand){
+      if(platby.length && (p.datum>doIso || !(t.ocakavane>0) || s>=r2(t.ocakavane)-0.005)) break;
+      platby.push(p); s=r2(s+p.suma); pouzite.add(p.kluc);
+    }
   } else if(t.typ==="dan"){
     const Q=dphParsujObdobie(t.obd);
     platby=vezmi(p=>p.obdobie===t.obd || (Q.mesiace||[]).includes(p.obdobie));
