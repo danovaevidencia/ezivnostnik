@@ -844,25 +844,25 @@ window.NAVODY_SNIMKY = {
  },
  "dph-udaje-2": {
   "m": {
-   "subor": "navody/dph-udaje-2.m.c3a768c6.webp",
+   "subor": "navody/dph-udaje-2.m.23fb0ef8.webp",
    "w": 390,
    "h": 600,
    "ciel": {
     "x": 41,
-    "y": 280,
+    "y": 279,
     "w": 308,
-    "h": 39
+    "h": 41
    }
   },
   "d": {
-   "subor": "navody/dph-udaje-2.d.e55b7e18.webp",
+   "subor": "navody/dph-udaje-2.d.262f239b.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
     "x": 277,
-    "y": 280,
+    "y": 279,
     "w": 706,
-    "h": 39
+    "h": 41
    }
   }
  },
