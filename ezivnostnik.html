@@ -10369,6 +10369,8 @@ const NAVODY_MODULY=new Set([
   // ·
   "kalendar","superdash","data",   // Kalendár, Štatistiky, Nastavenia a dáta
   // ·
+  "b2b_vykaz",   // B2B služby (spec 157.15)
+  // ·
 ]);
 const NV_KROK_MS=2800;
 let _nvStav={modul:null, uloha:null};
@@ -10455,8 +10457,9 @@ if(window.addEventListener) window.addEventListener("resize", ()=>{
 //   [[navod:modul/uloha|text]]   otvorí iný návod
 //   [[app:modul|text]]           otvorí modul
 //   [[app:modul#idPrvku|text]]   otvorí modul a prvok v ňom ukáže
-// Cieľ každého odkazu overuje test_navody.
-const NV_ODKAZ=/\[\[(navod|app):([a-zA-Z]+)(?:\/([a-z0-9-]+))?(?:#([A-Za-z0-9_-]+))?\|([^\]]+)\]\]/g;
+// Cieľ každého odkazu overuje test_navody. Id modulu môže mať číslicu
+// a podčiarnik (`b2b_vykaz`) — inak by sa odkaz vykreslil ako surový text.
+const NV_ODKAZ=/\[\[(navod|app):([a-zA-Z][a-zA-Z0-9_]*)(?:\/([a-z0-9-]+))?(?:#([A-Za-z0-9_-]+))?\|([^\]]+)\]\]/g;
 function nvText(s){
   return String(s||"").replace(NV_ODKAZ,(_,druh,modul,uloha,prvok,text)=>
     `<a href="#" class="nv-odkaz" onclick="event.preventDefault();event.stopPropagation();nvOdkaz('${druh}','${modul}','${uloha||""}','${prvok||""}')">${text}</a>`);
@@ -10488,8 +10491,13 @@ function planyModuluHtml(id){
   const plany=nvPlanyPreModul(id);
   return plany.length ? ` Je súčasťou ${plany.length>1?"plánov":"plánu"} <b>${plany.map(esc).join("</b>, <b>")}</b>.` : "";
 }
+// B2B služby nie sú v pláne, sú na pozvánku (spec 157, návrh §14) — „nie je vo
+// vašom pláne“ a cenník by klamali. Bez prístupu sa návod v zozname nekreslí
+// (ako skupina na ploche); kto príde odkazom, dostane vetu o pozvánke.
+function nvJeB2b(id){ return typeof MODUL_KATEGORIA!=="undefined" && MODUL_KATEGORIA[id]==="b2b"; }
 function nvPlanPoznamkaHtml(id){
   if(nvDostupny(id)) return "";
+  if(nvJeB2b(id)) return `<div class="nv-plan"><span aria-hidden="true">🔒</span><span>B2B služby sú na pozvánku — prístup dostanete, keď vás správca projektu pozve. Návod si pozrieť môžete.</span></div>`;
   return `<div class="nv-plan"><span aria-hidden="true">🔒</span><span>Tento modul vo vašom pláne nie je.${planyModuluHtml(id)}
     Návod si pozrieť môžete. <a href="#" class="nv-odkaz" onclick="event.preventDefault();zobrazCennik()">Zobraziť plány</a></span></div>`;
 }
@@ -10514,7 +10522,7 @@ function nvOtvorModul(modul, prvok){
 function nvSpatHtml(text, akcia){ return `<div class="clSpat" onclick="${akcia}">‹ ${esc(text)}</div>`; }
 function nvOtvorModulHtml(id){
   const a=APPS[id]; if(!a) return "";
-  if(!nvDostupny(id)) return `<button class="aabtn pri" onclick="zobrazCennik()">Zobraziť plány</button>`;
+  if(!nvDostupny(id)) return nvJeB2b(id) ? "" : `<button class="aabtn pri" onclick="zobrazCennik()">Zobraziť plány</button>`;
   return `<button class="aabtn pri" onclick="nvOtvorModul('${id}')">Otvoriť ${esc(a.n)}</button>`;
 }
 // Vrstva 0: zoznam návodov po skupinách, v tom poradí, v akom sú moduly na ploche.
@@ -10529,6 +10537,7 @@ function nvZoznamHtml(N){
   const riadok=id=>{
     const a=APPS[id], m=N[id]; if(!a||!m) return "";
     if(typeof modulLenSZCOSkryty==="function" && modulLenSZCOSkryty(id)) return "";   // spoločnosť: modul len pre živnostníka
+    if(nvJeB2b(id) && !nvDostupny(id)) return "";   // B2B na pozvánku: bez prístupu ani v zozname
     return `<button class="nv-riadok" onclick="otvorNavod('${id}')">
       <span class="appic nv-ic" style="background:${a.c}">${a.ic}</span>
       <span class="nv-rtext"><b>${esc(a.n)}</b><span>${esc(m.vJednejVete||"")}</span>${nvDostupny(id) ? "" : `<span class="nv-planmini">🔒 nie je vo vašom pláne</span>`}</span>
@@ -26778,7 +26787,7 @@ function b2bVystupForm(v){
   return `<div class="mfield"><label>Typ zo zmluvy</label><select id="b2bVTyp"><option value="">—</option>${(D.typy_vystupov||[]).map(t=>`<option value="${esc(t.id)}"${v&&v.typ===t.id?" selected":""}>${esc(t.nazov||t.id)}</option>`).join("")}</select></div>
     <div class="mfield"><label>Názov</label><input id="b2bVNazov" maxlength="300" value="${esc(v&&v.nazov||"")}" placeholder="napr. Zápis z riadiaceho výboru"></div>
     <div class="mfield"><label>Dátum</label><input id="b2bVDatum" type="date" value="${esc(v&&v.datum||b2bIso(new Date()))}"></div>
-    <div class="mfield"><label>Autori</label><div style="display:flex;flex-direction:column;gap:4px">${d.osoby.filter(o=>o.aktivny||aut.has(o.id)).map(o=>`<label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" class="b2bVAut" value="${esc(o.id)}"${aut.has(o.id)?" checked":""}> ${esc(o.meno)}</label>`).join("")}</div></div>
+    <div class="mfield"><label>Autori</label><div style="display:flex;flex-direction:column;gap:4px">${d.osoby.filter(o=>o.aktivny||aut.has(o.id)).map(o=>`<label style="display:flex;gap:6px;align-items:center;font-size:13px;font-weight:400;margin:0"><input type="checkbox" class="b2bVAut" value="${esc(o.id)}"${aut.has(o.id)?" checked":""} style="width:auto"> ${esc(o.meno)}</label>`).join("")}</div></div>
     ${v? "" : `<div class="csub" style="margin:0">ID (${esc(d.projekt.kod)}-V-…) pridelí server pri uložení a nikdy sa nepoužije znova. Súbor nahráte v zozname výstupov.</div>`}`;
 }
 function b2bVystupZForm(){
@@ -27103,7 +27112,8 @@ function b2bZaznamVystupyHtml(z){
   const zoz=b2bVystupySoSubormi(d.vystupy, d.subory).filter(v=>!v.zmazane || vybr.has(v.cislo));
   const ine=[...vybr].filter(c=>!zoz.some(v=>v.cislo===c));
   if(!zoz.length && !ine.length) return "";
-  const r=(c,t)=>`<label style="display:flex;gap:6px;align-items:center;font-size:13px;padding:2px 0"><input type="checkbox" class="b2bZVyst" value="${esc(c)}"${vybr.has(c)? " checked" : ""}> <b>${esc(c)}</b> ${esc(t)}</label>`;
+  // .mfield dáva inputom šírku 100 % a labelom štýl nadpisu poľa — políčko by stálo v strede riadka.
+  const r=(c,t)=>`<label style="display:flex;gap:6px;align-items:center;font-size:13px;font-weight:400;color:var(--ink);padding:2px 0;margin:0"><input type="checkbox" class="b2bZVyst" value="${esc(c)}"${vybr.has(c)? " checked" : ""} style="width:auto"> <b>${esc(c)}</b> ${esc(t)}</label>`;
   return `<details class="mfield"${vybr.size? " open" : ""}><summary style="cursor:pointer;font-size:13px;font-weight:600">Výstupy záznamu (${vybr.size||"žiadny"})</summary>
     ${zoz.slice().reverse().map(v=>r(v.cislo, v.nazov+(v.zmazane? " (zmazaný)" : ""))).join("")}${ine.map(c=>r(c, "(nie je v projekte)")).join("")}</details>`;
 }

@@ -2,6 +2,486 @@
 // Pre každú snímku varianta m (mobil) a d (desktop): súbor, rozmery výrezu
 // v CSS px a obdĺžnik prvku, na ktorý sa ťuká (vo výreze).
 window.NAVODY_SNIMKY = {
+ "b2b_vykaz-fakturovat-1": {
+  "m": {
+   "subor": "navody/b2b_vykaz-fakturovat-1.m.86695202.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 238,
+    "y": 281,
+    "w": 118,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/b2b_vykaz-fakturovat-1.d.a055beb1.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 740,
+    "y": 221,
+    "w": 118,
+    "h": 37
+   }
+  }
+ },
+ "b2b_vykaz-fakturovat-2": {
+  "m": {
+   "subor": "navody/b2b_vykaz-fakturovat-2.m.8eddae33.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 42,
+    "y": 228,
+    "w": 306,
+    "h": 39
+   }
+  },
+  "d": {
+   "subor": "navody/b2b_vykaz-fakturovat-2.d.c9445893.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 104,
+    "y": 224,
+    "w": 402,
+    "h": 39
+   }
+  }
+ },
+ "b2b_vykaz-hodiny-1": {
+  "m": {
+   "subor": "navody/b2b_vykaz-hodiny-1.m.f49abf05.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 31,
+    "y": 281,
+    "w": 95,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/b2b_vykaz-hodiny-1.d.a055beb1.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 267,
+    "y": 221,
+    "w": 95,
+    "h": 37
+   }
+  }
+ },
+ "b2b_vykaz-hodiny-2": {
+  "m": {
+   "subor": "navody/b2b_vykaz-hodiny-2.m.e3f03081.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 42,
+    "y": 278,
+    "w": 104,
+    "h": 43
+   }
+  },
+  "d": {
+   "subor": "navody/b2b_vykaz-hodiny-2.d.43d78937.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 294,
+    "y": 278,
+    "w": 140,
+    "h": 43
+   }
+  }
+ },
+ "b2b_vykaz-hodiny-3": {
+  "m": {
+   "subor": "navody/b2b_vykaz-hodiny-3.m.3c174e89.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 31,
+    "y": 281,
+    "w": 139,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/b2b_vykaz-hodiny-3.d.a055beb1.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 267,
+    "y": 264,
+    "w": 139,
+    "h": 37
+   }
+  }
+ },
+ "b2b_vykaz-kalendar-1": {
+  "m": {
+   "subor": "navody/b2b_vykaz-kalendar-1.m.f49abf05.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 132,
+    "y": 281,
+    "w": 159,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/b2b_vykaz-kalendar-1.d.a055beb1.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 368,
+    "y": 221,
+    "w": 159,
+    "h": 37
+   }
+  }
+ },
+ "b2b_vykaz-kalendar-2": {
+  "m": {
+   "subor": "navody/b2b_vykaz-kalendar-2.m.7a05ceea.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 42,
+    "y": 159,
+    "w": 306,
+    "h": 290
+   }
+  },
+  "d": {
+   "subor": "navody/b2b_vykaz-kalendar-2.d.ddc8157c.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 104,
+    "y": 229,
+    "w": 816,
+    "h": 160
+   }
+  }
+ },
+ "b2b_vykaz-kalendar-3": {
+  "m": {
+   "subor": "navody/b2b_vykaz-kalendar-3.m.7a05ceea.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 200,
+    "y": 486,
+    "w": 148,
+    "h": 56
+   }
+  },
+  "d": {
+   "subor": "navody/b2b_vykaz-kalendar-3.d.ddc8157c.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 517,
+    "y": 426,
+    "w": 403,
+    "h": 40
+   }
+  }
+ },
+ "b2b_vykaz-projekt-1": {
+  "m": {
+   "subor": "navody/b2b_vykaz-projekt-1.m.b7171354.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 16,
+    "y": 281,
+    "w": 125,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/b2b_vykaz-projekt-1.d.1dacb8b2.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 252,
+    "y": 197,
+    "w": 125,
+    "h": 37
+   }
+  }
+ },
+ "b2b_vykaz-projekt-2": {
+  "m": {
+   "subor": "navody/b2b_vykaz-projekt-2.m.42df8865.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 42,
+    "y": 153,
+    "w": 306,
+    "h": 293
+   }
+  },
+  "d": {
+   "subor": "navody/b2b_vykaz-projekt-2.d.7c0d6f96.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 294,
+    "y": 205,
+    "w": 436,
+    "h": 189
+   }
+  }
+ },
+ "b2b_vykaz-projekt-3": {
+  "m": {
+   "subor": "navody/b2b_vykaz-projekt-3.m.6230d983.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 42,
+    "y": 292,
+    "w": 306,
+    "h": 16
+   }
+  },
+  "d": {
+   "subor": "navody/b2b_vykaz-projekt-3.d.76e09926.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 294,
+    "y": 292,
+    "w": 436,
+    "h": 16
+   }
+  }
+ },
+ "b2b_vykaz-projekt-5": {
+  "m": {
+   "subor": "navody/b2b_vykaz-projekt-5.m.450229f6.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 299,
+    "y": 344,
+    "w": 53,
+    "h": 28
+   }
+  },
+  "d": {
+   "subor": "navody/b2b_vykaz-projekt-5.d.e8e6be9f.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 827,
+    "y": 390,
+    "w": 94,
+    "h": 14
+   }
+  }
+ },
+ "b2b_vykaz-vykaz-1": {
+  "m": {
+   "subor": "navody/b2b_vykaz-vykaz-1.m.e51a8be2.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 31,
+    "y": 292,
+    "w": 54,
+    "h": 16
+   }
+  },
+  "d": {
+   "subor": "navody/b2b_vykaz-vykaz-1.d.3f3e8ec4.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 267,
+    "y": 292,
+    "w": 54,
+    "h": 16
+   }
+  }
+ },
+ "b2b_vykaz-vykaz-2": {
+  "m": {
+   "subor": "navody/b2b_vykaz-vykaz-2.m.a52daf9c.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 31,
+    "y": 281,
+    "w": 108,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/b2b_vykaz-vykaz-2.d.59271aef.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 267,
+    "y": 281,
+    "w": 108,
+    "h": 37
+   }
+  }
+ },
+ "b2b_vykaz-vykaz-3": {
+  "m": {
+   "subor": "navody/b2b_vykaz-vykaz-3.m.a52daf9c.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 145,
+    "y": 281,
+    "w": 161,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/b2b_vykaz-vykaz-3.d.59271aef.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 381,
+    "y": 281,
+    "w": 161,
+    "h": 37
+   }
+  }
+ },
+ "b2b_vykaz-vykaz-4": {
+  "m": {
+   "subor": "navody/b2b_vykaz-vykaz-4.m.28e358e6.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 31,
+    "y": 281,
+    "w": 205,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/b2b_vykaz-vykaz-4.d.0a3455f9.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 267,
+    "y": 215,
+    "w": 205,
+    "h": 37
+   }
+  }
+ },
+ "b2b_vykaz-vystupy-1": {
+  "m": {
+   "subor": "navody/b2b_vykaz-vystupy-1.m.3f770687.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 270,
+    "y": 281,
+    "w": 89,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/b2b_vykaz-vystupy-1.d.486f5987.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 904,
+    "y": 191,
+    "w": 89,
+    "h": 37
+   }
+  }
+ },
+ "b2b_vykaz-vystupy-2": {
+  "m": {
+   "subor": "navody/b2b_vykaz-vystupy-2.m.db8d415a.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 42,
+    "y": 258,
+    "w": 306,
+    "h": 41
+   }
+  },
+  "d": {
+   "subor": "navody/b2b_vykaz-vystupy-2.d.64c25a00.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 294,
+    "y": 230,
+    "w": 436,
+    "h": 41
+   }
+  }
+ },
+ "b2b_vykaz-vystupy-3": {
+  "m": {
+   "subor": "navody/b2b_vykaz-vystupy-3.m.df2cee67.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 103,
+    "y": 281,
+    "w": 122,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/b2b_vykaz-vystupy-3.d.a0268a4b.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 339,
+    "y": 281,
+    "w": 122,
+    "h": 37
+   }
+  }
+ },
+ "b2b_vykaz-vystupy-4": {
+  "m": {
+   "subor": "navody/b2b_vykaz-vystupy-4.m.78b1d296.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 42,
+    "y": 292,
+    "w": 306,
+    "h": 16
+   }
+  },
+  "d": {
+   "subor": "navody/b2b_vykaz-vystupy-4.d.3104b822.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 294,
+    "y": 310,
+    "w": 436,
+    "h": 16
+   }
+  }
+ },
  "banka-automat-1": {
   "m": {
    "subor": "navody/banka-automat-1.m.f64cd339.webp",

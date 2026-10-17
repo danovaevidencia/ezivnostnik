@@ -1303,5 +1303,148 @@ data: {
 },
 // ───────────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────── B2B SLUŽBY
+// Spec 157.15. Modul je na pozvánku (nie v pláne) — bez prístupu sa návod
+// v zozname nekreslí (nvJeB2b). Snímky sú z vymysleného projektu v pamäti
+// (dev/navody/scenare/b2b.js), demo B2B nemá.
+b2b_vykaz: {
+  vJednejVete: "Vykazovať hodiny tímu podľa zmluvy a poslať mesačný výkaz objednávateľovi",
+  uvod: "Projekt je jedna zmluva — napríklad realizačná zmluva k rámcovej dohode. Každý člen tímu si zapisuje hodiny ručne alebo z kalendára a z nich vznikne <b>spoločný pracovný výkaz</b> v tvare, aký chce objednávateľ. Čo do projektu zapíšete, vidia všetci jeho členovia, aj ľudia z iných firiem tímu.",
+  ulohy: [
+    {
+      id: "hodiny",
+      nazov: "Zapísať odpracované hodiny",
+      kedy: "Priebežne počas mesiaca — po stretnutí alebo po práci na úlohe.",
+      kroky: [
+        { text: "V záložke <b>Môj mesiac</b> ťuknite na <b>＋ Záznam</b>.", tlacidlo: "＋ Záznam", snimka: "b2b_vykaz-hodiny-1" },
+        { text: "Vyplňte dátum, čas od–do (alebo počet hodín) a vyberte aktivitu.", snimka: "b2b_vykaz-hodiny-2",
+          tip: "Prekrývajúce sa stretnutia appka nezráta dvakrát a hodiny vo výkaze zaokrúhli za celý deň na celé hodiny — od 30 minút nahor." },
+        { text: "Ťuknite na <b>Uložiť</b>.", tlacidlo: "Uložiť" },
+        { text: "Keď máte mesiac zapísaný, zaškrtnite <b>Mesiac hotový</b> — tím uvidí, že na vás nečaká.", tlacidlo: "Mesiac hotový", snimka: "b2b_vykaz-hodiny-3" },
+      ],
+      tip: "Aktivity, ktoré používate najčastejšie, sa ukážu ako <b>Časté:</b> — ťuknutím otvoríte nový záznam s vybranou aktivitou.",
+      podrobnosti: [
+        { nadpis: "Aktivita nie je v zozname",
+          html: "<p>Pridajte ju cez <b>＋ Aktivita</b>: konkrétna úloha projektu (napríklad „Riadiaci výbor — podklady“) patrí pod oblasť alebo činnosť zo zmluvy. Z aktivít mesiaca appka skladá popis pracovnej činnosti vo výkaze.</p>" },
+        { nadpis: "Kto vidí moje záznamy",
+          html: "<p>Všetci členovia projektu. Súkromné ostáva len to, čo do projektu nevošlo — napríklad udalosti kalendára, ktoré ste pri importe neoznačili.</p>" },
+        { nadpis: "Len moje hodiny v súbore",
+          html: "<p><b>⬇ Môj výkaz</b> stiahne len vaše hodiny v tvare výkazu objednávateľa aj s hárkom Detail — na vlastnú kontrolu.</p>" },
+      ],
+    },
+    {
+      id: "kalendar",
+      nazov: "Načítať hodiny z kalendára",
+      kedy: "Stretnutia a práca na projekte sú v Outlooku a nechcete ich prepisovať ručne.",
+      kroky: [
+        { text: "Uložte si kalendár za mesiac ako súbor .ics (návod pre Outlook je nižšie v podrobnostiach)." },
+        { text: "V záložke <b>Môj mesiac</b> ťuknite na <b>📅 Z kalendára (.ics)</b> a vyberte súbor.", tlacidlo: "📅 Z kalendára (.ics)", snimka: "b2b_vykaz-kalendar-1" },
+        { text: "Označte udalosti, ktoré patria projektu, a každej vyberte aktivitu.", snimka: "b2b_vykaz-kalendar-2",
+          tip: "Odmietnuté a zrušené stretnutia appka sama neoznačí — odmietnutie spozná podľa vášho e-mailu v kalendári." },
+        { text: "Ťuknite na <b>Importovať označené</b>.", tlacidlo: "Importovať označené", snimka: "b2b_vykaz-kalendar-3" },
+      ],
+      tip: "Výber si appka zapamätá: budúci mesiac budú stretnutia s rovnakým predmetom označené samy, aj s aktivitou.",
+      podrobnosti: [
+        { nadpis: "Ako dostať .ics z Outlooku",
+          html: "<p>V Outlooku pre Windows: <b>Súbor → Uložiť kalendár</b>, v <b>Ďalšie možnosti</b> nastavte rozsah dátumov na mesiac a uložte. Z Google kalendára: <b>Nastavenia → Import a export → Exportovať</b>.</p>" },
+        { nadpis: "Čo sa z kalendára ukladá",
+          html: "<p>Len dátum, čas a predmet označených udalostí. Účastníci ani text pozvánky do projektu nejdú a neoznačené udalosti sa neukladajú vôbec.</p>" },
+        { nadpis: "Ten istý súbor dvakrát",
+          html: "<p>Udalosť, ktorá už v projekte je, ostane v zozname sivá s poznámkou „už v projekte“ — druhýkrát sa nenačíta.</p>" },
+        { nadpis: "Kategórie z Outlooku",
+          html: "<p>Ak projektovým stretnutiam dávate kategóriu, ťuknite na ňu hore v okne — označí všetky udalosti s ňou a appka si ju zapamätá.</p>" },
+      ],
+    },
+    {
+      id: "vykaz",
+      nazov: "Zložiť a odoslať spoločný výkaz",
+      kedy: "Po skončení mesiaca, keď má tím hodiny zapísané.",
+      kroky: [
+        { text: "V záložke <b>Spoločný výkaz</b> pozrite náhľad a zoznam <b>Kontroly</b>.", tlacidlo: "Spoločný výkaz", snimka: "b2b_vykaz-vykaz-1" },
+        { text: "Doplňte číslo výkazu a akceptujúceho a ťuknite na <b>Uložiť verziu</b>.", tlacidlo: "Uložiť verziu", snimka: "b2b_vykaz-vykaz-2" },
+        { text: "Ťuknite na <b>⬇ Výkaz na odoslanie</b> a súbor pošlite objednávateľovi.", tlacidlo: "⬇ Výkaz na odoslanie", snimka: "b2b_vykaz-vykaz-3" },
+        { text: "Ťuknite na <b>Odoslané objednávateľovi…</b> a zadajte dátum doručenia.", tlacidlo: "Odoslané objednávateľovi…", snimka: "b2b_vykaz-vykaz-4" },
+      ],
+      tip: "Výkaz na odoslanie sa nestiahne, kým má chyby (✗) — napríklad hodiny osoby, ktorá nemá miesto v prílohe so zoznamom expertov.",
+      podrobnosti: [
+        { nadpis: "Čo je v súbore",
+          html: "<p>Rovnaké hárky a vzorce ako vzor objednávateľa: Nastavenia a hárok „Osoba N“ za každú organizáciu tímu. Výkaz na odoslanie je bez hárku Detail; <b>⬇ Interný (s Detailom)</b> má navyše Detail (kto, kedy, čo, výstupy) a hárok Výstupy.</p>" },
+        { nadpis: "Lehota a schválenie",
+          html: "<p>Po odoslaní appka ukáže lehotu 5 dní na vyjadrenie s posunom cez víkend a sviatok. Potom zapíšete <b>Schválený…</b> alebo <b>Pripomienky…</b>; keď lehota uplynie bez odpovede, ponúkne <b>Schválený mlčky (bod 2.8)</b>.</p>" },
+        { nadpis: "Oprava hodín kolegu",
+          html: "<p>V Detaile náhľadu je pri riadku <b>upraviť</b>. Je to korekcia vo verzii výkazu — záznam kolegu sa nemení a korekcia je v Detaile označená.</p>" },
+        { nadpis: "Kolega appku nepoužíva",
+          html: "<p>Jeho výkaz načítate v záložke Tím cez <b>⬆ Výkaz osoby bez účtu (XLSX)</b> — appka spozná hárok Detail z exportu appky, jednoduchú tabuľku aj hárok v tvare vzoru.</p>" },
+        { nadpis: "Verzie výkazu",
+          html: "<p>Každý export uloží novú verziu, ak sa od poslednej niečo zmenilo — rovnaká verzia dá vždy rovnaký súbor. Schválený výkaz sa už nemení.</p>" },
+      ],
+    },
+    {
+      id: "vystupy",
+      nazov: "Pridať výstup a priradiť ho k práci",
+      kedy: "Vznikol zápis zo stretnutia, report, stanovisko alebo iný dokument, ktorý zmluva vyžaduje.",
+      kroky: [
+        { text: "V záložke <b>Výstupy</b> ťuknite na <b>＋ Výstup</b>.", tlacidlo: "＋ Výstup", snimka: "b2b_vykaz-vystupy-1" },
+        { text: "Vyberte typ zo zmluvy, napíšte názov a ťuknite na <b>Založiť</b> — výstup dostane ID projektu, napríklad RZ7-V-001.", tlacidlo: "Založiť", snimka: "b2b_vykaz-vystupy-2" },
+        { text: "Pri výstupe ťuknite na <b>⬆ Nahrať súbor</b>.", tlacidlo: "Nahrať súbor", snimka: "b2b_vykaz-vystupy-3" },
+        { text: "V úprave záznamu, ku ktorému výstup patrí, otvorte <b>Výstupy záznamu</b> a výstup označte.", tlacidlo: "Výstupy záznamu", snimka: "b2b_vykaz-vystupy-4" },
+      ],
+      tip: "ID výstupu sa nikdy nepoužije znova, ani po zmazaní — dá sa naň spoľahnúť v korešpondencii s objednávateľom.",
+      podrobnosti: [
+        { nadpis: "Balík pre objednávateľa",
+          html: "<p>V záložke Spoločný výkaz ťuknite na <b>⬇ Balík so výstupmi (ZIP)</b>: výkaz a súbory výstupov mesiaca premenované na <i>ID_názov</i> (napríklad RZ7-V-001_Zapis.docx). Výstup bez súboru alebo zmazaný v balíku nebude — okno to ukáže vopred.</p>" },
+        { nadpis: "Ako sú súbory chránené",
+          html: "<p>Súbor sa uloží zašifrovaný kľúčom projektu a otvoriť ho dá len člen projektu cez appku; každé stiahnutie sa zapíše. Šifrovanie chráni úložisko a zálohy, nie pred prevádzkovateľom servera.</p>" },
+        { nadpis: "Aké súbory",
+          html: "<p>PDF, Word, Excel, PowerPoint, OpenDocument, obrázky PNG a JPG, text, CSV, e-mail (MSG, EML) a ZIP do 25 MB. Obsah súboru musí sedieť s príponou.</p>" },
+        { nadpis: "Opravený súbor",
+          html: "<p><b>⬆ Nová verzia</b> nahrá opravený súbor. Staré verzie ostanú a odoslaný výkaz aj jeho balík ukazujú na tú, ktorá platila pri odoslaní.</p>" },
+      ],
+    },
+    {
+      id: "fakturovat",
+      nazov: "Vyfakturovať svoje hodiny",
+      kedy: "Výkaz je schválený a svoju časť fakturujete cez vlastnú firmu v eživnostníku.",
+      kroky: [
+        { text: "V záložke <b>Môj mesiac</b> ťuknite na <b>→ Do Výkazov</b>.", tlacidlo: "→ Do Výkazov", snimka: "b2b_vykaz-fakturovat-1" },
+        { text: "Skontrolujte dni, hodiny a číslo zákazky, ktoré prišli z projektu, a ťuknite na <b>Uložiť</b>.", tlacidlo: "Uložiť", snimka: "b2b_vykaz-fakturovat-2" },
+        { text: "V [[app:vykazy|Výkazoch]] na karte výkazu ťuknite na <b>🧾 Vystaviť faktúru</b> — [[navod:vykazy/export|ako vyfakturovať výkaz]].", tlacidlo: "Vystaviť faktúru" },
+      ],
+      tip: "Odberateľa a sadzbu berie faktúra zo zákazkového listu v [[app:dokumenty|Dokumentoch]]. Keď pre zákazku list nie je, appka na to upozorní ešte pred faktúrou.",
+      podrobnosti: [
+        { nadpis: "Hodiny sa v projekte zmenili",
+          html: "<p><b>→ Do Výkazov</b> výkaz aktualizuje: ukáže rozdiel po dňoch a zmení len dni — hlavička a zákazka ostanú, ako ste ich upravili. Vyfakturovaný výkaz sa už nemení.</p>" },
+        { nadpis: "Človekodne",
+          html: "<p>Výkaz z projektu počíta človekodne z hodín (8 hodín = 1 deň), rovnako ako spoločný výkaz — nie z nastavení výkazov.</p>" },
+      ],
+    },
+    {
+      id: "projekt",
+      nazov: "Založiť projekt a pozvať tím",
+      kedy: "Začínate novú zmluvu a máte právo zakladať projekty.",
+      kroky: [
+        { text: "V zozname projektov ťuknite na <b>＋ Nový projekt</b>.", tlacidlo: "＋ Nový projekt", snimka: "b2b_vykaz-projekt-1" },
+        { text: "Vložte odkaz na zmluvu v Centrálnom registri zmlúv a ťuknite na <b>Načítať</b>.", tlacidlo: "Načítať", snimka: "b2b_vykaz-projekt-2" },
+        { text: "Pri prílohe zmluvy ťuknite na <b>Prečítať asistentom</b> a v návrhu ťuknite na <b>Prevziať označené</b>.", tlacidlo: "Prečítať asistentom", snimka: "b2b_vykaz-projekt-3",
+          tip: "Pri každom riadku návrhu je strana a bod zmluvy — prevezme sa len to, čo nechávate označené." },
+        { text: "Doplňte kód projektu a svoje meno a ťuknite na <b>Založiť projekt</b>.", tlacidlo: "Založiť projekt" },
+        { text: "V záložke <b>Projekt</b> pridajte ľudí cez <b>＋ Osoba</b> a pošlite im pozvánku — <b>pozvať e-mailom</b>.", tlacidlo: "pozvať e-mailom", snimka: "b2b_vykaz-projekt-5" },
+      ],
+      tip: "Kto ešte nemá účet, dostane e-mail s odkazom; pozvánku prijme len účet s tou istou e-mailovou adresou.",
+      podrobnosti: [
+        { nadpis: "Kto zakladá projekty",
+          html: "<p>B2B služby sú na pozvánku. Projekt zakladá len ten, komu to povolíme; ostatní sa do projektu dostanú pozvánkou od jeho správcu.</p>" },
+        { nadpis: "Zmluva nie je v registri",
+          html: "<p>Zmluvu prečíta asistent aj z PDF — <b>vybrať PDF</b> v okne nového projektu. Pred odoslaním sa appka opýta, lebo súbor pôjde k poskytovateľovi jazykového modelu.</p>" },
+        { nadpis: "Správcovia",
+          html: "<p>Správca mení projekt a osoby a pozýva. Ďalšieho správcu určíte pri osobe s účtom — <b>urobiť správcom</b>. Projekt má vždy aspoň jedného.</p>" },
+        { nadpis: "Údaje projektu zo súboru",
+          html: "<p>Pozície, miesta a činnosti sa dajú nahrať aj z JSON vo formáte eživnostníka — v záložke Projekt <b>⬆ Nahradiť z JSON</b>.</p>" },
+      ],
+    },
+  ],
+},
+// ───────────────────────────────────────────────────────────────────────
+
 },
 };
