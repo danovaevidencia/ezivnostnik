@@ -2298,7 +2298,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.10.17-TK";  // admin: prístup k B2B službám (spec 157.16); TJ: návody B2B; TI: B2B služby (spec 157), zásady 1.27
+const APP_VERZIA = "2026.10.17-TL";  // B2B: CRZ z poľa pri založení, miesto zakladateľa (spec 157.18); TK: admin: prístup k B2B službám (spec 157.16); TJ: návody B2B; TI: B2B služby (spec 157), zásady 1.27
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -26396,7 +26396,7 @@ function b2bZmenyOdVerzie(snimka, d){
   return {pridane, zmenene, zmazane, spolu:pridane+zmenene+zmazane};
 }
 // Hlavička CRZ z iného projektu nesmie ostať — „Prečítať asistentom“ by poslalo cudziu zmluvu.
-async function b2bOtvorProjekt(pid){ B2B.pid=pid; B2B.mesiac=B2B.mesiac||b2bMesiacTeraz(); B2B.pohlad="moj"; B2B.d=null; B2B._crz=null; B2B._navrh=null; appB2bVykaz(); }
+async function b2bOtvorProjekt(pid){ B2B.pid=pid; B2B.mesiac=B2B.mesiac||b2bMesiacTeraz(); B2B.pohlad="moj"; B2B.d=null; B2B._crz=null; B2B._crzVstup=null; B2B._navrh=null; appB2bVykaz(); }
 function b2bSpatZoznam(){ B2B.pid=null; B2B.d=null; appB2bVykaz(); }
 function b2bZmenMesiac(o){ B2B.mesiac=b2bPosunMesiac(B2B.mesiac||b2bMesiacTeraz(), o); B2B.d=null; appB2bVykaz(); }
 function b2bPohlad(p){ B2B.pohlad=p; appB2bVykaz(); }
@@ -26410,8 +26410,8 @@ async function b2bUlozZaznam(id){
   const datum=v("b2bZDatum"), od=v("b2bZOd"), dk=v("b2bZDo"), akt=v("b2bZAkt")||null, popis=v("b2bZPopis");
   let minuty=b2bCasMinuty(od, dk);
   if(minuty==null){ const h=parseFloat(v("b2bZHod").replace(",",".")); minuty=isFinite(h)? Math.round(h*60) : null; }
-  if(!/^\d{4}-\d{2}-\d{2}$/.test(datum)) return alert("Zadajte dátum.");
-  if(minuty==null || minuty<=0 || minuty>1440) return alert("Zadajte čas od–do alebo počet hodín (do 24).");
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(datum)) return b2bVOkne("Zadajte dátum.");
+  if(minuty==null || minuty<=0 || minuty>1440) return b2bVOkne("Zadajte čas od–do alebo počet hodín (do 24).");
   const riadok={datum, cas_od:(b2bMinCasu(od)!=null&&b2bMinCasu(dk)!=null)? od : null, cas_do:(b2bMinCasu(od)!=null&&b2bMinCasu(dk)!=null)? dk : null,
     minuty, aktivita_id:akt, popis:popis||null};
   // Výstupy len keď formulár výber ukázal — inak by uloženie zmazalo ID z importu.
@@ -26443,7 +26443,7 @@ async function b2bUlozAktivitu(){
   const d=B2B.d; if(!d) return;
   const nazov=String((document.getElementById("b2bANazov")||{}).value||"").trim();
   const oblast=(document.getElementById("b2bAOblast")||{}).value||null, zakazka=String((document.getElementById("b2bAZak")||{}).value||"").trim()||null;
-  if(!nazov) return alert("Zadajte názov aktivity.");
+  if(!nazov) return b2bVOkne("Zadajte názov aktivity.");
   try{
     const r=await sb.from("b2b_aktivity").insert({projekt_id:d.pid, nazov, oblast, zakazka}).select("id");
     if(r.error) throw r.error;
@@ -26593,16 +26593,47 @@ async function b2bPvStav(stav){
   }catch(e){ b2bChyba(e, "Stav výkazu sa nepodarilo zmeniť"); }
 }
 // ── projekt a osoby (správca) ──
+// Vráti true/false — zakladanie a Prevziať podľa toho pokračujú alebo ostanú v okne.
 async function b2bNacitajCrz(cielId){
   const vstup=String((document.getElementById("b2bCrz")||{}).value||"").trim();
   const el=document.getElementById(cielId||"b2bCrzVysl"); if(el) el.textContent="Načítavam z CRZ…";
   try{
     const r=await b2bEdge("crz",{vstup});
-    B2B._crz=r.zmluva;
+    B2B._crz=r.zmluva; B2B._crzVstup=vstup;
     const z=r.zmluva;
     if(el) el.innerHTML=b2bCrzVyslHtml(z);
     const n=document.getElementById("b2bNNazov"); if(n && !n.value) n.value=z.nazov||"";
-  }catch(e){ if(el) el.innerHTML=`<span style="color:var(--neg)">${esc((e&&e.message)||e)}</span>`; }
+    return true;
+  }catch(e){ if(el) el.innerHTML=`<span style="color:var(--neg)">${esc((e&&e.message)||e)}</span>`; return false; }
+}
+// Pole CRZ je zdroj pravdy. Odkaz vložený bez „Načítať“ (alebo prepísaný po
+// načítaní) sa načíta teraz — inak by sa pri založení ticho zahodil (prvý ostrý
+// projekt, 17. 10. 2026). Prázdne pole = bez CRZ, aj keď sa predtým niečo načítalo.
+// Vráti hlavičku, null (prázdne pole) alebo false (chyba je už v okne pri poli).
+async function b2bCrzZPola(){
+  const vstup=String((document.getElementById("b2bCrz")||{}).value||"").trim();
+  if(!vstup) return null;
+  if(B2B._crz && B2B._crzVstup===vstup) return B2B._crz;
+  return (await b2bNacitajCrz())? B2B._crz : false;
+}
+// Kontrola v okne: hláška a okno ostane otvorené s vyplnenými poľami
+// (modalConfirm zavrie okno pri všetkom okrem false).
+function b2bVOkne(text){ alert(text); return false; }
+// Dni pred „na mieste od“ idú do súhrnu bez miesta (bod 4.2 b) — povedať to pri dátume.
+function b2bMiestoOdPozn(od, ucinnost){
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(od||"")) return "";
+  const zac=/^\d{4}-\d{2}-\d{2}$/.test(ucinnost||"")? ucinnost : od.slice(0,8)+"01";
+  if(zac>=od) return "";
+  return "Hodiny od "+fmtDatum(zac)+" do dňa pred "+fmtDatum(od)+" pôjdu do súhrnu bez miesta (bod 4.2 b). Ak ste na mieste skôr, dajte skorší dátum.";
+}
+// Účinnosť: v novom projekte z načítanej hlavičky CRZ alebo z JSON, inak z projektu.
+function b2bMiestoOdPoznUkaz(idOd, idPozn){
+  const u= idOd==="b2bNOd"? (B2B._crz&&B2B._crz.datum_ucinnosti) || ((B2B._json||{}).obdobie||{}).ucinnost_od
+    : ((((B2B.d||{}).projekt||{}).data||{}).obdobie||{}).ucinnost_od;
+  const e=document.getElementById(idPozn); if(e) e.textContent=b2bMiestoOdPozn((document.getElementById(idOd)||{}).value, u||"");
+}
+function b2bMiestoMoznosti(miesta, vybrane){
+  return (miesta||[]).map(x=>`<option value="${esc(x.id)}"${vybrane===x.id?" selected":""}>${esc(x.nazov_v_zmluve||x.id)}${x.poradie_v_prilohe? " ("+esc(x.poradie_v_prilohe)+")" : ""}</option>`).join("");
 }
 // Hlavička zo CRZ + prílohy s čítaním asistentom (aj sken — model číta obraz strany).
 function b2bCrzVyslHtml(z){
@@ -26621,7 +26652,7 @@ function b2bZCrz(data, z){
   return D;
 }
 function b2bNovyProjekt(zachovaj){
-  if(!zachovaj){ B2B._json=null; B2B._crz=null; B2B._novyStav=null; }
+  if(!zachovaj){ B2B._json=null; B2B._crz=null; B2B._crzVstup=null; B2B._novyStav=null; }
   openModal("Nový projekt", `
     <div class="csub">Projekt = jedna realizačná zmluva. Zmluvu načítajte z CRZ a nechajte ju prečítať asistentom, alebo nahrajte údaje z JSON (formát eživnostníka).</div>
     <div class="mfield"><label>Údaje projektu z JSON (voliteľné)</label><input id="b2bNJson" type="file" accept=".json,application/json" onchange="b2bNacitajJson(this)"></div>
@@ -26633,19 +26664,36 @@ function b2bNovyProjekt(zachovaj){
     <div class="mfield"><label>Názov projektu</label><input id="b2bNNazov" placeholder="Realizačná zmluva č. …"></div>
     <div class="mfield"><label>Kód (2–10 znakov A–Z, 0–9; do ID výstupov)</label><input id="b2bNKod" maxlength="10" placeholder="RZ3"></div>
     <div class="mfield"><label>Vaše meno vo výkaze</label><input id="b2bNMeno"></div>
-    <div class="mfield"><label>Vaša organizácia</label><select id="b2bNOrg"><option value="">— najprv nahrajte JSON —</option></select></div>`,
+    <div class="mfield"><label>Vaša organizácia</label><select id="b2bNOrg"><option value="">— doplní sa z JSON alebo zo zmluvy (nepovinné) —</option></select></div>
+    <div class="mfield"><label>Vaše miesto v Prílohe 4</label><select id="b2bNMiesto"><option value="">— doplní sa z JSON alebo zo zmluvy (nepovinné) —</option></select></div>
+    <div class="mfield"><label>Na mieste od (prázdne = od začiatku)</label><input id="b2bNOd" type="date" oninput="b2bMiestoOdPoznUkaz('b2bNOd','b2bNOdPozn')"></div>
+    <div id="b2bNOdPozn" class="csub" style="margin-top:-6px"></div>`,
     async ()=>{
       const v=x=>String((document.getElementById(x)||{}).value||"").trim();
-      const nazov=v("b2bNNazov"), kod=v("b2bNKod").toUpperCase(), meno=v("b2bNMeno"), org=v("b2bNOrg")||null;
-      if(!nazov || !/^[A-Z0-9]{2,10}$/.test(kod) || !meno) return alert("Vyplňte názov, kód (2–10 znakov A–Z, 0–9) a vaše meno.");
+      const nazov=v("b2bNNazov"), kod=v("b2bNKod").toUpperCase(), meno=v("b2bNMeno"), org=v("b2bNOrg")||null, miesto=v("b2bNMiesto"), od=v("b2bNOd");
+      if(!nazov || !/^[A-Z0-9]{2,10}$/.test(kod) || !meno) return b2bVOkne("Vyplňte názov, kód (2–10 znakov A–Z, 0–9) a vaše meno.");
       let data=B2B._json? JSON.parse(JSON.stringify(B2B._json)) : {organizacie:[], pozicie:[], miesta:[]};
       delete data.format; delete data.verzia_formatu;
-      if(B2B._crz) data=b2bZCrz(data, B2B._crz);
+      const crz=await b2bCrzZPola();
+      if(crz===false) return b2bVOkne("Zmluvu z CRZ sa nepodarilo načítať — projekt sa nezaložil. Opravte odkaz alebo pole CRZ vyprázdnite.");
+      if(crz) data=b2bZCrz(data, crz);
+      if(!miesto && (data.miesta||[]).length && !confirm("Nevybrali ste svoje miesto v Prílohe 4 — vaše hodiny pôjdu do súhrnu bez miesta (bod 4.2 b), kým ho nedoplníte v záložke Projekt. Založiť aj tak?")) return false;
+      let pid;
       try{
         const r=await sb.rpc("b2b_zaloz_projekt",{p_nazov:nazov, p_kod:kod, p_data:data, p_meno:meno, p_organizacia:org});
         if(r.error) throw r.error;
-        closeModal(); await b2bNacitajClenstvo(); b2bOtvorProjekt(r.data);
-      }catch(e){ b2bChyba(e, "Projekt sa nepodarilo založiť"); }
+        pid=r.data;
+      }catch(e){ b2bChyba(e, "Projekt sa nepodarilo založiť"); return false; }
+      // Miesto zakladateľa: RPC ho nepozná, zapíše ho správca hneď po založení (tá istá cesta ako Upraviť osobu).
+      let bezMiesta="";
+      if(miesto){
+        try{
+          const u=await sb.from("b2b_osoby").update({miesta:[{miesto, od:od||null, do:null}]}).eq("projekt_id",pid).eq("user_id",_prihlasenyUser).select("id");
+          if(u.error) throw u.error; if(!u.data||!u.data.length) throw new Error("osoba zakladateľa sa v projekte nenašla");
+        }catch(e){ console.error("B2B: miesto zakladateľa", e); bezMiesta=(e&&e.message)||String(e); }
+      }
+      closeModal(); await b2bNacitajClenstvo(); b2bOtvorProjekt(pid);
+      if(bezMiesta) alert("Projekt je založený, ale vaše miesto v Prílohe 4 sa nepodarilo uložiť ("+bezMiesta+"). Doplňte ho v záložke Projekt → Osoby → upraviť.");
     }, null, null, "Založiť projekt");
   // Návrat z návrhu zo zmluvy: vyplnené polia, hlavička CRZ a prevzaté údaje ostanú.
   if(zachovaj){
@@ -26653,6 +26701,7 @@ function b2bNovyProjekt(zachovaj){
     if(B2B._json) b2bNovyUkazJson(B2B._json, "✓ prevzaté zo zmluvy: ");
     if(B2B._crz){ const el=document.getElementById("b2bCrzVysl"); if(el) el.innerHTML=b2bCrzVyslHtml(B2B._crz); }
     nast("b2bNNazov", st.nazov); nast("b2bNKod", st.kod); nast("b2bNMeno", st.meno); nast("b2bNOrg", st.org); nast("b2bCrz", st.crz);
+    nast("b2bNMiesto", st.miesto); nast("b2bNOd", st.od); b2bMiestoOdPoznUkaz("b2bNOd","b2bNOdPozn");
   }
 }
 function b2bNovyUkazJson(j, pred){
@@ -26661,6 +26710,7 @@ function b2bNovyUkazJson(j, pred){
   const n=document.getElementById("b2bNNazov"); if(n && !n.value && j.zmluva) n.value=j.zmluva.nazov||"";
   const k=document.getElementById("b2bNKod"); if(k && !k.value && j.kod) k.value=j.kod;
   const o=document.getElementById("b2bNOrg"); if(o) o.innerHTML=(j.organizacie||[]).map(x=>`<option value="${esc(x.id)}">${esc(x.nazov)}</option>`).join("");
+  const m=document.getElementById("b2bNMiesto"); if(m) m.innerHTML=`<option value="">— zatiaľ bez miesta —</option>`+b2bMiestoMoznosti(j.miesta);
 }
 // JSON projektu (formát ezivnostnik.b2b.projekt v1, návrh §18.1).
 function b2bNacitajJson(input){
@@ -26698,21 +26748,25 @@ function b2bProjektJsonNahraj(){
   openModal("Nahradiť údaje projektu z JSON", `
     <div class="csub">Pozície, miesta, organizácie, činnosti a výstupy sa nahradia obsahom súboru. Záznamy hodín ani osoby sa nemenia. Zmena ide do logu projektu.</div>
     <div class="mfield"><input type="file" accept=".json,application/json" onchange="b2bNacitajJson(this)"></div><div id="b2bJsonVysl" class="csub"></div>`,
-    async ()=>{ if(!B2B._json) return alert("Najprv vyberte súbor."); const j=JSON.parse(JSON.stringify(B2B._json)); delete j.format; delete j.verzia_formatu; delete j.kod;
+    async ()=>{ if(!B2B._json) return b2bVOkne("Najprv vyberte súbor."); const j=JSON.parse(JSON.stringify(B2B._json)); delete j.format; delete j.verzia_formatu; delete j.kod;
       const crz=B2B.d.projekt.data&&B2B.d.projekt.data.zmluva&&B2B.d.projekt.data.zmluva.crz; if(crz){ j.zmluva=Object.assign({}, j.zmluva||{}, {crz}); }
       if(await b2bUlozDataProjektu(j, "Údaje projektu nahradené.")) closeModal(); }, null, null, "Nahradiť");
 }
+// Prevziať berie to, čo je v poli — nenačítané alebo zmenené pole sa najprv načíta (ako pri založení).
 async function b2bCrzDoProjektu(){
-  if(!B2B._crz) return alert("Najprv načítajte zmluvu z CRZ.");
-  if(await b2bUlozDataProjektu(b2bZCrz(B2B.d.projekt.data, B2B._crz), "Hlavička zmluvy prevzatá z CRZ.")) B2B._crz=null;
+  const crz=await b2bCrzZPola();
+  if(crz===null) return alert("Zadajte odkaz alebo ID zmluvy v CRZ.");
+  if(crz===false) return;   // chyba načítania je pod poľom
+  if(await b2bUlozDataProjektu(b2bZCrz(B2B.d.projekt.data, crz), "Hlavička zmluvy prevzatá z CRZ.")){ B2B._crz=null; B2B._crzVstup=null; }
 }
 function b2bOsobaForm(o){
   const D=(B2B.d.projekt.data)||{}, m=((o&&o.miesta)||[])[0]||{};
   return `<div class="mfield"><label>Meno vo výkaze</label><input id="b2bOMeno" value="${esc(o&&o.meno||"")}"></div>
     <div class="mfield"><label>Organizácia</label><select id="b2bOOrg"><option value="">—</option>${(D.organizacie||[]).map(x=>`<option value="${esc(x.id)}"${o&&o.organizacia===x.id?" selected":""}>${esc(x.nazov)}</option>`).join("")}</select></div>
-    <div class="mfield"><label>Miesto v Prílohe 4</label><select id="b2bOMiesto"><option value="">— zatiaľ bez miesta —</option>${(D.miesta||[]).map(x=>`<option value="${esc(x.id)}"${m.miesto===x.id?" selected":""}>${esc(x.nazov_v_zmluve||x.id)}${x.poradie_v_prilohe? " ("+esc(x.poradie_v_prilohe)+")" : ""}</option>`).join("")}</select></div>
-    <div class="mrow2" style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div class="mfield"><label>Na mieste od</label><input id="b2bOOd" type="date" value="${esc(m.od||"")}"></div>
+    <div class="mfield"><label>Miesto v Prílohe 4</label><select id="b2bOMiesto"><option value="">— zatiaľ bez miesta —</option>${b2bMiestoMoznosti(D.miesta, m.miesto)}</select></div>
+    <div class="mrow2" style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div class="mfield"><label>Na mieste od</label><input id="b2bOOd" type="date" value="${esc(m.od||"")}" oninput="b2bMiestoOdPoznUkaz('b2bOOd','b2bOOdPozn')"></div>
     <div class="mfield"><label>do</label><input id="b2bODo" type="date" value="${esc(m.do||"")}"></div></div>
+    <div id="b2bOOdPozn" class="csub" style="margin-top:-6px">${esc(b2bMiestoOdPozn(m.od, ((D.obdobie||{}).ucinnost_od)||""))}</div>
     ${((o&&o.miesta)||[]).length>1? `<div class="csub">Osoba má ${o.miesta.length} období na miestach — upravuje sa prvé, ostatné ostávajú.</div>` : ""}`;
 }
 function b2bOsobaZForm(o){
@@ -26722,13 +26776,13 @@ function b2bOsobaZForm(o){
 }
 function b2bOsobaPridaj(){
   openModal("Pridať osobu", `<div class="csub">Osoba bez účtu — hodiny jej môže zapisovať alebo importovať ktorýkoľvek člen. Správca ju potom môže pozvať e-mailom.</div>`+b2bOsobaForm(null),
-    async ()=>{ const x=b2bOsobaZForm(null); if(!x.meno) return alert("Zadajte meno.");
+    async ()=>{ const x=b2bOsobaZForm(null); if(!x.meno) return b2bVOkne("Zadajte meno.");
       try{ const r=await sb.from("b2b_osoby").insert(Object.assign({projekt_id:B2B.d.pid}, x)); if(r.error) throw r.error; closeModal(); b2bObnov(); }
       catch(e){ b2bChyba(e, "Osobu sa nepodarilo pridať"); } }, null, null, "Pridať");
 }
 function b2bOsobaUprav(id){
   const o=B2B.d.osoby.find(x=>x.id===id); if(!o) return;
-  openModal("Upraviť osobu", b2bOsobaForm(o), async ()=>{ const x=b2bOsobaZForm(o); if(!x.meno) return alert("Zadajte meno.");
+  openModal("Upraviť osobu", b2bOsobaForm(o), async ()=>{ const x=b2bOsobaZForm(o); if(!x.meno) return b2bVOkne("Zadajte meno.");
     try{ const r=await sb.from("b2b_osoby").update(x).eq("id",id).select("id"); if(r.error) throw r.error; if(!r.data||!r.data.length) throw new Error("nemáte právo meniť túto osobu");
       closeModal(); b2bObnov(); }catch(e){ b2bChyba(e, "Osobu sa nepodarilo uložiť"); } });
 }
@@ -26797,7 +26851,7 @@ function b2bVystupZForm(){
 }
 function b2bVystupNovy(){
   openModal("Nový výstup", b2bVystupForm(null), async ()=>{
-    const x=b2bVystupZForm(); if(!x.nazov) return alert("Zadajte názov výstupu.");
+    const x=b2bVystupZForm(); if(!x.nazov) return b2bVOkne("Zadajte názov výstupu.");
     try{
       const r=await sb.rpc("b2b_vystup_zaloz",{p_projekt:B2B.d.pid, p_typ:x.typ, p_nazov:x.nazov, p_datum:x.datum, p_autori:x.autori});
       if(r.error) throw r.error;
@@ -26809,7 +26863,7 @@ function b2bVystupUprav(id){
   const v=(B2B.d.vystupy||[]).find(x=>x.id===id); if(!v) return;
   const mozeZmazat=v.vytvoril===_prihlasenyUser || b2bSomSpravca();
   openModal("Výstup "+v.cislo, b2bVystupForm(v), async ()=>{
-    const x=b2bVystupZForm(); if(!x.nazov) return alert("Zadajte názov výstupu.");
+    const x=b2bVystupZForm(); if(!x.nazov) return b2bVOkne("Zadajte názov výstupu.");
     try{ const r=await sb.rpc("b2b_vystup_uprav",{p_vystup:id, p_typ:x.typ, p_nazov:x.nazov, p_datum:x.datum, p_autori:x.autori}); if(r.error) throw r.error; closeModal(); b2bObnov(); }
     catch(e){ b2bChyba(e, "Výstup sa nepodarilo uložiť"); }
   }, mozeZmazat? ()=>b2bVystupZmaz(id) : null);
@@ -26931,7 +26985,7 @@ const B2B_NAVRH_POLIA=[["zmluva","Zmluva"],["objednavatel","Objednávateľ"],["o
 const B2B_NAVRH_ZOZNAMY=[["organizacie","Organizácie"],["pozicie","Pozície (rozpočet a sadzby)"],["miesta","Miesta v prílohe"],["oblasti","Oblasti"],
   ["ciele","Ciele"],["aktivity_zmluvy","Aktivity zo zmluvy"],["typy_vystupov","Typy výstupov"]];
 function b2bZdrojText(z){ return z? [z.strana!=null? "str. "+z.strana : "", z.bod? "bod "+z.bod : ""].filter(Boolean).join(", ") : ""; }
-function b2bNovyStavZForm(){ const v=x=>(document.getElementById(x)||{}).value||""; return {nazov:v("b2bNNazov"), kod:v("b2bNKod"), meno:v("b2bNMeno"), org:v("b2bNOrg"), crz:v("b2bCrz")}; }
+function b2bNovyStavZForm(){ const v=x=>(document.getElementById(x)||{}).value||""; return {nazov:v("b2bNNazov"), kod:v("b2bNKod"), meno:v("b2bNMeno"), org:v("b2bNOrg"), crz:v("b2bCrz"), miesto:v("b2bNMiesto"), od:v("b2bNOd")}; }
 async function b2bZmluvaCitaj(priloha, subor){
   const novy=!!document.getElementById("b2bNNazov"), projekt=novy? null : B2B.pid, crz=B2B._crz;
   if(subor==null && !crz) return alert("Najprv načítajte zmluvu z CRZ.");
@@ -27011,7 +27065,7 @@ function b2bZNavrhu(N, D0, vyber){
 async function b2bZmluvaPrevezmi(){
   const st=B2B._navrh; if(!st) return;
   const vyber=new Set([...document.querySelectorAll(".b2bNav")].filter(x=>x.checked).map(x=>x.dataset.k));
-  if(!vyber.size) return alert("Nie je označený žiadny riadok.");
+  if(!vyber.size) return b2bVOkne("Nie je označený žiadny riadok.");
   if(st.novy){
     B2B._json=b2bZNavrhu(st.navrh, B2B._json||{format:"ezivnostnik.b2b.projekt", verzia_formatu:1, organizacie:[], pozicie:[], miesta:[]}, vyber);
     B2B._navrh=null; closeModal(); b2bNovyProjekt(true);
@@ -27434,7 +27488,7 @@ async function b2bImportCitaj(input){
 }
 async function b2bImportUloz(){
   const d=B2B.d, imp=B2B._imp; if(!d) return;
-  if(!imp || !imp.riadky.length) return alert("Najprv vyberte súbor s riadkami za tento mesiac.");
+  if(!imp || !imp.riadky.length) return b2bVOkne("Najprv vyberte súbor s riadkami za tento mesiac.");
   const D=d.projekt.data||{}, org=(document.getElementById("b2bImpOrg")||{}).value||null;
   const norm=s=>String(s||"").toLowerCase().trim();
   try{
@@ -27452,7 +27506,7 @@ async function b2bImportUloz(){
     const orgNazov=((D.organizacie||[]).find(o=>o.id===org)||{}).nazov||"";
     let vybrana=(document.getElementById("b2bImpOsoba")||{}).value||null;
     if(!vybrana && imp.riadky.some(r=>!r.osoba && !r.pozicia)){
-      const nm=String((document.getElementById("b2bImpNova")||{}).value||"").trim(); if(!nm) return alert("Vyberte osobu alebo zadajte meno novej.");
+      const nm=String((document.getElementById("b2bImpNova")||{}).value||"").trim(); if(!nm) return b2bVOkne("Vyberte osobu alebo zadajte meno novej.");
       vybrana=await najdiAleboZaloz(nm, null);
     }
     const akt={}; d.aktivity.forEach(a=>{ akt[norm(a.nazov)]=a.id; });
