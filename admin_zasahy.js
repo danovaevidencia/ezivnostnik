@@ -19,6 +19,9 @@ const ZASAH_AKCIE = {
   firma_config: "Konfig firmy", gdpr_zmazat: "zmazanie účtu", prevod_sparuj: "ručné spárovanie platby",
   prevod_zrus: "zrušenie objednávky", prevod_over: "overenie platby výpisom", dobropis: "dobropis",
   kampan_vyrad: "vyradenie z kampane", kampan_vylucenie_spatne: "vylúčenie z kampaní (spätne)",
+  // B2B služby (admin_76, spec 157.16) — prístup zakladateľa projektov
+  zakladatel_pridany: "B2B: prístup pridaný", zakladatel_pozvany: "B2B: pozvánka", zakladatel_odobraty: "B2B: prístup odobratý",
+  zakladatel_mail: "B2B: e-mail s pozvánkou",
 };
 const CFG_KTO = { stripe: "karta (Stripe)", prevod: "prevod", uctovnik: "účtovník", rucne: "ručne (darovaný alebo nastavený adminom)", free: "nikto — Free" };
 
