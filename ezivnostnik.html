@@ -25781,6 +25781,14 @@ function b2bKoniecLehoty(odoslaneIso){
   const m=String(odoslaneIso||"").match(/^(\d{4})-(\d{2})-(\d{2})/); if(!m) return null;
   return b2bIso(posunNaPracovnyDen(new Date(+m[1],+m[2]-1,+m[3]+5), true));
 }
+// Vnútorná poistka: Detail (hodiny dňa osoby s pozíciou a organizáciou)
+// musí dať ten istý súčet ako súhrn. Pri správnych dátach sa nerozíde —
+// stráži budúcu zmenu, ktorá by jeden z výpočtov zmenila bez druhého.
+function b2bDetailVsSuhrn(organizacie, detail){
+  const suhrn=organizacie.reduce((a,o)=>a+o.spolu,0);
+  const det=detail.filter(r=>r.pozicia && r.organizacia).reduce((a,r)=>a+(r.hodinyDen||0),0);
+  return {suhrn, detail:det, zhoda:suhrn===det};
+}
 function b2bZoznamTextom(n){ return n.length<=1 ? n.join("") : n.slice(0,-1).join(", ")+" a "+n[n.length-1]; }
 // Popis pracovnej činnosti v tvare vzoru: „<oblasti> – <pozície>:“ pre
 // pozície s hodinami, potom „vrátane nasledovných aktivít:“ a aktivity mesiaca.
@@ -25909,16 +25917,15 @@ function b2bVykazModel(vstup){
       if(pct>100) k("pozor","CERPANIE",(p.nazov_vo_vykaze||p.id)+": vyčerpaných "+sp+" z "+roz+" h — rozpočet prekročený");
       else if(pct>80) k("pozor","CERPANIE",(p.nazov_vo_vykaze||p.id)+": vyčerpaných "+Math.round(pct)+" % rozpočtu ("+sp+" z "+roz+" h)"); }
   });
-  const sumaSuhrn=organizacie.reduce((a,o)=>a+o.spolu,0);
-  const sumaDetail=detail.filter(r=>r.pozicia && r.organizacia).reduce((a,r)=>a+(r.hodinyDen||0),0);
-  if(sumaSuhrn!==sumaDetail) k("chyba","DETAIL_SUHRN","Súčet Detailu ("+sumaDetail+" h) sa nerovná súhrnu ("+sumaSuhrn+" h)");
+  const zs=b2bDetailVsSuhrn(organizacie, detail);
+  if(!zs.zhoda) k("chyba","DETAIL_SUHRN","Súčet Detailu ("+zs.detail+" h) sa nerovná súhrnu ("+zs.suhrn+" h)");
   const pd=pracovneDni(rok,mes), z=D.zmluva||{};
   return {rok, mes, mesiac:vstup.mesiac, nazovMesiaca:B2B_MESIACE[mes-1], pocetDni, dni, hodinDna, fond, fondVypocitany,
     cislo:U.cislo||"", datumPV:U.datum||(pd.length? b2bIso(pd[pd.length-1]) : b2bIso(new Date(rok,mes,0))),
     akceptujuci:U.akceptujuci!=null? U.akceptujuci : ((D.pv&&D.pv.akceptujuci)||""),
     zmluvaNazov:[z.nazov,z.predmet].filter(Boolean).join(": "), objednavatel:(D.objednavatel&&D.objednavatel.nazov)||"",
     organizacie, osobaDen, detail, kontroly, sviatky:b2bSviatkyRoka(rok),
-    spolu:sumaSuhrn, suma:Math.round(organizacie.reduce((a,o)=>a+o.suma,0)*100)/100};
+    spolu:zs.suhrn, suma:Math.round(organizacie.reduce((a,o)=>a+o.suma,0)*100)/100};
 }
 // ── Zápis XLSX v tvare vzoru (hárky Nastavenia, Osoba N, Hárok2, Detail) ──
 const B2B_STYL=(()=>{
