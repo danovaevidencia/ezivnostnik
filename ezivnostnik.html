@@ -22242,7 +22242,7 @@ const DOKUMENTY={
   podmienky:{url:"podmienky.html",     n:"Obchodné podmienky",      verzia:"1.11",
              novinka:"Pribudla platba predplatného prevodom a súhlas s tým, že vám faktúry doručujeme elektronicky — e-mailom a v aplikácii."},
   sukromie: {url:"sukromie.html",      n:"Ochrana osobných údajov", verzia:"1.27",
-             novinka:"Pribudli B2B služby na pozvánku: údaje projektu (mená, hodiny, výkazy) vidia všetci jeho členovia a server si môže z Centrálneho registra zmlúv stiahnuť verejnú hlavičku zmluvy."},
+             novinka:"Pribudli B2B služby na pozvánku: údaje projektu (mená, hodiny, výkazy, výstupy) vidia všetci jeho členovia, súbory výstupov sa ukladajú šifrovane, server si môže z Centrálneho registra zmlúv stiahnuť verejnú hlavičku a prílohu zmluvy a správca ju môže dať prečítať asistentovi."},
   zmazanie: {url:"zmazanie-uctu.html", n:"Zmazanie účtu a údajov"},
 };
 // Záznam súhlasu k účtu (ROZHODNUTIA č. 52). Zmluva vzniká vytvorením účtu
@@ -25876,6 +25876,10 @@ function b2bVykazModel(vstup){
   (vstup.aktivity||[]).forEach(a=>{ aktMap[a.id]=a; });
   (D.oblasti||[]).forEach(o=>{ oblMap[o.id]=o.text; });
   pozicie.forEach(p=>(p.cinnosti||[]).forEach(c=>{ oblMap[c.id]=c.text; }));
+  // Výstupy (E1b): záznam nesie ID výstupov; snímka pred E1b zoznam nemá → bez kontrol výstupov.
+  const vystMap={}, typVyst={};
+  (vstup.vystupy||[]).forEach(v=>{ vystMap[v.cislo]=v; });
+  (D.typy_vystupov||[]).forEach(t=>{ typVyst[t.id]=t.nazov||t.id; });
   const kor=U.korekcie||{}, korDen=U.hodinyDen||{};
   const zazn=(vstup.zaznamy||[])
     .filter(z=>z && String(z.datum||"").slice(0,7)===vstup.mesiac && (!vstup.lenOsoba || z.osoba_id===vstup.lenOsoba))
@@ -25922,7 +25926,9 @@ function b2bVykazModel(vstup){
         zakazka:a.zakazka||"", od:z.cas_od? String(z.cas_od).slice(0,5) : "", do:z.cas_do? String(z.cas_do).slice(0,5) : "",
         minuty:(od!=null&&dk!=null&&dk>od)? dk-od : (+z.minuty||0), hodinyDen:i===0? x.hodiny : null,
         oblast:a.oblast? (oblMap[a.oblast]||a.oblast) : "", aktivita:a.nazov||"", popis:z.popis||"",
-        vystupy:(z.vystupy||[]).join(", "), zdroj:/^ics:/.test(z.zdroj||"")? "kalendár" : /^import:/.test(z.zdroj||"")? "import" : "ručne",
+        vystupy:(z.vystupy||[]).join(", "), vystupyId:(z.vystupy||[]).slice(),
+        vystupyNazvy:(z.vystupy||[]).map(c=>vystMap[c]? vystMap[c].nazov : "").filter(Boolean).join("; "),
+        zdroj:/^ics:/.test(z.zdroj||"")? "kalendár" : /^import:/.test(z.zdroj||"")? "import" : "ručne",
         korekcia:(z._korekcia||(i===0&&x.korigovane))? "áno" : "", zaznamId:z.id});
     });
   });
@@ -25967,13 +25973,37 @@ function b2bVykazModel(vstup){
   });
   const zs=b2bDetailVsSuhrn(organizacie, detail);
   if(!zs.zhoda) k("chyba","DETAIL_SUHRN","Súčet Detailu ("+zs.detail+" h) sa nerovná súhrnu ("+zs.suhrn+" h)");
+  // Výstupy mesiaca = tie, na ktoré odkazujú riadky Detailu (vybrané organizácie) — hárok Výstupy aj balík ZIP.
+  const pouzite=[]; detail.forEach(r=>r.vystupyId.forEach(c=>{ if(!pouzite.includes(c)) pouzite.push(c); }));
+  pouzite.sort((a,b)=>a.localeCompare(b,"sk",{numeric:true}));
+  const vystupy=pouzite.map(c=>{ const v=vystMap[c];
+    if(!v) return {cislo:c, nazov:"", typ:"", autori:"", datum:"", zmazane:false, subor:null, vBaliku:"", neznamy:true};
+    return {cislo:c, nazov:v.nazov, typ:typVyst[v.typ]||v.typ||"", autori:(v.autori||[]).map(id=>(osMap[id]||{}).meno).filter(Boolean).join(", "),
+      datum:v.datum||"", zmazane:!!v.zmazane, subor:v.subor||null, vBaliku:(v.subor && !v.zmazane)? b2bNazovVBaliku(c, v.subor.nazov) : ""}; });
+  if(Array.isArray(vstup.vystupy)) vystupy.forEach(v=>{
+    if(v.neznamy) k("pozor","VYSTUP_NEZNAMY","Výstup "+v.cislo+" nie je v zozname výstupov projektu",{cislo:v.cislo});
+    else if(v.zmazane) k("pozor","VYSTUP_ZMAZANY","Výstup "+v.cislo+" je zmazaný, záznamy naň ešte odkazujú",{cislo:v.cislo});
+    else if(!v.subor) k("pozor","VYSTUP_BEZ_SUBORU","Výstup "+v.cislo+" ("+v.nazov+") nemá súbor — v balíku nebude",{cislo:v.cislo});
+  });
   const pd=pracovneDni(rok,mes), z=D.zmluva||{};
   return {rok, mes, mesiac:vstup.mesiac, nazovMesiaca:B2B_MESIACE[mes-1], pocetDni, dni, hodinDna, fond, fondVypocitany,
     cislo:U.cislo||"", datumPV:U.datum||(pd.length? b2bIso(pd[pd.length-1]) : b2bIso(new Date(rok,mes,0))),
     akceptujuci:U.akceptujuci!=null? U.akceptujuci : ((D.pv&&D.pv.akceptujuci)||""),
     zmluvaNazov:[z.nazov,z.predmet].filter(Boolean).join(": "), objednavatel:(D.objednavatel&&D.objednavatel.nazov)||"",
-    organizacie, osobaDen, detail, kontroly, sviatky:b2bSviatkyRoka(rok),
+    organizacie, osobaDen, detail, kontroly, vystupy, sviatky:b2bSviatkyRoka(rok),
     spolu:zs.suhrn, suma:Math.round(organizacie.reduce((a,o)=>a+o.suma,0)*100)/100};
+}
+// Názov súboru výstupu v balíku: „<ID>_<pôvodný názov>“ (návrh §8). ID na
+// začiatku už je → nepridá sa druhýkrát; znaky, ktoré Windows v názve
+// nedovolí, a riadiace znaky → podčiarnik.
+function b2bNazovVBaliku(cislo, nazov){
+  const ZAKAZANE='<>:"/|?*'+String.fromCharCode(92);
+  let n=[...String(nazov||"")].map(ch=>(ch.charCodeAt(0)<32 || ZAKAZANE.includes(ch))? "_" : ch).join("").trim().replace(/[. ]+$/,"");
+  if(!n) n="subor";
+  const c=String(cislo||"");
+  if(!c) return n;
+  const zac=n.toUpperCase().startsWith(c.toUpperCase()) && !/[0-9]/.test(n.charAt(c.length));
+  return zac? n : c+"_"+n;
 }
 // ── Zápis XLSX v tvare vzoru (hárky Nastavenia, Osoba N, Hárok2, Detail) ──
 const B2B_STYL=(()=>{
@@ -26124,13 +26154,13 @@ function b2bXlsx(model, X, volby){
   const idxH2=wb.SheetNames.length-1;
   // Detail — interný a môj výkaz
   if(volby.variant==="interny" || volby.variant==="moj"){
-    const d={}, hl=["Dátum","Deň","Osoba","Organizácia","Pozícia","Miesto v zmluve","Zákazka","Od","Do","Minúty","Hodiny (deň)","Oblasť zo zmluvy","Aktivita","Popis","Výstupy (ID)","Zdroj","Korekcia"];
+    const d={}, hl=["Dátum","Deň","Osoba","Organizácia","Pozícia","Miesto v zmluve","Zákazka","Od","Do","Minúty","Hodiny (deň)","Oblasť zo zmluvy","Aktivita","Popis","Výstupy (ID)","Názov výstupu","Zdroj","Korekcia"];
     hl.forEach((t,c)=>{ d[A(c,1)]=cel(t,S.detHl); });
     const vyb=new Set(orgs.map(o=>o.nazov));
     const rows=model.detail.filter(r=>!r.organizacia || vyb.has(r.organizacia));
     rows.forEach((r,i)=>{ const R=2+i;
-      [b2bSerial(r.datum),r.den,r.osoba,r.organizacia,r.pozicia,r.miesto,r.zakazka,r.od,r.do,r.minuty,r.hodinyDen==null?"":r.hodinyDen,r.oblast,r.aktivita,r.popis,r.vystupy,r.zdroj,r.korekcia]
-        .forEach((v,c)=>{ d[A(c,R)]=cel(v,c===0? S.detD : (c===1||c===7||c===8||c===9||c===10||c===16)? S.detN : S.det); }); });
+      [b2bSerial(r.datum),r.den,r.osoba,r.organizacia,r.pozicia,r.miesto,r.zakazka,r.od,r.do,r.minuty,r.hodinyDen==null?"":r.hodinyDen,r.oblast,r.aktivita,r.popis,r.vystupy,r.vystupyNazvy||"",r.zdroj,r.korekcia]
+        .forEach((v,c)=>{ d[A(c,R)]=cel(v,c===0? S.detD : (c===1||c===7||c===8||c===9||c===10||c===17)? S.detN : S.det); }); });
     const posl=1+rows.length; let R=posl+2;
     d[A(0,R)]=cel("Súčty po osobách",S.detSum); R++;
     const po={}; model.osobaDen.forEach(x=>{ if(x.organizacia && !orgs.some(o=>o.id===x.organizacia)) return; const k=x.osobaId; (po[k]||(po[k]={meno:x.meno,h:0})).h+=x.hodiny; });
@@ -26141,11 +26171,24 @@ function b2bXlsx(model, X, volby){
     d[A(0,R)]=cel("Súčet hodín súhrnu (Osoba N)",S.detSum); d[A(1,R)]=cel(orgs.reduce((a,o)=>a+o.spolu,0),S.detSum,sumF); const rS=R; R++;
     const zhoda=rows.reduce((a,r)=>a+(r.hodinyDen||0),0)===orgs.reduce((a,o)=>a+o.spolu,0);
     d[A(0,R)]=cel("Súčet Detailu = súhrn",S.detSum); d[A(1,R)]=cel(zhoda?"áno":"NIE",S.detSum,'IF(B'+rD+'=B'+rS+',"áno","NIE")');
-    d["!ref"]="A1:Q"+R;
-    d["!cols"]=[12,5,22,22,14,20,12,7,7,8,9,40,30,40,14,10,9].map(w=>({width:w}));
-    d["!autofilter"]={ref:"A1:Q"+Math.max(1,posl)};
+    d["!ref"]="A1:R"+R;
+    d["!cols"]=[12,5,22,22,14,20,12,7,7,8,9,40,30,40,14,30,10,9].map(w=>({width:w}));
+    d["!autofilter"]={ref:"A1:R"+Math.max(1,posl)};
     X.utils.book_append_sheet(wb,d,"Detail");
     info.detail=wb.SheetNames.length-1;
+    // Výstupy — tie, na ktoré odkazuje Detail; názov v balíku = súbor vo vystupy/ v ZIP.
+    if((model.vystupy||[]).length){
+      const v={}, vh=["ID","Názov v balíku","Typ","Názov","Autori","Dátum","Verzia súboru","SHA-256"];
+      vh.forEach((t,c)=>{ v[A(c,1)]=cel(t,S.detHl); });
+      model.vystupy.forEach((x,i)=>{ const R2=2+i;
+        [x.cislo, x.vBaliku? "vystupy/"+x.vBaliku : (x.neznamy? "— nie je v projekte" : x.zmazane? "— zmazaný" : "— bez súboru"), x.typ, x.nazov, x.autori,
+         x.datum? b2bSerial(x.datum) : "", x.subor? x.subor.verzia : "", x.subor? x.subor.sha256 : ""]
+          .forEach((h,c)=>{ v[A(c,R2)]=cel(h, c===5&&x.datum? S.detD : c===6? S.detN : S.det); }); });
+      v["!ref"]="A1:H"+(1+model.vystupy.length);
+      v["!cols"]=[13,44,26,40,28,12,9,66].map(w=>({width:w}));
+      X.utils.book_append_sheet(wb,v,"Výstupy");
+      info.vystupy=wb.SheetNames.length-1;
+    }
   }
   wb.Workbook={Sheets:wb.SheetNames.map((s,i)=>({Hidden:i===idxH2?1:0})), Names:[
     {Name:"Aktivita",Ref:"Hárok2!$A$47:$A$48"},{Name:"mesiac",Ref:"Hárok2!$B$68"},{Name:"mesiace",Ref:"Hárok2!$A$33:$A$44"},
@@ -26171,6 +26214,7 @@ function b2bXlsxDoplnXml(fflate, buf, info){
   uprav(0, sx=>zaMerge(sx,'<dataValidations count="2"><dataValidation type="list" allowBlank="1" showInputMessage="1" showErrorMessage="1" sqref="B4"><formula1>roky</formula1></dataValidation>'+
     '<dataValidation type="list" allowBlank="1" showInputMessage="1" showErrorMessage="1" sqref="B5"><formula1>mesiace</formula1></dataValidation></dataValidations>'));
   if(info.detail!=null) uprav(info.detail, sx=>pane(sx,0,1,"A2"));
+  if(info.vystupy!=null) uprav(info.vystupy, sx=>pane(sx,0,1,"A2"));
   const st="xl/styles.xml";
   if(files[st]) files[st]=enc.encode(dec.decode(files[st]).replace(/<dxfs count="0"\/>/,
     '<dxfs count="2"><dxf><fill><patternFill><bgColor rgb="FFFFFF66"/></patternFill></fill></dxf><dxf><fill><patternFill><bgColor rgb="FFFFC000"/></patternFill></fill></dxf></dxfs>'));
@@ -26279,11 +26323,19 @@ async function b2bNacitajProjekt(){
   if(!r[0].data) throw new Error("Projekt sa nenašiel alebo k nemu už nemáte prístup.");
   let verzie=[];
   if(r[5].data){ const v=await sb.from("b2b_vykazy_verzie").select("*").eq("vykaz_id",r[5].data.id).order("verzia"); if(v.error) throw v.error; verzie=v.data||[]; }
+  // Výstupy (admin_75). Bez migrácie tabuľka nie je — modul ide ďalej bez nich a povie to.
+  let vystupy=[], subory=[], bezVystupov=false;
+  const vr=await sb.from("b2b_vystupy").select("*").eq("projekt_id",pid).order("poradie");
+  if(vr.error){ if(b2bChybaTabulky(vr.error)) bezVystupov=true; else throw vr.error; }
+  else{
+    vystupy=vr.data||[];
+    if(vystupy.length){ const sr=await sb.from("b2b_vystupy_subory").select("id,vystup_id,verzia,nazov,typ,velkost,sha256,nahral,nahrate").in("vystup_id",vystupy.map(v=>v.id)).order("verzia"); if(sr.error) throw sr.error; subory=sr.data||[]; }
+  }
   if(poradie!==_b2bNacitanie) return false;
   const vsetky=r[3].data||[];
   B2B.d={pid, mesiac, projekt:r[0].data, osoby:r[1].data||[], aktivity:r[2].data||[],
     zaznamy:vsetky.filter(z=>z.datum>=od), zaznamyPred:vsetky.filter(z=>z.datum<od),
-    mesiace:r[4].data||[], vykaz:r[5].data||null, verzie, moje:(r[6].data&&r[6].data.data)||{}};
+    mesiace:r[4].data||[], vykaz:r[5].data||null, verzie, moje:(r[6].data&&r[6].data.data)||{}, vystupy, subory, bezVystupov};
   const posl=verzie[verzie.length-1];
   B2B.pvUprava=posl? JSON.parse(JSON.stringify(posl.uprava||{})) : {};
   B2B.pvVerzia=posl? posl.verzia : null;
@@ -26308,11 +26360,21 @@ function b2bSnimka(d){
     aktivity:d.aktivity.map(a=>({id:a.id, nazov:a.nazov, oblast:a.oblast, zakazka:a.zakazka})),
     zaznamy:d.zaznamy.map(z=>({id:z.id, osoba_id:z.osoba_id, datum:z.datum, cas_od:z.cas_od, cas_do:z.cas_do, minuty:z.minuty,
       aktivita_id:z.aktivita_id, popis:z.popis, vystupy:z.vystupy, zdroj:z.zdroj})),
-    mesiace:d.mesiace.map(m=>({osoba_id:m.osoba_id, mesiac:m.mesiac, stav:m.stav})), cerpanieDoteraz:b2bCerpanie(d) };
+    mesiace:d.mesiace.map(m=>({osoba_id:m.osoba_id, mesiac:m.mesiac, stav:m.stav})), cerpanieDoteraz:b2bCerpanie(d),
+    vystupy:b2bVystupySoSubormi(d.vystupy, d.subory) };
 }
+// Výstupy s posledným súborom — do snímky PV ide aj id verzie súboru, aby balík
+// odoslanej verzie niesol presne ten súbor, ktorý bol vtedy aktuálny.
+function b2bVystupySoSubormi(vystupy, subory){
+  const posl={}; (subory||[]).forEach(s=>{ if(!posl[s.vystup_id] || s.verzia>posl[s.vystup_id].verzia) posl[s.vystup_id]=s; });
+  return (vystupy||[]).map(v=>{ const s=posl[v.id];
+    return {id:v.id, cislo:v.cislo, typ:v.typ||null, nazov:v.nazov, datum:v.datum||null, autori:v.autori||[], zmazane:!!v.zmazane,
+      subor:s? {id:s.id, verzia:s.verzia, nazov:s.nazov, typ:s.typ, velkost:s.velkost, sha256:s.sha256} : null}; });
+}
+function b2bChybaTabulky(e){ return !!e && (e.code==="PGRST205" || e.code==="42P01"); }
 function b2bModelZoSnimky(s, mesiac, uprava, lenOsoba){
   return b2bVykazModel({projekt:s.projekt, osoby:s.osoby, aktivity:s.aktivity, zaznamy:s.zaznamy, mesiac, uprava:uprava||{},
-    mesiace:s.mesiace, cerpanieDoteraz:s.cerpanieDoteraz, lenOsoba});
+    mesiace:s.mesiace, cerpanieDoteraz:s.cerpanieDoteraz, lenOsoba, vystupy:s.vystupy});
 }
 // Čo sa zmenilo od snímky verzie: pridané, zmenené, zmazané záznamy.
 function b2bZmenyOdVerzie(snimka, d){
@@ -26342,6 +26404,9 @@ async function b2bUlozZaznam(id){
   if(minuty==null || minuty<=0 || minuty>1440) return alert("Zadajte čas od–do alebo počet hodín (do 24).");
   const riadok={datum, cas_od:(b2bMinCasu(od)!=null&&b2bMinCasu(dk)!=null)? od : null, cas_do:(b2bMinCasu(od)!=null&&b2bMinCasu(dk)!=null)? dk : null,
     minuty, aktivita_id:akt, popis:popis||null};
+  // Výstupy len keď formulár výber ukázal — inak by uloženie zmazalo ID z importu.
+  const vEl=[...document.querySelectorAll(".b2bZVyst")];
+  if(vEl.length) riadok.vystupy=vEl.filter(x=>x.checked).map(x=>x.value);
   try{
     const r=id? await sb.from("b2b_zaznamy").update(riadok).eq("id",id).select("id")
               : await sb.from("b2b_zaznamy").insert(Object.assign({projekt_id:d.pid, osoba_id:os.id, zdroj:"rucne"}, riadok)).select("id");
@@ -26407,7 +26472,7 @@ function b2bPvZmenene(){
   return (z && z.spolu>0) || JSON.stringify(posl.uprava||{})!==JSON.stringify(B2B.pvUprava||{});
 }
 async function b2bSha256(u8){ const h=await crypto.subtle.digest("SHA-256", u8); return [...new Uint8Array(h)].map(x=>x.toString(16).padStart(2,"0")).join(""); }
-async function b2bPvExport(variant){
+async function b2bPvExport(variant, balik){
   const d=B2B.d; if(!d) return;
   try{
     let verzia=B2B.pvVerzia;
@@ -26421,8 +26486,22 @@ async function b2bPvExport(variant){
       return alert("Výkaz na odoslanie má chyby — opravte ich (zoznam Kontroly) alebo stiahnite interný výkaz.");
     const [X, F]=await Promise.all([ensureXlsxStyle(), ensureFflate()]);
     const u8=b2bVykazSubor(model, X, F, {variant});
-    downloadBlob(new Blob([u8],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}),
-      b2bSuborNazov(model, B2B.d.projekt.kod, variant, os&&os.meno));
+    const nazovPv=b2bSuborNazov(model, B2B.d.projekt.kod, variant, os&&os.meno);
+    if(balik){
+      // Balík (návrh §10.1): PV + vystupy/<ID>_<názov>. Súbor = verzia zo snímky PV,
+      // nie najnovšia; dešifruje ho server pri stiahnutí a zapíše do logu.
+      const subory={[nazovPv]:u8}, chybaju=[];
+      for(const v of model.vystupy){
+        if(!v.vBaliku){ chybaju.push(v.cislo); continue; }
+        oznamPas("Sťahujem výstup "+v.cislo+"…");
+        const s=await b2bVystupSubor(v.subor.id);
+        if(s.sha!==v.subor.sha256) throw new Error("výstup "+v.cislo+": súbor sa nezhoduje so snímkou výkazu");
+        subory["vystupy/"+v.vBaliku]=s.u8;
+      }
+      const zip=F.zipSync(subory,{level:6});
+      downloadBlob(new Blob([zip],{type:"application/zip"}), nazovPv.replace(/\.xlsx$/,"_balik.zip"));
+      oznamPas("Balík: výkaz a "+(model.vystupy.length-chybaju.length)+" "+sklon(model.vystupy.length-chybaju.length,"výstup","výstupy","výstupov")+(chybaju.length? " · bez súboru: "+chybaju.join(", ") : "")+".");
+    } else downloadBlob(new Blob([u8],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}), nazovPv);
     if(variant!=="moj" && B2B.d.vykaz){
       const r=await sb.rpc("b2b_pv_export_log",{p_vykaz:B2B.d.vykaz.id, p_verzia:verzia, p_variant:variant, p_sha256:await b2bSha256(u8)});
       if(r.error) console.error("B2B: export sa nezapísal do logu", r.error);
@@ -26511,9 +26590,16 @@ async function b2bNacitajCrz(cielId){
     const r=await b2bEdge("crz",{vstup});
     B2B._crz=r.zmluva;
     const z=r.zmluva;
-    if(el) el.innerHTML=`✓ ${esc(z.nazov)} · č. ${esc(z.cislo)} · ${esc(z.objednavatel.nazov)} · účinnosť ${z.datum_ucinnosti? fmtDatum(z.datum_ucinnosti) : "—"}${z.ciastka!=null? " · "+eur(z.ciastka) : ""}${(z.prilohy||[]).some(p=>p.sken)? `<div class="csub" style="margin:4px 0 0">Príloha je sken — činnosti a rozpočet zadajte ručne alebo z JSON (čítanie asistentom príde v ďalšom kole).</div>` : ""}`;
+    if(el) el.innerHTML=b2bCrzVyslHtml(z);
     const n=document.getElementById("b2bNNazov"); if(n && !n.value) n.value=z.nazov||"";
   }catch(e){ if(el) el.innerHTML=`<span style="color:var(--neg)">${esc((e&&e.message)||e)}</span>`; }
+}
+// Hlavička zo CRZ + prílohy s čítaním asistentom (aj sken — model číta obraz strany).
+function b2bCrzVyslHtml(z){
+  const pr=(z.prilohy||[]).map((p,i)=>`<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px;font-size:12.5px">
+      <span>${p.sken? "🖼" : "📄"} ${esc(p.nazov)}${p.velkost? " ("+esc(p.velkost)+")" : ""}</span><button class="aabtn" type="button" onclick="b2bZmluvaCitaj(${i})">Prečítať asistentom</button></div>`).join("");
+  return `✓ ${esc(z.nazov)} · č. ${esc(z.cislo)} · ${esc(z.objednavatel.nazov)} · účinnosť ${z.datum_ucinnosti? fmtDatum(z.datum_ucinnosti) : "—"}${z.ciastka!=null? " · "+eur(z.ciastka) : ""}
+    ${pr? `<div class="csub" style="margin:6px 0 0">Asistent prečíta prílohu (aj sken) a navrhne pozície, rozpočet, miesta, oblasti a typy výstupov so stranou a bodom zmluvy — prevezmete len to, čo potvrdíte.</div>${pr}` : ""}`;
 }
 // Hlavička zo CRZ do dát projektu (zmluva, objednávateľ, účinnosť) — nič iné neprepíše.
 function b2bZCrz(data, z){
@@ -26524,15 +26610,16 @@ function b2bZCrz(data, z){
   if(z.ciastka!=null) D.cena=Object.assign({}, D.cena||{}, {crz_ciastka:z.ciastka});
   return D;
 }
-function b2bNovyProjekt(){
-  B2B._json=null; B2B._crz=null;
+function b2bNovyProjekt(zachovaj){
+  if(!zachovaj){ B2B._json=null; B2B._crz=null; B2B._novyStav=null; }
   openModal("Nový projekt", `
-    <div class="csub">Projekt = jedna realizačná zmluva. Pozície, miesta Prílohy 4 a činnosti nahráte z JSON (formát eživnostníka) — zmluvu v CRZ doplníte odkazom.</div>
+    <div class="csub">Projekt = jedna realizačná zmluva. Zmluvu načítajte z CRZ a nechajte ju prečítať asistentom, alebo nahrajte údaje z JSON (formát eživnostníka).</div>
     <div class="mfield"><label>Údaje projektu z JSON (voliteľné)</label><input id="b2bNJson" type="file" accept=".json,application/json" onchange="b2bNacitajJson(this)"></div>
     <div id="b2bNJsonVysl" class="csub" style="margin-top:-6px"></div>
     <div class="mfield"><label>Zmluva v CRZ — odkaz alebo ID (voliteľné)</label>
       <div style="display:flex;gap:6px"><input id="b2bCrz" placeholder="https://www.crz.gov.sk/zmluva/…"><button class="aabtn" type="button" onclick="b2bNacitajCrz()">Načítať</button></div></div>
     <div id="b2bCrzVysl" class="csub" style="margin-top:-6px"></div>
+    <div class="csub" style="margin:0 0 10px">Neverejnú zmluvu (PDF) môže asistent prečítať aj zo súboru: <label style="color:var(--brand);cursor:pointer;text-decoration:underline">vybrať PDF<input type="file" accept=".pdf,application/pdf" style="display:none" onchange="b2bZmluvaNahraj(this)"></label></div>
     <div class="mfield"><label>Názov projektu</label><input id="b2bNNazov" placeholder="Realizačná zmluva č. …"></div>
     <div class="mfield"><label>Kód (2–10 znakov A–Z, 0–9; do ID výstupov)</label><input id="b2bNKod" maxlength="10" placeholder="RZ3"></div>
     <div class="mfield"><label>Vaše meno vo výkaze</label><input id="b2bNMeno"></div>
@@ -26550,6 +26637,20 @@ function b2bNovyProjekt(){
         closeModal(); await b2bNacitajClenstvo(); b2bOtvorProjekt(r.data);
       }catch(e){ b2bChyba(e, "Projekt sa nepodarilo založiť"); }
     }, null, null, "Založiť projekt");
+  // Návrat z návrhu zo zmluvy: vyplnené polia, hlavička CRZ a prevzaté údaje ostanú.
+  if(zachovaj){
+    const st=B2B._novyStav||{}, nast=(id,v)=>{ const e=document.getElementById(id); if(e && v) e.value=v; };
+    if(B2B._json) b2bNovyUkazJson(B2B._json, "✓ prevzaté zo zmluvy: ");
+    if(B2B._crz){ const el=document.getElementById("b2bCrzVysl"); if(el) el.innerHTML=b2bCrzVyslHtml(B2B._crz); }
+    nast("b2bNNazov", st.nazov); nast("b2bNKod", st.kod); nast("b2bNMeno", st.meno); nast("b2bNOrg", st.org); nast("b2bCrz", st.crz);
+  }
+}
+function b2bNovyUkazJson(j, pred){
+  const el=document.getElementById("b2bNJsonVysl")||document.getElementById("b2bJsonVysl");
+  if(el) el.textContent=(pred||"✓ ")+(j.pozicie||[]).length+" pozície, "+(j.miesta||[]).length+" miest, "+(j.organizacie||[]).length+" organizácie";
+  const n=document.getElementById("b2bNNazov"); if(n && !n.value && j.zmluva) n.value=j.zmluva.nazov||"";
+  const k=document.getElementById("b2bNKod"); if(k && !k.value && j.kod) k.value=j.kod;
+  const o=document.getElementById("b2bNOrg"); if(o) o.innerHTML=(j.organizacie||[]).map(x=>`<option value="${esc(x.id)}">${esc(x.nazov)}</option>`).join("");
 }
 // JSON projektu (formát ezivnostnik.b2b.projekt v1, návrh §18.1).
 function b2bNacitajJson(input){
@@ -26562,10 +26663,7 @@ function b2bNacitajJson(input){
       if(j.format!=="ezivnostnik.b2b.projekt") throw new Error("nie je to JSON projektu eživnostníka (pole format)");
       if(!Array.isArray(j.pozicie) || !Array.isArray(j.organizacie)) throw new Error("chýbajú pozície alebo organizácie");
       B2B._json=j;
-      if(el) el.textContent="✓ "+j.pozicie.length+" pozície, "+(j.miesta||[]).length+" miest, "+j.organizacie.length+" organizácie";
-      const n=document.getElementById("b2bNNazov"); if(n && !n.value && j.zmluva) n.value=j.zmluva.nazov||"";
-      const k=document.getElementById("b2bNKod"); if(k && !k.value && j.kod) k.value=j.kod;
-      const o=document.getElementById("b2bNOrg"); if(o) o.innerHTML=j.organizacie.map(x=>`<option value="${esc(x.id)}">${esc(x.nazov)}</option>`).join("");
+      b2bNovyUkazJson(j);
     }catch(e){ B2B._json=null; if(el) el.innerHTML=`<span style="color:var(--neg)">${esc(e.message)}</span>`; }
   };
   rd.readAsText(f);
@@ -26649,6 +26747,268 @@ async function b2bOdober(osobaId){
   try{ const r=await sb.rpc("b2b_odober_osobu",{p_osoba:osobaId}); if(r.error) throw r.error; await b2bNacitajClenstvo(); b2bObnov(); }
   catch(e){ b2bChyba(e, "Osobu sa nepodarilo odobrať"); }
 }
+// ── B2B: výstupy (E1b, návrh §8) ─────────────────────────────────────────
+// ID prideľuje server (b2b_vystup_zaloz); súbor ide do edge funkcie, ktorá ho
+// zašifruje kľúčom projektu — do úložiska appka nesiaha (bucket nemá politiky).
+const B2B_MAX_VYSTUP=25*1024*1024;
+async function b2bEdgeSubor(query, subor){
+  const tok=await ziskajToken(); if(!tok) throw new Error(CHYBA_SESSION);
+  const res=await fetch(SUPABASE_URL+"/functions/v1/b2b?"+new URLSearchParams(query).toString(),{method:"POST",
+    headers:{"Content-Type":"application/octet-stream","Authorization":"Bearer "+tok}, body:subor});
+  const d=await res.json().catch(()=>({}));
+  if(!res.ok || d.chyba){ const e=new Error(d.chyba||("b2b odpovedal "+res.status)); e.stav=res.status; throw e; }
+  return d;
+}
+// Stiahnutie výstupu: bajty + názov, sha256 sa overí aj tu (server ho overil po dešifrovaní).
+async function b2bVystupSubor(suborId){
+  const tok=await ziskajToken(); if(!tok) throw new Error(CHYBA_SESSION);
+  const res=await fetch(SUPABASE_URL+"/functions/v1/b2b",{method:"POST",
+    headers:{"Content-Type":"application/json","Authorization":"Bearer "+tok}, body:JSON.stringify({akcia:"vystup_stiahni", subor:suborId})});
+  if(!res.ok){ const d=await res.json().catch(()=>({})); const e=new Error(d.chyba||("b2b odpovedal "+res.status)); e.stav=res.status; throw e; }
+  const u8=new Uint8Array(await res.arrayBuffer()), sha=res.headers.get("x-b2b-sha256")||"";
+  if(!sha || await b2bSha256(u8)!==sha) throw new Error("kontrolný súčet súboru nesedí — stiahnite ho znova");
+  let nazov="vystup"; try{ nazov=decodeURIComponent(res.headers.get("x-b2b-nazov")||"vystup"); }catch(_){ /* názov je doplnok, súbor je celý */ }
+  return {u8, sha, nazov, typ:res.headers.get("Content-Type")||"application/octet-stream"};
+}
+function b2bVelkost(n){ n=+n||0; return n>=1048576? (Math.round(n/104857.6)/10).toString().replace(".",",")+" MB" : Math.max(1,Math.round(n/1024))+" kB"; }
+function b2bVystupForm(v){
+  const d=B2B.d, D=d.projekt.data||{}, aut=new Set((v&&v.autori)||[]), os=b2bMojaOsoba();
+  if(!v && os) aut.add(os.id);
+  return `<div class="mfield"><label>Typ zo zmluvy</label><select id="b2bVTyp"><option value="">—</option>${(D.typy_vystupov||[]).map(t=>`<option value="${esc(t.id)}"${v&&v.typ===t.id?" selected":""}>${esc(t.nazov||t.id)}</option>`).join("")}</select></div>
+    <div class="mfield"><label>Názov</label><input id="b2bVNazov" maxlength="300" value="${esc(v&&v.nazov||"")}" placeholder="napr. Zápis z riadiaceho výboru"></div>
+    <div class="mfield"><label>Dátum</label><input id="b2bVDatum" type="date" value="${esc(v&&v.datum||b2bIso(new Date()))}"></div>
+    <div class="mfield"><label>Autori</label><div style="display:flex;flex-direction:column;gap:4px">${d.osoby.filter(o=>o.aktivny||aut.has(o.id)).map(o=>`<label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" class="b2bVAut" value="${esc(o.id)}"${aut.has(o.id)?" checked":""}> ${esc(o.meno)}</label>`).join("")}</div></div>
+    ${v? "" : `<div class="csub" style="margin:0">ID (${esc(d.projekt.kod)}-V-…) pridelí server pri uložení a nikdy sa nepoužije znova. Súbor nahráte v zozname výstupov.</div>`}`;
+}
+function b2bVystupZForm(){
+  const v=x=>String((document.getElementById(x)||{}).value||"").trim();
+  return {typ:v("b2bVTyp")||null, nazov:v("b2bVNazov"), datum:v("b2bVDatum")||null,
+    autori:[...document.querySelectorAll(".b2bVAut")].filter(x=>x.checked).map(x=>x.value)};
+}
+function b2bVystupNovy(){
+  openModal("Nový výstup", b2bVystupForm(null), async ()=>{
+    const x=b2bVystupZForm(); if(!x.nazov) return alert("Zadajte názov výstupu.");
+    try{
+      const r=await sb.rpc("b2b_vystup_zaloz",{p_projekt:B2B.d.pid, p_typ:x.typ, p_nazov:x.nazov, p_datum:x.datum, p_autori:x.autori});
+      if(r.error) throw r.error;
+      closeModal(); oznamPas("Výstup "+r.data.cislo+" založený — nahrajte k nemu súbor."); b2bObnov();
+    }catch(e){ b2bChyba(e, "Výstup sa nepodarilo založiť"); }
+  }, null, null, "Založiť");
+}
+function b2bVystupUprav(id){
+  const v=(B2B.d.vystupy||[]).find(x=>x.id===id); if(!v) return;
+  const mozeZmazat=v.vytvoril===_prihlasenyUser || b2bSomSpravca();
+  openModal("Výstup "+v.cislo, b2bVystupForm(v), async ()=>{
+    const x=b2bVystupZForm(); if(!x.nazov) return alert("Zadajte názov výstupu.");
+    try{ const r=await sb.rpc("b2b_vystup_uprav",{p_vystup:id, p_typ:x.typ, p_nazov:x.nazov, p_datum:x.datum, p_autori:x.autori}); if(r.error) throw r.error; closeModal(); b2bObnov(); }
+    catch(e){ b2bChyba(e, "Výstup sa nepodarilo uložiť"); }
+  }, mozeZmazat? ()=>b2bVystupZmaz(id) : null);
+}
+async function b2bVystupZmaz(id){
+  const v=(B2B.d.vystupy||[]).find(x=>x.id===id); if(!v) return;
+  if(!confirm("Zmazať výstup "+v.cislo+"? ID sa už nepoužije znova; súbor a staré verzie výkazov ostanú, záznamy naň budú odkazovať ako na zmazaný.")) return;
+  try{ const r=await sb.rpc("b2b_vystup_zmaz",{p_vystup:id}); if(r.error) throw r.error; closeModal(); b2bObnov(); }
+  catch(e){ b2bChyba(e, "Výstup sa nepodarilo zmazať"); }
+}
+async function b2bVystupNahraj(id, input){
+  const f=input&&input.files&&input.files[0]; if(input) input.value=""; if(!f) return;
+  const v=(B2B.d.vystupy||[]).find(x=>x.id===id); if(!v) return;
+  if(!f.size) return alert("Súbor je prázdny.");
+  if(f.size>B2B_MAX_VYSTUP) return alert("Súbor má "+b2bVelkost(f.size)+" — výstup môže mať najviac 25 MB.");
+  try{
+    oznamPas("Nahrávam "+f.name+"…");
+    const r=await b2bEdgeSubor({akcia:"vystup_nahraj", vystup:id, nazov:f.name}, f);
+    oznamPas("Výstup "+r.cislo+": uložená verzia "+r.verzia+" (šifrovane).");
+    b2bObnov();
+  }catch(e){ b2bChyba(e, "Súbor výstupu sa nepodarilo nahrať"); }
+}
+async function b2bVystupStiahni(suborId){
+  try{ const s=await b2bVystupSubor(suborId); downloadBlob(new Blob([s.u8],{type:s.typ}), s.nazov); }
+  catch(e){ b2bChyba(e, "Výstup sa nepodarilo stiahnuť"); }
+}
+// Balík: vyberie sa variant výkazu, zoznam ukáže, čo pôjde do vystupy/ a čo chýba.
+function b2bPvBalik(){
+  const d=B2B.d; if(!d) return;
+  const model=b2bModelZoSnimky(b2bSnimka(d), d.mesiac, B2B.pvUprava||{});
+  const chyby=model.kontroly.some(k=>k.uroven==="chyba");
+  const zoz=model.vystupy.map(v=>`<div style="font-size:12.5px;padding:3px 0">${v.vBaliku? "📎" : "⚠"} <b>${esc(v.cislo)}</b> ${esc(v.nazov||"")}${v.vBaliku? ` <span class="csub" style="margin:0">→ vystupy/${esc(v.vBaliku)}</span>` : ` <span style="color:var(--neg)">${v.neznamy? "nie je v projekte" : v.zmazane? "zmazaný" : "bez súboru"} — v balíku nebude</span>`}</div>`).join("");
+  openModal("Balík so výstupmi", `<div class="csub">ZIP: výkaz a súbory výstupov, na ktoré odkazujú záznamy mesiaca, premenované na <b>ID_názov</b>. Súbory dešifruje server a každé stiahnutie zapíše do logu projektu.</div>
+    <div class="mfield"><label>Výkaz v balíku</label><select id="b2bBVar"><option value="odoslanie"${chyby? " disabled" : " selected"}>na odoslanie (bez Detailu)${chyby? " — výkaz má chyby" : ""}</option><option value="interny"${chyby? " selected" : ""}>interný (Detail a Výstupy)</option></select></div>
+    <div class="mfield"><label>Výstupy mesiaca (${model.vystupy.length})</label>${zoz||'<div class="csub" style="margin:0">Záznamy mesiaca neodkazujú na žiadny výstup.</div>'}</div>`,
+    ()=>{ const v=(document.getElementById("b2bBVar")||{}).value||"interny"; closeModal(); b2bPvExport(v, true); }, null, null, "Stiahnuť ZIP");
+}
+function b2bVystupyHtml(){
+  const d=B2B.d, D=d.projekt.data||{};
+  if(d.bezVystupov) return `<div class="aempty">Výstupy na serveri ešte nie sú zapnuté (chýba migrácia admin_75).</div>`;
+  const typy=Object.fromEntries((D.typy_vystupov||[]).map(t=>[t.id,t.nazov||t.id]));
+  const os=Object.fromEntries(d.osoby.map(o=>[o.id,o.meno]));
+  const vMes={}; d.zaznamy.forEach(z=>(z.vystupy||[]).forEach(c=>{ vMes[c]=(vMes[c]||0)+1; }));
+  const zoz=b2bVystupySoSubormi(d.vystupy, d.subory).filter(v=>!v.zmazane).reverse();
+  const karty=zoz.map(v=>{ const s=v.subor;
+    return `<div class="card" style="padding:10px 14px;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:baseline">
+        <div><b>${esc(v.cislo)}</b> ${esc(v.nazov)}</div>
+        <a href="#" onclick="b2bVystupUprav('${esc(v.id)}');return false" style="font-size:12.5px">upraviť</a></div>
+      <div class="csub" style="margin:2px 0 0">${[v.typ? esc(typy[v.typ]||v.typ) : "", v.datum? esc(fmtDatum(v.datum)) : "", esc(v.autori.map(a=>os[a]).filter(Boolean).join(", ")), vMes[v.cislo]? vMes[v.cislo]+" "+sklon(vMes[v.cislo],"záznam","záznamy","záznamov")+" v mesiaci" : ""].filter(Boolean).join(" · ")}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px;font-size:12.5px">
+        ${s? `<span>📎 ${esc(s.nazov)} · ${b2bVelkost(s.velkost)} · verzia ${s.verzia}</span><button class="aabtn" onclick="b2bVystupStiahni('${esc(s.id)}')">⬇ Stiahnuť</button>` : `<span style="color:var(--ink-warn)">bez súboru</span>`}
+        <label class="aabtn" style="cursor:pointer">⬆ ${s? "Nová verzia" : "Nahrať súbor"}<input type="file" style="display:none" onchange="b2bVystupNahraj('${esc(v.id)}',this)"></label>
+      </div></div>`; }).join("");
+  return `<div class="card" style="padding:12px 14px">
+      <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center"><b>Výstupy projektu</b><button class="aabtn pri" onclick="b2bVystupNovy()">＋ Výstup</button></div>
+      <div class="csub" style="margin:6px 0 0">Zápisy, reporty, stanoviská… s ID projektu. Súbory sa ukladajú šifrovane kľúčom projektu a sťahujú sa len cez appku (stiahnutie ide do logu). Šifrovanie chráni obsah úložiska a záloh, nie pred prevádzkovateľom servera. Výstup k záznamu priradíte v jeho úprave.</div></div>
+    ${karty||`<div class="aempty">Zatiaľ žiadny výstup.</div>`}`;
+}
+// ── most B2B → Výkazy → faktúra (E1b, návrh §13, rozhodnutie 14) ─────────
+// Vlastné hodiny mesiaca ako výkaz FIRMY — ďalej zákazkový list, protokol
+// a faktúra cestou, ktorá už je. `povod` = projekt + osoba + mesiac: druhý
+// prenos výkaz aktualizuje s ukázaným rozdielom, nevytvorí druhý; vyfakturovaný
+// ani rozdelený sa nemení. Hodiny dňa = tie isté celé hodiny ako v PV.
+function b2bVykazPredloha(d, os){
+  const D=d.projekt.data||{}, akt=Object.fromEntries(d.aktivity.map(a=>[a.id,a]));
+  const model=b2bVykazModel({projekt:d.projekt, osoby:d.osoby, aktivity:d.aktivity, zaznamy:d.zaznamy, mesiac:d.mesiac, lenOsoba:os.id});
+  const poc={}; d.zaznamy.filter(z=>z.osoba_id===os.id && String(z.datum).slice(0,7)===d.mesiac).forEach(z=>{ const k=(akt[z.aktivita_id]||{}).zakazka; if(k) poc[k]=(poc[k]||0)+(+z.minuty||0); });
+  const org=(D.organizacie||[]).find(o=>o.id===os.organizacia)||{}, zo=(org.zakazky||[])[0];
+  // Číslo zákazky = interné číslo dodávateľa (rozhodnutie 13): najčastejšie z aktivít mesiaca, inak prvé zákazky organizácie.
+  const zakazka=Object.keys(poc).sort((a,b)=>poc[b]-poc[a])[0] || (zo? String(zo.cislo||zo) : "");
+  const [r,m]=d.mesiac.split("-").map(Number), od=d.mesiac+"-01", doD=b2bIso(new Date(r,m,0));
+  const polozky=model.osobaDen.filter(x=>x.hodiny>0).map(x=>{ const a=[];
+    x.zaznamy.forEach(z=>{ const t=String((akt[z.aktivita_id]||{}).nazov||z.popis||"").trim(); if(t && !a.includes(t)) a.push(t); });
+    return {datum:x.datum, hodiny:x.hodiny, aktivity:a, poznamka:a.join("; ")}; });
+  return vykazPrepocitaj({projekt:d.projekt.nazov, zakazka, pracovnik:os.meno, od, do:doD, obdobie:vykazObdobieText(od, doD),
+    mdRezim:"hodiny", mdHodin:+D.clovekoden_hodin||8, polozky, povod:"b2b:"+d.pid+":"+os.id+":"+d.mesiac});
+}
+function b2bVykazRozdiel(star, w){
+  const den=p=>String(p.datum||"").slice(0,10);
+  const a=new Map((star.polozky||[]).map(p=>[den(p), p])), b=new Map(w.polozky.map(p=>[p.datum, p]));
+  return [...new Set([...a.keys(), ...b.keys()])].sort().filter(x=>{ const p=a.get(x), q=b.get(x);
+      return !p || !q || (+p.hodiny||0)!==q.hodiny || JSON.stringify(p.aktivity||[])!==JSON.stringify(q.aktivity); })
+    .map(x=>({datum:x, pred:a.has(x)? +a.get(x).hodiny||0 : null, po:b.has(x)? b.get(x).hodiny : null}));
+}
+function b2bDoVykazov(){
+  if(!strazZapis("vykazy")) return;
+  const d=B2B.d, os=b2bMojaOsoba(); if(!d || !os || !firmaData) return;
+  const beh=behFirmy(), w=b2bVykazPredloha(d, os), mes=B2B_MESIACE[+d.mesiac.slice(5)-1];
+  if(!w.polozky.length) return alert("Za "+mes+" nemáte v projekte žiadne hodiny.");
+  const zl=w.zakazka? zakazkovyList(w.zakazka, w.do) : null;
+  const upoz=!w.zakazka? "Výkaz nemá číslo zákazky — doplňte ho; faktúra berie odberateľa a sadzbu zo zákazkového listu."
+    : !zl? "Pre zákazku "+w.zakazka+" nie je zákazkový list (Dokumenty) — faktúra by vzala odberateľa a sadzbu z Nastavení. Založte ho pred faktúrou." : "";
+  const idx=[]; (firmaData.vykazy||[]).forEach((x,i)=>{ if(x && x.povod===w.povod) idx.push(i); });
+  if(!idx.length){ if(upoz) oznamPas(upoz); editVykaz(null, w); return; }
+  if(idx.length>1) return alert("Výkaz z tohto projektu za "+mes+" je vo Výkazoch viackrát (rozdelený) — upravte ho tam ručne.");
+  const i=idx[0], star=firmaData.vykazy[i], f=vykazFakturaPrepojena(star);
+  if(f) return alert("Výkaz za "+mes+" je už vyfakturovaný (faktúra "+f.cislo+") — most ho nemení. Zmenu riešte dobropisom alebo novým výkazom.");
+  if(String(star.od||"").slice(0,10)!==w.od || String(star.do||"").slice(0,10)!==w.do) return alert("Výkaz z projektu má vo Výkazoch iné obdobie (rozdelený) — upravte ho tam ručne.");
+  const zmeny=b2bVykazRozdiel(star, w);
+  if(!zmeny.length) return oznamPas("Výkaz za "+mes+" je vo Výkazoch aktuálny.");
+  openModal("Aktualizovať výkaz", `<div class="csub">Vo Výkazoch už je výkaz z tohto projektu za ${esc(mes)}. Zmení sa ${zmeny.length} ${sklon(zmeny.length,"deň","dni","dní")}; hlavička, zákazka a ostatné polia ostanú.</div>
+    <div class="b2bscroll"><table class="b2bt b2bdet"><thead><tr><th>Deň</th><th>Teraz</th><th>Po prenose</th></tr></thead><tbody>${zmeny.map(z=>`<tr><td>${esc(fmtDatum(z.datum))}</td><td>${z.pred==null? "—" : z.pred+" h"}</td><td>${z.po==null? "—" : z.po+" h"}</td></tr>`).join("")}</tbody></table></div>
+    ${upoz? `<div class="csub" style="color:var(--ink-warn)">⚠ ${esc(upoz)}</div>` : ""}`,
+    ()=>{
+      if(!beh.platny()) return alert("Medzitým ste prepli firmu — výkaz sa neaktualizoval.");
+      if(!strazZapis("vykazy")) return;
+      const cur=(firmaData.vykazy||[])[i];
+      if(!cur || cur.povod!==w.povod) return alert("Výkazy sa medzitým zmenili — skúste to znova.");
+      const nov=JSON.parse(JSON.stringify(cur)); nov.polozky=w.polozky; nov.mdRezim=w.mdRezim; nov.mdHodin=w.mdHodin;
+      firmaData.vykazy[i]=vykazPrepocitaj(nov);
+      closeModal(); poZmene(); oznamPas("Výkaz za "+mes+" aktualizovaný z projektu.");
+    }, null, null, "Aktualizovať");
+}
+// ── čítanie zmluvy asistentom (E1b, návrh §7.2) ─────────────────────────
+// PDF z CRZ (server ho stiahne z prílohy uloženej hlavičky) alebo nahraté —
+// model vráti návrh so stranou a bodom; nič sa neuloží bez potvrdenia po riadkoch.
+const B2B_NAVRH_POLIA=[["zmluva","Zmluva"],["objednavatel","Objednávateľ"],["obdobie","Obdobie"],["cena","Cena"],["pv","Pracovný výkaz"]];
+const B2B_NAVRH_ZOZNAMY=[["organizacie","Organizácie"],["pozicie","Pozície (rozpočet a sadzby)"],["miesta","Miesta v prílohe"],["oblasti","Oblasti"],
+  ["ciele","Ciele"],["aktivity_zmluvy","Aktivity zo zmluvy"],["typy_vystupov","Typy výstupov"]];
+function b2bZdrojText(z){ return z? [z.strana!=null? "str. "+z.strana : "", z.bod? "bod "+z.bod : ""].filter(Boolean).join(", ") : ""; }
+function b2bNovyStavZForm(){ const v=x=>(document.getElementById(x)||{}).value||""; return {nazov:v("b2bNNazov"), kod:v("b2bNKod"), meno:v("b2bNMeno"), org:v("b2bNOrg"), crz:v("b2bCrz")}; }
+async function b2bZmluvaCitaj(priloha, subor){
+  const novy=!!document.getElementById("b2bNNazov"), projekt=novy? null : B2B.pid, crz=B2B._crz;
+  if(subor==null && !crz) return alert("Najprv načítajte zmluvu z CRZ.");
+  if(novy) B2B._novyStav=b2bNovyStavZForm();
+  const el=document.getElementById("b2bCrzVysl");
+  if(el) el.insertAdjacentHTML("beforeend", `<div class="csub" id="b2bZmCaka" style="margin:4px 0 0">Asistent číta zmluvu — trvá to do dvoch minút…</div>`);
+  try{
+    const r= subor? await b2bEdgeSubor(Object.assign({akcia:"zmluva_citaj", nazov:subor.name}, projekt? {projekt} : {}), subor)
+                  : await b2bEdge("zmluva_citaj", {crz_id:crz.id, priloha, projekt});
+    b2bZmluvaNahlad(r, novy);
+  }catch(e){ const c=document.getElementById("b2bZmCaka"); if(c) c.remove(); b2bChyba(e, "Zmluvu sa nepodarilo prečítať"); }
+}
+function b2bZmluvaNahraj(input){
+  const f=input&&input.files&&input.files[0]; if(input) input.value=""; if(!f) return;
+  if(!/\.pdf$/i.test(f.name)) return alert("Asistent číta zmluvu v PDF.");
+  if(f.size>20*1024*1024) return alert("PDF má "+b2bVelkost(f.size)+" — najviac 20 MB.");
+  if(!confirm("Zmluva z vášho súboru pôjde na prečítanie k poskytovateľovi jazykového modelu (Anthropic, USA) — Zásady ochrany súkromia, časť Asistent. Zmluvu zverejnenú v CRZ radšej načítajte z registra. Pokračovať?")) return;
+  b2bZmluvaCitaj(null, f);
+}
+function b2bNavrhRiadok(k, x){
+  if(k==="pozicie") return (x.nazov_vo_vykaze||x.nazov_v_zmluve)+(x.nazov_v_zmluve&&x.nazov_vo_vykaze? " ("+x.nazov_v_zmluve+")" : "")+" — "+(x.rozpocet_hodin!=null? x.rozpocet_hodin+" h" : "? h")+" × "+(x.sadzba_bez_dph!=null? eur(x.sadzba_bez_dph) : "?")
+    +(x.pocet_osob? " · "+x.pocet_osob+" os." : "")+((x.cinnosti||[]).length? " · "+x.cinnosti.length+" "+sklon(x.cinnosti.length,"činnosť","činnosti","činností") : "");
+  if(k==="organizacie") return x.nazov+(x.ico? " · IČO "+x.ico : "")+" · "+({hlavny_dodavatel:"hlavný dodávateľ", subdodavatel:"subdodávateľ", clen_skupiny:"člen skupiny"}[x.rola]||x.rola)+(x.podiel_pct!=null? " · "+x.podiel_pct+" %" : "");
+  if(k==="miesta") return (x.poradie_v_prilohe!=null? x.poradie_v_prilohe+". " : "")+x.nazov_v_zmluve+(x.pozicia? " → "+x.pozicia : "");
+  if(k==="typy_vystupov") return x.nazov+(x.text_zmluvy? " — "+x.text_zmluvy : "");
+  return x.text;
+}
+function b2bNavrhPole(x){
+  return Object.entries(x||{}).filter(([k,v])=>k!=="zdroj" && v!=null && v!=="")
+    .map(([k,v])=>k.replace(/_/g," ")+": "+(typeof v==="number" && /dph/.test(k)? eur(v) : typeof v==="boolean"? (v? "áno" : "nie") : String(v))).join(" · ");
+}
+function b2bZmluvaNahlad(r, novy){
+  const N=r.navrh||{}; B2B._navrh={navrh:N, novy};
+  const chk=(k,txt,zdr)=>`<label style="display:flex;gap:8px;align-items:flex-start;font-size:12.5px;padding:4px 0;border-top:1px solid var(--line)"><input type="checkbox" class="b2bNav" data-k="${esc(k)}" checked style="margin-top:2px"><span>${esc(txt)}${zdr? ` <span class="csub" style="margin:0">(${esc(zdr)})</span>` : ""}</span></label>`;
+  const polia=B2B_NAVRH_POLIA.map(([k,n])=>{ const t=N[k]&&b2bNavrhPole(N[k]); return t? `<div style="margin-top:8px"><b style="font-size:13px">${n}</b>${chk(k, t, b2bZdrojText(N[k].zdroj))}</div>` : ""; }).join("");
+  const zoz=B2B_NAVRH_ZOZNAMY.map(([k,n])=>{ const a=Array.isArray(N[k])? N[k] : [];
+    return a.length? `<details style="margin-top:8px"${a.length<=8? " open" : ""}><summary style="cursor:pointer;font-weight:600;font-size:13px">${n} (${a.length})</summary>${a.map((x,i)=>chk(k+":"+i, b2bNavrhRiadok(k,x), b2bZdrojText(x.zdroj))).join("")}</details>` : ""; }).join("");
+  const over=(N.na_overenie||[]).length? `<div style="background:var(--sfc-warn);border-radius:8px;padding:7px 11px;margin-top:10px;font-size:12px"><b>Na overenie</b>${N.na_overenie.map(t=>`<div>• ${esc(t)}</div>`).join("")}</div>` : "";
+  const zdr=r.zdroj||{};
+  openModal("Návrh zo zmluvy", `<div class="csub">Asistent prečítal ${esc(zdr.priloha||zdr.nazov||"zmluvu")}. Pri každom riadku je strana a bod zmluvy — skontrolujte ich. Prevezmú sa len označené riadky; označený zoznam nahradí doterajší, neoznačený ostane, ako je.</div>${over}${polia}${zoz}`,
+    ()=>b2bZmluvaPrevezmi(), null, null, "Prevziať označené");
+}
+// Návrh → dáta projektu. ID sa ZACHOVAJÚ podľa zhody (osoby, aktivity a výstupy
+// na ne odkazujú); nová položka dostane voľné ID, ID odstránenej sa nepoužije.
+function b2bZNavrhu(N, D0, vyber){
+  const D=JSON.parse(JSON.stringify(D0||{}));
+  const bez=x=>{ const o={}; Object.entries(x||{}).forEach(([k,v])=>{ if(k!=="zdroj" && v!=null && v!=="") o[k]=v; }); return o; };
+  const zdr=x=>b2bZdrojText(x&&x.zdroj)||undefined;
+  B2B_NAVRH_POLIA.forEach(([k])=>{ if(vyber.has(k) && N[k]) D[k]=Object.assign({}, D[k]||{}, bez(N[k]), {zdroj:zdr(N[k])}); });
+  if(vyber.has("objednavatel") && D.objednavatel && !D.objednavatel.rola_v_zmluve) D.objednavatel.rola_v_zmluve="Objednávateľ";
+  const volne=(pouz, pre)=>{ let n=1; while(pouz.has(pre+n)) n++; pouz.add(pre+n); return pre+n; };
+  const nahrad=(k, pre, rovnake, tvar)=>{
+    const a=(N[k]||[]).filter((x,i)=>vyber.has(k+":"+i)); if(!a.length) return;
+    const stare=D[k]||[], pouz=new Set(stare.map(y=>y.id)), nove=[];
+    a.forEach(x=>{ const s=stare.find(y=>!nove.some(n=>n.id===y.id) && rovnake(y,x)); nove.push(Object.assign({}, s||{}, tvar(x, s), {id:s? s.id : null, zdroj:zdr(x)})); });
+    nove.forEach(n=>{ if(!n.id) n.id=volne(pouz, typeof pre==="function"? pre(n) : pre); });
+    D[k]=nove;
+  };
+  const rovnText=(a,b)=>String(a||"").trim().toLowerCase()===String(b||"").trim().toLowerCase();
+  nahrad("organizacie", n=>n.rola==="hlavny_dodavatel"? "hlavny" : "sub", (y,x)=>(x.ico && y.ico===x.ico) || rovnText(y.nazov,x.nazov),
+    (x,s)=>Object.assign(bez(x), {zakazky:(s&&s.zakazky)||[]}));
+  nahrad("pozicie", "P", (y,x)=>rovnText(y.nazov_v_zmluve,x.nazov_v_zmluve), x=>Object.assign(bez(x), {_cinnosti:x.cinnosti||[]}));
+  (D.pozicie||[]).forEach(p=>{ if(!p._cinnosti) return;
+    const stare=(D0&&(D0.pozicie||[]).find(y=>y.id===p.id)||{}).cinnosti||[], pouz=new Set(stare.map(c=>c.id));
+    p.cinnosti=p._cinnosti.map(t=>{ const s=stare.find(c=>rovnText(c.text,t)); return s? {id:s.id, text:t} : {id:volne(pouz, p.id+"-"), text:t}; });
+    delete p._cinnosti; });
+  const pozId=t=>{ const p=(D.pozicie||[]).find(y=>rovnText(y.nazov_v_zmluve,t) || rovnText(y.nazov_vo_vykaze,t)); return p? p.id : (t||null); };
+  nahrad("miesta", "M", (y,x)=>y.pozicia===pozId(x.pozicia) && y.poradie_v_prilohe===x.poradie_v_prilohe, x=>Object.assign(bez(x), {pozicia:pozId(x.pozicia)}));
+  nahrad("oblasti", "O", (y,x)=>rovnText(y.text,x.text), bez);
+  nahrad("ciele", "C", (y,x)=>rovnText(y.text,x.text), bez);
+  nahrad("aktivity_zmluvy", "A", (y,x)=>rovnText(y.text,x.text), bez);
+  nahrad("typy_vystupov", "V", (y,x)=>rovnText(y.nazov,x.nazov), bez);
+  if(N.clovekoden_hodin && [...vyber].some(k=>k.startsWith("pozicie:"))) D.clovekoden_hodin=N.clovekoden_hodin;
+  if((N.na_overenie||[]).length) D.na_overenie=[...new Set([...(D.na_overenie||[]), ...N.na_overenie])];
+  return D;
+}
+async function b2bZmluvaPrevezmi(){
+  const st=B2B._navrh; if(!st) return;
+  const vyber=new Set([...document.querySelectorAll(".b2bNav")].filter(x=>x.checked).map(x=>x.dataset.k));
+  if(!vyber.size) return alert("Nie je označený žiadny riadok.");
+  if(st.novy){
+    B2B._json=b2bZNavrhu(st.navrh, B2B._json||{format:"ezivnostnik.b2b.projekt", verzia_formatu:1, organizacie:[], pozicie:[], miesta:[]}, vyber);
+    B2B._navrh=null; closeModal(); b2bNovyProjekt(true);
+    return;
+  }
+  if(await b2bUlozDataProjektu(b2bZNavrhu(st.navrh, B2B.d.projekt.data, vyber), "Údaje zo zmluvy prevzaté ("+vyber.size+" "+sklon(vyber.size,"riadok","riadky","riadkov")+").")){ B2B._navrh=null; closeModal(); }
+}
 // ── B2B: vykreslenie ─────────────────────────────────────────────────────
 // HTML náhľad PV z MODELU — tá istá funkcia dáva čísla aj XLSX (b2bVykazSubor).
 function b2bNahladHtml(model, upravy){
@@ -26716,6 +27076,7 @@ function b2bPvHtml(){
         ${zamknute? "" : `<button class="aabtn" onclick="b2bPvUlozVerziu()">Uložiť verziu</button>`}
         <button class="aabtn pri" onclick="b2bPvExport('odoslanie')"${chyby? ' title="Najprv opravte chyby v Kontrolách"' : ""}>⬇ Výkaz na odoslanie</button>
         <button class="aabtn" onclick="b2bPvExport('interny')">⬇ Interný (s Detailom)</button>
+        ${d.bezVystupov? "" : `<button class="aabtn" onclick="b2bPvBalik()">⬇ Balík so výstupmi (ZIP)</button>`}
       </div>
       <div class="csub" style="margin:8px 0 0">Spolu ${model.spolu} h · ${eur(model.suma)} bez DPH · fond ${model.fond} h. Export uloží novú verziu, ak sa niečo zmenilo.</div>
     </div>
@@ -26731,7 +27092,19 @@ function b2bZaznamForm(z){
       <div class="mfield"><label>alebo hodín</label><input id="b2bZHod" inputmode="decimal" value="${z&&!z.cas_od? Math.round(z.minuty/6)/10 : ""}" placeholder="napr. 2,5"></div></div>
     <div class="mfield"><label>Aktivita</label><select id="b2bZAkt"><option value="">— vyberte —</option>${akt.map(a=>`<option value="${a.id}"${z&&z.aktivita_id===a.id?" selected":""}>${esc(a.nazov)}</option>`).join("")}</select></div>
     <div class="mfield"><label>Popis (voliteľné)</label><input id="b2bZPopis" maxlength="2000" value="${esc(z&&z.popis||"")}"></div>
+    ${b2bZaznamVystupyHtml(z)}
     <div class="csub" style="margin:0">Hodiny vo výkaze sa zaokrúhľujú za celý deň na celé hodiny (od 30 min nahor).</div>`;
+}
+// Výber výstupov k záznamu: aktívne výstupy projektu + ID, ktoré záznam už má
+// (aj zmazané či neznáme z importu — aby ich uloženie nezahodilo potichu).
+function b2bZaznamVystupyHtml(z){
+  const d=B2B.d, vybr=new Set((z&&z.vystupy)||[]);
+  const zoz=b2bVystupySoSubormi(d.vystupy, d.subory).filter(v=>!v.zmazane || vybr.has(v.cislo));
+  const ine=[...vybr].filter(c=>!zoz.some(v=>v.cislo===c));
+  if(!zoz.length && !ine.length) return "";
+  const r=(c,t)=>`<label style="display:flex;gap:6px;align-items:center;font-size:13px;padding:2px 0"><input type="checkbox" class="b2bZVyst" value="${esc(c)}"${vybr.has(c)? " checked" : ""}> <b>${esc(c)}</b> ${esc(t)}</label>`;
+  return `<details class="mfield"${vybr.size? " open" : ""}><summary style="cursor:pointer;font-size:13px;font-weight:600">Výstupy záznamu (${vybr.size||"žiadny"})</summary>
+    ${zoz.slice().reverse().map(v=>r(v.cislo, v.nazov+(v.zmazane? " (zmazaný)" : ""))).join("")}${ine.map(c=>r(c, "(nie je v projekte)")).join("")}</details>`;
 }
 function b2bZaznamNovy(aktId){
   openModal("Nový záznam", b2bZaznamForm(null), ()=>b2bUlozZaznam(null), null, null, "Uložiť");
@@ -26770,6 +27143,7 @@ function b2bMojMesiacHtml(){
         <button class="aabtn" onclick="b2bIcsImport()">📅 Z kalendára (.ics)</button>
         <button class="aabtn" onclick="b2bAktivitaNova()">＋ Aktivita</button>
         <button class="aabtn" onclick="b2bPvExport('moj')">⬇ Môj výkaz</button>
+        ${firmaData && modulPovolenyPreModul("vykazy")? `<button class="aabtn" onclick="b2bDoVykazov()" title="Hodiny mesiaca ako výkaz vašej firmy — odtiaľ protokol a faktúra">→ Do Výkazov</button>` : ""}
         <label class="aabtn" style="display:flex;gap:6px;align-items:center"><input type="checkbox"${hotovo?" checked":""} onchange="b2bHotovo('${os.id}',this.checked)"> Mesiac hotový</label>
       </div>
       ${caste.length? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px"><span class="csub" style="margin:0;align-self:center">Časté:</span>${caste.map(a=>`<button class="apill" style="cursor:pointer;border:0" onclick="b2bZaznamNovy('${a.id}')">${esc(a.nazov)}</button>`).join("")}</div>` : ""}
@@ -26778,7 +27152,7 @@ function b2bMojMesiacHtml(){
     ${dni.length? dni.map(x=>`<details class="card" style="padding:10px 14px;margin-bottom:8px"${dni.length<=8?" open":""}>
       <summary style="cursor:pointer;display:flex;justify-content:space-between;gap:8px"><span>${esc(fmtDatum(x.datum))} ${B2B_DNI[new Date(x.datum+"T12:00").getDay()]}</span><span><b>${x.hodiny} h</b> <span class="csub" style="margin:0">(${x.minuty} min)</span></span></summary>
       ${x.zaznamy.map(z=>`<div style="display:flex;gap:8px;justify-content:space-between;border-top:1px solid var(--line);padding:6px 0;font-size:13px;cursor:pointer" onclick="b2bZaznamUprav('${z.id}')">
-        <span>${z.cas_od? esc(String(z.cas_od).slice(0,5)+"–"+String(z.cas_do||"").slice(0,5)) : (+z.minuty||0)+" min"} · ${esc((akt[z.aktivita_id]||{}).nazov||"bez aktivity")}${z.popis? " — "+esc(z.popis) : ""}</span>
+        <span>${z.cas_od? esc(String(z.cas_od).slice(0,5)+"–"+String(z.cas_do||"").slice(0,5)) : (+z.minuty||0)+" min"} · ${esc((akt[z.aktivita_id]||{}).nazov||"bez aktivity")}${z.popis? " — "+esc(z.popis) : ""}${(z.vystupy||[]).length? " · 📎 "+esc(z.vystupy.join(", ")) : ""}</span>
         <span class="csub" style="margin:0">${/^ics:/.test(z.zdroj)?"kalendár":"ručne"}</span></div>`).join("")}
     </details>`).join("") : `<div class="aempty">Za ${esc(B2B_MESIACE[+d.mesiac.slice(5)-1])} zatiaľ nič. Pridajte záznam alebo načítajte kalendár.</div>`}`;
 }
@@ -26819,7 +27193,8 @@ function b2bNastaveniaHtml(){
         <button class="aabtn" onclick="b2bProjektJsonNahraj()">⬆ Nahradiť z JSON</button></div>
         <div class="mfield" style="margin-top:10px"><label>Hlavička zo CRZ (odkaz alebo ID)</label>
           <div style="display:flex;gap:6px"><input id="b2bCrz" value="${esc(z.crz&&z.crz.odkaz||"")}" placeholder="https://www.crz.gov.sk/zmluva/…"><button class="aabtn" onclick="b2bNacitajCrz()">Načítať</button><button class="aabtn" onclick="b2bCrzDoProjektu()">Prevziať</button></div>
-          <div id="b2bCrzVysl" class="csub" style="margin:4px 0 0"></div></div>` : ""}
+          <div id="b2bCrzVysl" class="csub" style="margin:4px 0 0"></div>
+          <div class="csub" style="margin:6px 0 0">Neverejnú zmluvu (PDF) prečíta asistent aj zo súboru: <label style="color:var(--brand);cursor:pointer;text-decoration:underline">vybrať PDF<input type="file" accept=".pdf,application/pdf" style="display:none" onchange="b2bZmluvaNahraj(this)"></label></div></div>` : ""}
     </div>
     <div class="card" style="padding:12px 14px">
       <b>Osoby</b>
@@ -26856,7 +27231,7 @@ function appB2bVykaz(){
   if(B2B.d.chyba){ s.innerHTML=appHlavicka("b2b_vykaz",`<button class="aabtn" onclick="b2bSpatZoznam()">‹ Projekty</button>`)+
     `<div class="card" style="padding:12px 14px;border-color:var(--neg)"><b style="color:var(--neg)">Projekt sa nepodarilo načítať</b><div class="csub" style="margin:4px 0 8px">${esc(B2B.chybaProjektu||"")}</div><button class="aabtn" onclick="b2bObnov()">Skúsiť znova</button></div>`; return; }
   const d=B2B.d, tab=(k,n)=>`<button class="aabtn${B2B.pohlad===k?" pri":""}" onclick="b2bPohlad('${k}')">${n}</button>`;
-  const obsah=B2B.pohlad==="pv"? b2bPvHtml() : B2B.pohlad==="tim"? b2bTimHtml() : B2B.pohlad==="projekt"? b2bNastaveniaHtml() : b2bMojMesiacHtml();
+  const obsah=B2B.pohlad==="pv"? b2bPvHtml() : B2B.pohlad==="tim"? b2bTimHtml() : B2B.pohlad==="projekt"? b2bNastaveniaHtml() : B2B.pohlad==="vystupy"? b2bVystupyHtml() : b2bMojMesiacHtml();
   s.innerHTML=appHlavicka("b2b_vykaz", (B2B.projekty.length>1||B2B.pozvanky.length||B2B.zakladatel? `<button class="aabtn" onclick="b2bSpatZoznam()">‹ Projekty</button>` : ""))+`
     <div data-scroll="b2b">
     <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center;margin:0 2px 12px">
@@ -26864,7 +27239,7 @@ function appB2bVykaz(){
       <div style="display:flex;gap:4px;align-items:center"><button class="aabtn" onclick="b2bZmenMesiac(-1)" aria-label="Predchádzajúci mesiac">‹</button>
         <b style="min-width:120px;text-align:center">${esc(B2B_MESIACE[+d.mesiac.slice(5)-1])} ${d.mesiac.slice(0,4)}</b>
         <button class="aabtn" onclick="b2bZmenMesiac(1)" aria-label="Nasledujúci mesiac">›</button></div></div>
-    <div style="display:flex;gap:6px;flex-wrap:wrap;margin:0 2px 12px">${tab("moj","Môj mesiac")}${tab("tim","Tím")}${tab("pv","Spoločný výkaz")}${tab("projekt","Projekt")}</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin:0 2px 12px">${tab("moj","Môj mesiac")}${tab("tim","Tím")}${tab("pv","Spoločný výkaz")}${tab("vystupy","Výstupy")}${tab("projekt","Projekt")}</div>
     ${obsah}</div>`;
 }
 // ── B2B: import kalendára (.ics) — ten istý parser ako Výkazy (návrh §6) ──
@@ -26986,7 +27361,7 @@ function b2bImportRozpoznaj(X, wb, D, mesiac){
     if(hi<0){ out.upozornenia.push("Hárok „"+tabSheet+"“ nemá hlavičku so stĺpcami Dátum a Hodiny / Minúty / Od."); return out; }
     const H=rows[hi].map(norm), st=(...m)=>H.findIndex(h=>m.includes(h));
     const c={datum:st("datum"), osoba:st("osoba","meno"), od:st("od"), do:st("do"), min:st("minuty"), hod:st("hodiny"), akt:st("aktivita","cinnost"),
-      popis:st("popis","poznamka"), org:st("organizacia"), miesto:st("miesto v zmluve")};
+      popis:st("popis","poznamka"), org:st("organizacia"), miesto:st("miesto v zmluve"), vyst:st("vystupy (id)")};
     out.tvar=tabSheet==="Detail"? "detail" : "tabulka";
     rows.slice(hi+1).forEach(r=>{
       const datum=datumZ(r[c.datum]); if(!datum) return;
@@ -26996,7 +27371,8 @@ function b2bImportRozpoznaj(X, wb, D, mesiac){
       if(!(min>0) && c.hod>=0){ const h=cis(r[c.hod]); min=h>0? Math.round(h*60) : null; }
       pridaj({datum, osoba:c.osoba>=0? String(r[c.osoba]||"").trim()||null : null, cas_od:od&&dk? od : null, cas_do:od&&dk? dk : null,
         minuty:Math.round(min||0), aktivita:c.akt>=0? String(r[c.akt]||"").trim()||null : null, popis:c.popis>=0? String(r[c.popis]||"").trim()||null : null,
-        organizacia:c.org>=0? String(r[c.org]||"").trim()||null : null, miesto:c.miesto>=0? String(r[c.miesto]||"").trim()||null : null});
+        organizacia:c.org>=0? String(r[c.org]||"").trim()||null : null, miesto:c.miesto>=0? String(r[c.miesto]||"").trim()||null : null,
+        vystupy:c.vyst>=0? String(r[c.vyst]||"").split(/[,;]/).map(x=>x.trim()).filter(x=>/^[A-Z0-9]{2,10}-V-[0-9]{3,5}$/.test(x)) : []});
     });
     return out;
   }
@@ -27080,7 +27456,7 @@ async function b2bImportUloz(){
       if(r.aktivita){ aid=akt[norm(r.aktivita)];
         if(!aid){ const a=await sb.from("b2b_aktivity").insert({projekt_id:d.pid, nazov:r.aktivita.slice(0,300)}).select("id"); if(a.error) throw a.error; aid=akt[norm(r.aktivita)]=a.data[0].id; } }
       riadky.push({projekt_id:d.pid, osoba_id:osobaId, datum:r.datum, cas_od:r.cas_od||null, cas_do:r.cas_do||null, minuty:r.minuty, aktivita_id:aid, popis:r.popis||null,
-        zdroj:"import:"+String(imp.subor||"xlsx").slice(0,80)});
+        vystupy:r.vystupy||[], zdroj:"import:"+String(imp.subor||"xlsx").slice(0,80)});
     }
     const od=d.mesiac+"-01", doDna=b2bIso(new Date(+d.mesiac.slice(0,4), +d.mesiac.slice(5,7), 0));
     for(const oid of [...new Set(riadky.map(r=>r.osoba_id))]){
