@@ -2298,7 +2298,7 @@ const SUPABASE_KEY = "sb_publishable_dalCd7TaW7PJ40UD8KN86A_cKiIGRdc";
 
 // EMBEDDED_FAKTURA_FONT
 
-const APP_VERZIA = "2026.10.17-TL";  // B2B: CRZ z poľa pri založení, miesto zakladateľa (spec 157.18); TK: admin: prístup k B2B službám (spec 157.16); TJ: návody B2B; TI: B2B služby (spec 157), zásady 1.27
+const APP_VERZIA = "2026.10.17-TM";  // B2B: import z kalendára bez zaškrtnutia (spec 157.19); TL: CRZ z poľa pri založení, miesto zakladateľa (spec 157.18); TK: admin: prístup k B2B službám (spec 157.16); TJ: návody B2B; TI: B2B služby (spec 157), zásady 1.27
 let sb = null;
 let mode = "login"; // login | register
 let localMode = false;
@@ -27352,27 +27352,36 @@ function b2bIcsOkno(){
   const d=B2B.d, os=b2bMojaOsoba(), K=B2B._ics||[];
   const uz=new Set(d.zaznamy.filter(z=>os && z.osoba_id===os.id && /^ics:/.test(z.zdroj||"")).map(z=>z.zdroj+"|"+z.datum+"|"+String(z.cas_od||"").slice(0,5)));
   K.forEach(k=>{ k.uz=uz.has("ics:"+k.uid+"|"+k.datum+"|"+k.od); });
-  const akt=d.aktivity.filter(a=>a.aktivna!==false), sel=(id,v)=>`<select id="${id}" style="max-width:180px"><option value="">—</option>${akt.map(a=>`<option value="${a.id}"${v===a.id?" selected":""}>${esc(a.nazov)}</option>`).join("")}</select>`;
+  const akt=d.aktivity.filter(a=>a.aktivna!==false), sel=(id,v,zmena)=>`<select id="${id}" style="max-width:180px"${zmena? ` onchange="${zmena}"` : ""}><option value="">—</option>${akt.map(a=>`<option value="${a.id}"${v===a.id?" selected":""}>${esc(a.nazov)}</option>`).join("")}</select>`;
   const kat=[...new Set(K.flatMap(k=>k.kategorie))];
   openModal("Import z kalendára", `
-    <div class="csub">Označte udalosti projektu. Do projektu ide len dátum, čas a predmet — vidia ich všetci členovia. Účastníci ani text pozvánky sa neukladajú. Výber si appka zapamätá na budúci mesiac.</div>
+    <div class="csub">Zaškrtnite udalosti projektu (ťuknutím na riadok alebo výberom aktivity). Do projektu ide len dátum, čas a predmet — vidia ich všetci členovia. Účastníci ani text pozvánky sa neukladajú. Výber si appka zapamätá na budúci mesiac.</div>
     <div class="mfield"><label>Váš e-mail v kalendári (podľa neho sa spozná odmietnuté stretnutie)</label><input id="b2bIcsMail" type="email" value="${esc((d.moje&&d.moje.kalendarEmail)||_prihlasenyEmail||"")}"></div>
     ${kat.length? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"><span class="csub" style="margin:0;align-self:center">Kategórie:</span>${kat.map(c=>`<button class="apill" style="cursor:pointer;border:0" onclick="b2bIcsKategoria(this.dataset.k)" data-k="${esc(c)}">＋ ${esc(c)}</button>`).join("")}</div>` : ""}
     <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;font-size:12.5px">Aktivita pre všetky označené: ${sel("b2bIcsVsetky","")}<button class="aabtn" onclick="b2bIcsAktVsetky()">Použiť</button></div>
-    <div data-scroll="b2bics" style="max-height:52vh;overflow:auto">${K.map((k,i)=>`<div style="display:flex;gap:8px;align-items:center;border-top:1px solid var(--line);padding:6px 0;font-size:12.5px${k.uz||k.zrusene||k.odmietnute?";opacity:.6":""}">
-      <input type="checkbox" id="b2bIc${i}"${k.oznacene&&!k.uz?" checked":""}${k.uz?" disabled":""}>
+    <div data-scroll="b2bics" style="max-height:52vh;overflow:auto">${K.map((k,i)=>`<div style="display:flex;gap:4px 8px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line);padding:6px 0;font-size:12.5px${k.uz||k.zrusene||k.odmietnute?";opacity:.6":""}">
+      <label for="b2bIc${i}" style="display:flex;gap:8px;align-items:center;flex:1 1 200px;min-width:0;cursor:pointer">
+      <input type="checkbox" id="b2bIc${i}" style="width:20px;height:20px;flex:none;margin:0"${k.oznacene&&!k.uz?" checked":""}${k.uz?" disabled":""}>
       <span style="min-width:118px">${esc(fmtDatum(k.datum))} ${k.od}–${k.do}</span>
-      <span style="flex:1">${esc(k.predmet||"(bez predmetu)")}${k.uz? " · už v projekte" : k.odmietnute? " · odmietnuté" : k.zrusene? " · zrušené" : ""}</span>
-      ${k.uz? "" : sel("b2bIa"+i, k.aktivita_id)}</div>`).join("")}</div>`,
+      <span style="flex:1;min-width:0">${esc(k.predmet||"(bez predmetu)")}${k.uz? " · už v projekte" : k.odmietnute? " · odmietnuté" : k.zrusene? " · zrušené" : ""}</span></label>
+      ${k.uz? "" : sel("b2bIa"+i, k.aktivita_id, `b2bIcsOznac(${i})`)}</div>`).join("")}</div>`,
     ()=>b2bIcsUloz(), null, "siroky", "Importovať označené");
 }
 function b2bIcsKategoria(c){
   (B2B._ics||[]).forEach((k,i)=>{ if(k.kategorie.includes(c) && !k.uz && !k.zrusene && !k.odmietnute){ const cb=document.getElementById("b2bIc"+i); if(cb) cb.checked=true; } });
   B2B._icsKat=[...new Set([...(B2B._icsKat||[]), c])];
 }
+// Výber aktivity v riadku = človek chce ten riadok (prvý ostrý import, 17. 10. 2026:
+// aktivity vybrané, nič nezaškrtnuté, uložilo sa 0 záznamov).
+function b2bIcsOznac(i){
+  const s=document.getElementById("b2bIa"+i), cb=document.getElementById("b2bIc"+i);
+  if(s && s.value && cb && !cb.disabled) cb.checked=true;
+}
 function b2bIcsAktVsetky(){
   const v=(document.getElementById("b2bIcsVsetky")||{}).value; if(!v) return;
-  (B2B._ics||[]).forEach((k,i)=>{ const cb=document.getElementById("b2bIc"+i), s=document.getElementById("b2bIa"+i); if(cb && cb.checked && s) s.value=v; });
+  let n=0;
+  (B2B._ics||[]).forEach((k,i)=>{ const cb=document.getElementById("b2bIc"+i), s=document.getElementById("b2bIa"+i); if(cb && cb.checked && s){ s.value=v; n++; } });
+  if(!n) alert("Najprv zaškrtnite udalosti, ktorým chcete aktivitu dať.");
 }
 async function b2bIcsUloz(){
   const d=B2B.d, os=b2bMojaOsoba(); if(!d || !os) return;
@@ -27387,6 +27396,9 @@ async function b2bIcsUloz(){
       if(k.norm){ predm.add(k.norm); if(akt) P.aktivity[k.norm]=akt; }
     } else if(k.norm && predm.has(k.norm)) predm.delete(k.norm);
   });
+  // Nič označené = omyl, nie „0 záznamov“: okno ostane a pravidlá sa nezmenia
+  // (inak by sa zabudli aj predmety, ktoré si appka pamätala).
+  if(!nove.length) return b2bVOkne("Nie je zaškrtnutá žiadna udalosť. Zaškrtnite udalosti projektu (alebo im vyberte aktivitu) a potom Importovať označené.");
   P.predmety=[...predm].slice(-500);
   P.kategorie=[...new Set([...(P.kategorie||[]), ...(B2B._icsKat||[])])];
   const mail=String((document.getElementById("b2bIcsMail")||{}).value||"").trim().toLowerCase();
