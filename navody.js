@@ -1339,8 +1339,8 @@ b2b_vykaz: {
       kroky: [
         { text: "Uložte si kalendár za mesiac ako súbor .ics (návod pre Outlook je nižšie v podrobnostiach)." },
         { text: "V záložke <b>Môj mesiac</b> ťuknite na <b>📅 Z kalendára (.ics)</b> a vyberte súbor.", tlacidlo: "📅 Z kalendára (.ics)", snimka: "b2b_vykaz-kalendar-1" },
-        { text: "Označte udalosti, ktoré patria projektu, a každej vyberte aktivitu.", snimka: "b2b_vykaz-kalendar-2",
-          tip: "Odmietnuté a zrušené stretnutia appka sama neoznačí — odmietnutie spozná podľa vášho e-mailu v kalendári." },
+        { text: "Označte udalosti, ktoré patria projektu (alebo <b>Označiť všetky</b>), a každej vyberte aktivitu.", tlacidlo: "Označiť všetky", snimka: "b2b_vykaz-kalendar-2",
+          tip: "Výber aktivity riadok sám označí. Nový projekt aktivity ešte nemá — vo výbere zvoľte ＋ Nová aktivita…. Odmietnuté a zrušené stretnutia appka sama neoznačí." },
         { text: "Ťuknite na <b>Importovať označené</b>.", tlacidlo: "Importovať označené", snimka: "b2b_vykaz-kalendar-3" },
       ],
       tip: "Výber si appka zapamätá: budúci mesiac budú stretnutia s rovnakým predmetom označené samy, aj s aktivitou.",
@@ -1353,6 +1353,8 @@ b2b_vykaz: {
           html: "<p>Udalosť, ktorá už v projekte je, ostane v zozname sivá s poznámkou „už v projekte“ — druhýkrát sa nenačíta.</p>" },
         { nadpis: "Kategórie z Outlooku",
           html: "<p>Ak projektovým stretnutiam dávate kategóriu, ťuknite na ňu hore v okne — označí všetky udalosti s ňou a appka si ju zapamätá.</p>" },
+        { nadpis: "Úprava pred importom",
+          html: "<p>Pri riadku ťuknite na <b>✎</b> — upravíte čas od–do a popis, ktorý pôjde do záznamu. Udalosť cez víkend alebo sviatok sa appka pred importom opýta.</p>" },
       ],
     },
     {
@@ -1373,6 +1375,8 @@ b2b_vykaz: {
           html: "<p>Po odoslaní appka ukáže lehotu 5 dní na vyjadrenie s posunom cez víkend a sviatok. Potom zapíšete <b>Schválený…</b> alebo <b>Pripomienky…</b>; keď lehota uplynie bez odpovede, ponúkne <b>Schválený mlčky (bod 2.8)</b>.</p>" },
         { nadpis: "Oprava hodín kolegu",
           html: "<p>V Detaile náhľadu je pri riadku <b>upraviť</b>. Je to korekcia vo verzii výkazu — záznam kolegu sa nemení a korekcia je v Detaile označená.</p>" },
+        { nadpis: "Hodiny bez záznamu a dni na 8 h",
+          html: "<p><b>＋ Hodiny vo výkaze</b> (alebo ťuk na deň v tabuľke pozície) zapíše hodiny osoby za deň aj tam, kde záznam nemá. <b>Dni na 8 h…</b> nastaví dni osoby alebo celého tímu za mesiac či obdobie na celý človekodeň — nahor aj nadol. Záznamy sa nemenia, v Detaile je to korekcia; víkendy a sviatky len so súhlasom. Do Môjho mesiaca ani do Výkazov tieto úpravy nejdú.</p>" },
         { nadpis: "Kolega appku nepoužíva",
           html: "<p>Jeho výkaz načítate v záložke Tím cez <b>⬆ Výkaz osoby bez účtu (XLSX)</b> — appka spozná hárok Detail z exportu appky, jednoduchú tabuľku aj hárok v tvare vzoru.</p>" },
         { nadpis: "Verzie výkazu",
@@ -1389,7 +1393,7 @@ b2b_vykaz: {
         { text: "Pri výstupe ťuknite na <b>⬆ Nahrať súbor</b>.", tlacidlo: "Nahrať súbor", snimka: "b2b_vykaz-vystupy-3" },
         { text: "V úprave záznamu, ku ktorému výstup patrí, otvorte <b>Výstupy záznamu</b> a výstup označte.", tlacidlo: "Výstupy záznamu", snimka: "b2b_vykaz-vystupy-4" },
       ],
-      tip: "ID výstupu sa nikdy nepoužije znova, ani po zmazaní — dá sa naň spoľahnúť v korešpondencii s objednávateľom.",
+      tip: "Rýchlejšie priamo zo záznamu: v úprave záznamu ťuknite na 📎 Priložiť súbor ako nový výstup — výstup sa založí so súborom a k záznamu sa označí sám. ID výstupu sa nikdy nepoužije znova.",
       podrobnosti: [
         { nadpis: "Balík pre objednávateľa",
           html: "<p>V záložke Spoločný výkaz ťuknite na <b>⬇ Balík so výstupmi (ZIP)</b>: výkaz a súbory výstupov mesiaca premenované na <i>ID_názov</i> (napríklad RZ7-V-001_Zapis.docx). Výstup bez súboru alebo zmazaný v balíku nebude — okno to ukáže vopred.</p>" },
