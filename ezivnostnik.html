@@ -25728,6 +25728,410 @@ function xkApplyFreeze(X,fflate,buf,freezeMap){
   return fflate.zipSync(files);
 }
 // ═══════════════════════════════════════════════════════════════
+//  B2B SLUŽBY — PRACOVNÝ VÝKAZ PROJEKTU (spec kap. 157, č. 278)
+//
+//  Projekt = realizačná zmluva; hodiny ľudí z viacerých firiem (tabuľky
+//  b2b_*, admin_74 — NIE firmaData). Tu je čistá časť: model výkazu
+//  a zápis XLSX v tvare vzoru objednávateľa. Model je JEDNA PRAVDA pre
+//  HTML náhľad aj súbor — náhľad si nič nevyberá sám (spec 156.23).
+// ═══════════════════════════════════════════════════════════════
+const B2B_MESIACE=["január","február","marec","apríl","máj","jún","júl","august","september","október","november","december"];
+const B2B_DNI=["ne","po","ut","st","št","pi","so"];
+function b2bIso(d){ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+function b2bSerial(iso){ const m=String(iso||"").match(/^(\d{4})-(\d{2})-(\d{2})/); return m? Math.round(Date.UTC(+m[1],+m[2]-1,+m[3])/864e5)+25569 : null; }
+function b2bMinCasu(t){ const m=String(t||"").match(/^(\d{1,2}):(\d{2})/); return m? (+m[1])*60+(+m[2]) : null; }
+// Minúty osoby za deň: záznamy s časom zjednotením intervalov (prekryv sa
+// nezráta dvakrát), záznamy bez času súčtom minút.
+function b2bMinutyDna(zaznamy){
+  const iv=[]; let bezCasu=0;
+  (zaznamy||[]).forEach(z=>{ const a=b2bMinCasu(z.cas_od), b=b2bMinCasu(z.cas_do);
+    if(a!=null && b!=null && b>a) iv.push([a,b]); else bezCasu+=Math.max(0,+z.minuty||0); });
+  iv.sort((x,y)=>x[0]-y[0]);
+  let spolu=0, cur=null;
+  iv.forEach(([a,b])=>{ if(!cur || a>cur[1]){ if(cur) spolu+=cur[1]-cur[0]; cur=[a,b]; } else cur[1]=Math.max(cur[1],b); });
+  if(cur) spolu+=cur[1]-cur[0];
+  return spolu+bezCasu;
+}
+// Celé hodiny matematicky (rozhodnutie 17. 10. 2026): od 30 minút nahor.
+// Zaokrúhľuje sa DEŇ osoby, nie udalosť — štyri 15-min stretnutia = 1 h.
+function b2bZaokruhli(min){ return Math.floor((Math.max(0,+min||0)+30)/60); }
+// Miesto v Prílohe 4, na ktorom osoba v daný deň je (zmena experta od–do).
+function b2bMiestoOsoby(osoba, datum){
+  const m=((osoba&&osoba.miesta)||[]).find(x=>x && x.miesto && (!x.od||x.od<=datum) && (!x.do||x.do>=datum));
+  return m? m.miesto : null;
+}
+function b2bFond(rok, mes, hodinDna){ return pracovneDni(rok,mes).length*(hodinDna||8); }
+// Dni pracovného pokoja roka s názvom — z toho istého zoznamu ako isSviatok.
+function b2bSviatkyRoka(r){
+  const out=[];
+  for(let d=new Date(r,0,1); d.getFullYear()===r; d=new Date(r,d.getMonth(),d.getDate()+1)){
+    if(!isSviatok(d)) continue;
+    let n="";
+    try{ const Z=sadzbaKuDnu("dniPracovnehoPokoja", d), mmdd=b2bIso(d).slice(5);
+      n=(Z.pevne.find(x=>x.d===mmdd)||{}).n||"";
+      if(!n){ const od=Math.round((new Date(r,d.getMonth(),d.getDate())-velkonocnaNedela(r))/864e5); n=(Z.velkaNoc.find(x=>x.posun===od)||{}).n||""; }
+    }catch(e){ console.error("b2bSviatkyRoka", e); }
+    out.push({datum:b2bIso(d), nazov:n||"Deň pracovného pokoja"});
+  }
+  return out;
+}
+// Posledný deň 5-dňovej lehoty na vyjadrenie k PV (bod 2.8 zmluvy) —
+// koniec v sobotu, nedeľu alebo sviatok sa posúva na pracovný deň.
+function b2bKoniecLehoty(odoslaneIso){
+  const m=String(odoslaneIso||"").match(/^(\d{4})-(\d{2})-(\d{2})/); if(!m) return null;
+  return b2bIso(posunNaPracovnyDen(new Date(+m[1],+m[2]-1,+m[3]+5), true));
+}
+function b2bZoznamTextom(n){ return n.length<=1 ? n.join("") : n.slice(0,-1).join(", ")+" a "+n[n.length-1]; }
+// Popis pracovnej činnosti v tvare vzoru: „<oblasti> – <pozície>:“ pre
+// pozície s hodinami, potom „vrátane nasledovných aktivít:“ a aktivity mesiaca.
+function b2bPopisCinnosti(D, pozicieSHodinami, aktivityNazvy){
+  const P=D.popis_cinnosti_navrh||{}, obl={}, poz={};
+  (D.oblasti||[]).forEach(o=>{ obl[o.id]=o.text; });
+  (D.pozicie||[]).forEach(p=>{ poz[p.id]=p; });
+  const riadky=[];
+  (P.riadky||[]).forEach(r=>{
+    const pz=(r.pozicie||[]).filter(id=>pozicieSHodinami.has(id)); if(!pz.length) return;
+    const t=(r.oblasti||[]).map(id=>obl[id]).filter(Boolean).join("; "); if(!t) return;
+    riadky.push(t.charAt(0).toUpperCase()+t.slice(1)+" – "+b2bZoznamTextom(pz.map(id=>(poz[id]&&poz[id].nazov_vo_vykaze)||id))+":");
+  });
+  if(aktivityNazvy.length){ if(riadky.length) riadky.push(""); riadky.push(P.uvod_aktivit||"vrátane nasledovných aktivít:"); aktivityNazvy.forEach(a=>riadky.push("- "+a)); }
+  return riadky.join("\n");
+}
+// MODEL VÝKAZU. vstup: {projekt, osoby, aktivity, zaznamy, mesiac:"RRRR-MM",
+// uprava, mesiace (stavy „hotovo“), cerpanieDoteraz {pozícia: hodiny pred
+// mesiacom}, dnes, lenOsoba}. uprava: {cislo, datum, akceptujuci, fond,
+// popis {org: text}, organizacie [id], korekcie {záznam: {...}},
+// hodinyDen {"osoba|dátum": h}}. Výstup kreslí náhľad aj XLSX.
+function b2bVykazModel(vstup){
+  const projekt=vstup.projekt||{}, D=projekt.data||{}, U=vstup.uprava||{};
+  const [rok,mes]=String(vstup.mesiac).split("-").map(Number);
+  const pocetDni=new Date(rok,mes,0).getDate();
+  const dni=[];
+  for(let i=1;i<=pocetDni;i++){ const d=new Date(rok,mes-1,i); dni.push({d:i, datum:b2bIso(d), den:B2B_DNI[d.getDay()], vikend:d.getDay()===0||d.getDay()===6, sviatok:isSviatok(d)}); }
+  const hodinDna=+D.clovekoden_hodin||8;
+  const fondVypocitany=b2bFond(rok,mes,hodinDna);
+  const fond=(U.fond!=null && U.fond!=="")? +U.fond : fondVypocitany;
+  const pozicie=D.pozicie||[], orgs=D.organizacie||[];
+  const pozMap={}, miestaMap={}, orgMap={}, osMap={}, aktMap={}, oblMap={};
+  pozicie.forEach(p=>{ pozMap[p.id]=p; });
+  (D.miesta||[]).forEach(m=>{ miestaMap[m.id]=m; });
+  orgs.forEach(o=>{ orgMap[o.id]=o; });
+  (vstup.osoby||[]).forEach(o=>{ osMap[o.id]=o; });
+  (vstup.aktivity||[]).forEach(a=>{ aktMap[a.id]=a; });
+  (D.oblasti||[]).forEach(o=>{ oblMap[o.id]=o.text; });
+  pozicie.forEach(p=>(p.cinnosti||[]).forEach(c=>{ oblMap[c.id]=c.text; }));
+  const kor=U.korekcie||{}, korDen=U.hodinyDen||{};
+  const zazn=(vstup.zaznamy||[])
+    .filter(z=>z && String(z.datum||"").slice(0,7)===vstup.mesiac && (!vstup.lenOsoba || z.osoba_id===vstup.lenOsoba))
+    .map(z=>kor[z.id]? Object.assign({}, z, kor[z.id], {_korekcia:true}) : z)
+    .filter(z=>!z.vynechat);
+  const skup=new Map();
+  zazn.forEach(z=>{ const k=z.osoba_id+"|"+z.datum; if(!skup.has(k)) skup.set(k,[]); skup.get(k).push(z); });
+  const osobaDen=[];
+  skup.forEach((zz,k)=>{
+    const [osobaId,datum]=k.split("|"), os=osMap[osobaId]||{id:osobaId, meno:"(neznáma osoba)"};
+    const minuty=b2bMinutyDna(zz), korig=korDen[k]!=null && korDen[k]!=="";
+    const miesto=b2bMiestoOsoby(os, datum), pozicia=miesto&&miestaMap[miesto]? miestaMap[miesto].pozicia : null;
+    osobaDen.push({kluc:k, osobaId, meno:os.meno, datum, minuty, hodiny:korig? Math.max(0,Math.round(+korDen[k])) : b2bZaokruhli(minuty),
+      korigovane:korig, miesto, pozicia:pozMap[pozicia]? pozicia : null, organizacia:orgMap[os.organizacia]? os.organizacia : null,
+      zaznamy:zz.slice().sort((a,b)=>String(a.cas_od||"").localeCompare(String(b.cas_od||"")))});
+  });
+  osobaDen.sort((a,b)=>a.datum.localeCompare(b.datum) || String(a.meno).localeCompare(String(b.meno),"sk"));
+  const vybrane=Array.isArray(U.organizacie)&&U.organizacie.length? U.organizacie : orgs.map(o=>o.id);
+  const organizacie=orgs.filter(o=>vybrane.includes(o.id)).map(o=>{
+    const vOrg=osobaDen.filter(x=>x.organizacia===o.id && x.pozicia);
+    const rows=pozicie.map(p=>{
+      const hd=new Array(pocetDni).fill(0), osobyS=new Set();
+      vOrg.filter(x=>x.pozicia===p.id).forEach(x=>{ hd[+x.datum.slice(8)-1]+=x.hodiny; if(x.hodiny>0) osobyS.add(x.osobaId); });
+      const spolu=hd.reduce((a,b)=>a+b,0), sadzba=+p.sadzba_bez_dph||0;
+      return {id:p.id, nazov:p.nazov_vo_vykaze||p.nazov_v_zmluve||p.id, sadzba, pocetExpertov:osobyS.size, hodinyDni:hd, spolu, cd:spolu/hodinDna, suma:Math.round(spolu*sadzba*100)/100};
+    });
+    const spoluDni=new Array(pocetDni).fill(0); rows.forEach(r=>r.hodinyDni.forEach((h,i)=>{ spoluDni[i]+=h; }));
+    const spolu=rows.reduce((a,r)=>a+r.spolu,0);
+    const aktNazvy=[]; vOrg.forEach(x=>x.zaznamy.forEach(z=>{ const a=aktMap[z.aktivita_id]; if(a && a.nazov && !aktNazvy.includes(a.nazov)) aktNazvy.push(a.nazov); }));
+    const sHod=new Set(rows.filter(r=>r.spolu>0).map(r=>r.id));
+    const popis=(U.popis && U.popis[o.id]!=null)? String(U.popis[o.id]) : b2bPopisCinnosti(D, sHod, aktNazvy);
+    return {id:o.id, nazov:o.nazov||o.id, pozicie:rows, spoluDni, spolu, cd:spolu/hodinDna, suma:Math.round(rows.reduce((a,r)=>a+r.suma,0)*100)/100, popis};
+  });
+  // Detail — riadok na záznam; hodiny dňa osoby na prvom riadku dňa.
+  const detail=[];
+  osobaDen.forEach(x=>{
+    if(x.organizacia && !vybrane.includes(x.organizacia)) return;
+    const os=osMap[x.osobaId]||{}, m=x.miesto&&miestaMap[x.miesto];
+    x.zaznamy.forEach((z,i)=>{
+      const a=aktMap[z.aktivita_id]||{}, od=b2bMinCasu(z.cas_od), dk=b2bMinCasu(z.cas_do);
+      detail.push({datum:x.datum, den:B2B_DNI[new Date(x.datum+"T12:00").getDay()], osoba:x.meno, osobaId:x.osobaId,
+        organizacia:x.organizacia? orgMap[x.organizacia].nazov : "", pozicia:x.pozicia? (pozMap[x.pozicia].nazov_vo_vykaze||x.pozicia) : "",
+        miesto:m? (m.nazov_v_zmluve||m.id)+(m.poradie_v_prilohe? " ("+m.poradie_v_prilohe+")" : "") : "",
+        zakazka:a.zakazka||"", od:z.cas_od? String(z.cas_od).slice(0,5) : "", do:z.cas_do? String(z.cas_do).slice(0,5) : "",
+        minuty:(od!=null&&dk!=null&&dk>od)? dk-od : (+z.minuty||0), hodinyDen:i===0? x.hodiny : null,
+        oblast:a.oblast? (oblMap[a.oblast]||a.oblast) : "", aktivita:a.nazov||"", popis:z.popis||"",
+        vystupy:(z.vystupy||[]).join(", "), zdroj:/^ics:/.test(z.zdroj||"")? "kalendár" : /^import:/.test(z.zdroj||"")? "import" : "ručne",
+        korekcia:(z._korekcia||(i===0&&x.korigovane))? "áno" : "", zaznamId:z.id});
+    });
+  });
+  // Kontroly — ✗ blokuje „na odoslanie“, ! upozorní (návrh §11).
+  const kontroly=[], k=(uroven,kod,text,extra)=>kontroly.push(Object.assign({uroven,kod,text},extra||{}));
+  const fd=(iso)=>fmtDatum(iso);
+  osobaDen.forEach(x=>{
+    if(x.hodiny>0 && !x.pozicia) k("chyba","BEZ_MIESTA",x.meno+" "+fd(x.datum)+": bez miesta v Prílohe 4 — hodiny nie sú v súhrne (bod 4.2 b)",{osobaId:x.osobaId,datum:x.datum});
+    if(x.hodiny>0 && !x.organizacia) k("chyba","BEZ_ORGANIZACIE",x.meno+": nemá organizáciu projektu — hodiny nie sú v súhrne",{osobaId:x.osobaId,datum:x.datum});
+    if(x.hodiny>12) k("pozor","NAD_12H",x.meno+" "+fd(x.datum)+": "+x.hodiny+" h za deň",{osobaId:x.osobaId,datum:x.datum});
+    const d=new Date(x.datum+"T12:00");
+    if(x.hodiny>0 && (d.getDay()===0||d.getDay()===6)) k("pozor","VIKEND",x.meno+" "+fd(x.datum)+": práca cez víkend",{osobaId:x.osobaId,datum:x.datum});
+    else if(x.hodiny>0 && isSviatok(d)) k("pozor","SVIATOK",x.meno+" "+fd(x.datum)+": práca vo sviatok",{osobaId:x.osobaId,datum:x.datum});
+    if(x.minuty>0 && x.hodiny===0 && !x.korigovane) k("pozor","NULA",x.meno+" "+fd(x.datum)+": "+x.minuty+" min sa zaokrúhlilo na 0 h",{osobaId:x.osobaId,datum:x.datum});
+  });
+  const poOsobach={};
+  osobaDen.forEach(x=>{ const o=poOsobach[x.osobaId]||(poOsobach[x.osobaId]={meno:x.meno,h:0,min:0}); o.h+=x.hodiny; o.min+=x.minuty; });
+  Object.keys(poOsobach).forEach(id=>{ const o=poOsobach[id];
+    if(o.h>fond) k("pozor","NAD_FOND",o.meno+": "+o.h+" h je viac ako fond mesiaca ("+fond+" h)",{osobaId:id});
+    if(o.h*60-o.min>120) k("pozor","ZAOKRUHLENIE",o.meno+": zaokrúhlenie pridalo "+Math.round((o.h*60-o.min)/6)/10+" h",{osobaId:id});
+    const st=(vstup.mesiace||[]).find(m=>m.osoba_id===id && m.mesiac===vstup.mesiac);
+    if(vstup.mesiace && !(st && st.stav==="hotovy")) k("pozor","NIE_HOTOVO",o.meno+": mesiac nie je označený ako hotový",{osobaId:id});
+  });
+  const bezAkt=zazn.filter(z=>!z.aktivita_id).length;
+  if(bezAkt) k("pozor","BEZ_AKTIVITY",bezAkt+" "+sklon(bezAkt,"záznam","záznamy","záznamov")+" bez aktivity");
+  const dnes=vstup.dnes||b2bIso(new Date());
+  if(dnes < b2bIso(new Date(rok,mes,1))) k("chyba","MESIAC_NESKONCIL","Mesiac ešte neskončil — PV sa predkladá po jeho uplynutí (bod 2.7)");
+  const ucinnost=D.obdobie&&D.obdobie.ucinnost_od;
+  if(ucinnost){
+    const zac=ucinnost.slice(0,7), m=String(ucinnost).match(/^(\d{4})-(\d{2})-(\d{2})/);
+    const koniec=m&&+D.obdobie.trvanie_mesiacov? b2bIso(new Date(+m[1],+m[2]-1+(+D.obdobie.trvanie_mesiacov),+m[3]-1)) : null;
+    if(vstup.mesiac<zac || (koniec && vstup.mesiac>koniec.slice(0,7))) k("pozor","MIMO_TRVANIA","Mesiac je mimo trvania zmluvy"+(koniec? " ("+fd(ucinnost)+" – "+fd(koniec)+")" : ""));
+  }
+  const cerp=vstup.cerpanieDoteraz||{};
+  pozicie.forEach(p=>{
+    const mesiac=osobaDen.filter(x=>x.pozicia===p.id).reduce((a,x)=>a+x.hodiny,0), roz=+p.rozpocet_hodin||0;
+    const osob=new Set(osobaDen.filter(x=>x.pozicia===p.id && x.hodiny>0).map(x=>x.osobaId)).size;
+    if(+p.pocet_osob && osob>+p.pocet_osob) k("pozor","VIAC_OSOB",(p.nazov_vo_vykaze||p.id)+": "+osob+" osôb, zmluva počíta s "+p.pocet_osob);
+    if(roz && vstup.cerpanieDoteraz){ const sp=(+cerp[p.id]||0)+mesiac, pct=sp/roz*100;
+      if(pct>100) k("pozor","CERPANIE",(p.nazov_vo_vykaze||p.id)+": vyčerpaných "+sp+" z "+roz+" h — rozpočet prekročený");
+      else if(pct>80) k("pozor","CERPANIE",(p.nazov_vo_vykaze||p.id)+": vyčerpaných "+Math.round(pct)+" % rozpočtu ("+sp+" z "+roz+" h)"); }
+  });
+  const sumaSuhrn=organizacie.reduce((a,o)=>a+o.spolu,0);
+  const sumaDetail=detail.filter(r=>r.pozicia && r.organizacia).reduce((a,r)=>a+(r.hodinyDen||0),0);
+  if(sumaSuhrn!==sumaDetail) k("chyba","DETAIL_SUHRN","Súčet Detailu ("+sumaDetail+" h) sa nerovná súhrnu ("+sumaSuhrn+" h)");
+  const pd=pracovneDni(rok,mes), z=D.zmluva||{};
+  return {rok, mes, mesiac:vstup.mesiac, nazovMesiaca:B2B_MESIACE[mes-1], pocetDni, dni, hodinDna, fond, fondVypocitany,
+    cislo:U.cislo||"", datumPV:U.datum||(pd.length? b2bIso(pd[pd.length-1]) : b2bIso(new Date(rok,mes,0))),
+    akceptujuci:U.akceptujuci!=null? U.akceptujuci : ((D.pv&&D.pv.akceptujuci)||""),
+    zmluvaNazov:[z.nazov,z.predmet].filter(Boolean).join(": "), objednavatel:(D.objednavatel&&D.objednavatel.nazov)||"",
+    organizacie, osobaDen, detail, kontroly, sviatky:b2bSviatkyRoka(rok),
+    spolu:sumaSuhrn, suma:Math.round(organizacie.reduce((a,o)=>a+o.suma,0)*100)/100};
+}
+// ── Zápis XLSX v tvare vzoru (hárky Nastavenia, Osoba N, Hárok2, Detail) ──
+const B2B_STYL=(()=>{
+  const F="Calibri", V="Verdana";
+  const c=rgb=>({rgb}), b=(st,rgb)=>({style:st,color:{rgb:rgb||"000000"}});
+  const ram=(st,rgb)=>({top:b(st,rgb),bottom:b(st,rgb),left:b(st,rgb),right:b(st,rgb)});
+  const fill=rgb=>({patternType:"solid",fgColor:{rgb}});
+  const font=(sz,o,n)=>Object.assign({name:n||F,sz},o||{});
+  const al=(h,v,w)=>Object.assign({},h?{horizontal:h}:{},v?{vertical:v}:{},w?{wrapText:true}:{});
+  const TM="1F3864", MO="2F5496", SV="D9E1F2", BU="EBF3FB", VK="B3A2C7", SI="F2F2F2", R="B0B0B0", RB="CCCCCC", BI="FFFFFF";
+  const EUR='#,##0.00\\ "€"';
+  return {VIKEND:VK,
+    nTitul:{font:font(14,{bold:true,color:c(BI)}),fill:fill(TM),alignment:al("center","center")},
+    nPod:{font:font(9,{color:c(BI)}),fill:fill(MO),alignment:al("center","center")},
+    nSekcia:{font:font(11,{bold:true,color:c(BI)}),fill:fill(MO),alignment:al("left","center")},
+    nStitok:{font:font(10,{bold:true,color:c("000000")}),fill:fill(SV),border:ram("thin",R),alignment:al("left","center")},
+    nHodnota:{font:font(10,{color:c("000000")}),fill:fill(BI),border:{left:b("thin",R),top:b("thin",R),bottom:b("thin",R)},alignment:al("left","center")},
+    titul:{font:font(18,{bold:true,color:c(BI)}),fill:fill(TM),alignment:al("left","center")},
+    zmluva:{font:font(14,{bold:true,color:c(BI)}),fill:fill(TM),alignment:al("center","center",true)},
+    sucetHl:{font:font(12,{bold:true,color:c(BI)}),fill:fill(MO),alignment:al("center","center")},
+    stitok:{font:font(10,{bold:true,color:c(TM)}),fill:fill(SV),border:ram("thin",R),alignment:al("left","center")},
+    hodnota:{font:font(10,{color:c("000000")}),fill:fill(BI),border:ram("thin",R),alignment:al("left","center",true)},
+    pas:{fill:fill(MO)},
+    denHl:{font:font(10,{bold:true,color:c(BI)}),fill:fill(MO),border:{left:b("medium"),right:b("medium"),top:b("medium"),bottom:b("thin")},alignment:al("center","center")},
+    den:{font:font(9,{bold:true,color:c(BI)}),fill:fill(MO),border:ram("thin",BI),alignment:al("center","center")},
+    denV:{font:font(9,{bold:true}),fill:fill(VK),border:ram("thin",BI),alignment:al("center","center")},
+    sumHl:{font:font(8,{bold:true,color:c(BI)}),fill:fill(TM),border:{left:b("thin",R),right:b("thin",R),top:b("thin",R),bottom:b("medium")},alignment:al("center","center",true)},
+    datumA:{font:font(11,{bold:true}),fill:fill(SV),border:{left:b("medium")},alignment:al(null,"center")},
+    pocetHl:{font:font(11,{bold:true}),fill:fill(SV),border:{right:b("medium")},alignment:al("center","center")},
+    datum:{font:font(8,{color:c("333333")}),fill:fill(BU),border:ram("thin",RB),numFmt:"ddd",alignment:al("center","center",true)},
+    datumV:{font:font(8,{color:c("333333")}),fill:fill(VK),border:ram("thin",RB),numFmt:"ddd",alignment:al("center","center",true)},
+    pozicia:{font:font(9,{bold:true,color:c(TM)}),fill:fill(SV),border:ram("thin",R),alignment:al("left","center",true)},
+    pocet:{font:font(11),border:{left:b("thin"),right:b("medium"),bottom:b("thin")},alignment:al("center")},
+    bunka:{font:font(10,{color:c("000000")}),fill:fill(BU),border:ram("thin",RB),alignment:al("center","center")},
+    bunkaV:{font:font(10,{color:c("000000")}),fill:fill(VK),border:ram("thin",RB),alignment:al("center","center")},
+    sumH:{font:font(9,{bold:true,color:c("000000")}),fill:fill(VK),border:ram("thin",R),numFmt:"#,##0.00",alignment:al("center","center")},
+    sumE:{font:font(9,{bold:true,color:c("000000")}),fill:fill(VK),border:ram("thin",R),numFmt:EUR,alignment:al("center","center")},
+    spoluA:{font:font(10,{bold:true,color:c("375623")}),fill:fill(VK),border:ram("medium",MO)},
+    spoluB:{font:font(11),border:{right:b("medium"),top:b("thin"),bottom:b("medium")}},
+    spoluD:{font:font(9,{bold:true,color:c("000000")}),fill:fill(VK),border:ram("medium",MO),numFmt:"0.0",alignment:al("center","center")},
+    spoluH:{font:font(9,{bold:true,color:c("000000")}),fill:fill(VK),border:ram("medium",MO),numFmt:"#,##0.00",alignment:al("center","center")},
+    spoluE:{font:font(9,{bold:true,color:c("000000")}),fill:fill(VK),border:ram("medium",MO),numFmt:EUR,alignment:al("center","center")},
+    siva:{fill:fill(SI)},
+    popisHl:{font:font(9,{bold:true,color:c("000000")},V),fill:fill("D9D9D9"),border:{top:b("thin")},alignment:al("left","center",true)},
+    popis:{font:font(10,{bold:true,color:c(TM)}),alignment:al("left","top",true)},
+    popisBunka:{font:font(10),alignment:al(null,"top")},
+    datumStitok:{font:font(10,{bold:true,color:c(TM)}),fill:fill(SV),border:{left:b("thin"),top:b("thin"),bottom:b("thin")},alignment:al(null,"center")},
+    datumHodnota:{font:font(8,{color:c("000000")},V),fill:fill(BI),border:{left:b("medium"),right:b("medium"),top:b("thin"),bottom:b("thin")},numFmt:"d.m.yyyy",alignment:al("center","center")},
+    podpisStitok:{font:font(9,{bold:true,color:c(TM)}),fill:fill(SV),border:{left:b("thin"),top:b("thin"),bottom:b("thin")},alignment:al(null,"center",true)},
+    podpis:{font:font(10,{bold:true,color:c("000000")}),fill:fill(BI),border:{left:b("medium"),right:b("medium"),bottom:b("thin")},alignment:al("center",null,true)},
+    detHl:{font:font(10,{bold:true,color:c(BI)}),fill:fill(MO),border:ram("thin",BI),alignment:al("center","center",true)},
+    det:{font:font(10),border:ram("thin",RB),alignment:al(null,"top",true)},
+    detD:{font:font(10),border:ram("thin",RB),numFmt:"d.m.yyyy",alignment:al("center","top")},
+    detN:{font:font(10),border:ram("thin",RB),alignment:al("center","top")},
+    detSum:{font:font(10,{bold:true}),fill:fill(SV),border:ram("thin",R)}};
+})();
+function b2bXlsx(model, X, volby){
+  volby=volby||{};
+  const S=B2B_STYL, A=(c,r)=>X.utils.encode_col(c)+r, wb=X.utils.book_new();
+  const cel=(v,s,f)=>{ const o={v:v==null?"":v, t:typeof v==="number"?"n":"s"}; if(s) o.s=s; if(f) o.f=f; if(s&&s.numFmt) o.z=s.numFmt; return o; };
+  const info={harky:[]};
+  // Nastavenia
+  const n={};
+  n.A1=cel("NASTAVENIA – MESAČNÝ PRACOVNÝ VÝKAZ",S.nTitul); ["B1","C1","D1"].forEach(a=>{ n[a]=cel("",S.nTitul); });
+  n.A2=cel("Spoločné údaje pre všetkých zamestnancov  ·  Zmeňte tu hodnoty – všetky listy sa aktualizujú automaticky",S.nPod); ["B2","C2","D2"].forEach(a=>{ n[a]=cel("",S.nPod); });
+  ["A3","B3","C3","D3"].forEach((a,i)=>{ n[a]=cel(i?"":"▶  ZÁKLADNÉ INFO",S.nSekcia); });
+  [["Rok",model.rok],["Mesiac",model.nazovMesiaca],["Fond pracovného času v mesiaci (hodín)",model.fond]].forEach(([l,v],i)=>{
+    n[A(0,4+i)]=cel(l,S.nStitok); n[A(1,4+i)]=cel(v,S.nHodnota); n[A(2,4+i)]=cel("",S.nHodnota); n[A(3,4+i)]=cel("",S.nHodnota); });
+  ["A7","B7","C7","D7"].forEach((a,i)=>{ n[a]=cel(i?"":"▶  PODPISY",S.nSekcia); });
+  n.A8=cel("Meno nadriadného (akceptujúci PV)",S.nStitok); n.B8=cel(model.akceptujuci,S.nHodnota); n.C8=cel("",S.nHodnota); n.D8=cel("",S.nHodnota);
+  n["!ref"]="A1:D8";
+  n["!merges"]=[{s:{r:0,c:0},e:{r:0,c:3}},{s:{r:1,c:0},e:{r:1,c:3}},{s:{r:2,c:0},e:{r:2,c:3}},{s:{r:3,c:1},e:{r:3,c:3}},{s:{r:4,c:1},e:{r:4,c:3}},{s:{r:5,c:1},e:{r:5,c:3}},{s:{r:6,c:0},e:{r:6,c:3}},{s:{r:7,c:1},e:{r:7,c:3}}];
+  n["!cols"]=[{width:42},{width:18},{width:18},{width:18}];
+  n["!rows"]=[{hpt:39.75},{hpt:18},{hpt:21.75},{hpt:19.5},{hpt:19.5},{hpt:19.5},{hpt:21.75},{hpt:19.5}];
+  n["!margins"]={left:0.75,right:0.75,top:1,bottom:1,header:0.511811023622047,footer:0.511811023622047};
+  X.utils.book_append_sheet(wb,n,"Nastavenia");
+  // Osoba N — hárok na organizáciu
+  const orgs=model.organizacie.filter(o=>!volby.organizacie || volby.organizacie.includes(o.id));
+  orgs.forEach((org,oi)=>{
+    const ws={}, P=org.pozicie.length, rSpolu=11+P, rPopisHl=rSpolu+4, rPopis=rSpolu+5, rDatum=rSpolu+12, rPodpis=rSpolu+13;
+    const vik=d=>{ const x=model.dni[d-1]; return !!(x && x.vikend); };
+    ws.A1=cel("MESAČNÝ PRACOVNÝ VÝKAZ",S.titul); ws.B1=cel("",S.titul);
+    ws.C1=cel(model.zmluvaNazov,S.zmluva); for(let c=3;c<=32;c++) ws[A(c,1)]=cel("",S.zmluva);
+    ws.AH1=cel("Súčet",S.sucetHl); ws.AI1=cel("",S.sucetHl); ws.AJ1=cel("",S.sucetHl);
+    [["Číslo pracovného výkazu: ",model.cislo],["Poskytovateľ:",org.nazov],["Objednávateľ:",model.objednavatel]].forEach(([l,v],i)=>{ ws[A(0,2+i)]=cel(l,S.stitok); ws[A(1,2+i)]=cel(v,S.hodnota); });
+    ws.A5=cel("Mesiac:",S.stitok); ws.B5=cel(model.nazovMesiaca,S.hodnota,"Nastavenia!$B$5");
+    ws.A6=cel("Rok:",S.stitok);    ws.B6=cel(model.rok,S.hodnota,"Nastavenia!$B$4");
+    ws.A7=cel("Fond pracovného času v mesiaci:",S.stitok); ws.B7=cel(model.fond,S.hodnota,"Nastavenia!$B$6");
+    for(let c=0;c<=35;c++) ws[A(c,8)]=cel("",S.pas);
+    ws.A9=cel("Deň:",S.denHl); ws.B9=cel("",S.denHl);
+    ws.B10=cel("Počet expertov",S.pocetHl); ws.A10=cel("",S.datumA);
+    for(let d=1;d<=31;d++){
+      const c=1+d, ex=d<=model.pocetDni, sD=vik(d)?S.denV:S.den, sDt=vik(d)?S.datumV:S.datum;
+      ws[A(c,9)]= d<=28? cel(d,sD) : cel(ex? d : "",sD,'IF(DAY(EOMONTH(DATE(B6,mesiac,1),0))>'+(d-1)+','+d+',"")');
+      ws[A(c,10)]=cel(ex? b2bSerial(model.dni[d-1].datum) : "",sDt,'IF(LEN('+A(c,9)+')=0,"",(DATE($B$6,mesiac,'+A(c,9)+')))');
+    }
+    ws.AH9=cel("∑ nárokovaných ČH",S.sumHl); ws.AI9=cel("∑ nárokovaných ČD",S.sumHl); ws.AJ9=cel("∑ za nárokované ČH (bez DPH)",S.sumHl);
+    ws.AH10=cel("",S.sumHl); ws.AI10=cel("",S.sumHl); ws.AJ10=cel("",S.sumHl);
+    org.pozicie.forEach((p,i)=>{
+      const r=11+i;
+      ws[A(0,r)]=cel(p.nazov,S.pozicia); ws[A(1,r)]=cel(p.pocetExpertov,S.pocet);
+      for(let d=1;d<=31;d++){ const h=p.hodinyDni[d-1]||0; ws[A(1+d,r)]=cel(h>0? h : "",vik(d)?S.bunkaV:S.bunka); }
+      ws[A(33,r)]=cel(p.spolu,S.sumH,"SUM(C"+r+":AG"+r+")");
+      ws[A(34,r)]=cel(p.cd,S.sumH,"AH"+r+"/"+model.hodinDna);
+      ws[A(35,r)]=cel(p.suma,S.sumE,p.sadzba+"*AH"+r);
+    });
+    ws[A(0,rSpolu)]=cel("Spolu za jedného zamestnávateľa",S.spoluA); ws[A(1,rSpolu)]=cel("",S.spoluB);
+    for(let d=1;d<=31;d++){ const c=1+d; ws[A(c,rSpolu)]=cel(org.spoluDni[d-1]||0,S.spoluD,"SUM("+A(c,11)+":"+A(c,10+P)+")"); }
+    ws[A(33,rSpolu)]=cel(org.spolu,S.spoluH,"SUM(AH11:AH"+(10+P)+")");
+    ws[A(34,rSpolu)]=cel(org.cd,S.spoluH,"SUM(AI11:AI"+(10+P)+")");
+    ws[A(35,rSpolu)]=cel(org.suma,S.spoluE,"SUM(AJ11:AJ"+(10+P)+")");
+    for(let r=rSpolu+1;r<=rSpolu+3;r++) for(let c=0;c<=35;c++) ws[A(c,r)]=cel("",S.siva);
+    ws[A(10,rPopisHl)]=cel("Popis pracovnej činnosti:",S.popisHl); for(let c=11;c<=35;c++) ws[A(c,rPopisHl)]=cel("",S.popisHl);
+    for(let r=rPopis;r<=rPodpis;r++) for(let c=10;c<=35;c++){
+      const kr=c===10, pr=c===35, sp=r===rPodpis, st=Object.assign({},(r===rPopis&&kr)? S.popis : S.popisBunka);
+      st.border=Object.assign({}, kr?{left:{style:"thin",color:{rgb:"000000"}}}:{}, pr?{right:{style:"thin",color:{rgb:"000000"}}}:{}, sp?{bottom:{style:"thin",color:{rgb:"000000"}}}:{});
+      ws[A(c,r)]=cel(r===rPopis&&kr? org.popis : "",st);
+    }
+    ws[A(0,rDatum)]=cel("Dátum:",S.datumStitok);
+    const ds=b2bSerial(model.datumPV); ws[A(1,rDatum)]=cel(ds==null? "" : ds,S.datumHodnota); for(let c=2;c<=4;c++) ws[A(c,rDatum)]=cel("",S.datumHodnota);
+    ws[A(0,rPodpis)]=cel("Meno, priezvisko, podpis osoby potvrdzujúcej pracovný výkaz (priamy nadriadený):",S.podpisStitok);
+    ws[A(1,rPodpis)]=cel(model.akceptujuci,S.podpis,"Nastavenia!$B$8"); for(let c=2;c<=4;c++) ws[A(c,rPodpis)]=cel("",S.podpis);
+    const m=(r1,c1,r2,c2)=>({s:{r:r1-1,c:c1},e:{r:r2-1,c:c2}});
+    ws["!merges"]=[m(1,2,1,32),m(1,33,1,35),m(9,0,9,1),m(9,33,10,33),m(9,34,10,34),m(9,35,10,35),
+      m(rPopisHl,10,rPopisHl,35),m(rPopis,10,rPodpis,35),m(rDatum,1,rDatum,4),m(rPodpis,1,rPodpis,4)];
+    const sir=[25.33203125,26.44140625]; for(let c=2;c<=32;c++) sir.push(c===11? 6 : 5.6640625); sir.push(15.5546875,15.88671875,16);
+    ws["!cols"]=sir.map(w=>({width:w}));
+    const vys=[]; vys[0]={hpt:51.75}; vys[1]=vys[2]={hpt:16.5}; vys[3]={hpt:27.6}; vys[4]=vys[5]=vys[6]={hpt:16.5};
+    vys[8]={hpt:19.5}; vys[9]={hpt:43.5}; for(let i=0;i<P;i++) vys[10+i]={hpt:27.75}; vys[rSpolu-1]={hpt:21.75};
+    for(let r=rPopisHl;r<=rPodpis;r++) vys[r-1]={hpt:18}; vys[rDatum-1]={hpt:12}; vys[rPodpis-1]={hpt:84.75};
+    ws["!rows"]=vys;
+    ws["!margins"]={left:0.7,right:0.7,top:0.75,bottom:0.75,header:0.3,footer:0.3};
+    ws["!ref"]="A1:AJ"+rPodpis;
+    const meno="Osoba "+(oi+1);
+    X.utils.book_append_sheet(wb,ws,meno);
+    info.harky.push({idx:wb.SheetNames.length-1, meno, P, rSpolu, rPodpis});
+  });
+  // Hárok2 (skrytý) — číselníky a sviatky; sviatky sú HODNOTY z appky.
+  const h={};
+  h.A20=cel("Roky"); for(let i=0;i<10;i++) h[A(0,21+i)]=cel(model.rok-5+i);
+  h.A32=cel("Mesiace"); B2B_MESIACE.forEach((x,i)=>{ h[A(0,33+i)]=cel(x); });
+  h.A46=cel("Typy"); h.A47=cel("hlavná"); h.A48=cel("podporná");
+  h.A50=cel("Sviatky"); h.A51=cel("rok pre výpočet sviatku"); h.B51=cel(model.rok,null,"Nastavenia!$B$4");
+  model.sviatky.slice(0,15).forEach((s,i)=>{ const sr=b2bSerial(s.datum); h[A(0,52+i)]=cel(sr,{numFmt:"d.m.yyyy"}); h[A(1,52+i)]=cel(s.nazov); h[A(2,52+i)]=cel(sr,{numFmt:"d.m.yyyy"}); });
+  h.A68=cel("číslo mesiaca"); h.B68=cel(model.mes,null,"MATCH(Nastavenia!$B$5,mesiace,0)");
+  h["!ref"]="A20:C68"; h["!cols"]=[{width:23.5546875},{width:33.44140625},{width:12.33203125}];
+  X.utils.book_append_sheet(wb,h,"Hárok2");
+  const idxH2=wb.SheetNames.length-1;
+  // Detail — interný a môj výkaz
+  if(volby.variant==="interny" || volby.variant==="moj"){
+    const d={}, hl=["Dátum","Deň","Osoba","Organizácia","Pozícia","Miesto v zmluve","Zákazka","Od","Do","Minúty","Hodiny (deň)","Oblasť zo zmluvy","Aktivita","Popis","Výstupy (ID)","Zdroj","Korekcia"];
+    hl.forEach((t,c)=>{ d[A(c,1)]=cel(t,S.detHl); });
+    const vyb=new Set(orgs.map(o=>o.nazov));
+    const rows=model.detail.filter(r=>!r.organizacia || vyb.has(r.organizacia));
+    rows.forEach((r,i)=>{ const R=2+i;
+      [b2bSerial(r.datum),r.den,r.osoba,r.organizacia,r.pozicia,r.miesto,r.zakazka,r.od,r.do,r.minuty,r.hodinyDen==null?"":r.hodinyDen,r.oblast,r.aktivita,r.popis,r.vystupy,r.zdroj,r.korekcia]
+        .forEach((v,c)=>{ d[A(c,R)]=cel(v,c===0? S.detD : (c===1||c===7||c===8||c===9||c===10||c===16)? S.detN : S.det); }); });
+    const posl=1+rows.length; let R=posl+2;
+    d[A(0,R)]=cel("Súčty po osobách",S.detSum); R++;
+    const po={}; model.osobaDen.forEach(x=>{ if(x.organizacia && !orgs.some(o=>o.id===x.organizacia)) return; const k=x.osobaId; (po[k]||(po[k]={meno:x.meno,h:0})).h+=x.hodiny; });
+    Object.values(po).sort((a,b)=>String(a.meno).localeCompare(String(b.meno),"sk")).forEach(o=>{ d[A(0,R)]=cel(o.meno,S.det); d[A(1,R)]=cel(o.h,S.detN); R++; });
+    R++;
+    d[A(0,R)]=cel("Súčet hodín Detailu",S.detSum); d[A(1,R)]=cel(rows.reduce((a,r)=>a+(r.hodinyDen||0),0),S.detSum,"SUM(K2:K"+Math.max(2,posl)+")"); const rD=R; R++;
+    const sumF=info.harky.map(x=>"'"+x.meno+"'!AH"+x.rSpolu).join("+")||"0";
+    d[A(0,R)]=cel("Súčet hodín súhrnu (Osoba N)",S.detSum); d[A(1,R)]=cel(orgs.reduce((a,o)=>a+o.spolu,0),S.detSum,sumF); const rS=R; R++;
+    const zhoda=rows.reduce((a,r)=>a+(r.hodinyDen||0),0)===orgs.reduce((a,o)=>a+o.spolu,0);
+    d[A(0,R)]=cel("Súčet Detailu = súhrn",S.detSum); d[A(1,R)]=cel(zhoda?"áno":"NIE",S.detSum,'IF(B'+rD+'=B'+rS+',"áno","NIE")');
+    d["!ref"]="A1:Q"+R;
+    d["!cols"]=[12,5,22,22,14,20,12,7,7,8,9,40,30,40,14,10,9].map(w=>({width:w}));
+    d["!autofilter"]={ref:"A1:Q"+Math.max(1,posl)};
+    X.utils.book_append_sheet(wb,d,"Detail");
+    info.detail=wb.SheetNames.length-1;
+  }
+  wb.Workbook={Sheets:wb.SheetNames.map((s,i)=>({Hidden:i===idxH2?1:0})), Names:[
+    {Name:"Aktivita",Ref:"Hárok2!$A$47:$A$48"},{Name:"mesiac",Ref:"Hárok2!$B$68"},{Name:"mesiace",Ref:"Hárok2!$A$33:$A$44"},
+    {Name:"roky",Ref:"Hárok2!$A$21:$A$30"},{Name:"sviatky_datum",Ref:"Hárok2!$A$52:$B$66"},{Name:"sviatky_nazov",Ref:"Hárok2!$B$52:$C$66"},
+    ...info.harky.map(x=>({Name:"_xlnm.Print_Area",Sheet:x.idx,Ref:"'"+x.meno+"'!$A$1:$AJ$"+x.rPodpis}))]};
+  return {wb, info};
+}
+// Čo SheetJS nezapíše: podmienené formátovanie (víkend, sviatok), overenie
+// údajov v Nastaveniach, tlač na šírku na stranu, ukotvenie, farba karty.
+function b2bXlsxDoplnXml(fflate, buf, info){
+  const files=fflate.unzipSync(new Uint8Array(buf)), dec=new TextDecoder(), enc=new TextEncoder();
+  const uprav=(idx,fn)=>{ const p="xl/worksheets/sheet"+(idx+1)+".xml"; if(files[p]) files[p]=enc.encode(fn(dec.decode(files[p]))); };
+  const zaMerge=(sx,xml)=> sx.includes("</mergeCells>")? sx.replace("</mergeCells>","</mergeCells>"+xml) : sx.replace("<pageMargins",xml+"<pageMargins");
+  const pane=(sx,x,y,tl)=>sx.replace(/<sheetView workbookViewId="0"\/>/,'<sheetView workbookViewId="0"><pane '+(x?'xSplit="'+x+'" ':'')+'ySplit="'+y+'" topLeftCell="'+tl+'" activePane="'+(x?'bottomRight':'bottomLeft')+'" state="frozen"/><selection pane="'+(x?'bottomRight':'bottomLeft')+'"/></sheetView>');
+  const sheetPr=(sx,obsah)=> sx.includes("<sheetPr")? sx.replace(/<sheetPr([^>]*)\/>/,"<sheetPr$1>"+obsah+"</sheetPr>") : sx.replace(/(<worksheet[^>]*>)/,"$1<sheetPr>"+obsah+"</sheetPr>");
+  info.harky.forEach(x=>uprav(x.idx, sx=>{
+    sx=sheetPr(sx,'<tabColor rgb="FF1F3864"/><pageSetUpPr fitToPage="1"/>');
+    sx=pane(sx,2,9,"C10");
+    sx=zaMerge(sx,'<conditionalFormatting sqref="C9:AG'+(10+x.P)+'"><cfRule type="expression" dxfId="0" priority="1"><formula>WEEKDAY(C$10,2)&gt;5</formula></cfRule>'+
+      '<cfRule type="expression" dxfId="1" priority="2"><formula>VLOOKUP(C$10,sviatky_datum,1,0)</formula></cfRule></conditionalFormatting>');
+    return sx.replace(/(<pageMargins[^>]*\/>)/,'$1<pageSetup paperSize="9" scale="47" fitToHeight="0" orientation="landscape"/>');
+  }));
+  uprav(0, sx=>zaMerge(sx,'<dataValidations count="2"><dataValidation type="list" allowBlank="1" showInputMessage="1" showErrorMessage="1" sqref="B4"><formula1>roky</formula1></dataValidation>'+
+    '<dataValidation type="list" allowBlank="1" showInputMessage="1" showErrorMessage="1" sqref="B5"><formula1>mesiace</formula1></dataValidation></dataValidations>'));
+  if(info.detail!=null) uprav(info.detail, sx=>pane(sx,0,1,"A2"));
+  const st="xl/styles.xml";
+  if(files[st]) files[st]=enc.encode(dec.decode(files[st]).replace(/<dxfs count="0"\/>/,
+    '<dxfs count="2"><dxf><fill><patternFill><bgColor rgb="FFFFFF66"/></patternFill></fill></dxf><dxf><fill><patternFill><bgColor rgb="FFFFC000"/></patternFill></fill></dxf></dxfs>'));
+  return fflate.zipSync(files);
+}
+// Súbor PV: variant "odoslanie" (bez Detailu), "interny", "moj".
+function b2bVykazSubor(model, X, fflate, volby){
+  const {wb, info}=b2bXlsx(model, X, volby);
+  const buf=X.write(wb,{type:"array",bookType:"xlsx",bookSST:true});
+  return b2bXlsxDoplnXml(fflate, buf, info);
+}
+function b2bSuborNazov(model, kod, variant, meno){
+  const cast=s=>String(s||"").normalize("NFD").replace(/\p{M}/gu,"").replace(/[^A-Za-z0-9.-]+/g,"_").replace(/^[_.]+|[_.]+$/g,"");
+  return [cast(model.cislo)||"PV", model.mesiac, cast(kod), variant==="interny"? "interny" : variant==="moj"? cast(meno)||"moj" : ""].filter(Boolean).join("_")+".xlsx";
+}
+// ═══════════════════════════════════════════════════════════════
 //  ÚČTOVNÁ DÁVKA (spec kap. 140.4, č. 237) — JEDNA PRAVDA PRE KAŽDÝ EXPORT
 //
 //  Čistý objekt bez formátu: partneri ako entity, faktúry, výdavky, úhrady,
