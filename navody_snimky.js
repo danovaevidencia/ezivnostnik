@@ -28,7 +28,7 @@ window.NAVODY_SNIMKY = {
  },
  "b2b_vykaz-fakturovat-2": {
   "m": {
-   "subor": "navody/b2b_vykaz-fakturovat-2.m.8eddae33.webp",
+   "subor": "navody/b2b_vykaz-fakturovat-2.m.c837320a.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -76,7 +76,7 @@ window.NAVODY_SNIMKY = {
  },
  "b2b_vykaz-hodiny-2": {
   "m": {
-   "subor": "navody/b2b_vykaz-hodiny-2.m.e3f03081.webp",
+   "subor": "navody/b2b_vykaz-hodiny-2.m.919d10cd.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -87,7 +87,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/b2b_vykaz-hodiny-2.d.43d78937.webp",
+   "subor": "navody/b2b_vykaz-hodiny-2.d.0304d5ae.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -148,31 +148,31 @@ window.NAVODY_SNIMKY = {
  },
  "b2b_vykaz-kalendar-2": {
   "m": {
-   "subor": "navody/b2b_vykaz-kalendar-2.m.7a05ceea.webp",
+   "subor": "navody/b2b_vykaz-kalendar-2.m.9953b6b3.webp",
    "w": 390,
    "h": 600,
    "ciel": {
     "x": 42,
-    "y": 159,
+    "y": 97,
     "w": 306,
-    "h": 290
+    "h": 405
    }
   },
   "d": {
-   "subor": "navody/b2b_vykaz-kalendar-2.d.ddc8157c.webp",
+   "subor": "navody/b2b_vykaz-kalendar-2.d.20b20b7c.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
     "x": 104,
-    "y": 229,
+    "y": 217,
     "w": 816,
-    "h": 160
+    "h": 250
    }
   }
  },
  "b2b_vykaz-kalendar-3": {
   "m": {
-   "subor": "navody/b2b_vykaz-kalendar-3.m.7a05ceea.webp",
+   "subor": "navody/b2b_vykaz-kalendar-3.m.ae257fe7.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -183,12 +183,12 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/b2b_vykaz-kalendar-3.d.ddc8157c.webp",
+   "subor": "navody/b2b_vykaz-kalendar-3.d.20b20b7c.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
     "x": 517,
-    "y": 426,
+    "y": 504,
     "w": 403,
     "h": 40
    }
@@ -292,7 +292,7 @@ window.NAVODY_SNIMKY = {
  },
  "b2b_vykaz-vykaz-1": {
   "m": {
-   "subor": "navody/b2b_vykaz-vykaz-1.m.e51a8be2.webp",
+   "subor": "navody/b2b_vykaz-vykaz-1.m.cf7f51ec.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -303,7 +303,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/b2b_vykaz-vykaz-1.d.3f3e8ec4.webp",
+   "subor": "navody/b2b_vykaz-vykaz-1.d.adc7604b.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -316,7 +316,7 @@ window.NAVODY_SNIMKY = {
  },
  "b2b_vykaz-vykaz-2": {
   "m": {
-   "subor": "navody/b2b_vykaz-vykaz-2.m.a52daf9c.webp",
+   "subor": "navody/b2b_vykaz-vykaz-2.m.c43da96a.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -327,7 +327,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/b2b_vykaz-vykaz-2.d.59271aef.webp",
+   "subor": "navody/b2b_vykaz-vykaz-2.d.547b0ad6.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -340,22 +340,22 @@ window.NAVODY_SNIMKY = {
  },
  "b2b_vykaz-vykaz-3": {
   "m": {
-   "subor": "navody/b2b_vykaz-vykaz-3.m.a52daf9c.webp",
+   "subor": "navody/b2b_vykaz-vykaz-3.m.31f0c7de.webp",
    "w": 390,
    "h": 600,
    "ciel": {
-    "x": 145,
+    "x": 140,
     "y": 281,
     "w": 161,
     "h": 37
    }
   },
   "d": {
-   "subor": "navody/b2b_vykaz-vykaz-3.d.59271aef.webp",
+   "subor": "navody/b2b_vykaz-vykaz-3.d.547b0ad6.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
-    "x": 381,
+    "x": 652,
     "y": 281,
     "w": 161,
     "h": 37
@@ -364,7 +364,7 @@ window.NAVODY_SNIMKY = {
  },
  "b2b_vykaz-vykaz-4": {
   "m": {
-   "subor": "navody/b2b_vykaz-vykaz-4.m.28e358e6.webp",
+   "subor": "navody/b2b_vykaz-vykaz-4.m.3eb79d41.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -375,7 +375,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/b2b_vykaz-vykaz-4.d.0a3455f9.webp",
+   "subor": "navody/b2b_vykaz-vykaz-4.d.17210b09.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -412,7 +412,7 @@ window.NAVODY_SNIMKY = {
  },
  "b2b_vykaz-vystupy-2": {
   "m": {
-   "subor": "navody/b2b_vykaz-vystupy-2.m.db8d415a.webp",
+   "subor": "navody/b2b_vykaz-vystupy-2.m.b94a4da7.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -460,7 +460,7 @@ window.NAVODY_SNIMKY = {
  },
  "b2b_vykaz-vystupy-4": {
   "m": {
-   "subor": "navody/b2b_vykaz-vystupy-4.m.78b1d296.webp",
+   "subor": "navody/b2b_vykaz-vystupy-4.m.190952d3.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -471,12 +471,12 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/b2b_vykaz-vystupy-4.d.3104b822.webp",
+   "subor": "navody/b2b_vykaz-vystupy-4.d.fcded5ac.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
     "x": 294,
-    "y": 310,
+    "y": 295,
     "w": 436,
     "h": 16
    }
