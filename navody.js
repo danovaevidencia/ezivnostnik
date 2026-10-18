@@ -1325,7 +1325,7 @@ b2b_vykaz: {
       tip: "Aktivity, ktoré používate najčastejšie, sa ukážu ako <b>Časté:</b> — ťuknutím otvoríte nový záznam s vybranou aktivitou.",
       podrobnosti: [
         { nadpis: "Aktivita nie je v zozname",
-          html: "<p>Pridajte ju cez <b>＋ Aktivita</b>: konkrétna úloha projektu (napríklad „Riadiaci výbor — podklady“) patrí pod oblasť alebo činnosť zo zmluvy. Z aktivít mesiaca appka skladá popis pracovnej činnosti vo výkaze.</p>" },
+          html: "<p>Pridajte ju cez <b>＋ Aktivita</b>: konkrétna úloha projektu (napríklad „Riadiaci výbor — podklady“) patrí pod oblasť zo zmluvy alebo pod činnosť vašej pozície; činnosti iných pozícií ukáže voľba pod výberom. Z aktivít mesiaca appka skladá popis pracovnej činnosti vo výkaze.</p>" },
         { nadpis: "Kto vidí moje záznamy",
           html: "<p>Všetci členovia projektu. Súkromné ostáva len to, čo do projektu nevošlo — napríklad udalosti kalendára, ktoré ste pri importe neoznačili.</p>" },
         { nadpis: "Len moje hodiny v súbore",
@@ -1372,7 +1372,7 @@ b2b_vykaz: {
       tip: "Výkaz na odoslanie sa nestiahne, kým má chyby (✗) — napríklad hodiny osoby, ktorá nemá miesto v prílohe so zoznamom expertov.",
       podrobnosti: [
         { nadpis: "Čo je v súbore",
-          html: "<p>Rovnaké hárky a vzorce ako vzor objednávateľa: Nastavenia a hárok „Osoba N“ za každú organizáciu tímu. Výkaz na odoslanie je bez hárku Detail; <b>⬇ Interný (s Detailom)</b> má navyše Detail (kto, kedy, čo, výstupy) a hárok Výstupy.</p>" },
+          html: "<p>Rovnaké hárky a vzorce ako vzor objednávateľa: Nastavenia a <b>jeden hárok za celý tím</b> — poskytovateľ je hlavný dodávateľ a riadok pozície sčíta hodiny jej expertov zo všetkých organizácií. Výkaz na odoslanie je bez hárku Detail; <b>⬇ Interný (s Detailom)</b> má navyše Detail (kto, kedy, čo, výstupy) a hárok Výstupy, a so zaškrtnutým <b>Interný výkaz po organizáciách</b> hárok za každú organizáciu.</p>" },
         { nadpis: "Lehota a schválenie",
           html: "<p>Po odoslaní appka ukáže lehotu 5 dní na vyjadrenie s posunom cez víkend a sviatok. Potom zapíšete <b>Schválený…</b> alebo <b>Pripomienky…</b>; keď lehota uplynie bez odpovede, ponúkne <b>Schválený mlčky (bod 2.8)</b>.</p>" },
         { nadpis: "Oprava hodín kolegu",
@@ -1395,7 +1395,7 @@ b2b_vykaz: {
         { text: "Pri výstupe ťuknite na <b>⬆ Nahrať súbor</b>.", tlacidlo: "Nahrať súbor", snimka: "b2b_vykaz-vystupy-3" },
         { text: "V úprave záznamu, ku ktorému výstup patrí, otvorte <b>Výstupy záznamu</b> a výstup označte.", tlacidlo: "Výstupy záznamu", snimka: "b2b_vykaz-vystupy-4" },
       ],
-      tip: "Rýchlejšie priamo zo záznamu: v úprave záznamu ťuknite na 📎 Priložiť súbor ako nový výstup — výstup sa založí so súborom a k záznamu sa označí sám. ID výstupu sa nikdy nepoužije znova.",
+      tip: "Rýchlejšie priamo v Mojom mesiaci: 📎 pri zázname alebo 📎 Výstup pri dni priradí nový alebo existujúci výstup k záznamom — ten istý výstup môže patriť aj k záznamom viacerých dní. ID výstupu sa nikdy nepoužije znova.",
       podrobnosti: [
         { nadpis: "Balík pre objednávateľa",
           html: "<p>V záložke Spoločný výkaz ťuknite na <b>⬇ Balík so výstupmi (ZIP)</b>: výkaz a súbory výstupov mesiaca premenované na <i>ID_názov</i> (napríklad RZ7-V-001_Zapis.docx). Výstup bez súboru alebo zmazaný v balíku nebude — okno to ukáže vopred.</p>" },
@@ -1447,6 +1447,8 @@ b2b_vykaz: {
           html: "<p>Správca mení projekt a osoby a pozýva. Ďalšieho správcu určíte pri osobe s účtom — <b>urobiť správcom</b>. Projekt má vždy aspoň jedného.</p>" },
         { nadpis: "Údaje projektu zo súboru",
           html: "<p>Pozície, miesta a činnosti sa dajú nahrať aj z JSON vo formáte eživnostníka — v záložke Projekt <b>⬆ Nahradiť z JSON</b>.</p>" },
+        { nadpis: "Zmluva, zákazka a nastavenia",
+          html: "<p>V záložke Projekt je časť <b>Zmluva a nastavenia projektu</b>: zmluva, objednávateľ, obdobie, cena, pravidlá výkazu, organizácie, pozície s činnosťami, zoznam expertov, oblasti a typy výstupov — pri každej časti strana a bod zmluvy. Správca ich upraví tlačidlom <b>Upraviť</b>; tam je aj <b>Číslo zákazky</b>, ktoré sa ponúkne vo Výkazoch a pri faktúre.</p>" },
       ],
     },
   ],
