@@ -4,7 +4,7 @@
 window.NAVODY_SNIMKY = {
  "b2b_vykaz-fakturovat-1": {
   "m": {
-   "subor": "navody/b2b_vykaz-fakturovat-1.m.e1685193.webp",
+   "subor": "navody/b2b_vykaz-fakturovat-1.m.7ca6fb77.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -15,7 +15,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/b2b_vykaz-fakturovat-1.d.0567dee2.webp",
+   "subor": "navody/b2b_vykaz-fakturovat-1.d.ae1bc3eb.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -52,7 +52,7 @@ window.NAVODY_SNIMKY = {
  },
  "b2b_vykaz-hodiny-1": {
   "m": {
-   "subor": "navody/b2b_vykaz-hodiny-1.m.3f95774a.webp",
+   "subor": "navody/b2b_vykaz-hodiny-1.m.5ae43bef.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -63,7 +63,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/b2b_vykaz-hodiny-1.d.0567dee2.webp",
+   "subor": "navody/b2b_vykaz-hodiny-1.d.ae1bc3eb.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -87,7 +87,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/b2b_vykaz-hodiny-2.d.0e83a8b6.webp",
+   "subor": "navody/b2b_vykaz-hodiny-2.d.af76560e.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -100,7 +100,7 @@ window.NAVODY_SNIMKY = {
  },
  "b2b_vykaz-hodiny-3": {
   "m": {
-   "subor": "navody/b2b_vykaz-hodiny-3.m.181af773.webp",
+   "subor": "navody/b2b_vykaz-hodiny-3.m.c9b72ca8.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -111,7 +111,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/b2b_vykaz-hodiny-3.d.0567dee2.webp",
+   "subor": "navody/b2b_vykaz-hodiny-3.d.ae1bc3eb.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -124,7 +124,7 @@ window.NAVODY_SNIMKY = {
  },
  "b2b_vykaz-kalendar-1": {
   "m": {
-   "subor": "navody/b2b_vykaz-kalendar-1.m.3f95774a.webp",
+   "subor": "navody/b2b_vykaz-kalendar-1.m.5ae43bef.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -135,7 +135,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/b2b_vykaz-kalendar-1.d.0567dee2.webp",
+   "subor": "navody/b2b_vykaz-kalendar-1.d.ae1bc3eb.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -191,6 +191,102 @@ window.NAVODY_SNIMKY = {
     "y": 490,
     "w": 403,
     "h": 40
+   }
+  }
+ },
+ "b2b_vykaz-objednavka-1": {
+  "m": {
+   "subor": "navody/b2b_vykaz-objednavka-1.m.75ad7403.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 31,
+    "y": 281,
+    "w": 154,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/b2b_vykaz-objednavka-1.d.2622efd0.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 267,
+    "y": 257,
+    "w": 154,
+    "h": 37
+   }
+  }
+ },
+ "b2b_vykaz-objednavka-2": {
+  "m": {
+   "subor": "navody/b2b_vykaz-objednavka-2.m.52014cd2.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 55,
+    "y": 280,
+    "w": 280,
+    "h": 39
+   }
+  },
+  "d": {
+   "subor": "navody/b2b_vykaz-objednavka-2.d.df540008.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 117,
+    "y": 280,
+    "w": 790,
+    "h": 39
+   }
+  }
+ },
+ "b2b_vykaz-objednavka-3": {
+  "m": {
+   "subor": "navody/b2b_vykaz-objednavka-3.m.c93d3cb6.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 42,
+    "y": 329,
+    "w": 208,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/b2b_vykaz-objednavka-3.d.a8d4c752.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 104,
+    "y": 408,
+    "w": 208,
+    "h": 37
+   }
+  }
+ },
+ "b2b_vykaz-objednavka-4": {
+  "m": {
+   "subor": "navody/b2b_vykaz-objednavka-4.m.7183551a.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 31,
+    "y": 413,
+    "w": 147,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/b2b_vykaz-objednavka-4.d.464a90d0.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 484,
+    "y": 281,
+    "w": 147,
+    "h": 37
    }
   }
  },
@@ -255,7 +351,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/b2b_vykaz-projekt-3.d.e0764e9d.webp",
+   "subor": "navody/b2b_vykaz-projekt-3.d.2147d1f5.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -268,7 +364,7 @@ window.NAVODY_SNIMKY = {
  },
  "b2b_vykaz-projekt-5": {
   "m": {
-   "subor": "navody/b2b_vykaz-projekt-5.m.2f88719c.webp",
+   "subor": "navody/b2b_vykaz-projekt-5.m.5250451f.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -279,7 +375,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/b2b_vykaz-projekt-5.d.b3ef4bdc.webp",
+   "subor": "navody/b2b_vykaz-projekt-5.d.9398914c.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -364,7 +460,7 @@ window.NAVODY_SNIMKY = {
  },
  "b2b_vykaz-vykaz-4": {
   "m": {
-   "subor": "navody/b2b_vykaz-vykaz-4.m.cc8f8dbc.webp",
+   "subor": "navody/b2b_vykaz-vykaz-4.m.d6530275.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -375,7 +471,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/b2b_vykaz-vykaz-4.d.d7d5b8be.webp",
+   "subor": "navody/b2b_vykaz-vykaz-4.d.9ef9fb89.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -388,7 +484,7 @@ window.NAVODY_SNIMKY = {
  },
  "b2b_vykaz-vystupy-1": {
   "m": {
-   "subor": "navody/b2b_vykaz-vystupy-1.m.3f770687.webp",
+   "subor": "navody/b2b_vykaz-vystupy-1.m.8cbec0fa.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -399,7 +495,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/b2b_vykaz-vystupy-1.d.c9ce382b.webp",
+   "subor": "navody/b2b_vykaz-vystupy-1.d.fb1d62c0.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -423,7 +519,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/b2b_vykaz-vystupy-2.d.70541c94.webp",
+   "subor": "navody/b2b_vykaz-vystupy-2.d.cc246110.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -436,7 +532,7 @@ window.NAVODY_SNIMKY = {
  },
  "b2b_vykaz-vystupy-3": {
   "m": {
-   "subor": "navody/b2b_vykaz-vystupy-3.m.0f227a2e.webp",
+   "subor": "navody/b2b_vykaz-vystupy-3.m.a999147f.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -447,7 +543,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/b2b_vykaz-vystupy-3.d.168092d2.webp",
+   "subor": "navody/b2b_vykaz-vystupy-3.d.54029dbc.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
