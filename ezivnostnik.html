@@ -26524,17 +26524,39 @@ function b2bModelZoSnimky(s, mesiac, uprava, lenOsoba, poOrganizaciach){
   return b2bVykazModel({projekt:s.projekt, osoby:s.osoby, aktivity:s.aktivity, zaznamy:s.zaznamy, mesiac, uprava:uprava||{},
     mesiace:s.mesiace, cerpanieDoteraz:s.cerpanieDoteraz, lenOsoba, vystupy:s.vystupy, hodinyDna:s.hodinyDna||{}, poOrganizaciach:!!poOrganizaciach});
 }
-// Čo sa zmenilo od snímky verzie: pridané, zmenené, zmazané záznamy a zmenené hodiny dňa.
+// Čo sa zmenilo od snímky verzie — všetko, z čoho sa skladá súbor PV a balík: záznamy
+// (aj výstupy pri nich), hodiny dňa, výstupy mesiaca (názov, súbor…), osoby a aktivity
+// zo záznamov a údaje zmluvy. Čo chýba tu, to export vezme zo starej snímky, kým náhľad
+// kreslí živý stav (nález kola TQ, spec 157.24: priradený výstup v náhľade balíka, v ZIP nie).
+// Čo súbor nemení (iný výstup projektu, nová aktivita bez záznamov, objednávky), novú verziu nevyrobí.
+function b2bKanon(x){
+  if(Array.isArray(x)) return "["+x.map(b2bKanon).join(",")+"]";
+  if(x && typeof x==="object") return "{"+Object.keys(x).filter(k=>x[k]!==undefined).sort().map(k=>JSON.stringify(k)+":"+b2bKanon(x[k])).join(",")+"}";
+  return JSON.stringify(x===undefined? null : x);
+}
 function b2bZmenyOdVerzie(snimka, d){
   if(!snimka) return null;
-  const k=z=>JSON.stringify([z.osoba_id,z.datum,z.cas_od,z.cas_do,z.minuty,z.aktivita_id,z.popis,z.zdroj]);
+  const k=z=>JSON.stringify([z.osoba_id,z.datum,z.cas_od,z.cas_do,z.minuty,z.aktivita_id,z.popis,z.zdroj,(z.vystupy||[]).slice().sort()]);
   const stare=new Map((snimka.zaznamy||[]).map(z=>[z.id,k(z)])), nove=new Map(d.zaznamy.map(z=>[z.id,k(z)]));
   let pridane=0, zmenene=0, zmazane=0;
   nove.forEach((v,id)=>{ if(!stare.has(id)) pridane++; else if(stare.get(id)!==v) zmenene++; });
   stare.forEach((v,id)=>{ if(!nove.has(id)) zmazane++; });
   const hs=snimka.hodinyDna||{}, hn=b2bHodinyMapa(d.hodinyDna);
   const hodiny=[...new Set(Object.keys(hs).concat(Object.keys(hn)))].filter(x=>hs[x]!==hn[x]).length;
-  return {pridane, zmenene, zmazane, hodiny, spolu:pridane+zmenene+zmazane+hodiny};
+  // Výstupy, na ktoré odkazujú záznamy mesiaca (pred aj teraz): hárok Výstupy a súbory v ZIP.
+  const zz=(snimka.zaznamy||[]).concat(d.zaznamy), cisla=new Set(), osoby=new Set(Object.keys(hs).concat(Object.keys(hn)).map(x=>x.split("|")[0])), akt=new Set();
+  zz.forEach(z=>{ (z.vystupy||[]).forEach(c=>cisla.add(c)); osoby.add(z.osoba_id); if(z.aktivita_id) akt.add(z.aktivita_id); });
+  const kv=v=>v? b2bKanon([v.nazov, v.typ||null, v.datum||null, (v.autori||[]).slice().sort(), !!v.zmazane, v.subor? v.subor.id : null]) : "";
+  const vS=new Map((snimka.vystupy||[]).map(v=>[v.cislo,kv(v)])), vN=new Map(b2bVystupySoSubormi(d.vystupy, d.subory).map(v=>[v.cislo,kv(v)]));
+  const vystupy=[...cisla].filter(c=>(vS.get(c)||"")!==(vN.get(c)||"")).length;
+  // Osoby a aktivity zo záznamov (zaradenie, meno, organizácia; názov, oblasť, zákazka) a zmluva.
+  const ko=o=>o? b2bKanon([o.meno, o.organizacia||null, o.miesta||[]]) : "", ka=a=>a? b2bKanon([a.nazov, a.oblast||null, a.zakazka||null]) : "";
+  const po=(zoz,fn)=>new Map((zoz||[]).map(x=>[x.id,fn(x)]));
+  const oS=po(snimka.osoby,ko), oN=po(d.osoby,ko), aS=po(snimka.aktivity,ka), aN=po(d.aktivity,ka);
+  const bezObj=D=>{ const c=Object.assign({}, D||{}); delete c.objednavky; return b2bKanon(c); };
+  const projekt=[...osoby].filter(id=>(oS.get(id)||"")!==(oN.get(id)||"")).length + [...akt].filter(id=>(aS.get(id)||"")!==(aN.get(id)||"")).length
+    + (bezObj((snimka.projekt||{}).data)!==bezObj(d.projekt.data)? 1 : 0);
+  return {pridane, zmenene, zmazane, hodiny, vystupy, projekt, spolu:pridane+zmenene+zmazane+hodiny+vystupy+projekt};
 }
 // Hlavička CRZ z iného projektu nesmie ostať — „Prečítať asistentom“ by poslalo cudziu zmluvu.
 async function b2bOtvorProjekt(pid){ B2B.pid=pid; B2B.mesiac=B2B.mesiac||b2bMesiacTeraz(); B2B.pohlad="moj"; B2B.d=null; B2B._crz=null; B2B._crzVstup=null; B2B._navrh=null; appB2bVykaz(); }
@@ -26616,6 +26638,16 @@ async function b2bPvUlozVerziu(tichy){
     return r.data;
   }catch(e){ b2bChyba(e, "Verziu výkazu sa nepodarilo uložiť"); return null; }
 }
+// Schválený (fakturovaný) PV = ODOSLANÁ verzia — tú objednávateľ schválil. Počas stavu
+// „odoslaný“ sa verzie ukladať dajú (export so zmenou), takže posledná môže byť novšia.
+// Zobrazenie, balík aj export schváleného idú z nej a nič neukladajú — server po
+// schválení novú verziu odmietne (admin_74) a výkaz by sa nedal stiahnuť (spec 157.24).
+// Bez odoslanej verzie (stav nastavený opravou správcu) posledná uložená.
+function b2bPvSchvalena(d){
+  const pv=d&&d.vykaz; if(!pv || (pv.stav!=="schvaleny" && pv.stav!=="fakturovany")) return null;
+  const v=d.verzie||[];
+  return v.find(x=>x.verzia===pv.odoslana_verzia) || v[v.length-1] || null;
+}
 // Nezmenený stav = posledná verzia; inak sa najprv uloží nová (rovnaká verzia = rovnaký súbor).
 function b2bPvZmenene(){
   const d=B2B.d, posl=d&&d.verzie[d.verzie.length-1]; if(!posl) return true;
@@ -26626,10 +26658,12 @@ async function b2bSha256(u8){ const h=await crypto.subtle.digest("SHA-256", u8);
 async function b2bPvExport(variant, balik){
   const d=B2B.d; if(!d) return;
   try{
-    let verzia=B2B.pvVerzia;
-    if(variant!=="moj" && b2bPvZmenene()){ verzia=await b2bPvUlozVerziu(true); if(verzia==null) return; }
+    // Schválený: súbor zo schválenej (odoslanej) verzie, nič sa neukladá. Inak pri zmene nová verzia.
+    const sv=b2bPvSchvalena(d);
+    let verzia=sv? sv.verzia : B2B.pvVerzia;
+    if(variant!=="moj" && !sv && b2bPvZmenene()){ verzia=await b2bPvUlozVerziu(true); if(verzia==null) return; }
     const os=b2bMojaOsoba();
-    const posl=B2B.d.verzie[B2B.d.verzie.length-1];
+    const posl=sv || B2B.d.verzie[B2B.d.verzie.length-1];
     const model= variant==="moj"
       ? b2bModelZoSnimky(b2bSnimka(B2B.d), B2B.d.mesiac, {}, os&&os.id)
       : b2bModelZoSnimky(posl.snimka, B2B.d.mesiac, posl.uprava, null, variant==="interny" && !!(posl.uprava||{}).internyPoOrganizaciach);
@@ -27182,7 +27216,8 @@ async function b2bVystupStiahni(suborId){
 // Balík: vyberie sa variant výkazu, zoznam ukáže, čo pôjde do vystupy/ a čo chýba.
 function b2bPvBalik(){
   const d=B2B.d; if(!d) return;
-  const model=b2bModelZoSnimky(b2bSnimka(d), d.mesiac, B2B.pvUprava||{});
+  // Náhľad = súbor: schválený z jeho verzie, inak živý stav (export ho pri zmene uloží ako verziu).
+  const sv=b2bPvSchvalena(d), model= sv? b2bModelZoSnimky(sv.snimka, d.mesiac, sv.uprava) : b2bModelZoSnimky(b2bSnimka(d), d.mesiac, B2B.pvUprava||{});
   const chyby=model.kontroly.some(k=>k.uroven==="chyba");
   const zoz=model.vystupy.map(v=>`<div style="font-size:12.5px;padding:3px 0">${v.vBaliku? "📎" : "⚠"} <b>${esc(v.cislo)}</b> ${esc(v.nazov||"")}${v.vBaliku? ` <span class="csub" style="margin:0">→ vystupy/${esc(v.vBaliku)}</span>` : ` <span style="color:var(--neg)">${v.neznamy? "nie je v projekte" : v.zmazane? "zmazaný" : "bez súboru"} — v balíku nebude</span>`}</div>`).join("");
   openModal("Balík so výstupmi", `<div class="csub">ZIP: výkaz a súbory výstupov, na ktoré odkazujú záznamy mesiaca, premenované na <b>ID_názov</b>. Súbory dešifruje server a každé stiahnutie zapíše do logu projektu.</div>
@@ -27420,18 +27455,22 @@ function b2bStavPvHtml(d){
   if(pv.stav==="schvaleny"){ info+=" "+fmtDatum(pv.schvalene_dna)+(pv.schvalenie==="mlcky"? " — považuje sa za schválený (lehota uplynula, bod 2.8)" : ""); akcie.push(`<button class="aabtn" onclick="b2bPvStav('fakturovany')">Fakturované…</button>`); }
   if(pv.stav==="fakturovany") info+=" "+fmtDatum(pv.fakturovane_dna)+(pv.faktura? " · "+esc(pv.faktura) : "");
   if(pv.poznamka) info+=`<div class="csub" style="margin:4px 0 0">${esc(pv.poznamka)}</div>`;
-  const zm=posl&&b2bZmenyOdVerzie(posl.snimka, d);
-  const zmeny=zm&&zm.spolu? `<div style="background:var(--sfc-warn);border-radius:8px;padding:7px 11px;margin-top:8px;font-size:12px">Od verzie ${posl.verzia} sa zmenilo: záznamy ${zm.pridane+zm.zmenene+zm.zmazane} (pribudlo ${zm.pridane}, zmenené ${zm.zmenene}, zmazané ${zm.zmazane})${zm.hodiny? `, hodiny dňa ${zm.hodiny}` : ""}. Nová verzia ich prevezme.</div>` : "";
+  // Schválený PV sa porovnáva so schválenou (odoslanou) verziou a už sa nemení.
+  const sv=b2bPvSchvalena(d), ref=sv||posl, zm=ref&&b2bZmenyOdVerzie(ref.snimka, d);
+  const zmeny=zm&&zm.spolu? `<div style="background:var(--sfc-warn);border-radius:8px;padding:7px 11px;margin-top:8px;font-size:12px">${sv? "Od schválenej verzie" : "Od verzie"} ${ref.verzia} sa zmenilo: ${[
+      zm.pridane+zm.zmenene+zm.zmazane? `záznamy ${zm.pridane+zm.zmenene+zm.zmazane} (pribudlo ${zm.pridane}, zmenené ${zm.zmenene}, zmazané ${zm.zmazane})` : "",
+      zm.hodiny? `hodiny dňa ${zm.hodiny}` : "", zm.vystupy? `výstupy ${zm.vystupy}` : "", zm.projekt? "osoby, aktivity alebo zmluva" : ""].filter(Boolean).join(", ")}. ${sv? "Schválený výkaz sa nemení — zobrazenie aj export idú zo schválenej verzie." : "Nová verzia ich prevezme."}</div>` : "";
   return `<div style="font-size:13px">${info}</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${akcie.join("")}</div>${zmeny}
     <div class="csub" style="margin:8px 0 0">Verzie: ${d.verzie.map(v=>"v"+v.verzia+" "+fmtDatum(String(v.vytvorene).slice(0,10))).join(" · ")||"—"}</div>`;
 }
 function b2bPvHtml(){
   const d=B2B.d, U=B2B.pvUprava||{}, D=d.projekt.data||{};
   const zamknute=d.vykaz && (d.vykaz.stav==="schvaleny"||d.vykaz.stav==="fakturovany");
-  const posl=d.verzie[d.verzie.length-1];
-  const model= zamknute&&posl? b2bModelZoSnimky(posl.snimka, d.mesiac, posl.uprava) : b2bModelZoSnimky(b2bSnimka(d), d.mesiac, U);
+  // Zamknutý = schválená (odoslaná) verzia; posledná môže byť novšia (uložená počas „odoslaný“).
+  const sv=b2bPvSchvalena(d), svTxt=!sv? "aktuálny stav (verzia nie je uložená)" : (sv.verzia===d.vykaz.odoslana_verzia? "odoslaná verzia " : "posledná uložená verzia ")+sv.verzia;
+  const model= sv? b2bModelZoSnimky(sv.snimka, d.mesiac, sv.uprava) : b2bModelZoSnimky(b2bSnimka(d), d.mesiac, U);
   const vyb=Array.isArray(U.organizacie)&&U.organizacie.length? U.organizacie : (D.organizacie||[]).map(o=>o.id);
-  const hlavicka=zamknute? `<div class="csub">Výkaz je schválený — zobrazuje sa odoslaná verzia ${d.vykaz.odoslana_verzia||posl.verzia}. Nové verzie sa nepridávajú.</div>` : `
+  const hlavicka=zamknute? `<div class="csub">Výkaz je schválený — zobrazuje sa ${svTxt}. Nové verzie sa nepridávajú.</div>` : `
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px">
       <div class="mfield"><label>Číslo PV</label><input value="${esc(U.cislo||"")}" placeholder="PV1" onchange="b2bPvNastav('cislo',this.value.trim())"></div>
       <div class="mfield"><label>Dátum výkazu</label><input type="date" value="${esc(U.datum||model.datumPV)}" onchange="b2bPvNastav('datum',this.value)"></div>
@@ -27450,7 +27489,7 @@ function b2bPvHtml(){
         <button class="aabtn" onclick="b2bPvExport('interny')" title="Stiahnuť výkaz s hárkom Detail (kto, kedy, čo, výstupy) — pre vlastnú kontrolu, nie pre objednávateľa">⬇ Interný (s Detailom)</button>
         ${d.bezVystupov? "" : `<button class="aabtn" onclick="b2bPvBalik()" title="Stiahnuť ZIP: výkaz na odoslanie a súbory výstupov mesiaca premenované na ID_názov">⬇ Balík so výstupmi (ZIP)</button>`}
       </div>
-      <div class="csub" style="margin:8px 0 0">Spolu ${model.spolu} h · ${eur(model.suma)} bez DPH · fond ${model.fond} h. Export uloží novú verziu, ak sa niečo zmenilo.</div>
+      <div class="csub" style="margin:8px 0 0">Spolu ${model.spolu} h · ${eur(model.suma)} bez DPH · fond ${model.fond} h. ${sv? "Export ide zo schválenej verzie "+sv.verzia+", nič sa neukladá." : "Export uloží novú verziu, ak sa niečo zmenilo."}</div>
     </div>
     <div id="b2bPvNahlad">${b2bNahladHtml(model, zamknute? null : {popisUpraveny:U.popis||{}})}</div>`;
 }
@@ -28519,7 +28558,7 @@ async function b2bIcsUloz(){
 // Tri tvary: hárok Detail z exportu appky, jednoduchá tabuľka (Dátum, Osoba,
 // Od–Do / Minúty / Hodiny, Aktivita, Popis), hárok v tvare vzoru (Osoba N).
 function b2bImportRozpoznaj(X, wb, D, mesiac){
-  const out={tvar:null, riadky:[], mimoMesiaca:0, organizacia:null, upozornenia:[], pracovnik:null, mesiaceSuboru:{}};
+  const out={tvar:null, riadky:[], mimoMesiaca:0, organizacia:null, upozornenia:[], pracovnik:null, mesiaceSuboru:{}, hodinyDna:[]};
   const datumZ=v=>{
     if(typeof v==="number" && v>20000 && v<80000) return new Date(Math.round((v-25569)*864e5)).toISOString().slice(0,10);
     const s=String(v==null?"":v).trim(), m=s.match(/^(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})$/);
@@ -28544,7 +28583,11 @@ function b2bImportRozpoznaj(X, wb, D, mesiac){
     if(hi<0){ out.upozornenia.push("Hárok „"+tabSheet+"“ nemá hlavičku so stĺpcami Dátum a Hodiny / Počet hodín / Minúty / Od."); return out; }
     const H=rows[hi].map(norm), st=(...m)=>H.findIndex(h=>m.includes(h));
     const c={datum:st("datum"), osoba:st("osoba","meno"), od:st("od"), do:st("do"), min:st("minuty"), hod:st("hodiny","pocet hodin"), akt:st("aktivita","cinnost"),
-      popis:st("popis","poznamka"), org:st("organizacia"), miesto:st("miesto v zmluve"), vyst:st("vystupy (id)")};
+      popis:st("popis","poznamka"), org:st("organizacia"), miesto:st("miesto v zmluve"), vyst:st("vystupy (id)"), hodDen:st("hodiny (den)")};
+    // Hárok Detail nesie aj skutočné hodiny dňa (č. 280): „Hodiny (deň)“ na prvom riadku
+    // dňa osoby; deň bez záznamu má vlastný riadok s Minúty 0, ktorý záznamom nie je.
+    // Bez nich by import ručné hodiny ticho stratil (nález kola TQ, spec 157.24).
+    const dniOsob=new Map();
     rows.slice(0,hi).forEach(r=>{ const i=r.findIndex(x=>/^pracovnik\s*:?$/.test(norm(x))); if(i>=0 && !out.pracovnik){ const m=r.slice(i+1).find(x=>String(x).trim()); if(m) out.pracovnik=String(m).trim(); } });
     out.tvar=tabSheet==="Detail"? "detail" : out.pracovnik && c.osoba<0? "predloha" : "tabulka";
     rows.slice(hi+1).forEach(r=>{
@@ -28553,10 +28596,26 @@ function b2bImportRozpoznaj(X, wb, D, mesiac){
       let min=c.min>=0? cis(r[c.min]) : null;
       if(!(min>0)) min=b2bCasMinuty(od, dk);
       if(!(min>0) && c.hod>=0){ const h=cis(r[c.hod]); min=h>0? Math.round(h*60) : null; }
-      pridaj({datum, osoba:c.osoba>=0? String(r[c.osoba]||"").trim()||null : null, cas_od:od&&dk? od : null, cas_do:od&&dk? dk : null,
+      const riadok={datum, osoba:c.osoba>=0? String(r[c.osoba]||"").trim()||null : null, cas_od:od&&dk? od : null, cas_do:od&&dk? dk : null,
         minuty:Math.round(min||0), aktivita:c.akt>=0? String(r[c.akt]||"").trim()||null : null, popis:c.popis>=0? String(r[c.popis]||"").trim()||null : null,
         organizacia:c.org>=0? String(r[c.org]||"").trim()||null : null, miesto:c.miesto>=0? String(r[c.miesto]||"").trim()||null : null,
-        vystupy:c.vyst>=0? String(r[c.vyst]||"").split(/[,;]/).map(x=>x.trim()).filter(x=>/^[A-Z0-9]{2,10}-V-[0-9]{3,5}$/.test(x)) : []});
+        vystupy:c.vyst>=0? String(r[c.vyst]||"").split(/[,;]/).map(x=>x.trim()).filter(x=>/^[A-Z0-9]{2,10}-V-[0-9]{3,5}$/.test(x)) : []};
+      if(c.hodDen>=0){
+        const kl=(riadok.osoba||"")+"|"+datum, h=cis(r[c.hodDen]);
+        if(!dniOsob.has(kl)) dniOsob.set(kl, {osoba:riadok.osoba, datum, miesto:riadok.miesto, hodiny:null, zz:[]});
+        const x=dniOsob.get(kl); if(x.hodiny==null && h!=null) x.hodiny=h;
+        if(riadok.minuty>0) x.zz.push(riadok);
+      }
+      pridaj(riadok);
+    });
+    // Hodiny dňa zo súboru: každý deň osoby s hodnotou; „ručné“ = iné, než dá súčet
+    // záznamov dňa po zaokrúhlení (to isté pravidlo ako model) — tie sa prenesú.
+    dniOsob.forEach(x=>{
+      if(x.hodiny==null) return;
+      if(!x.zz.length && x.hodiny>0) out.mesiaceSuboru[x.datum.slice(0,7)]=(out.mesiaceSuboru[x.datum.slice(0,7)]||0)+1;
+      if(x.datum.slice(0,7)!==mesiac) return;
+      const h=Math.max(0, Math.min(24, Math.round(x.hodiny)));
+      out.hodinyDna.push({osoba:x.osoba, datum:x.datum, miesto:x.miesto, hodiny:h, rucne:h!==b2bZaokruhli(b2bMinutyDna(x.zz))});
     });
     return out;
   }
@@ -28607,7 +28666,7 @@ async function b2bImportCitajSubor(nazov, data){
     const imp=b2bImportRozpoznaj(X, wb, d.projekt.data||{}, d.mesiac);
     imp.subor=nazov;
     B2B._imp=imp;
-    const osoby=[...new Set(imp.riadky.map(r=>r.osoba||(r.pozicia? "pozícia "+r.pozicia : imp.pracovnik||"(vybraná osoba)")))];
+    const osoby=[...new Set(imp.riadky.map(r=>r.osoba||(r.pozicia? "pozícia "+r.pozicia : imp.pracovnik||"(vybraná osoba)")).concat(imp.hodinyDna.map(x=>x.osoba||imp.pracovnik||"(vybraná osoba)")))];
     const hod=Math.round(imp.riadky.reduce((a,r)=>a+r.minuty,0)/6)/10;
     if(imp.organizacia){ const o=((d.projekt.data||{}).organizacie||[]).find(x=>x.nazov===imp.organizacia), s=document.getElementById("b2bImpOrg"); if(o&&s) s.value=o.id; }
     // Pracovník z hlavičky: existujúca osoba bez účtu podľa mena, inak nová s tým menom.
@@ -28618,8 +28677,18 @@ async function b2bImportCitajSubor(nazov, data){
       else if(ex){ if(s) s.value=ex.id; }
       else { if(s) s.value=""; if(n) n.value=imp.pracovnik; pozn=`<div>Osoba „${esc(imp.pracovnik)}“ v projekte nie je — založí sa ako nová (doplňte jej zaradenie v Projekte).</div>`; }
     }
+    // Hodiny dňa z hárku Detail: deň zo súboru bude ako v súbore; ručné hodiny, ktoré má
+    // osoba v projekte v dni mimo súboru (napr. „Dni na 8 h“ pred importom), ostanú — povie sa to.
+    const hdR=imp.hodinyDna.filter(x=>x.rucne), dTxt=x=>(+x.slice(8))+". "+(+x.slice(5,7))+".";
+    if(hdR.length) pozn+=`<div>Hodiny dňa zadané ručne: ${hdR.length} ${sklon(hdR.length,"deň","dni","dní")} (${hdR.reduce((a,x)=>a+x.hodiny,0)} h) — prenesú sa ako hodiny dňa.</div>`;
+    if(imp.hodinyDna.length){
+      const nm=s=>String(s||"").toLowerCase().trim(), vSubore=new Set(imp.hodinyDna.map(x=>nm(x.osoba)+"|"+x.datum)), mena=new Set(imp.hodinyDna.map(x=>nm(x.osoba)));
+      const ostanu=(d.hodinyDna||[]).map(h=>({h, o:d.osoby.find(o=>o.id===h.osoba_id && o.aktivny), datum:String(h.datum).slice(0,10)}))
+        .filter(x=>x.o && mena.has(nm(x.o.meno)) && x.datum.slice(0,7)===d.mesiac && !vSubore.has(nm(x.o.meno)+"|"+x.datum)).sort((a,b)=>a.datum.localeCompare(b.datum));
+      if(ostanu.length) pozn+=`<div>Ručné hodiny dňa v projekte, ktoré súbor nemá, ostanú: ${esc(ostanu.slice(0,8).map(x=>dTxt(x.datum)+" "+x.o.meno+" ("+x.h.hodiny+" h)").join(", "))}${ostanu.length>8? " …" : ""}. Zrušíte ich cez Dni na ${+(d.projekt.data||{}).clovekoden_hodin||8} h → vrátiť podľa záznamov.</div>`;
+    }
     const ine=Object.keys(imp.mesiaceSuboru).filter(m=>m!==d.mesiac).sort((a,b)=>imp.mesiaceSuboru[b]-imp.mesiaceSuboru[a]);
-    const prepni=!imp.riadky.length && ine.length? `<div style="margin-top:6px">Súbor je za ${esc(B2B_MESIACE[+ine[0].slice(5)-1])} ${ine[0].slice(0,4)}. <button class="aabtn" onclick="b2bImportDoMesiaca('${ine[0]}')" title="Prepnúť projekt na mesiac súboru a importovať ho tam">Prepnúť na ${b2bMesTxt(ine[0])}</button></div>` : "";
+    const prepni=!imp.riadky.length && !imp.hodinyDna.length && ine.length?`<div style="margin-top:6px">Súbor je za ${esc(B2B_MESIACE[+ine[0].slice(5)-1])} ${ine[0].slice(0,4)}. <button class="aabtn" onclick="b2bImportDoMesiaca('${ine[0]}')" title="Prepnúť projekt na mesiac súboru a importovať ho tam">Prepnúť na ${b2bMesTxt(ine[0])}</button></div>` : "";
     const tvar={detail:"hárok Detail", vzor:"hárok v tvare vzoru", predloha:"výkaz prác", tabulka:"tabuľka"}[imp.tvar];
     if(el) el.innerHTML=imp.tvar? `✓ ${tvar} · ${imp.riadky.length} ${sklon(imp.riadky.length,"záznam","záznamy","záznamov")} · ${hod} h · ${esc(osoby.join(", "))}${imp.mimoMesiaca? " · "+imp.mimoMesiaca+" riadkov z iného mesiaca vynechaných" : ""}${imp.upozornenia.map(u=>`<div style="color:var(--neg)">${esc(u)}</div>`).join("")}${pozn}${prepni}`
       : `<span style="color:var(--neg)">${esc(imp.upozornenia.join(" ")||"Súbor sa nepodarilo rozpoznať.")}</span>`;
@@ -28638,7 +28707,7 @@ function b2bImportDoMesiaca(m){
 }
 async function b2bImportUloz(){
   const d=B2B.d, imp=B2B._imp; if(!d) return;
-  if(!imp || !imp.riadky.length) return b2bVOkne("Najprv vyberte súbor s riadkami za tento mesiac.");
+  if(!imp || (!imp.riadky.length && !(imp.hodinyDna||[]).length)) return b2bVOkne("Najprv vyberte súbor s riadkami za tento mesiac.");
   const D=d.projekt.data||{}, org=(document.getElementById("b2bImpOrg")||{}).value||null;
   const norm=s=>String(s||"").toLowerCase().trim();
   try{
@@ -28676,17 +28745,31 @@ async function b2bImportUloz(){
       riadky.push({projekt_id:d.pid, osoba_id:osobaId, datum:r.datum, cas_od:r.cas_od||null, cas_do:r.cas_do||null, minuty:r.minuty, aktivita_id:aid, popis:r.popis||null,
         vystupy:r.vystupy||[], zdroj:"import:"+String(imp.subor||"xlsx").slice(0,80)});
     }
+    // Hodiny dňa z hárku Detail (č. 280): deň zo súboru = ako v súbore — ručné sa nastavia,
+    // deň podľa záznamov zruší staršie ručné hodiny; deň, ktorý súbor nemá, ostane (náhľad to povie).
+    // Osoby sa hľadajú pred zápisom, aby osoba s účtom zastavila import skôr, než sa niečo zapíše.
+    const hdZmeny=[], hdOsoby=[], db=b2bHodinyMapa(d.hodinyDna);
+    for(const x of (imp.hodinyDna||[])){
+      const osobaId=x.osoba? await najdiAleboZaloz(x.osoba, miestoZTextu(x.miesto)) : vybrana; if(!osobaId) continue;
+      hdOsoby.push(osobaId);
+      const chcem=x.rucne? x.hodiny : null, ma=db[osobaId+"|"+x.datum]!=null? db[osobaId+"|"+x.datum] : null;
+      if(chcem!==ma) hdZmeny.push({osobaId, datum:x.datum, hodiny:chcem});
+    }
     const od=d.mesiac+"-01", doDna=b2bIso(new Date(+d.mesiac.slice(0,4), +d.mesiac.slice(5,7), 0));
-    for(const oid of [...new Set(riadky.map(r=>r.osoba_id))]){
+    for(const oid of [...new Set(riadky.map(r=>r.osoba_id).concat(hdOsoby))]){
       const z=await sb.from("b2b_zaznamy").delete().eq("osoba_id",oid).gte("datum",od).lte("datum",doDna).like("zdroj","import:%");
       if(z.error) throw z.error;
     }
     for(let i=0;i<riadky.length;i+=200){ const r=await sb.from("b2b_zaznamy").insert(riadky.slice(i,i+200)); if(r.error) throw r.error; }
+    // Hodiny dňa jedinou cestou (RPC, najviac 1000 dní naraz). Keď zlyhá, okno ostane —
+    // záznamy už sú zapísané a ďalší pokus ich nahradí, hodiny dňa sa dopíšu.
+    for(let i=0;i<hdZmeny.length;i+=500){ if(!await b2bHodinyNastav(hdZmeny.slice(i,i+500))) return false; }
     // súbor z e-mailu projektu: prijatý sa označí spracovaný až po uložení záznamov
     const prij=B2B._impSubor&&B2B._impSubor.prijate;
-    if(prij) await b2bPrijateStav(prij, "spracovane", "import výkazu: "+riadky.length+" záznamov");
+    const hdTxt=hdZmeny.length? " · hodiny dňa: "+hdZmeny.length+" "+sklon(hdZmeny.length,"deň","dni","dní") : "";
+    if(prij) await b2bPrijateStav(prij, "spracovane", "import výkazu: "+riadky.length+" záznamov"+hdTxt);
     B2B._imp=null; B2B._impSubor=null; B2B._impData=null; closeModal();
-    oznamPas("Importovaných "+riadky.length+" "+sklon(riadky.length,"záznam","záznamy","záznamov")+".");
+    oznamPas("Importovaných "+riadky.length+" "+sklon(riadky.length,"záznam","záznamy","záznamov")+hdTxt+".");
     b2bObnov();
   }catch(e){ b2bChyba(e, "Import sa nepodaril"); }
 }
