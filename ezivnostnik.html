@@ -1950,6 +1950,8 @@ html[data-jazda] .jazdapruh{display:flex}
       <b>e<i>živnostník</i></b>
     </a>
     <div class="authsub" id="authSub">Prihláste sa do svojej kancelárie</div>
+    <!-- Pozvánka do B2B projektu čaká na prihlásenie (b2bPozvankaPrihlasenie). -->
+    <div class="authmsg info" id="authPozvanka" style="display:none">Máte pozvánku do projektu. Prihláste sa — alebo si vytvorte účet — e-mailovou adresou, na ktorú pozvánka prišla. Po prihlásení sa prijme sama.</div>
 
     <div class="authmsg" id="authMsg"></div>
 
@@ -1984,15 +1986,15 @@ html[data-jazda] .jazdapruh{display:flex}
     </div>
     <div class="authswitch"><a onclick="doReset()" style="color:var(--ink-soft)">Zabudnuté heslo?</a></div>
 
-    <div class="divider">alebo</div>
-    <button class="btn ghost" onclick="useLocal()">Pokračovať bez účtu (lokálne)</button>
+    <div class="divider" id="authAlebo">alebo</div>
+    <button class="btn ghost" id="btnLokalne" onclick="useLocal()">Pokračovať bez účtu (lokálne)</button>
     <!-- Ukážka sa dala dovtedy spustiť len z landing page cez `?vstup=demo`.
          Kto príde z Google Play, landing page nikdy neuvidí — TWA otvorí
          rovno `start_url`, teda toto prihlásenie. Bez tohto tlačidla je prvá
          obrazovka po inštalácii žiadosť o heslo k účtu, ktorý ešte nemá,
          a jediná alternatíva prázdna appka. Platí to aj pre recenzenta
          v Play Console (kap. 65.7). -->
-    <button class="btn ghost" onclick="spustiDemo()" style="margin-top:8px">
+    <button class="btn ghost" id="btnUkazka" onclick="spustiDemo()" style="margin-top:8px">
       Vyskúšať s ukážkovými dátami
     </button>
     <div style="text-align:center;font-size:11.5px;margin-top:16px;color:var(--ink-soft);line-height:1.6">
@@ -2499,7 +2501,7 @@ async function boot(){
   hide("loading");
 
   // Pozvánku odlož skôr, než sa čokoľvek presmeruje alebo prepíše URL.
-  zapamatajPozvanku(); b2bZapamatajPozvanku();
+  zapamatajPozvanku(); b2bZapamatajPozvanku(); b2bPozvankaPrihlasenie();
 
   // NÁVRAT Z PLATBY (Stripe presmeruje späť s ?platba=ok|zrusena)
   spracujNavratZPlatby();
@@ -2537,7 +2539,8 @@ async function boot(){
   const { data:{ session } } = await sb.auth.getSession();
   if(session){ enterApp(session.user); spracujPozvanku(); b2bSpracujPozvanku(); return; }
 
-  if(uvodTreba()){ show("uvodView"); return; }
+  // S pozvánkou do projektu rovno prihlásenie — úvod appky ponúka aj ukážku, v ktorej by sa stratila.
+  if(uvodTreba() && !b2bPozvankaPrihlasenie()){ show("uvodView"); return; }
   show("authView");
   if(vstup==="register") nastavMode("register");
 }
@@ -26328,6 +26331,15 @@ function b2bZapamatajPozvanku(){
   if(t) gpsUloz(PROJEKT_POZVANKA_KLUC, t);
   return t;
 }
+// Kým pozvánka čaká, prihlásenie to povie a lokálny režim ani ukážku neponúkne —
+// pozvánka sa prijme len po prihlásení do cloudu (b2bSpracujPozvanku), z lokálneho
+// režimu by sa stratila (19. 10. 2026, č. 285 — dovtedy prihlásenie o pozvánke mlčalo).
+function b2bPozvankaPrihlasenie(){
+  const caka=!!gpsCitaj(PROJEKT_POZVANKA_KLUC), el=id=>document.getElementById(id);
+  const p=el("authPozvanka"); if(p) p.style.display=caka? "block" : "none";
+  ["authAlebo","btnLokalne","btnUkazka"].forEach(id=>{ const x=el(id); if(x) x.style.display=caka? "none" : ""; });
+  return caka;
+}
 const B2B_HLASKY_POZVANKY={ neplatna:"Pozvánka neexistuje alebo bola zrušená.", uz_prijata:"Táto pozvánka už bola použitá.",
   zrusena:"Pozvánku správca zrušil — požiadajte o novú.", expirovana:"Platnosť pozvánky uplynula. Požiadajte o novú.",
   iny_email:"Pozvánka je vystavená na inú e-mailovú adresu. Prihláste sa účtom, na ktorý prišla.",
@@ -26346,6 +26358,7 @@ async function b2bSpracujPozvanku(){
   try{
     const { data:{ user } } = await sb.auth.getUser(); if(!user) return false;
     gpsUloz(PROJEKT_POZVANKA_KLUC, null);       // aj pri neúspechu — inak by sa skúšala pri každom štarte
+    b2bPozvankaPrihlasenie();
     history.replaceState({}, "", location.pathname);
     await b2bPrijmiPozvanku(t);
     oznamPas("Ste v projekte — B2B služby → Pracovný výkaz.");
@@ -28396,7 +28409,7 @@ async function b2bPrijateObjPotvrd(){
 }
 function b2bZoznamHtml(){
   const poz=B2B.pozvanky.map(p=>`<div class="card" style="padding:12px 14px;border-color:var(--brand)">
-      <b>Pozvánka do projektu ${esc(p.projekt_nazov)}</b><div class="csub" style="margin:4px 0 8px">ako ${esc(p.osoba_meno)} · platí do ${fmtDatum(String(p.plati_do).slice(0,10))}</div>
+      <b>Pozvánka do projektu ${esc(p.projekt_nazov)}</b><div class="csub" style="margin:4px 0 8px">ako ${esc(p.osoba_meno)}${p.rola==="management"? " (Management a support — výkazy a objednávky tímu, hodiny nevykazujete)" : ""} · platí do ${fmtDatum(String(p.plati_do).slice(0,10))}</div>
       <button class="aabtn pri" onclick="b2bPrijmiZAppky('${p.id}')">Prijať</button></div>`).join("");
   const proj=B2B.projekty.map(p=>`<div class="card" style="padding:12px 14px;cursor:pointer" onclick="b2bOtvorProjekt('${p.id}')">
       <b>${esc(p.nazov)}</b> <span class="apill" style="font-size:10px">${esc(p.kod)}</span>${p.spravca? ' <span class="apill" style="font-size:10px">správca</span>' : ""}${p.rola==="management"? ' <span class="apill" style="font-size:10px">management</span>' : ""}</div>`).join("");
