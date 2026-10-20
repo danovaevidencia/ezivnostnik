@@ -315,7 +315,7 @@ vydavky: {
         { nadpis: "Funguje po prihlásení",
           html: "<p>Doklady e-mailom potrebujú účet v cloude. V ukážkovom režime appka namiesto okna ukáže upozornenie. Adresu nájdete aj v [[app:data#dmKarta|nastaveniach]].</p>" },
         { nadpis: "Kto môže na adresu posielať",
-          html: "<p>Ktokoľvek. Odosielateľa, od ktorého nič nechcete, zablokujete v tom istom okne cez <b>🚫 Blokované adresy</b>. Keď adresa unikne, <b>↻ Nová adresa</b> vám pridelí inú a stará prestane fungovať.</p>" },
+          html: "<p>Ktokoľvek. Odosielateľa, od ktorého nič nechcete, zablokujete v tom istom okne cez <b>🚫 Blokované adresy</b>. Adresa na posta.ezivnostnik.eu je pevná — vznikla z mena pred @ v prihlasovacom e-maile vlastníka firmy. Staršia adresa (…@tolapnal.resend.app) funguje ďalej; keď unikne, <b>↻ Vymeniť starú adresu</b> ju nahradí inou.</p>" },
         { nadpis: "Ako appka pozná, že doklad už máte",
           html: "<p>Rovnaké číslo dokladu, alebo rovnaká suma aj dátum od toho istého dodávateľa. Pri preposlaných faktúrach sa to stáva ľahko — napríklad keď ste ju predtým už odfotili.</p>" },
         { nadpis: "Výpis z banky e-mailom",
@@ -1440,7 +1440,7 @@ b2b_vykaz: {
       nazov: "Preposlať objednávku alebo výkaz na e-mail projektu",
       kedy: "Klient poslal objednávku alebo kolega poslal výkaz v Exceli a chcete ich dostať do projektu bez sťahovania a nahrávania.",
       kroky: [
-        { text: "V záložke <b>Projekt</b> v karte <b>E-mail projektu</b> skopírujte adresu projektu (správca ju raz vytvorí tlačidlom <b>Vytvoriť adresu projektu</b>).", tlacidlo: "Kopírovať" },
+        { text: "V záložke <b>Projekt</b> v karte <b>E-mail projektu</b> skopírujte adresu projektu (správca ju raz vytvorí: zvolí meno — návrh je z kódu projektu — a ťukne na <b>Vytvoriť adresu</b>; potom sa nemení).", tlacidlo: "Kopírovať" },
         { text: "Mail s objednávkou alebo s výkazom (XLSX) prepošlite na túto adresu — ako bežné preposlanie, nie ako prílohu.", tlacidlo: "" },
         { text: "Pri položke v zozname <b>Na spracovanie</b> ťuknite na <b>Importovať</b> (výkaz) alebo <b>Priradiť k objednávke</b> (objednávka).", tlacidlo: "Priradiť k objednávke", snimka: "b2b_vykaz-email-2" },
         { text: "Pri objednávke skontrolujte porovnanie s vaším konceptom a ťuknite na <b>Potvrdiť objednávku</b> — keď sa mail líši, hodiny a počty expertov sa prevezmú z neho.", tlacidlo: "Potvrdiť objednávku", snimka: "b2b_vykaz-email-3" },

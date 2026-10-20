@@ -22198,9 +22198,10 @@ function majetokVyradInfo(id){
 async function dmVykresliKartu(){
   const box=document.getElementById("dmKarta");
   if(!box) return;
-  let adresa=null, pocet=0;
+  let adresy=null, adresa=null, pocet=0;
   try{
-    adresa=await dokladyAdresa(false);
+    adresy=await dokladyAdresy();
+    adresa=adresy && adresy.hlavna;
     await nacitajCakajuce(true);
     pocet=cakajucePocty().spolu;
   }catch(e){ console.error("Doklady e-mailom — karta v Nastaveniach:", e); }
@@ -22224,6 +22225,7 @@ async function dmVykresliKartu(){
         <input id="dmAdresa" value="${esc(adresa)}" readonly style="font-family:ui-monospace,monospace;font-size:12px">
         <button class="aabtn" onclick="dmKopiruj()" title="Kopírovať">⧉</button>
       </div>
+      ${dokladyStaraHtml(adresy)}
     </div>
     ${pocet?`<div style="background:var(--bg);border-left:3px solid var(--brand);border-radius:0 9px 9px 0;
       padding:9px 12px;font-size:12.5px;margin-bottom:10px;cursor:pointer" onclick="otvorCakajuce()">
@@ -22235,8 +22237,10 @@ async function dmVykresliKartu(){
     </div>
     <div style="font-size:11.5px;color:var(--ink-soft);margin-top:9px;line-height:1.5">
       Doklad prijmeme od kohokoľvek — do evidencie sa aj tak nedostane sám, čaká na vaše potvrdenie.
-      Adresa sa nedá uhádnuť; keby sa predsa dostala k nežiaducemu odosielateľovi, vygenerujte novú
-      a stará okamžite prestane fungovať.
+      ${adresy && adresy.stara
+        ? `Nežiaduceho odosielateľa zablokujete v <b>Blokovaných adresách</b>.`
+        : `Adresa sa nedá uhádnuť; keby sa predsa dostala k nežiaducemu odosielateľovi, vygenerujte novú
+      a stará okamžite prestane fungovať.`}
     </div>`;
 }
 // Zavretie sa ukladá k firme, nie do prehliadača — kto appku otvorí na inom
@@ -26414,18 +26418,25 @@ async function b2bNacitajProjekt(){
     if(vystupy.length){ const sr=await sb.from("b2b_vystupy_subory").select("id,vystup_id,verzia,nazov,typ,velkost,sha256,nahral,nahrate").in("vystup_id",vystupy.map(v=>v.id)).order("verzia"); if(sr.error) throw sr.error; subory=sr.data||[]; }
   }
   // E-mail projektu (admin_78): adresa a prijaté. Bez migrácie modul ide ďalej bez nich.
-  let prijem=null, prijate=[], bezPrijmu=false;
-  const [pa, pp]=await Promise.all([sb.from("b2b_prijem").select("token,povolene").eq("projekt_id",pid).maybeSingle(),
-    sb.from("b2b_prijate").select("id,email_id,od_koho,predmet,telo,subor_nazov,subor_typ,subor_cesta,subor_bajtov,druh,stav,poznamka,spracovane,prijate").eq("projekt_id",pid).order("prijate",{ascending:false}).limit(100)]);
+  // Adresa @posta (admin_80): bez migrácie ostáva stará b2b-…; iná chyba projekt
+  // nezastaví — karta povie, že sa adresa nenačítala.
+  let prijem=null, prijate=[], bezPrijmu=false, prijemAlias=null, bezAliasu=false, aliasChyba="";
+  const [pa, pp, pr]=await Promise.all([sb.from("b2b_prijem").select("token,povolene").eq("projekt_id",pid).maybeSingle(),
+    sb.from("b2b_prijate").select("id,email_id,od_koho,predmet,telo,subor_nazov,subor_typ,subor_cesta,subor_bajtov,druh,stav,poznamka,spracovane,prijate").eq("projekt_id",pid).order("prijate",{ascending:false}).limit(100),
+    sb.from("prijem_adresy").select("alias").eq("projekt_id",pid).maybeSingle()]);
   if(pa.error || pp.error){ const e=pa.error||pp.error; if(b2bChybaTabulky(e)) bezPrijmu=true; else throw e; }
   else { prijem=pa.data||null; prijate=pp.data||[]; }
+  if(pr.error){
+    bezAliasu=true;
+    if(!b2bChybaTabulky(pr.error)){ aliasChyba=pr.error.message||String(pr.error); console.error("B2B adresa @"+POSTA_DOMENA+" sa nenačítala:", aliasChyba); }
+  } else prijemAlias=(pr.data && pr.data.alias)||null;
   if(poradie!==_b2bNacitanie) return false;
   const vsetky=r[3].data||[];
   B2B.d={pid, mesiac, projekt:r[0].data, osoby:r[1].data||[], aktivity:r[2].data||[],
     zaznamy:vsetky.filter(z=>z.datum>=od), zaznamyPred:vsetky.filter(z=>z.datum<od),
     mesiace:r[4].data||[], vykaz:r[5].data||null, verzie, moje:(r[6].data&&r[6].data.data)||{}, vystupy, subory, bezVystupov,
     hodinyDna:hodinyDna.filter(h=>String(h.datum)>=od), hodinyDnaPred:hodinyDna.filter(h=>String(h.datum)<od), bezHodinDna,
-    prijem, prijate, bezPrijmu};
+    prijem, prijate, bezPrijmu, prijemAlias, bezAliasu, aliasChyba};
   const posl=verzie[verzie.length-1], kluc=pid+"|"+mesiac, verzia=posl? posl.verzia : null;
   // Obnovenie dát (uložený záznam, hodiny dňa) nezahodí rozpísaný výkaz — len nová
   // verzia alebo iný projekt či mesiac ho nahradí uloženou úpravou.
@@ -28255,7 +28266,38 @@ async function b2bObjKopirujPredmet(){
 // k objednávke projektu, iný súbor sa dá stiahnuť. Stav mení len RPC
 // b2b_prijate_stav (log projektu).
 const B2B_PRIJATE_DRUH={vykaz:"📊 výkaz", objednavka:"📨 objednávka", subor:"📎 súbor", sprava:"✉ správa"};
-function b2bPrijemAdresa(d){ return d && d.prijem && d.prijem.token? d.prijem.token+"@"+DOKLADY_DOMENA : ""; }
+// Od admin_80 (č. 287) má projekt aj čitateľnú adresu `alias@posta.ezivnostnik.eu`:
+// zvolí ju správca raz (návrh z kódu projektu) a nemení sa; stará b2b-… funguje ďalej.
+function b2bPrijemAdresaStara(d){ return d && d.prijem && d.prijem.token? d.prijem.token+"@"+DOKLADY_DOMENA : ""; }
+function b2bPrijemAdresa(d){ return d && d.prijemAlias? d.prijemAlias+"@"+POSTA_DOMENA : b2bPrijemAdresaStara(d); }
+// Tvar aliasu = prijem_alias_platny v admin_80 (test_posta_adresy porovnáva výraz);
+// vyhradené a obsadené mená posúdi server a povie prečo.
+const B2B_ALIAS_TVAR = /^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$/;
+function b2bAliasPlatny(a){ a=String(a||""); return a.length>=2 && a.length<=40 && B2B_ALIAS_TVAR.test(a) && !/[._-]{2}/.test(a); }
+function b2bAliasNavrh(d){
+  const p=(d && d.projekt) || {};
+  const z=s=>String(s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g,"-")
+    .replace(/[^a-z0-9._-]/g,"").replace(/[._-]{2,}/g,"-").replace(/^[._-]+|[._-]+$/g,"").slice(0,40).replace(/[._-]+$/,"");
+  const n=z(p.kod);
+  return b2bAliasPlatny(n)? n : (b2bAliasPlatny(z(p.nazov))? z(p.nazov) : "");
+}
+function b2bPrijemAliasFormHtml(d){
+  return `<div style="margin-top:6px"><div class="csub" style="margin:0 0 4px">Adresa projektu — zvoľte ju raz, potom sa nemení. Návrh je z kódu projektu.</div>
+    <div style="display:flex;gap:6px;align-items:center"><input id="b2bAliasPole" value="${esc(b2bAliasNavrh(d))}" autocomplete="off" autocapitalize="none" spellcheck="false" style="flex:1;min-width:0;font-family:ui-monospace,monospace"><span class="csub" style="margin:0;white-space:nowrap">@${POSTA_DOMENA}</span></div>
+    <button class="aabtn pri" style="margin-top:6px" onclick="b2bPrijemAliasVytvor()" title="Vytvoriť adresu projektu na ${POSTA_DOMENA}">Vytvoriť adresu</button></div>`;
+}
+async function b2bPrijemAliasVytvor(){
+  const el=document.getElementById("b2bAliasPole"); if(!el || !B2B.d) return;
+  const a=String(el.value||"").trim().toLowerCase();
+  if(!b2bAliasPlatny(a)){ alert("Adresa: 2 až 40 znakov — malé písmená bez diakritiky, číslice, v strede aj bodka, pomlčka alebo podčiarnik."); el.focus(); return; }
+  if(!confirm("Vytvoriť adresu projektu "+a+"@"+POSTA_DOMENA+"?\n\nAdresa sa potom nedá zmeniť.")) return;
+  try{
+    const r=await sb.rpc("b2b_prijem_alias", {p_projekt:B2B.d.pid, p_alias:a});
+    if(r.error) throw r.error;
+    oznamPas("Adresa projektu je vytvorená: "+r.data+"@"+POSTA_DOMENA);
+    b2bObnov();
+  }catch(e){ b2bChyba(e, "Adresu projektu sa nepodarilo vytvoriť"); }
+}
 function b2bPrijateNove(d){ return ((d&&d.prijate)||[]).filter(x=>x.stav==="nove"); }
 function b2bPrijateBanner(d){
   const n=b2bPrijateNove(d).length; if(!n || B2B.pohlad==="projekt") return "";
@@ -28263,7 +28305,7 @@ function b2bPrijateBanner(d){
 }
 function b2bPrijemHtml(d){
   if(d.bezPrijmu) return "";
-  const spravca=b2bSomSpravca(), adr=b2bPrijemAdresa(d), nove=b2bPrijateNove(d), ine=(d.prijate||[]).filter(x=>x.stav!=="nove");
+  const spravca=b2bSomSpravca(), adr=b2bPrijemAdresa(d), stara=b2bPrijemAdresaStara(d), nove=b2bPrijateNove(d), ine=(d.prijate||[]).filter(x=>x.stav!=="nove");
   const polozka=x=>{
     const tl=[];
     if(x.stav==="nove"){
@@ -28287,14 +28329,21 @@ function b2bPrijemHtml(d){
   return `<div class="card" style="padding:12px 14px"><b>E-mail projektu</b>
     <div class="csub" style="margin:4px 0 6px">Prepošlite sem objednávku od objednávateľa alebo výkaz kolegu (XLSX). Nič sa neuloží samo — počká tu na spracovanie. Adresu poznajú len členovia projektu.</div>
     ${adr? `<div style="display:flex;gap:6px"><input id="b2bPrijemAdr" value="${esc(adr)}" readonly><button class="aabtn" onclick="b2bPrijemKopiruj()" title="Skopírovať adresu projektu">Kopírovať</button></div>
-      ${spravca? `<div class="csub" style="margin:4px 0 0"><a href="#" onclick="b2bPrijemAdresaNova(true);return false" title="Vydať novú adresu — stará prestane prijímať">nová adresa</a></div>` : ""}`
+      ${d.prijemAlias && stara? `<div class="csub" style="margin:4px 0 0">Stará adresa <span style="font-family:ui-monospace,monospace;word-break:break-all">${esc(stara)}</span> funguje ďalej.${spravca? ` <a href="#" onclick="b2bPrijemAdresaNova(true);return false" title="Vydať náhradu za starú adresu — stará prestane prijímať, adresa @${POSTA_DOMENA} sa nemení">vymeniť starú adresu</a>` : ""}</div>`
+        : spravca && !d.bezAliasu? b2bPrijemAliasFormHtml(d)
+        : spravca? `<div class="csub" style="margin:4px 0 0"><a href="#" onclick="b2bPrijemAdresaNova(true);return false" title="Vydať novú adresu — stará prestane prijímať">nová adresa</a></div>` : ""}`
+      : spravca && !d.bezAliasu? b2bPrijemAliasFormHtml(d)
       : spravca? `<button class="aabtn pri" onclick="b2bPrijemAdresaNova(false)" title="Vytvoriť prijímaciu adresu projektu">Vytvoriť adresu projektu</button>` : `<div class="csub" style="margin:0">Adresu vytvorí správca projektu.</div>`}
+    ${spravca && d.aliasChyba? `<div class="csub" style="margin:4px 0 0;color:var(--warn)">Adresu @${POSTA_DOMENA} sa nepodarilo načítať: ${esc(d.aliasChyba)}</div>` : ""}
     ${nove.length? `<div style="margin-top:8px;font-size:13px;font-weight:600">Na spracovanie (${nove.length})</div>${nove.map(polozka).join("")}` : adr? `<div class="csub" style="margin:8px 0 0">Nič nečaká.</div>` : ""}
     ${ine.length? `<details style="margin-top:8px"><summary style="cursor:pointer;font-size:13px">Spracované a odmietnuté (${ine.length})</summary>${ine.map(polozka).join("")}</details>` : ""}
   </div>`;
 }
 async function b2bPrijemAdresaNova(prerazit){
-  if(prerazit && !confirm("Vydať novú adresu projektu? Stará prestane prijímať — kto ju má uloženú, potrebuje novú.")) return;
+  const alias=B2B.d && B2B.d.prijemAlias;
+  if(prerazit && !confirm(alias
+    ? "Vymeniť starú adresu projektu (…@"+DOKLADY_DOMENA+")? Stará prestane prijímať — kto ju má uloženú, potrebuje novú. Adresa "+alias+"@"+POSTA_DOMENA+" sa nemení."
+    : "Vydať novú adresu projektu? Stará prestane prijímať — kto ju má uloženú, potrebuje novú.")) return;
   try{
     const r=await sb.rpc("b2b_prijem_token", {p_projekt:B2B.d.pid, p_prerazit:!!prerazit});
     if(r.error) throw r.error;
@@ -42603,6 +42652,38 @@ async function dokladyAdresa(prerazit){
 // Doména, na ktorej appka prijíma doklady. Pilot beží na adrese prideľovanej
 // Resendom; pri prechode na vlastnú doménu sa mení tu aj v secrete edge funkcie.
 const DOKLADY_DOMENA = "tolapnal.resend.app";
+// Čitateľné adresy (admin_80, ROZHODNUTIA č. 287): `meno@posta.ezivnostnik.eu`
+// je pevný alias firmy alebo B2B projektu, edge ho preloží na token. Staré
+// adresy na DOKLADY_DOMENA fungujú ďalej natrvalo (preposielanie z banky).
+const POSTA_DOMENA = "posta.ezivnostnik.eu";
+
+// Adresy firmy: hlavná `meno@posta…` a stará `<token>@…`, ktorá funguje ďalej.
+// Alias vznikne pri prvom otvorení z mena pred @ vlastníka firmy a nemení sa.
+// Bez migrácie admin_80 (alebo keď sa alias nenačíta) ostáva hlavnou stará —
+// appka neukáže adresu, ktorú databáza nepotvrdila.
+let _prijemAlias = null;   // {firma, alias} — text pri výmene starej adresy
+async function dokladyAdresy(){
+  const f = firmaId;
+  const stara = await dokladyAdresa(false);
+  if(!stara) return null;
+  let alias = null;
+  try{
+    const { data, error } = await sb.rpc("prijem_adresa_firmy", { p_firma: f });
+    if(error && !chybaChybajuciObjektDb(error)) throw error;
+    if(!error && data) alias = String(data);
+  }catch(e){ console.error("Adresa @"+POSTA_DOMENA+" sa nenačítala — ukazujem starú:", (e && e.message) || e); }
+  _prijemAlias = alias ? { firma: f, alias } : null;
+  return alias ? { hlavna: alias+"@"+POSTA_DOMENA, stara } : { hlavna: stara, stara: null };
+}
+// Riadok pod hlavnou adresou: stará funguje ďalej, odkiaľ sa vzala nová.
+function dokladyStaraHtml(adresy){
+  if(!adresy || !adresy.stara) return "";
+  return `<div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;line-height:1.5">
+    Adresa vznikla z mena pred @ v prihlasovacom e-maile vlastníka firmy a nemení sa.
+    Stará adresa <span style="font-family:ui-monospace,monospace;word-break:break-all">${esc(adresy.stara)}</span>
+    funguje ďalej — preposielanie, ktoré ste si na ňu nastavili (napríklad z banky), netreba meniť.
+  </div>`;
+}
 
 // ── POHYBY Z NOTIFIKÁCIÍ (kap. 49) ──────────────────────────────────────
 //
@@ -42953,7 +43034,8 @@ async function otvorCakajuce(){
   const beh=behFirmy();
   await nacitajCakajuce();
   if(!beh.platny()) return;
-  const adresa = await dokladyAdresa(false);
+  const adresy = await dokladyAdresy();
+  const adresa = adresy && adresy.hlavna;
   if(!beh.platny()) return;
   const nove   = cakajuceDoklady.filter(x=>x.stav==="nove");
   const cudzie = cakajuceDoklady.filter(x=>x.stav==="neznamy_odosielatel");
@@ -42980,7 +43062,8 @@ async function otvorCakajuce(){
         <input id="cdAdresa" value="${esc(adresa)}" readonly style="font-family:monospace;font-size:12px">
         <button class="aabtn" onclick="kopirujAdresu()" title="Kopírovať">⧉</button>
       </div>
-      <div class="ocr-hint">Prepošlite sem faktúru a objaví sa tu. Prijímame od kohokoľvek — adresu, od ktorej nič nechcete, zablokujete nižšie.</div>`
+      <div class="ocr-hint">Prepošlite sem faktúru a objaví sa tu. Prijímame od kohokoľvek — adresu, od ktorej nič nechcete, zablokujete nižšie.</div>
+      ${dokladyStaraHtml(adresy)}`
       : `<div class="ocr-hint">Adresa sa nepodarilo načítať — skúste to neskôr.</div>`}
       ${posledny}
     </div>
@@ -43077,7 +43160,9 @@ async function otvorCakajuce(){
     <div style="margin-top:16px;border-top:1px solid var(--line);padding-top:12px">
       <button class="aabtn" onclick="spravujOdosielatelov()">🚫 Blokované adresy</button>
       <button class="aabtn" onclick="spravujPotlacene()">🔕 Umlčané maily</button>
-      <button class="aabtn" onclick="prerazDokladyToken()"${zam("data")} title="Stará adresa okamžite prestane fungovať">↻ Nová adresa</button>
+      ${adresy && adresy.stara
+        ? `<button class="aabtn" onclick="prerazDokladyToken()"${zam("data")} title="Stará adresa (@${DOKLADY_DOMENA}) okamžite prestane fungovať, adresa @${POSTA_DOMENA} sa nemení">↻ Vymeniť starú adresu</button>`
+        : `<button class="aabtn" onclick="prerazDokladyToken()"${zam("data")} title="Stará adresa okamžite prestane fungovať">↻ Nová adresa</button>`}
     </div>
   `, null, null, "siroky");
 }
@@ -43091,7 +43176,11 @@ function kopirujAdresu(){
 
 async function prerazDokladyToken(){
   if(!strazZapis("data")) return;
-  if(!confirm("Vygenerovať novú prijímaciu adresu?\n\nStará okamžite prestane fungovať — kto ju má uloženú v kontaktoch, musí dostať novú.")) return;
+  // S adresou @posta (admin_80) sa mení len stará adresa — alias je pevný a ostáva.
+  const alias=_prijemAlias && _prijemAlias.firma===firmaId ? _prijemAlias.alias : null;
+  if(!confirm(alias
+    ? "Vymeniť starú adresu (…@"+DOKLADY_DOMENA+") za inú?\n\nAdresa "+alias+"@"+POSTA_DOMENA+" sa nemení. Stará okamžite prestane fungovať — kto ju má uloženú (napríklad preposielanie z banky), musí dostať novú."
+    : "Vygenerovať novú prijímaciu adresu?\n\nStará okamžite prestane fungovať — kto ju má uloženú v kontaktoch, musí dostať novú.")) return;
   const beh=behFirmy();   // firma, ktorej adresu meníme (ROZHODNUTIA č. 138)
   const a=await dokladyAdresa(true);
   // Po prepnutí firmy sa adresa zmenila firme pôvodu a jej stará adresa prestala platiť — to sa musí
@@ -43101,7 +43190,7 @@ async function prerazDokladyToken(){
       +"\n\nStará adresa prestala fungovať. Medzitým ste otvorili inú firmu — jej adresa sa nemenila.");
     return;
   }
-  if(a){ cloudMsg("Nová adresa: "+a,"ok"); otvorCakajuce(); }
+  if(a){ cloudMsg((alias? "Stará adresa vymenená: " : "Nová adresa: ")+a,"ok"); otvorCakajuce(); }
 }
 
 async function blokujOdosielatela(email){
