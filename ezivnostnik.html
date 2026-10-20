@@ -4159,7 +4159,8 @@ function zobrazFirmu(){
   // 14. 9. 2026). Na pozadí so stropom; demo a lokálny režim odfiltruje brána.
   if(firmaData && typeof postarNaPozadi==="function") postarNaPozadi();
   const empty=document.getElementById("emptyCard");
-  if(!firmaData && b2bMaPristup()){ b2bLenRezim(); return; }
+  // Aj kým sa B2B pozvánka prijíma alebo keď sa neprijala — sprievodca firmy by ju prekryl (č. 289).
+  if(!firmaData && (b2bMaPristup() || B2B.pozvankaBezi || B2B.pozvankaChyba)){ b2bLenRezim(); return; }
   if(!firmaData){
     // nová firma bez dát → spusti onboarding sprievodcu (nie suchý import-only stav)
     empty.classList.add("hidden");
@@ -26401,24 +26402,46 @@ const B2B_HLASKY_POZVANKY={ neplatna:"Pozvánka neexistuje alebo bola zrušená.
 async function b2bPrijmiPozvanku(token, id){
   const { data, error } = await sb.rpc("b2b_prijmi_pozvanku", { p_token:token||null, p_id:id||null });
   if(error) throw error;
-  if(!data || !data.ok) throw new Error(B2B_HLASKY_POZVANKY[data&&data.chyba]||"Pozvánku do projektu sa nepodarilo prijať.");
+  if(!data || !data.ok){ const e=new Error(B2B_HLASKY_POZVANKY[data&&data.chyba]||"Pozvánku do projektu sa nepodarilo prijať."); e.kod=data&&data.chyba; throw e; }
   await b2bNacitajClenstvo();
   B2B.pid=data.projekt_id; B2B.pohlad="moj"; B2B.d=null;
   return data;
 }
+// Kým sa pozvánka prijíma (beží súbežne s načítaním firmy), účet bez firmy nesmie
+// skončiť v sprievodcovi firmy; neúspech (iný e-mail, po platnosti…) ukáže karta
+// v module B2B, nie alert nad sprievodcom firmy (č. 289, návrh §21.6).
 async function b2bSpracujPozvanku(){
   if(b2bBezServera()) return false;
   const t=gpsCitaj(PROJEKT_POZVANKA_KLUC); if(!t) return false;
+  B2B.pozvankaBezi=true; B2B.pozvankaChyba=null;   // synchrónne — pred prvým await
   try{
-    const { data:{ user } } = await sb.auth.getUser(); if(!user) return false;
+    const { data:{ user } } = await sb.auth.getUser(); if(!user){ B2B.pozvankaBezi=false; return false; }
     gpsUloz(PROJEKT_POZVANKA_KLUC, null);       // aj pri neúspechu — inak by sa skúšala pri každom štarte
     b2bPozvankaPrihlasenie();
     history.replaceState({}, "", location.pathname);
     await b2bPrijmiPozvanku(t);
+    B2B.pozvankaBezi=false;
     oznamPas("Ste v projekte — B2B služby → Pracovný výkaz.");
     otvorApp("b2b_vykaz");
     return true;
-  }catch(e){ alert("Pozvánku do projektu sa nepodarilo prijať: "+((e&&e.message)||e)); return false; }
+  }catch(e){
+    B2B.pozvankaBezi=false;
+    B2B.pozvankaChyba={kod:(e&&e.kod)||null, text:(e&&e.message)||String(e)};
+    console.error("B2B: pozvánka sa neprijala", e);
+    B2B.pid=null; otvorApp("b2b_vykaz");
+    return false;
+  }
+}
+// Karta nad zoznamom projektov: pozvánka sa prijíma / neprijala sa a čo s tým.
+function b2bPozvankaStavHtml(){
+  if(B2B.pozvankaBezi) return `<div class="card" style="padding:12px 14px;border-color:var(--brand)"><b>Prijímam pozvánku do projektu…</b></div>`;
+  const ch=B2B.pozvankaChyba; if(!ch) return "";
+  const iny=ch.kod==="iny_email";
+  return `<div class="card" style="padding:12px 14px;border-color:var(--warn)" id="b2bPozvankaChyba"><b>${iny? "Pozvánka prišla na inú e-mailovú adresu" : "Pozvánku do projektu sa nepodarilo prijať"}</b>
+    <div class="csub" style="margin:4px 0 8px">${iny
+      ? `Ste prihlásený ako <b>${esc(_prihlasenyEmail||"—")}</b>, pozvánka je vystavená na inú adresu. Odhláste sa a prihláste (alebo zaregistrujte) tou, na ktorú pozvánka prišla — alebo požiadajte správcu projektu o pozvánku na túto adresu.`
+      : esc(ch.text)}</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">${iny? `<button class="aabtn pri" onclick="doLogout()">Odhlásiť sa</button>` : ""}<button class="aabtn" onclick="B2B.pozvankaChyba=null;appB2bVykaz()">Zavrieť</button></div></div>`;
 }
 async function b2bPrijmiZAppky(id){
   try{ await b2bPrijmiPozvanku(null, id); appB2bVykaz(); }
@@ -26430,6 +26453,90 @@ async function b2bPrijmiZAppky(id){
 function b2bLenRezim(){
   ["emptyCard","dashboard","dashTitle","obView"].forEach(id=>{ const x=document.getElementById(id); if(x) x.classList.add("hidden"); });
   otvorApp("b2b_vykaz");
+}
+// ── B2B: sprievodca pri prvom otvorení projektu (č. 289, NAVRH_B2B_VYKAZ §21) ──
+// Kroky podľa roly s pohyblivou obrazovkou z tých istých snímok ako návody
+// (prehrávač návodov). „Videl“ sa pamätá v b2b_moje (súkromné nastavenia
+// projektu — účet × projekt, nie zariadenie). Posledný krok s ponukou vlastnej
+// firmy len pre človeka BEZ firmy, ktorý nie je Management a support (Roman).
+function b2bUvodKroky(d){
+  const os=b2bMojaOsoba(), management=b2bJeManagement(os), spravca=!!(os && os.spravca);
+  const D=(d && d.projekt && d.projekt.data)||{}, naz=(d && d.projekt && d.projekt.nazov)||"projekt";
+  const m=os && (D.miesta||[]).find(x=>x.id===b2bMiestoOsoby(os, b2bIso(new Date())));
+  const poz=m && (D.pozicie||[]).find(p=>p.id===m.pozicia);
+  const kto=management? "Ste v ňom ako <b>Management a support</b> — pracujete s výkazmi celého tímu, hodiny sami nevykazujete a nastavenia projektu mení správca."
+    : "Tu vykazujete hodiny na zmluvu"+(poz? " ako <b>"+esc(poz.nazov_vo_vykaze||poz.nazov_v_zmluve||poz.id)+"</b>" : "")+". Správca z hodín tímu zloží mesačný pracovný výkaz pre objednávateľa.";
+  const k=[{id:"vitaj", nadpis:"Vitajte v projekte "+naz, html:kto+" Čo do projektu zapíšete, vidia všetci jeho členovia.", snimky:[]}];
+  if(!management) k.push(
+    {id:"hodiny", nadpis:"Zapíšte hodiny", html:"V záložke <b>Môj mesiac</b> pridáte záznam: dátum, čas alebo počet hodín, aktivita a krátky popis práce. Z popisov vznikne popis činnosti vo výkaze — oplatí sa písať konkrétne.", snimky:["b2b_vykaz-hodiny-1","b2b_vykaz-hodiny-2"]},
+    {id:"kalendar", nadpis:"Alebo ich prevezmite z kalendára", html:"<b>📅 Z kalendára (.ics)</b> načíta stretnutia z Outlooku či Google kalendára. Označíte tie, ktoré patria projektu — appka si výber zapamätá na ďalší mesiac.", snimky:["b2b_vykaz-kalendar-1","b2b_vykaz-kalendar-2","b2b_vykaz-kalendar-3"]},
+    {id:"hotovo", nadpis:"Na konci mesiaca: Mesiac hotový", html:"Keď máte mesiac zapísaný, zaškrtnite <b>Mesiac hotový</b>. Správca uvidí, na koho nečaká, a zloží výkaz tímu.", snimky:["b2b_vykaz-hodiny-3","b2b_vykaz-vykaz-1"]});
+  else k.push(
+    {id:"tim", nadpis:"Výkaz tímu", html:"V <b>Spoločnom výkaze</b> opravíte hodiny dňa a označíte mesiace členov ako hotové; výkaz sa skladá z hodín celého tímu.", snimky:["b2b_vykaz-vykaz-1","b2b_vykaz-vykaz-2"]},
+    {id:"objednavky", nadpis:"Objednávky pre klienta", html:"V <b>Objednávkach</b> pripravíte koncept e-mailu s objednávkou na mesiac a potvrdenie zapíšete z mailu klienta.", snimky:["b2b_vykaz-objednavka-1","b2b_vykaz-objednavka-3","b2b_vykaz-objednavka-4"]},
+    {id:"email", nadpis:"E-mail projektu", html:"Objednávky a výkazy preposlané na adresu projektu počkajú v záložke <b>Projekt</b> na spracovanie.", snimky:["b2b_vykaz-email-2","b2b_vykaz-email-3"]});
+  if(spravca) k.push({id:"nastavenia", nadpis:"Ste správca projektu", html:"V záložke <b>Projekt</b> upravujete zmluvu, pozície a tím a posielate pozvánky. Výkaz pre objednávateľa zložíte v <b>Spoločnom výkaze</b>.", snimky:["b2b_vykaz-projekt-5","b2b_vykaz-vykaz-3"]});
+  if(!firmaData && !management) k.push({id:"ponuka", nadpis:"Fakturujete hodiny ako živnostník?", html:b2bPonukaFirmyHtml(), snimky:["b2b_vykaz-fakturovat-1","b2b_vykaz-fakturovat-2"], ponuka:true});
+  return k;
+}
+// Ponuka vlastnej firmy — jeden text pre sprievodcu, menu účtu aj „Fakturovať hodiny…“.
+// Len to, čo plán Free naozaj má (PLANY.free.moduly; DPH a priznanie sú v platených).
+function b2bPonukaFirmyHtml(){
+  return `Popri projekte si v eživnostníku môžete viesť aj vlastnú firmu:<ul style="margin:6px 0 6px;padding-left:18px">
+    <li>faktúru z hodín projektu vystavíte cez <b>→ Do Výkazov</b></li>
+    <li>prijímate e-faktúry — od 1. 1. 2027 ich musí vedieť prijať každý podnikateľ</li>
+    <li>výdavky a bločky odfotíte, appka ich prečíta</li>
+    <li>platby z banky sa k faktúram priradia samy</li></ul>
+    Začať môžete v bezplatnom pláne Free; DPH a daňové priznanie sú v platených plánoch. Projekt ostáva, kde je.`;
+}
+function b2bPonukaFirmy(){
+  openModal("✨ Vlastná firma v eživnostníku", `<div style="font-size:13.5px;line-height:1.55">${b2bPonukaFirmyHtml()}</div>`,
+    ()=>{ b2bZalozFirmu(); }, null, null, "Založiť firmu");
+}
+function b2bZalozFirmu(){ B2B.uvod=null; spustiOnboarding(); }
+async function b2bUvodZapamataj(d){
+  if(!d || (d.moje && d.moje.uvod)) return;
+  d.moje=Object.assign({}, d.moje, {uvod:b2bIso(new Date())});
+  try{
+    const r=await sb.from("b2b_moje").upsert({user_id:_prihlasenyUser, projekt_id:d.pid, data:d.moje, upravene:new Date().toISOString()}, {onConflict:"user_id,projekt_id"});
+    if(r.error) throw r.error;
+  }catch(e){ console.error("B2B: sprievodca sa nezapamätal (ukáže sa aj nabudúce)", e); }
+}
+// Automaticky raz za reláciu a projekt, kým nie je zapamätaný; inak cez odkaz „sprievodca“.
+function b2bUvodAuto(d){
+  B2B._uvodSkusany=B2B._uvodSkusany||{};
+  if(!d || d.chyba || (d.moje && d.moje.uvod) || !b2bMojaOsoba() || B2B._uvodSkusany[d.pid]) return;
+  B2B._uvodSkusany[d.pid]=true;
+  setTimeout(()=>{ if(B2B.d===d && modulNaObrazovke()==="b2b_vykaz") b2bUvodOtvor(); }, 0);
+}
+function b2bUvodOtvor(){
+  const d=B2B.d; if(!d || d.chyba) return;
+  B2B.uvod={pid:d.pid, kroky:b2bUvodKroky(d), i:0};
+  b2bUvodZapamataj(d);
+  // Snímky sú v navody_snimky.js — bez nich ide sprievodca len s textom.
+  navodyNacitaj().catch(()=>{}).then(()=>b2bUvodKrok(0));
+}
+function b2bUvodKrok(i){
+  const u=B2B.uvod; if(!u || !B2B.d || B2B.d.pid!==u.pid) return;
+  u.i=Math.max(0, Math.min(i, u.kroky.length-1));
+  const k=u.kroky[u.i], posledny=u.i===u.kroky.length-1;
+  const prehravac=window.NAVODY_SNIMKY? nvPrehravacHtml(k.snimky.map(s=>({snimka:s, text:k.nadpis}))) : "";
+  const body=u.kroky.map((x,j)=>`<span style="display:inline-block;width:7px;height:7px;border-radius:50%;margin:0 3px;background:${j===u.i?"var(--brand)":"var(--line)"}"></span>`).join("");
+  openModal("Sprievodca projektom · "+(u.i+1)+"/"+u.kroky.length, `
+    <div id="b2bUvod" data-krok="${esc(k.id)}">
+      <div style="font-size:16px;font-weight:700;margin:0 0 6px">${esc(k.nadpis)}</div>
+      <div style="font-size:13.5px;line-height:1.55;margin:0 0 10px">${k.html}</div>
+      ${prehravac}
+      <div style="text-align:center;margin:10px 0 4px">${body}</div>
+      <div style="display:flex;justify-content:space-between;gap:8px;margin-top:6px">
+        ${u.i? `<button class="aabtn" onclick="b2bUvodKrok(${u.i-1})">‹ Späť</button>` : `<span></span>`}
+        ${k.ponuka? `<button class="aabtn" onclick="closeModal()">Teraz nie</button>` : posledny? "" : `<button class="aabtn" onclick="closeModal()" title="Sprievodcu otvoríte znova odkazom pri názve projektu">Preskočiť</button>`}
+      </div>
+      ${k.ponuka? `<div class="csub" style="margin:8px 0 0">Kedykoľvek neskôr: menu účtu → <b>Založiť firmu v eživnostníku</b>.</div>` : ""}
+    </div>`,
+    k.ponuka? ()=>{ b2bZalozFirmu(); } : posledny? ()=>true : ()=>{ b2bUvodKrok(u.i+1); return false; },
+    null, null, k.ponuka? "Založiť firmu" : posledny? "Začať" : "Ďalej ›");
+  if(prehravac) nvSpusti();
 }
 function b2bMesiacTeraz(){ const d=new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"); }
 function b2bPosunMesiac(m, o){ const [r,mm]=m.split("-").map(Number), d=new Date(r,mm-1+o,1); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"); }
@@ -27812,7 +27919,8 @@ function b2bMojMesiacHtml(){
         <button class="aabtn" onclick="b2bPvHodiny(null,null,null,'${os.id}')" title="Zadať skutočne odpracované hodiny za deň — aj bez záznamu; platia vo výkaze aj vo faktúre">＋ Hodiny dňa</button>
         <button class="aabtn" onclick="b2bPvNa8('${os.id}')" title="Nastaviť hodiny dní mesiaca alebo obdobia na celý človekodeň (nahor aj nadol); víkendy a sviatky len so súhlasom">Dni na ${h8} h…</button>
         <button class="aabtn" onclick="b2bPvExport('moj')" title="Stiahnuť len vaše hodiny v tvare výkazu objednávateľa aj s Detailom — na kontrolu">⬇ Môj výkaz</button>
-        ${firmaData && modulPovolenyPreModul("vykazy")? `<button class="aabtn" onclick="b2bDoVykazov()" title="Hodiny mesiaca ako výkaz vašej firmy — odtiaľ protokol a faktúra">→ Do Výkazov</button>` : ""}
+        ${firmaData && modulPovolenyPreModul("vykazy")? `<button class="aabtn" onclick="b2bDoVykazov()" title="Hodiny mesiaca ako výkaz vašej firmy — odtiaľ protokol a faktúra">→ Do Výkazov</button>`
+          : !firmaData? `<button class="aabtn" onclick="b2bPonukaFirmy()" title="Fakturovať hodiny môžete z vlastnej firmy v eživnostníku — účet ju zatiaľ nemá">→ Fakturovať hodiny…</button>` : ""}
         <label class="aabtn" style="display:flex;gap:6px;align-items:center" title="Dať tímu vedieť, že máte mesiac zapísaný — správca vidí, na koho nečaká"><input type="checkbox" style="width:auto"${hotovo?" checked":""} onchange="b2bHotovo('${os.id}',this.checked)"> Mesiac hotový</label>
       </div>
       ${caste.length? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px"><span class="csub" style="margin:0;align-self:center">Časté:</span>${caste.map(a=>`<button class="apill" style="cursor:pointer;border:0" onclick="b2bZaznamNovy('${a.id}')">${esc(a.nazov)}</button>`).join("")}</div>` : ""}
@@ -28668,14 +28776,14 @@ function b2bZoznamHtml(){
       <b>${esc(p.nazov)}</b> <span class="apill" style="font-size:10px">${esc(p.kod)}</span>${p.spravca? ' <span class="apill" style="font-size:10px">správca</span>' : ""}${p.rola==="management"? ' <span class="apill" style="font-size:10px">management</span>' : ""}</div>`).join("");
   const chyba=B2B.chyba? `<div class="card" style="padding:12px 14px;border-color:var(--neg)"><b style="color:var(--neg)">Projekty sa nepodarilo načítať</b><div class="csub" style="margin:4px 0 0">${esc(B2B.chyba)} — prázdny zoznam preto nemusí znamenať, že projekty nemáte.</div></div>` : "";
   return `<div class="csub" style="margin:0 2px 14px">Projekty na zmluvu: hodiny tímu z kalendára alebo ručne, mesačný pracovný výkaz pre objednávateľa. Prístup je na pozvánku.</div>
-    ${chyba}${poz}${proj||(!poz? `<div class="aempty">Zatiaľ nie ste v žiadnom projekte.</div>` : "")}
+    ${b2bPozvankaStavHtml()}${chyba}${poz}${proj||(!poz? `<div class="aempty">Zatiaľ nie ste v žiadnom projekte.</div>` : "")}
     ${B2B.zakladatel? `<button class="aabtn pri" onclick="b2bNovyProjekt()" title="Založiť projekt na novú zmluvu — z CRZ, PDF zmluvy alebo JSON">＋ Nový projekt</button>` : ""}
     ${!firmaData? `<div class="csub" style="margin:18px 2px 0">Účet bez vlastnej firmy — <a href="#" onclick="spustiOnboarding();return false">založiť firmu</a> · <a href="#" onclick="doLogout();return false">odhlásiť sa</a></div>` : ""}`;
 }
 async function b2bNacitajAZobraz(){
   try{ const ok=await b2bNacitajProjekt(); if(ok===false) return; B2B.chybaProjektu=null; }
   catch(e){ console.error("B2B: projekt sa nenačítal", e); B2B.chybaProjektu=String((e&&e.message)||e); B2B.d={chyba:true, pid:B2B.pid, mesiac:B2B.mesiac}; }
-  if(modulNaObrazovke()==="b2b_vykaz") appB2bVykaz();
+  if(modulNaObrazovke()==="b2b_vykaz"){ appB2bVykaz(); b2bUvodAuto(B2B.d); }   // sprievodca po prvom načítaní projektu (č. 289)
   // import výkazu prepnutý na mesiac súboru: okno znova s tým istým súborom
   const pok=B2B._impPokracuj; B2B._impPokracuj=null;
   if(pok && B2B.d && !B2B.d.chyba) b2bImportOsoby(pok);
@@ -28698,7 +28806,7 @@ function appB2bVykaz(){
   s.innerHTML=appHlavicka("b2b_vykaz", (B2B.projekty.length>1||B2B.pozvanky.length||B2B.zakladatel? `<button class="aabtn" onclick="b2bSpatZoznam()">‹ Projekty</button>` : ""))+`
     <div data-scroll="b2b">
     <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center;margin:0 2px 12px">
-      <div><b style="font-size:15px">${esc(d.projekt.nazov)}</b></div>
+      <div><b style="font-size:15px">${esc(d.projekt.nazov)}</b> <a href="#" class="csub" style="margin:0 0 0 4px;font-size:12px" onclick="b2bUvodOtvor();return false" title="Ako projekt funguje — krok po kroku">sprievodca</a></div>
       <div style="display:flex;gap:4px;align-items:center"><button class="aabtn" onclick="b2bZmenMesiac(-1)" aria-label="Predchádzajúci mesiac">‹</button>
         <b style="min-width:120px;text-align:center">${esc(B2B_MESIACE[+d.mesiac.slice(5)-1])} ${d.mesiac.slice(0,4)}</b>
         <button class="aabtn" onclick="b2bZmenMesiac(1)" aria-label="Nasledujúci mesiac">›</button></div></div>
@@ -43914,6 +44022,7 @@ function otvorUctoMenu(btn){
     ${TB_CIARA}
     <button onclick="uctoVyber('spatnaVazba')" style="${TB_POLOZKA}">💬 Spätná väzba<div style="font-size:11.5px;color:var(--ink-soft);margin-top:2px">hodnotenie, návrh, otázka, chyba</div></button>
     ${TB_CIARA}
+    ${!firmaData && !localMode && b2bMaPristup()? `<button onclick="uctoVyber('zalozitFirmu')" style="${TB_POLOZKA}">✨ Založiť firmu v eživnostníku<div style="font-size:11.5px;color:var(--ink-soft);margin-top:2px">faktúry, e-faktúry, výdavky, banka</div></button>${TB_CIARA}` : ""}
     <button onclick="uctoVyber('nastavenia')" style="${TB_POLOZKA}">⚙ Nastavenia a dáta</button>
     ${TB_CIARA}
     <button onclick="uctoVyber('zaloha')" style="${TB_POLOZKA}">↧ Stiahnuť zálohu</button>
@@ -43941,6 +44050,8 @@ function uctoVyber(co){
   // Účet bez firmy (onboarding) nemá Nastavenia — zmazanie účtu je preto aj tu (N1).
   if(co==="zmazatUcet"){ gdprMojeZmazanie(); return; }
   if(co==="spatnaVazba"){ otvorSpatnuVazbu(); return; }
+  // Účet len v B2B (č. 289): ponuka vlastnej firmy je vždy po ruke tu.
+  if(co==="zalozitFirmu"){ b2bPonukaFirmy(); return; }
   if(co==="nastavenia") otvorApp("data");
   else if(co==="zaloha") exportFirmu();
   else if(co==="odhlasit"){
