@@ -22271,8 +22271,8 @@ const DOKUMENTY={
   // `novinka` ukáže okno súhlasu — čo sa vo verzii zmenilo, jednou vetou
   podmienky:{url:"podmienky.html",     n:"Obchodné podmienky",      verzia:"1.11",
              novinka:"Pribudla platba predplatného prevodom a súhlas s tým, že vám faktúry doručujeme elektronicky — e-mailom a v aplikácii."},
-  sukromie: {url:"sukromie.html",      n:"Ochrana osobných údajov", verzia:"1.28",
-             novinka:"B2B projekt môže mať vlastnú e-mailovú adresu: objednávky a výkazy, ktoré na ňu prepošlete, vidia členovia projektu, kým ich nespracujú. B2B služby sú na pozvánku — údaje projektu (mená, hodiny, výkazy, výstupy) vidia všetci jeho členovia, súbory výstupov sa ukladajú šifrovane a server si môže z Centrálneho registra zmlúv stiahnuť verejnú hlavičku a prílohu zmluvy."},
+  sukromie: {url:"sukromie.html",      n:"Ochrana osobných údajov", verzia:"1.29",
+             novinka:"Vo výkaze B2B projektu vie asistent na tlačidlo „Doplniť detaily z výkazov“ navrhnúť odrážky k činnostiam z objednávky: jazykovému modelu pošle činnosti a popisy, aktivity a minúty záznamov mesiaca — bez mien osôb a dátumov. Do výkazu ide návrh až po potvrdení."},
   zmazanie: {url:"zmazanie-uctu.html", n:"Zmazanie účtu a údajov"},
 };
 // Záznam súhlasu k účtu (ROZHODNUTIA č. 52). Zmluva vzniká vytvorením účtu
@@ -25868,20 +25868,68 @@ function b2bDetailVsSuhrn(organizacie, detail, spolu){
   return {suhrn, detail:det, zhoda:suhrn===det};
 }
 function b2bZoznamTextom(n){ return n.length<=1 ? n.join("") : n.slice(0,-1).join(", ")+" a "+n[n.length-1]; }
-// Popis pracovnej činnosti v tvare vzoru: „<oblasti> – <pozície>:“ pre
-// pozície s hodinami, potom „vrátane nasledovných aktivít:“ a aktivity mesiaca.
-function b2bPopisCinnosti(D, pozicieSHodinami, aktivityNazvy){
+// Popis pracovnej činnosti. Keď mesiac má objednávku (č. 288, návrh §20): za každú
+// pozíciu s hodinami, ktorá je v objednávke, jej názov a činnosti z objednávky
+// (zmluva + Ďalšie body); pod činnosťou odrážky detailov, keď ich dodá návrh
+// (`detaily` {pozícia: [[detail…] po činnostiach]}). Pozície mimo objednávky
+// a mesiac bez objednávky po starom v tvare vzoru: „<oblasti> – <pozície>:“.
+// Na konci „vrátane nasledovných aktivít:“ a aktivity mesiaca.
+function b2bPopisPozicie(D, pozicieSHodinami, mesiac){
+  const ob=b2bObjednavkaMesiaca(D, mesiac); if(!ob) return null;
+  const pozicie=[];
+  (D.pozicie||[]).forEach(p=>{
+    if(!pozicieSHodinami.has(p.id)) return;
+    const r=(ob.pozicie||[]).find(x=>x.pozicia===p.id); if(!r) return;
+    const cinnosti=b2bObjCinnostiTexty(p, r); if(!cinnosti.length) return;
+    pozicie.push({id:p.id, nazov:p.nazov_vo_vykaze||p.nazov_v_zmluve||p.id, cinnosti});
+  });
+  return pozicie.length? {objednavka:ob.id, pozicie} : null;
+}
+function b2bPopisCinnosti(D, pozicieSHodinami, aktivityNazvy, mesiac, detaily){
   const P=D.popis_cinnosti_navrh||{}, obl={}, poz={};
   (D.oblasti||[]).forEach(o=>{ obl[o.id]=o.text; });
   (D.pozicie||[]).forEach(p=>{ poz[p.id]=p; });
-  const riadky=[];
-  (P.riadky||[]).forEach(r=>{
-    const pz=(r.pozicie||[]).filter(id=>pozicieSHodinami.has(id)); if(!pz.length) return;
-    const t=(r.oblasti||[]).map(id=>obl[id]).filter(Boolean).join("; "); if(!t) return;
-    riadky.push(t.charAt(0).toUpperCase()+t.slice(1)+" – "+b2bZoznamTextom(pz.map(id=>(poz[id]&&poz[id].nazov_vo_vykaze)||id))+":");
+  const riadky=[], zObj=b2bPopisPozicie(D, pozicieSHodinami, mesiac), vObj=new Set(zObj? zObj.pozicie.map(p=>p.id) : []);
+  if(zObj) zObj.pozicie.forEach(p=>{
+    if(riadky.length) riadky.push("");
+    riadky.push(p.nazov+":");
+    p.cinnosti.forEach((c,ci)=>{
+      const det=((detaily&&detaily[p.id]&&detaily[p.id][ci])||[]).map(x=>String(x).trim()).filter(Boolean);
+      // Dvojbodka len pred odrážkami — samotná činnosť je veta, nie nadpis.
+      riadky.push(det.length? c.replace(/[\s.:;,]+$/,"")+":" : c);
+      det.forEach(x=>riadky.push("- "+x));
+    });
   });
+  const zoZmluvy=[];
+  (P.riadky||[]).forEach(r=>{
+    const pz=(r.pozicie||[]).filter(id=>pozicieSHodinami.has(id) && !vObj.has(id)); if(!pz.length) return;
+    const t=(r.oblasti||[]).map(id=>obl[id]).filter(Boolean).join("; "); if(!t) return;
+    zoZmluvy.push(t.charAt(0).toUpperCase()+t.slice(1)+" – "+b2bZoznamTextom(pz.map(id=>(poz[id]&&poz[id].nazov_vo_vykaze)||id))+":");
+  });
+  if(zoZmluvy.length){ if(riadky.length) riadky.push(""); riadky.push(...zoZmluvy); }
   if(aktivityNazvy.length){ if(riadky.length) riadky.push(""); riadky.push(P.uvod_aktivit||"vrátane nasledovných aktivít:"); aktivityNazvy.forEach(a=>riadky.push("- "+a)); }
   return riadky.join("\n");
+}
+// Čo z výkazu ide modelu pri návrhu detailov (č. 288): po pozíciách z objednávky
+// činnosti a záznamy mesiaca zlúčené podľa popisu a aktivity so súčtom minút.
+// BEZ mien osôb, dátumov a organizácií — zásady 1.29, časť Asistent. Strop na
+// pozíciu a dĺžku popisu drží požiadavku malú (najdlhšie záznamy idú prvé).
+const B2B_POPIS_MAX_ZAZNAMOV=150, B2B_POPIS_MAX_TEXT=300;
+function b2bPopisVstup(zPoz, vOrg, aktMap){
+  if(!zPoz) return null;
+  return {objednavka:zPoz.objednavka, pozicie:zPoz.pozicie.map(p=>{
+    const m=new Map();
+    vOrg.filter(x=>x.pozicia===p.id).forEach(x=>x.zaznamy.forEach(z=>{
+      const popis=String(z.popis||"").replace(/\s+/g," ").trim().slice(0,B2B_POPIS_MAX_TEXT);
+      const aktivita=String((aktMap[z.aktivita_id]||{}).nazov||"").trim();
+      if(!popis && !aktivita) return;
+      const k=popis.toLowerCase()+"|"+aktivita.toLowerCase();
+      if(!m.has(k)) m.set(k, {popis, aktivita, minuty:0});
+      m.get(k).minuty+=+z.minuty||0;
+    }));
+    const zaznamy=[...m.values()].sort((a,b)=>b.minuty-a.minuty).slice(0,B2B_POPIS_MAX_ZAZNAMOV);
+    return {pozicia:p.id, nazov:p.nazov, cinnosti:p.cinnosti.slice(), zaznamy};
+  })};
 }
 // MODEL VÝKAZU. vstup: {projekt, osoby, aktivity, zaznamy, mesiac:"RRRR-MM",
 // uprava, mesiace (stavy „hotovo“), cerpanieDoteraz {pozícia: hodiny pred
@@ -25957,8 +26005,10 @@ function b2bVykazModel(vstup){
     const spolu=rows.reduce((a,r)=>a+r.spolu,0);
     const aktNazvy=[]; vOrg.forEach(x=>x.zaznamy.forEach(z=>{ const a=aktMap[z.aktivita_id]; if(a && a.nazov && !aktNazvy.includes(a.nazov)) aktNazvy.push(a.nazov); }));
     const sHod=new Set(rows.filter(r=>r.spolu>0).map(r=>r.id));
-    const popis=(U.popis && U.popis[o.id]!=null)? String(U.popis[o.id]) : b2bPopisCinnosti(D, sHod, aktNazvy);
-    return {id:o.id, nazov:o.nazov, pozicie:rows, spoluDni, spolu, cd:spolu/hodinDna, suma:Math.round(rows.reduce((a,r)=>a+r.suma,0)*100)/100, popis};
+    const popis=(U.popis && U.popis[o.id]!=null)? String(U.popis[o.id]) : b2bPopisCinnosti(D, sHod, aktNazvy, vstup.mesiac);
+    // Vstup návrhu detailov z toho istého výberu ako text (pozície s hodinami, objednávka mesiaca).
+    const popisVstup=b2bPopisVstup(b2bPopisPozicie(D, sHod, vstup.mesiac), vOrg, aktMap);
+    return {id:o.id, nazov:o.nazov, pozicie:rows, spoluDni, spolu, cd:spolu/hodinDna, suma:Math.round(rows.reduce((a,r)=>a+r.suma,0)*100)/100, popis, popisVstup, aktNazvy, sHod:[...sHod]};
   });
   // Detail — riadok na záznam; hodiny dňa osoby na prvom riadku dňa.
   const detail=[];
@@ -26733,6 +26783,51 @@ function b2bPvPopis(orgId, text){
   if(text==null) delete U.popis[orgId]; else U.popis[orgId]=text;
   b2bPrekresliPv();
 }
+// Návrh detailov popisu činnosti (č. 288, návrh §20). Model priradí prácu zo záznamov
+// mesiaca k činnostiam z objednávky; nič sa neuloží samo — „Použiť návrh“ zapíše text
+// ako ručnú úpravu popisu (b2bPvPopis) a nezaradené sa len ukážu, do textu nejdú.
+// Odpoveď modelu sa berie len v tvare, ktorý sedí na odoslané pozície a činnosti.
+const B2B_POPIS_MAX_DETAILOV=8, B2B_POPIS_MAX_DETAIL=200;
+function b2bPopisZNavrhu(vstup, navrh){
+  const detaily={}, nezaradene=[]; let pocet=0;
+  const cisty=x=>String(x==null? "" : x).replace(/\s+/g," ").trim().replace(/^[-–•*]\s*/,"").slice(0,B2B_POPIS_MAX_DETAIL);
+  const pole=x=>Array.isArray(x)? x : [];   // odpoveď modelu sa berie len v očakávanom tvare
+  pole(navrh&&navrh.pozicie).forEach(np=>{
+    const p=(vstup.pozicie||[]).find(x=>x.pozicia===(np&&np.pozicia)); if(!p) return;
+    const det=detaily[p.pozicia]=detaily[p.pozicia]||p.cinnosti.map(()=>[]);
+    pole(np.cinnosti).forEach(nc=>{
+      const i=Math.round(+(nc&&nc.c))-1; if(!(i>=0 && i<p.cinnosti.length)) return;
+      pole(nc.detaily).map(cisty).filter(Boolean).forEach(t=>{
+        if(det[i].length<B2B_POPIS_MAX_DETAILOV && !det[i].some(x=>x.toLowerCase()===t.toLowerCase())){ det[i].push(t); pocet++; } });
+    });
+  });
+  pole(navrh&&navrh.nezaradene).map(cisty).filter(Boolean).forEach(t=>{ if(!nezaradene.includes(t)) nezaradene.push(t); });
+  return {detaily, nezaradene, pocet};
+}
+async function b2bPopisNavrh(orgId){
+  const d=B2B.d; if(!d || !b2bSomManagement()) return;
+  const D=d.projekt.data||{}, model=b2bModelZoSnimky(b2bSnimka(d), d.mesiac, B2B.pvUprava||{}), o=model.organizacie.find(x=>x.id===orgId);
+  const vs=o && o.popisVstup;
+  if(!vs) return alert("Mesiac nemá objednávku s činnosťami pre pozície s hodinami — návrh nie je z čoho skladať.");
+  if(!vs.pozicie.some(p=>p.zaznamy.length)) return alert("Záznamy mesiaca nemajú popis ani aktivitu — detaily nie je z čoho doplniť.");
+  if(!confirm("Činnosti z objednávky a popisy a aktivity záznamov mesiaca — bez mien a dátumov — pôjdu jazykovému modelu Claude (Anthropic, USA), Zásady ochrany súkromia, časť Asistent. Vráti návrh, nič sa neuloží samo. Pokračovať?")) return;
+  const pid=d.pid, mesiac=d.mesiac;
+  oznamPas("Asistent skladá návrh popisu — trvá to do minúty…");
+  let r;
+  try{ r=await b2bEdge("popis_navrh", {projekt:pid, mesiac, pozicie:vs.pozicie}); }
+  catch(e){ return b2bChyba(e, "Návrh popisu sa nepodarilo pripraviť"); }
+  // Medzitým iný projekt alebo mesiac — návrh patrí výkazu, z ktorého odišiel.
+  if(!B2B.d || B2B.d.pid!==pid || B2B.d.mesiac!==mesiac) return;
+  const n=b2bPopisZNavrhu(vs, r.navrh), text=b2bPopisCinnosti(D, new Set(o.sHod), o.aktNazvy, mesiac, n.detaily);
+  const upraveny=(B2B.pvUprava&&B2B.pvUprava.popis&&B2B.pvUprava.popis[orgId]!=null);
+  openModal("✨ Návrh popisu činnosti", `
+    <div class="csub" style="margin:0 0 6px">Asistent priradil prácu zo záznamov mesiaca k činnostiam z objednávky (${n.pocet} ${sklon(n.pocet,"odrážka","odrážky","odrážok")}). Skontrolujte ho — po použití sa text dá ďalej upravovať.${upraveny? " <b>Použitie nahradí váš upravený text.</b>" : ""}</div>
+    <textarea id="b2bPopisNavrhText" rows="14" readonly style="width:100%;font:inherit;font-size:12.5px;border:1.5px solid var(--line);border-radius:10px;padding:8px">${esc(text)}</textarea>
+    ${n.nezaradene.length? `<div style="margin-top:10px;font-size:13px;font-weight:600">Nezaradené (${n.nezaradene.length}) — do popisu nejdú</div>
+      <div class="csub" style="margin:2px 0 4px">Práca zo záznamov, ktorú asistent nepriradil k žiadnej objednanej činnosti. Ak patrí do výkazu, doplňte ju po použití ručne.</div>
+      <ul style="margin:0;padding-left:18px;font-size:12.5px">${n.nezaradene.map(t=>`<li>${esc(t)}</li>`).join("")}</ul>` : ""}`,
+    n.pocet? ()=>{ b2bPvPopis(orgId, text); oznamPas("Popis činnosti doplnený z výkazov — uloží sa s verziou výkazu."); } : null, null, "siroky", "Použiť návrh");
+}
 function b2bPvOrganizacia(orgId, zapnut){
   const d=B2B.d, vsetky=((d.projekt.data||{}).organizacie||[]).map(o=>o.id);
   const U=B2B.pvUprava=Object.assign({}, B2B.pvUprava||{});
@@ -27493,6 +27588,7 @@ function b2bNahladHtml(model, upravy){
       <div class="b2bscroll b2bpvmrz"><table class="b2bt" data-org="${esc(o.id)}"><thead><tr><th class="b2bl">Deň</th><th class="b2bpoc">Počet expertov</th>${hlav}<th>∑ ČH</th><th>∑ ČD</th><th>∑ €</th></tr></thead><tbody>${riadky}${spolu}</tbody></table></div>
       ${b2bNahladDniHtml(model, o, bunka, fh)}
       <div class="mfield" style="margin-top:10px"><label>Popis pracovnej činnosti${upravy? ` <span style="font-weight:400">(text sa dá upraviť${upravy.popisUpraveny&&upravy.popisUpraveny[o.id]? ` · <a href="#" onclick="b2bPvPopis('${esc(o.id)}',null);return false">vrátiť automatický</a>` : ""})</span>` : ""}</label>
+        ${upravy && upravy.mozeNavrh && o.popisVstup && o.popisVstup.pozicie.some(p=>p.zaznamy.length)? `<button class="aabtn" style="margin:2px 0 6px" onclick="b2bPopisNavrh('${esc(o.id)}')" title="Asistent priradí prácu zo záznamov mesiaca k činnostiam z objednávky a navrhne odrážky — návrh uvidíte pred použitím">✨ Doplniť detaily z výkazov</button>` : ""}
         <textarea rows="6" style="width:100%;font:inherit;font-size:12.5px;border:1.5px solid var(--line);border-radius:10px;padding:8px" ${upravy? `onchange="b2bPvPopis('${esc(o.id)}',this.value)"` : "readonly"}>${esc(o.popis)}</textarea></div>
     </div>`;
   }).join("");
@@ -27556,7 +27652,7 @@ function b2bPvHtml(){
       </div>
       <div class="csub" style="margin:8px 0 0">Spolu ${model.spolu} h · ${eur(model.suma)} bez DPH · fond ${model.fond} h. ${sv? "Export ide zo schválenej verzie "+sv.verzia+", nič sa neukladá." : "Export uloží novú verziu, ak sa niečo zmenilo."}</div>
     </div>
-    <div id="b2bPvNahlad">${b2bNahladHtml(model, zamknute? null : {popisUpraveny:U.popis||{}})}</div>`;
+    <div id="b2bPvNahlad">${b2bNahladHtml(model, zamknute? null : {popisUpraveny:U.popis||{}, mozeNavrh:b2bSomManagement()})}</div>`;
 }
 function b2bPrekresliPv(){ if(B2B.pohlad==="pv" && B2B.d) prekresliSoScrollom(()=>appB2bVykaz()); }
 function b2bZaznamForm(z){
@@ -27960,6 +28056,24 @@ function b2bObjPredmetSpravy(obj, D){
 function b2bObjMiestaPozicie(D, p){ return (D.miesta||[]).filter(m=>m.pozicia===p.id).sort((a,b)=>(a.poradie_v_prilohe||0)-(b.poradie_v_prilohe||0)); }
 // Riadky v poradí pozícií zmluvy; miesto inej pozície sa nezaráta. Cena za ČH
 // s DPH sa zaokrúhli na centy pred násobením — ako v predlohe (47 × 1,23 = 57,81).
+// Činnosti pozície v objednávke: zaškrtnuté zo zmluvy (poradie zmluvy) a za nimi
+// „Ďalšie body“ z mailu. Jedno pravidlo pre e-mail objednávky aj popis činnosti PV.
+function b2bObjCinnostiTexty(p, r){
+  return (p.cinnosti||[]).filter(c=>(r.cinnosti||[]).includes(c.id)).map(c=>c.text)
+    .concat((r.dalsie||[]).map(t=>String(t).trim()).filter(Boolean));
+}
+// Objednávka mesiaca pre popis činnosti PV (č. 288, návrh §20): potvrdená, ktorej obdobie
+// zasahuje do mesiaca (pri viacerých tá s najväčším prekryvom); keď potvrdená nie je, poslaná.
+function b2bObjednavkaMesiaca(D, mesiac){
+  const [r,m]=String(mesiac||"").split("-").map(Number); if(!r || !m) return null;
+  const od=mesiac+"-01", doD=mesiac+"-"+String(new Date(r,m,0).getDate()).padStart(2,"0");
+  const prekryv=o=>{ const a=o.od>od? o.od : od, b=o.do<doD? o.do : doD; return a<=b? Math.round((Date.parse(b)-Date.parse(a))/864e5)+1 : 0; };
+  for(const st of ["potvrdena","poslana"]){
+    const k=(D.objednavky||[]).filter(o=>o && o.stav===st && o.od && o.do && prekryv(o)>0).sort((a,b)=>prekryv(b)-prekryv(a));
+    if(k.length) return k[0];
+  }
+  return null;
+}
 function b2bObjednavkaModel(obj, D){
   const mPoz=Object.fromEntries((D.miesta||[]).map(m=>[m.id,m.pozicia]));
   const dph=obj.dph_pct!=null && obj.dph_pct!==""? +obj.dph_pct : b2bObjDphPct(D);
@@ -27976,7 +28090,7 @@ function b2bObjednavkaModel(obj, D){
     const cena=p.sadzba_bez_dph!=null && p.sadzba_bez_dph!==""? Math.round(p.sadzba_bez_dph*(1+dph/100)*100)/100 : null;
     if(!(hNa>0)) chyby.push(nazov+": zadajte počet ČH na experta.");
     if(cena==null) chyby.push(nazov+": pozícia nemá sadzbu — doplňte ju v Projekte → Zmluva a nastavenia → Pozície.");
-    const cinnosti=(p.cinnosti||[]).filter(c=>(r.cinnosti||[]).includes(c.id)).map(c=>c.text).concat((r.dalsie||[]).map(t=>String(t).trim()).filter(Boolean));
+    const cinnosti=b2bObjCinnostiTexty(p, r);
     if(!cinnosti.length) pozor.push(nazov+": bez činností — e-mail nepovie, čo majú experti robiť.");
     if(p.rozpocet_hodin>0 && spoluH>p.rozpocet_hodin) pozor.push(nazov+": "+b2bObjH(spoluH)+" ČH je viac než celý rozpočet pozície ("+b2bObjH(p.rozpocet_hodin)+" h).");
     riadky.push({pozicia:p.id, nazov, pocet:ms.length, miesta:ms, hodinNaExperta:hNa, spoluH, cena, suma:cena==null? 0 : Math.round(spoluH*cena*100)/100, cinnosti});
