@@ -1442,10 +1442,10 @@ b2b_vykaz: {
       kroky: [
         { text: "V záložke <b>Projekt</b> v karte <b>E-mail projektu</b> skopírujte adresu projektu (správca ju raz vytvorí: zvolí meno — návrh je z kódu projektu — a ťukne na <b>Vytvoriť adresu</b>; potom sa nemení).", tlacidlo: "Kopírovať" },
         { text: "Mail s objednávkou alebo s výkazom (XLSX) prepošlite na túto adresu — ako bežné preposlanie, nie ako prílohu.", tlacidlo: "" },
-        { text: "Pri položke v zozname <b>Na spracovanie</b> ťuknite na <b>Importovať</b> (výkaz) alebo <b>Priradiť k objednávke</b> (objednávka).", tlacidlo: "Priradiť k objednávke", snimka: "b2b_vykaz-email-2" },
+        { text: "Objednávka čaká v záložke <b>Objednávky</b> v karte <b>Objednávky z e-mailu</b> — ťuknite na <b>Priradiť k objednávke</b>. Výkaz čaká v záložke <b>Projekt</b> v zozname <b>Na spracovanie</b> — ťuknite na <b>Importovať</b>.", tlacidlo: "Priradiť k objednávke", snimka: "b2b_vykaz-email-2" },
         { text: "Pri objednávke skontrolujte porovnanie s vaším konceptom a ťuknite na <b>Potvrdiť objednávku</b> — keď sa mail líši, hodiny a počty expertov sa prevezmú z neho.", tlacidlo: "Potvrdiť objednávku", snimka: "b2b_vykaz-email-3" },
       ],
-      tip: "Nič sa neuloží samo — všetko počká na spracovanie. Keď je na adrese niečo nové, nad záložkami svieti pás a pri záložke Projekt počet.",
+      tip: "Nič sa neuloží samo — všetko počká na spracovanie. Keď je na adrese niečo nové, nad záložkami svieti pás a počet pri záložke Objednávky (objednávka) alebo Projekt (výkaz a ostatné). Spracovanú objednávku otvoríte v Objednávkach pod „Spracované a odmietnuté“ — tam sa dá z mailu prevziať znova.",
       podrobnosti: [
         { nadpis: "Čo adresa prijme",
           html: "<p>Výkazy v Exceli (XLSX, XLS, CSV), PDF, Word, obrázky, preposlaný mail (EML, MSG) a ZIP do 15 MB. Telo mailu sa uloží ako objednávka, keď hovorí o objednávke a má obdobie (napr. 1.11.2026 – 30.11.2026). Iné typy sa preskočia a v zozname je napísané prečo.</p>" },

@@ -26474,7 +26474,7 @@ function b2bUvodKroky(d){
   else k.push(
     {id:"tim", nadpis:"Výkaz tímu", html:"V <b>Spoločnom výkaze</b> opravíte hodiny dňa a označíte mesiace členov ako hotové; výkaz sa skladá z hodín celého tímu.", snimky:["b2b_vykaz-vykaz-1","b2b_vykaz-vykaz-2"]},
     {id:"objednavky", nadpis:"Objednávky pre klienta", html:"V <b>Objednávkach</b> pripravíte koncept e-mailu s objednávkou na mesiac a potvrdenie zapíšete z mailu klienta.", snimky:["b2b_vykaz-objednavka-1","b2b_vykaz-objednavka-3","b2b_vykaz-objednavka-4"]},
-    {id:"email", nadpis:"E-mail projektu", html:"Objednávky a výkazy preposlané na adresu projektu počkajú v záložke <b>Projekt</b> na spracovanie.", snimky:["b2b_vykaz-email-2","b2b_vykaz-email-3"]});
+    {id:"email", nadpis:"E-mail projektu", html:"Objednávky a výkazy preposlané na adresu projektu počkajú na spracovanie — objednávky v záložke <b>Objednávky</b>, výkazy v záložke <b>Projekt</b>.", snimky:["b2b_vykaz-email-2","b2b_vykaz-email-3"]});
   if(spravca) k.push({id:"nastavenia", nadpis:"Ste správca projektu", html:"V záložke <b>Projekt</b> upravujete zmluvu, pozície a tím a posielate pozvánky. Výkaz pre objednávateľa zložíte v <b>Spoločnom výkaze</b>.", snimky:["b2b_vykaz-projekt-5","b2b_vykaz-vykaz-3"]});
   if(!firmaData && !management) k.push({id:"ponuka", nadpis:"Fakturujete hodiny ako živnostník?", html:b2bPonukaFirmyHtml(), snimky:["b2b_vykaz-fakturovat-1","b2b_vykaz-fakturovat-2"], ponuka:true});
   return k;
@@ -28274,8 +28274,9 @@ function b2bObjednavkyHtml(){
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">${tl.join("")}</div></div>`;
   };
   return `<div class="card" style="padding:12px 14px"><b>Objednávky</b>
-      <div class="csub" style="margin:4px 0 0">Koncept e-mailovej objednávky pre objednávateľa: ktorí experti z Prílohy 4, koľko hodín a aké činnosti zo zmluvy na obdobie. Objednávateľ ho pošle späť ako objednávku.</div>
+      <div class="csub" style="margin:4px 0 0">Koncept e-mailovej objednávky pre objednávateľa: ktorí experti z Prílohy 4, koľko hodín a aké činnosti zo zmluvy na obdobie. Objednávateľ ho pošle späť ako objednávku.${B2B.d.bezPrijmu? "" : " Jeho mail prepošlite na e-mail projektu (adresa je v záložke Projekt) — objaví sa tu."}</div>
       ${spravca? `<div style="margin-top:10px"><button class="aabtn pri" onclick="b2bObjNova()" title="Pripraviť objednávku na ďalší mesiac — predvyplní sa z poslednej">＋ Nová objednávka</button></div>` : `<div class="csub" style="margin:6px 0 0">Objednávky pripravuje správca alebo Management a support projektu.</div>`}</div>
+    ${b2bPrijateObjHtml(B2B.d)}
     ${b2bObjPodlaOd(b2bObjednavky()).map(karta).join("")||`<div class="aempty">Zatiaľ žiadna objednávka.</div>`}`;
 }
 function b2bObjPosledny(m){ const [r,mm]=m.split("-").map(Number); return m+"-"+String(new Date(r,mm,0).getDate()).padStart(2,"0"); }
@@ -28521,14 +28522,22 @@ async function b2bPrijemAliasVytvor(){
   }catch(e){ b2bChyba(e, "Adresu projektu sa nepodarilo vytvoriť"); }
 }
 function b2bPrijateNove(d){ return ((d&&d.prijate)||[]).filter(x=>x.stav==="nove"); }
+// Mail s objednávkou žije v záložke Objednávky, ostatné prijaté v Projekte
+// (Roman 21. 10. 2026, č. 290: „objednávky — spracované atď. by som prehodil do karty objednávky“).
+function b2bPrijateJeObj(x){ return !!x && x.druh==="objednavka"; }
 function b2bPrijateBanner(d){
-  const n=b2bPrijateNove(d).length; if(!n || B2B.pohlad==="projekt") return "";
-  return `<div class="card" style="padding:10px 14px;border-color:var(--brand);display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap"><span style="font-size:13px">📥 ${n} ${sklon(n,"položka prišla","položky prišli","položiek prišlo")} na e-mail projektu</span><button class="aabtn" onclick="b2bPohlad('projekt')" title="Otvoriť zoznam prijatého v záložke Projekt">Spracovať</button></div>`;
+  const nove=b2bPrijateNove(d), obj=nove.filter(b2bPrijateJeObj).length, ine=nove.length-obj;
+  // Pás vedie do záložky, kde položka čaká; v tej záložke ju človek už vidí.
+  const kam=[];
+  if(ine && B2B.pohlad!=="projekt") kam.push(["projekt", ine, "Projekt"]);
+  if(obj && B2B.pohlad!=="objednavky") kam.push(["objednavky", obj, "Objednávky"]);
+  if(!kam.length) return "";
+  const n=kam.reduce((s,k)=>s+k[1], 0);
+  const tl=kam.map(([p,c,nazov])=>`<button class="aabtn" onclick="b2bPohlad('${p}')" title="Otvoriť prijaté v záložke ${nazov}">${kam.length>1? nazov+" ("+c+")" : "Spracovať"}</button>`).join("");
+  return `<div class="card" style="padding:10px 14px;border-color:var(--brand);display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap"><span style="font-size:13px">📥 ${n} ${sklon(n,"položka prišla","položky prišli","položiek prišlo")} na e-mail projektu</span><div style="display:flex;gap:6px;flex-wrap:wrap">${tl}</div></div>`;
 }
-function b2bPrijemHtml(d){
-  if(d.bezPrijmu) return "";
-  const spravca=b2bSomSpravca(), adr=b2bPrijemAdresa(d), stara=b2bPrijemAdresaStara(d), nove=b2bPrijateNove(d), ine=(d.prijate||[]).filter(x=>x.stav!=="nove");
-  const polozka=x=>{
+// Jedna položka prijatého — ten istý riadok v karte E-mail projektu aj Objednávky z e-mailu.
+function b2bPrijataPolozkaHtml(x){
     const tl=[];
     if(x.stav==="nove"){
       if(x.druh==="vykaz") tl.push(`<button class="aabtn pri" onclick="b2bPrijateImport('${x.id}')" title="Načítať výkaz do importu osoby bez účtu — pred uložením uvidíte náhľad">Importovať</button>`);
@@ -28547,7 +28556,13 @@ function b2bPrijemHtml(d){
       <div class="csub" style="margin:2px 0 0">${esc(x.predmet||"(bez predmetu)")}${x.od_koho? " · od "+esc(x.od_koho) : ""}${x.stav!=="nove"? " · "+(x.stav==="spracovane"? "spracované" : "odmietnuté")+(x.poznamka? " — "+esc(x.poznamka) : "") : ""}</div>
       ${telo && x.druh!=="vykaz"? `<details style="margin-top:4px"><summary style="cursor:pointer;font-size:12.5px">Text mailu</summary><div style="white-space:pre-wrap;font-size:12px;max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px;margin-top:4px">${esc(telo)}</div></details>` : ""}
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;align-items:center;font-size:13px">${tl.join(x.stav==="nove"? "" : " · ")}</div></div>`;
-  };
+}
+function b2bPrijemHtml(d){
+  if(d.bezPrijmu) return "";
+  const spravca=b2bSomSpravca(), adr=b2bPrijemAdresa(d), stara=b2bPrijemAdresaStara(d);
+  const prijate=d.prijate||[], tu=prijate.filter(x=>!b2bPrijateJeObj(x)), nove=tu.filter(x=>x.stav==="nove"), ine=tu.filter(x=>x.stav!=="nove");
+  const obj=prijate.filter(b2bPrijateJeObj), objNove=obj.filter(x=>x.stav==="nove").length;
+  const polozka=b2bPrijataPolozkaHtml;
   return `<div class="card" style="padding:12px 14px"><b>E-mail projektu</b>
     <div class="csub" style="margin:4px 0 6px">Prepošlite sem objednávku od objednávateľa alebo výkaz kolegu (XLSX). Nič sa neuloží samo — počká tu na spracovanie. Adresu poznajú len členovia projektu.</div>
     ${adr? `<div style="display:flex;gap:6px"><input id="b2bPrijemAdr" value="${esc(adr)}" readonly><button class="aabtn" onclick="b2bPrijemKopiruj()" title="Skopírovať adresu projektu">Kopírovať</button></div>
@@ -28557,8 +28572,21 @@ function b2bPrijemHtml(d){
       : spravca && !d.bezAliasu? b2bPrijemAliasFormHtml(d)
       : spravca? `<button class="aabtn pri" onclick="b2bPrijemAdresaNova(false)" title="Vytvoriť prijímaciu adresu projektu">Vytvoriť adresu projektu</button>` : `<div class="csub" style="margin:0">Adresu vytvorí správca projektu.</div>`}
     ${spravca && d.aliasChyba? `<div class="csub" style="margin:4px 0 0;color:var(--warn)">Adresu @${POSTA_DOMENA} sa nepodarilo načítať: ${esc(d.aliasChyba)}</div>` : ""}
-    ${nove.length? `<div style="margin-top:8px;font-size:13px;font-weight:600">Na spracovanie (${nove.length})</div>${nove.map(polozka).join("")}` : adr? `<div class="csub" style="margin:8px 0 0">Nič nečaká.</div>` : ""}
+    ${nove.length? `<div style="margin-top:8px;font-size:13px;font-weight:600">Na spracovanie (${nove.length})</div>${nove.map(polozka).join("")}` : adr && !objNove? `<div class="csub" style="margin:8px 0 0">Nič nečaká.</div>` : ""}
+    ${obj.length? `<div class="csub" style="margin:8px 0 0">Objednávky z mailu sú v záložke <a href="#" onclick="b2bPohlad('objednavky');return false" title="Otvoriť záložku Objednávky">Objednávky</a>${objNove? " — "+objNove+" "+sklon(objNove,"čaká","čakajú","čaká")+" na priradenie" : ""}.</div>` : ""}
     ${ine.length? `<details style="margin-top:8px"><summary style="cursor:pointer;font-size:13px">Spracované a odmietnuté (${ine.length})</summary>${ine.map(polozka).join("")}</details>` : ""}
+  </div>`;
+}
+// Karta v záložke Objednávky: maily s objednávkou — čakajúce na priradenie,
+// spracované a odmietnuté zbalené (tam je aj „otvoriť“ → Prevziať znova z mailu).
+// Kým žiadny neprišiel, karta sa nekreslí.
+function b2bPrijateObjHtml(d){
+  if(!d || d.bezPrijmu) return "";
+  const obj=(d.prijate||[]).filter(b2bPrijateJeObj); if(!obj.length) return "";
+  const nove=obj.filter(x=>x.stav==="nove"), ine=obj.filter(x=>x.stav!=="nove");
+  return `<div class="card" style="padding:12px 14px${nove.length? ";border-color:var(--brand)" : ""}"><b>Objednávky z e-mailu</b>
+    ${nove.length? `<div style="margin-top:8px;font-size:13px;font-weight:600">Na spracovanie (${nove.length})</div>${nove.map(b2bPrijataPolozkaHtml).join("")}` : `<div class="csub" style="margin:4px 0 0">Nič nečaká.</div>`}
+    ${ine.length? `<details style="margin-top:8px"><summary style="cursor:pointer;font-size:13px">Spracované a odmietnuté (${ine.length})</summary>${ine.map(b2bPrijataPolozkaHtml).join("")}</details>` : ""}
   </div>`;
 }
 async function b2bPrijemAdresaNova(prerazit){
@@ -28802,6 +28830,8 @@ function appB2bVykaz(){
   // Management a support nerobí — Môj mesiac nemá, projekt sa mu otvorí na Spoločnom výkaze.
   const jaManagement=b2bJeManagement(b2bMojaOsoba());
   if(jaManagement && B2B.pohlad==="moj") B2B.pohlad="pv";
+  // Počet čakajúcich pri záložke, kde čakajú: objednávky z mailu v Objednávkach, ostatné v Projekte (č. 290).
+  const noveP=b2bPrijateNove(d), nObj=noveP.filter(b2bPrijateJeObj).length, nIne=noveP.length-nObj;
   const obsah=B2B.pohlad==="pv"? b2bPvHtml() : B2B.pohlad==="tim"? b2bTimHtml() : B2B.pohlad==="projekt"? b2bNastaveniaHtml() : B2B.pohlad==="vystupy"? b2bVystupyHtml() : B2B.pohlad==="objednavky"? b2bObjednavkyHtml() : b2bMojMesiacHtml();
   s.innerHTML=appHlavicka("b2b_vykaz", (B2B.projekty.length>1||B2B.pozvanky.length||B2B.zakladatel? `<button class="aabtn" onclick="b2bSpatZoznam()">‹ Projekty</button>` : ""))+`
     <div data-scroll="b2b">
@@ -28810,7 +28840,7 @@ function appB2bVykaz(){
       <div style="display:flex;gap:4px;align-items:center"><button class="aabtn" onclick="b2bZmenMesiac(-1)" aria-label="Predchádzajúci mesiac">‹</button>
         <b style="min-width:120px;text-align:center">${esc(B2B_MESIACE[+d.mesiac.slice(5)-1])} ${d.mesiac.slice(0,4)}</b>
         <button class="aabtn" onclick="b2bZmenMesiac(1)" aria-label="Nasledujúci mesiac">›</button></div></div>
-    <div style="display:flex;gap:6px;flex-wrap:wrap;margin:0 2px 12px">${jaManagement? "" : tab("moj","Môj mesiac")}${tab("tim","Tím")}${tab("pv","Spoločný výkaz")}${tab("vystupy","Výstupy")}${tab("objednavky","Objednávky")}${tab("projekt","Projekt"+(b2bPrijateNove(d).length? " · 📥"+b2bPrijateNove(d).length : ""))}</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin:0 2px 12px">${jaManagement? "" : tab("moj","Môj mesiac")}${tab("tim","Tím")}${tab("pv","Spoločný výkaz")}${tab("vystupy","Výstupy")}${tab("objednavky","Objednávky"+(nObj? " · 📥"+nObj : ""))}${tab("projekt","Projekt"+(nIne? " · 📥"+nIne : ""))}</div>
     ${b2bPrijateBanner(d)}${obsah}</div>`;
 }
 // ── B2B: import kalendára (.ics) — ten istý parser ako Výkazy (návrh §6) ──
