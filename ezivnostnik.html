@@ -22273,7 +22273,7 @@ const DOKUMENTY={
   podmienky:{url:"podmienky.html",     n:"Obchodné podmienky",      verzia:"1.11",
              novinka:"Pribudla platba predplatného prevodom a súhlas s tým, že vám faktúry doručujeme elektronicky — e-mailom a v aplikácii."},
   sukromie: {url:"sukromie.html",      n:"Ochrana osobných údajov", verzia:"1.30",
-             novinka:"V B2B projekte majú osoby kontaktný e-mail (z pozvánky alebo zapísaný členom), ktorý vidia všetci členovia projektu; pri zrušení účtu sa zmaže. Kalendár (.ics) preposlaný na e-mail projektu sa uloží ako príloha so všetkým, čo obsahuje — do záznamov z neho ide len to, čo pri importe označíte."},
+             novinka:"V B2B projekte majú osoby kontaktný e-mail (z pozvánky alebo zapísaný členom), ktorý vidia všetci členovia projektu; pri zrušení účtu sa zmaže. Kalendár (.ics) preposlaný na e-mail projektu sa uloží ako príloha so všetkým, čo obsahuje — do záznamov z neho ide len to, čo pri importe označíte. Návrh popisu činnosti z výkazov môže spustiť každý člen projektu."},
   zmazanie: {url:"zmazanie-uctu.html", n:"Zmazanie účtu a údajov"},
 };
 // Záznam súhlasu k účtu (ROZHODNUTIA č. 52). Zmluva vzniká vytvorením účtu
@@ -26621,6 +26621,9 @@ function b2bSomSpravca(){ const o=b2bMojaOsoba(); return !!(o && o.spravca); }
 // miesto ani vlastné hodiny (stráži server). Bez admin_79 rola chýba = člen tímu.
 function b2bJeManagement(o){ return !!(o && o.rola==="management"); }
 function b2bSomManagement(){ const o=b2bMojaOsoba(); return !!(o && (o.spravca || b2bJeManagement(o))); }
+// Zastupiteľnosť (Roman 21. 10. 2026, č. 295, admin_84): spoločný výkaz — AI návrh popisu,
+// hodiny dňa a Hotovo za kohokoľvek — a objednávky smie každý aktívny člen projektu.
+function b2bSomVTime(){ return !!b2bMojaOsoba(); }
 // Skutočné hodiny dňa (admin_77) ako mapa „osoba|deň → h“ — tak ich číta model.
 function b2bHodinyMapa(rows){
   const m={}; (rows||[]).forEach(h=>{ if(h && h.hodiny!=null) m[h.osoba_id+"|"+String(h.datum).slice(0,10)]=+h.hodiny; });
@@ -26926,7 +26929,7 @@ function b2bPopisZNavrhu(vstup, navrh){
   return {detaily, nezaradene, pocet};
 }
 async function b2bPopisNavrh(orgId){
-  const d=B2B.d; if(!d || !b2bSomManagement()) return;
+  const d=B2B.d; if(!d || !b2bSomVTime()) return;
   const D=d.projekt.data||{}, model=b2bModelZoSnimky(b2bSnimka(d), d.mesiac, B2B.pvUprava||{}), o=model.organizacie.find(x=>x.id===orgId);
   const vs=o && o.popisVstup;
   if(!vs) return alert("Mesiac nemá objednávku s činnosťami pre pozície s hodinami — návrh nie je z čoho skladať.");
@@ -27798,7 +27801,7 @@ function b2bPvHtml(){
       </div>
       <div class="csub" style="margin:8px 0 0">Spolu ${model.spolu} h · ${eur(model.suma)} bez DPH · fond ${model.fond} h. ${sv? "Export ide zo schválenej verzie "+sv.verzia+", nič sa neukladá." : "Export uloží novú verziu, ak sa niečo zmenilo."}</div>
     </div>
-    <div id="b2bPvNahlad">${b2bNahladHtml(model, zamknute? null : {popisUpraveny:U.popis||{}, mozeNavrh:b2bSomManagement()})}</div>`;
+    <div id="b2bPvNahlad">${b2bNahladHtml(model, zamknute? null : {popisUpraveny:U.popis||{}, mozeNavrh:b2bSomVTime()})}</div>`;
 }
 function b2bPrekresliPv(){ if(B2B.pohlad==="pv" && B2B.d) prekresliSoScrollom(()=>appB2bVykaz()); }
 function b2bZaznamForm(z){
@@ -28012,9 +28015,9 @@ function b2bTimHtml(){
   const model=b2bVykazModel({projekt:d.projekt, osoby:d.osoby, aktivity:d.aktivity, zaznamy:d.zaznamy, mesiac:d.mesiac, hodinyDna:b2bHodinyMapa(d.hodinyDna)});
   const hod={}; model.osobaDen.forEach(x=>{ hod[x.osobaId]=(hod[x.osobaId]||0)+x.hodiny; });
   const org=Object.fromEntries((D.organizacie||[]).map(o=>[o.id,o.nazov]));
-  // Hotovo: za osobu bez účtu ktorýkoľvek člen, za kohokoľvek správca a Management a support
-  // (č. 285, R3). Management sám nerobí — v tíme ho niet, pokiaľ nemá hodiny z čias pred rolou.
-  const man=b2bSomManagement();
+  // Hotovo za kohokoľvek ktorýkoľvek člen (zastupiteľnosť, č. 295 — predtým len správca
+  // a Management a support, č. 285 R3). Management sám nerobí — v tíme ho niet, pokiaľ nemá hodiny z čias pred rolou.
+  const man=b2bSomVTime();
   const riadky=d.osoby.filter(o=>(o.aktivny || hod[o.id]) && (!b2bJeManagement(o) || hod[o.id])).map(o=>{
     const hot=d.mesiace.some(m=>m.osoba_id===o.id && m.stav==="hotovy"), mozem=o.aktivny && !b2bJeManagement(o) && (man || !o.user_id);
     return `<tr><td>${esc(o.meno)}${o.user_id? "" : ' <span class="apill" style="font-size:10px">bez účtu</span>'}</td><td>${esc(org[o.organizacia]||"—")}</td><td style="text-align:right">${hod[o.id]||0}</td><td>${hot? "✓ hotovo"+(mozem && man? ` · <a href="#" onclick="b2bHotovo('${o.id}',false);return false">vrátiť</a>` : "") : (mozem? `<a href="#" onclick="b2bHotovo('${o.id}',true);return false">označiť hotovo</a>` : "")}</td></tr>`;
@@ -28328,8 +28331,9 @@ function b2bPracDniObdobia(od, doD){
   return n;
 }
 function b2bObjednavkyHtml(){
-  // Objednávky pripravuje správca alebo Management a support (č. 285, R2).
-  const D=B2B.d.projekt.data||{}, spravca=b2bSomManagement();
+  // Objednávky pripravuje každý člen projektu (zastupiteľnosť, č. 295 — predtým správca
+  // alebo Management a support, č. 285 R2).
+  const D=B2B.d.projekt.data||{}, spravca=b2bSomVTime();
   const karta=o=>{
     const sp=b2bObjednavkaSprava(o, D), m=sp.model, stav=o.stav||"koncept", id=esc(o.id), kedy=(o.stav_kedy||{})[stav];
     const tl=[`<button class="aabtn pri" onclick="b2bObjNahlad('${id}')" title="Ukázať e-mail tak, ako odíde, stiahnuť ho pre Outlook alebo skopírovať">Náhľad a e-mail</button>`];
@@ -28849,7 +28853,7 @@ function b2bObjZmluvaZMailu(e, D){
 }
 function b2bPrijateObjednavka(id){
   const d=B2B.d, D=d.projekt.data||{}, x=(d.prijate||[]).find(p=>p.id===id); if(!x) return;
-  const e=b2bObjZTextu(x.telo), spravca=b2bSomManagement();
+  const e=b2bObjZTextu(x.telo), spravca=b2bSomVTime();
   // Objednávka toho istého obdobia; potvrdená len vtedy, keď ju potvrdil práve tento mail (prevzatie znova).
   const kand=(D.objednavky||[]).filter(o=>e.od && o.od===e.od && o.do===e.do && (o.stav!=="potvrdena" || (o.potvrdena_z && o.potvrdena_z.prijate===id)));
   const ob=kand[0]||null, m=ob? b2bObjednavkaModel(ob, D) : null, znova=!!(ob && ob.stav==="potvrdena");
