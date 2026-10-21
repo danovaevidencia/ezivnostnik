@@ -22272,8 +22272,8 @@ const DOKUMENTY={
   // `novinka` ukáže okno súhlasu — čo sa vo verzii zmenilo, jednou vetou
   podmienky:{url:"podmienky.html",     n:"Obchodné podmienky",      verzia:"1.11",
              novinka:"Pribudla platba predplatného prevodom a súhlas s tým, že vám faktúry doručujeme elektronicky — e-mailom a v aplikácii."},
-  sukromie: {url:"sukromie.html",      n:"Ochrana osobných údajov", verzia:"1.29",
-             novinka:"Vo výkaze B2B projektu vie asistent na tlačidlo „Doplniť detaily z výkazov“ navrhnúť odrážky k činnostiam z objednávky: jazykovému modelu pošle činnosti a popisy, aktivity a minúty záznamov mesiaca — bez mien osôb a dátumov. Do výkazu ide návrh až po potvrdení."},
+  sukromie: {url:"sukromie.html",      n:"Ochrana osobných údajov", verzia:"1.30",
+             novinka:"V B2B projekte majú osoby kontaktný e-mail (z pozvánky alebo zapísaný členom), ktorý vidia všetci členovia projektu; pri zrušení účtu sa zmaže. Kalendár (.ics) preposlaný na e-mail projektu sa uloží ako príloha so všetkým, čo obsahuje — do záznamov z neho ide len to, čo pri importe označíte."},
   zmazanie: {url:"zmazanie-uctu.html", n:"Zmazanie účtu a údajov"},
 };
 // Záznam súhlasu k účtu (ROZHODNUTIA č. 52). Zmluva vzniká vytvorením účtu
@@ -26546,6 +26546,18 @@ async function b2bVsetky(zostav){
   for(let od=0;;od+=1000){ const {data,error}=await zostav().range(od,od+999); if(error) throw error; out.push(...(data||[])); if(!data||data.length<1000) return out; }
 }
 let _b2bNacitanie=0;
+// Pozvánky osôb, ktoré ešte čakajú na prijatie (číta ich len správca — RLS z admin_74):
+// odkaz sa dá ukázať aj po odoslaní (admin_83, č. 292). Chyba projekt nezastaví.
+async function b2bPozvankyOsob(pid){
+  try{
+    const r=await sb.from("b2b_pozvanky").select("*").eq("projekt_id",pid);
+    if(r.error) throw r.error;
+    const teraz=Date.now();
+    return (r.data||[]).filter(p=>!p.prijate && !p.zrusene && new Date(p.plati_do).getTime()>teraz);
+  }catch(e){ console.error("B2B: pozvánky osôb sa nenačítali", e); return []; }
+}
+// Odkaz pozvánky — ten istý v okne po pozvaní aj neskôr v Osobách.
+function b2bPozvankaUrl(token){ return "https://ezivnostnik.eu/ezivnostnik.html?b2b="+encodeURIComponent(token); }
 async function b2bNacitajProjekt(){
   const poradie=++_b2bNacitanie, pid=B2B.pid, mesiac=B2B.mesiac;
   const od=mesiac+"-01", doDna=b2bIso(new Date(+mesiac.slice(0,4), +mesiac.slice(5,7), 0));
@@ -26578,9 +26590,9 @@ async function b2bNacitajProjekt(){
   // Adresa @posta (admin_80): bez migrácie ostáva stará b2b-…; iná chyba projekt
   // nezastaví — karta povie, že sa adresa nenačítala.
   let prijem=null, prijate=[], bezPrijmu=false, prijemAlias=null, bezAliasu=false, aliasChyba="";
-  const [pa, pp, pr]=await Promise.all([sb.from("b2b_prijem").select("token,povolene").eq("projekt_id",pid).maybeSingle(),
+  const [pa, pp, pr, pozvankyOsob]=await Promise.all([sb.from("b2b_prijem").select("token,povolene").eq("projekt_id",pid).maybeSingle(),
     sb.from("b2b_prijate").select("id,email_id,od_koho,predmet,telo,subor_nazov,subor_typ,subor_cesta,subor_bajtov,druh,stav,poznamka,spracovane,prijate").eq("projekt_id",pid).order("prijate",{ascending:false}).limit(100),
-    sb.from("prijem_adresy").select("alias").eq("projekt_id",pid).maybeSingle()]);
+    sb.from("prijem_adresy").select("alias").eq("projekt_id",pid).maybeSingle(), b2bPozvankyOsob(pid)]);
   if(pa.error || pp.error){ const e=pa.error||pp.error; if(b2bChybaTabulky(e)) bezPrijmu=true; else throw e; }
   else { prijem=pa.data||null; prijate=pp.data||[]; }
   if(pr.error){
@@ -26593,7 +26605,7 @@ async function b2bNacitajProjekt(){
     zaznamy:vsetky.filter(z=>z.datum>=od), zaznamyPred:vsetky.filter(z=>z.datum<od),
     mesiace:r[4].data||[], vykaz:r[5].data||null, verzie, moje:(r[6].data&&r[6].data.data)||{}, vystupy, subory, bezVystupov,
     hodinyDna:hodinyDna.filter(h=>String(h.datum)>=od), hodinyDnaPred:hodinyDna.filter(h=>String(h.datum)<od), bezHodinDna,
-    prijem, prijate, bezPrijmu, prijemAlias, bezAliasu, aliasChyba};
+    prijem, prijate, bezPrijmu, prijemAlias, bezAliasu, aliasChyba, pozvankyOsob};
   const posl=verzie[verzie.length-1], kluc=pid+"|"+mesiac, verzia=posl? posl.verzia : null;
   // Obnovenie dát (uložený záznam, hodiny dňa) nezahodí rozpísaný výkaz — len nová
   // verzia alebo iný projekt či mesiac ho nahradí uloženou úpravou.
@@ -27338,6 +27350,7 @@ function b2bOsobaForm(o){
       <option value="management"${man? " selected" : ""}>Management a support — výkazy a objednávky tímu</option></select>
       <div class="csub" style="margin:4px 0 0">Management a support pracuje s výkazmi celého tímu (hodiny dňa, Hotovo, objednávky), nemení nastavenia projektu a sám hodiny nezapisuje.</div></div>` : "";
   return `<div class="mfield"><label>Meno vo výkaze</label><input id="b2bOMeno" value="${esc(o&&o.meno||"")}"></div>
+    <div class="mfield"><label>Kontaktný e-mail</label><input id="b2bOEmail" type="email" value="${esc(o&&o.email||"")}" placeholder="meno@firma.sk" autocomplete="off"><div class="csub" style="margin:4px 0 0">Vidia ho členovia projektu; pozvánka ho vyplní sama.</div></div>
     <div class="mfield"><label>Organizácia</label><select id="b2bOOrg"><option value="">—</option>${(D.organizacie||[]).map(x=>`<option value="${esc(x.id)}"${o&&o.organizacia===x.id?" selected":""}>${esc(x.nazov)}</option>`).join("")}</select></div>
     ${rola}<div id="b2bOMiestoBlok"${man? ' style="display:none"' : ""}>
     <div class="mfield"><label>Miesto v Prílohe 4</label><select id="b2bOMiesto"><option value="">— zatiaľ bez miesta —</option>${b2bMiestoMoznosti(D.miesta, m.miesto)}</select></div>
@@ -27352,12 +27365,18 @@ function b2bOsobaZForm(o){
   const v=x=>String((document.getElementById(x)||{}).value||"").trim();
   const rola=document.getElementById("b2bORola")? (v("b2bORola")||"clen") : null;
   const miesto=v("b2bOMiesto"), prve=miesto? [{miesto, od:v("b2bOOd")||null, do:v("b2bODo")||null}] : [];
-  return {meno:v("b2bOMeno"), organizacia:v("b2bOOrg")||null, miesta: rola==="management"? [] : [...prve, ...(((o&&o.miesta)||[]).slice(1))], rola};
+  return {meno:v("b2bOMeno"), email:v("b2bOEmail").toLowerCase()||null, organizacia:v("b2bOOrg")||null, miesta: rola==="management"? [] : [...prve, ...(((o&&o.miesta)||[]).slice(1))], rola};
+}
+// Kontrola formulára osoby pred zápisom — prázdny e-mail je v poriadku.
+function b2bOsobaChyba(x){
+  if(!x.meno) return "Zadajte meno.";
+  if(x.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x.email)) return "Kontaktný e-mail nie je platný.";
+  return "";
 }
 async function b2bNastavRolu(osobaId, rola){ const r=await sb.rpc("b2b_nastav_rolu",{p_osoba:osobaId, p_rola:rola}); if(r.error) throw r.error; }
 function b2bOsobaPridaj(){
   openModal("Pridať osobu", `<div class="csub">Osoba bez účtu — hodiny jej môže zapisovať alebo importovať ktorýkoľvek člen. Správca ju potom môže pozvať e-mailom.</div>`+b2bOsobaForm(null),
-    async ()=>{ const x=b2bOsobaZForm(null), rola=x.rola; delete x.rola; if(!x.meno) return b2bVOkne("Zadajte meno.");
+    async ()=>{ const x=b2bOsobaZForm(null), rola=x.rola; delete x.rola; const ch=b2bOsobaChyba(x); if(ch) return b2bVOkne(ch);
       let id=null;
       try{ const r=await sb.from("b2b_osoby").insert(Object.assign({projekt_id:B2B.d.pid}, x)).select("id"); if(r.error) throw r.error; id=r.data&&r.data[0]&&r.data[0].id; }
       catch(e){ b2bChyba(e, "Osobu sa nepodarilo pridať"); return; }
@@ -27367,7 +27386,7 @@ function b2bOsobaPridaj(){
 }
 function b2bOsobaUprav(id){
   const o=B2B.d.osoby.find(x=>x.id===id); if(!o) return;
-  openModal("Upraviť osobu", b2bOsobaForm(o), async ()=>{ const x=b2bOsobaZForm(o), rola=x.rola; delete x.rola; if(!x.meno) return b2bVOkne("Zadajte meno.");
+  openModal("Upraviť osobu", b2bOsobaForm(o), async ()=>{ const x=b2bOsobaZForm(o), rola=x.rola; delete x.rola; const ch=b2bOsobaChyba(x); if(ch) return b2bVOkne(ch);
     const zmena=rola && rola!==(o.rola||"clen");
     try{
       // Management nesmie mať miesto (server): na člena tímu najprv rola, na management najprv miesto preč.
@@ -27378,11 +27397,12 @@ function b2bOsobaUprav(id){
 }
 async function b2bPozvi(osobaId){
   const o=B2B.d.osoby.find(x=>x.id===osobaId); if(!o) return;
-  const email=prompt("E-mail, na ktorý pozvať osobu „"+o.meno+"“:",""); if(!email) return;
+  // Kontaktný e-mail osoby sa predvyplní; pozvánka ho na osobe aj prepíše (admin_83, č. 292).
+  const email=prompt("E-mail, na ktorý pozvať osobu „"+o.meno+"“:",o.email||""); if(!email) return;
   if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) return alert("Zadajte platný e-mail.");
   try{
     const r=await sb.rpc("b2b_pozvi",{p_osoba:osobaId, p_email:email.trim()}); if(r.error) throw r.error;
-    const odkaz="https://ezivnostnik.eu/ezivnostnik.html?b2b="+encodeURIComponent(r.data);
+    const odkaz=b2bPozvankaUrl(r.data);
     let mail=true; try{ await b2bEdge("pozvanka",{token:r.data}); }catch(e){ mail=false; console.error("B2B: e-mail pozvánky", e); }
     openModal("Pozvánka vytvorená", `<div class="csub">${mail? "E-mail s pozvánkou odišiel na "+esc(email.trim())+"." : "E-mail sa nepodarilo odoslať — pošlite odkaz ručne."}
       Pozvánka platí 14 dní a prijať ju môže len účet s touto adresou.${b2bJeManagement(o)? " Prichádza s rolou Management a support." : ""}</div>
@@ -27390,6 +27410,23 @@ async function b2bPozvi(osobaId){
     { const zr=document.getElementById("modalZrusit"); if(zr) zr.textContent="Zavrieť"; }
     b2bObnov();
   }catch(e){ b2bChyba(e, "Pozvánku sa nepodarilo vytvoriť"); }
+}
+// Odkaz čakajúcej pozvánky aj po odoslaní (Roman 21. 10. 2026, č. 292) — dá sa poslať
+// iným kanálom; prijať ho vie len účet s pozvanou adresou. Pozvánka spred admin_83
+// odkaz uložený nemá: pomôže len nová pozvánka (starý odkaz potom prestane platiť).
+function b2bPozvankaOdkaz(id){
+  const p=((B2B.d&&B2B.d.pozvankyOsob)||[]).find(x=>x.id===id); if(!p) return;
+  const o=B2B.d.osoby.find(x=>x.id===p.osoba_id)||{}, odkaz=p.odkaz_token? b2bPozvankaUrl(p.odkaz_token) : "";
+  B2B._odkazPozvanky=odkaz;
+  openModal("Odkaz pozvánky", `<div class="csub">Pozvánka pre ${esc(o.meno||"osobu")} na <b>${esc(p.email)}</b> platí do ${esc(fmtDatum(String(p.plati_do).slice(0,10)))}. Prijať ju môže len účet s touto adresou — odkaz môžete poslať aj inak než e-mailom.</div>
+    ${odkaz? `<div class="mfield"><label>Odkaz</label><input id="b2bPozOdkaz" readonly value="${esc(odkaz)}" onclick="this.select()"></div>
+      <button class="aabtn" onclick="b2bPozvankaKopiruj()" title="Skopírovať odkaz pozvánky">Kopírovať odkaz</button>`
+      : `<div class="csub" style="margin:8px 0 0;color:var(--ink-warn)">Odkaz sa pri tejto pozvánke neuložil (vznikla pred 21. 10. 2026). Pošlite pozvánku znova cez „pozvať e-mailom“ — odkaz z prvého e-mailu potom prestane platiť.</div>`}`, null);
+  { const zr=document.getElementById("modalZrusit"); if(zr) zr.textContent="Zavrieť"; }
+}
+async function b2bPozvankaKopiruj(){
+  try{ await navigator.clipboard.writeText(B2B._odkazPozvanky||""); oznamPas("Odkaz pozvánky je skopírovaný."); }
+  catch(e){ console.error("B2B: odkaz pozvánky sa neskopíroval", e); const el=document.getElementById("b2bPozOdkaz"); if(el){ el.focus(); el.select(); } alert("Odkaz sa nepodarilo skopírovať — je označený, skopírujte ho ručne."); }
 }
 async function b2bSpravca(osobaId, spravca){
   try{ const r=await sb.rpc("b2b_nastav_spravcu",{p_osoba:osobaId, p_spravca:spravca}); if(r.error) throw r.error; b2bObnov(); }
@@ -28107,7 +28144,10 @@ function b2bNastaveniaHtml(){
       !o.user_id && o.aktivny? `<a href="#" onclick="b2bPozvi('${o.id}');return false">pozvať e-mailom</a>` : "",
       o.user_id && o.aktivny? `<a href="#" onclick="b2bSpravca('${o.id}',${o.spravca?"false":"true"});return false">${o.spravca?"odobrať správcu":"urobiť správcom"}</a>` : "",
       o.aktivny? `<a href="#" onclick="b2bOdober('${o.id}');return false">odobrať</a>` : ""].filter(Boolean).join(" · ") : "";
-    return `<tr${o.aktivny?"":' style="opacity:.55"'}><td>${esc(o.meno)}${o.spravca? ' <span class="apill" style="font-size:10px">správca</span>' : ""}${b2bJeManagement(o)? ' <span class="apill" style="font-size:10px" title="Management a support — výkazy a objednávky tímu, nastavenia nemení, hodiny nezapisuje">management</span>' : ""}${o.aktivny? "" : " (odobratý)"}</td><td>${esc(org[o.organizacia]||"—")}</td><td>${esc(b2bJeManagement(o)? "nerobí (Management a support)" : (m||"bez miesta"))}</td><td>${o.user_id? "účet" : "bez účtu"}</td><td>${akcie}</td></tr>`;
+    // Kontaktný e-mail osoby a čakajúca pozvánka s odkazom pre správcu (admin_83, č. 292).
+    const poz=!o.user_id && (d.pozvankyOsob||[]).find(p=>p.osoba_id===o.id);
+    const pristup=o.user_id? "účet" : poz? `pozvaná do ${esc(fmtDatum(String(poz.plati_do).slice(0,10)))}${spravca? ` · <a href="#" onclick="b2bPozvankaOdkaz('${poz.id}');return false" title="Ukázať a skopírovať odkaz pozvánky">odkaz</a>` : ""}` : "bez účtu";
+    return `<tr${o.aktivny?"":' style="opacity:.55"'}><td>${esc(o.meno)}${o.spravca? ' <span class="apill" style="font-size:10px">správca</span>' : ""}${b2bJeManagement(o)? ' <span class="apill" style="font-size:10px" title="Management a support — výkazy a objednávky tímu, nastavenia nemení, hodiny nezapisuje">management</span>' : ""}${o.aktivny? "" : " (odobratý)"}${o.email? `<div class="csub" style="margin:0;word-break:break-all">${esc(o.email)}</div>` : ""}</td><td>${esc(org[o.organizacia]||"—")}</td><td>${esc(b2bJeManagement(o)? "nerobí (Management a support)" : (m||"bez miesta"))}</td><td>${pristup}</td><td>${akcie}</td></tr>`;
   }).join("");
   return `<div class="card" style="padding:12px 14px">
       <b>${esc(z.nazov||d.projekt.nazov)}</b>${z.cislo? " · č. "+esc(z.cislo) : ""}${z.crz&&z.crz.id? ` · <a href="${esc(z.crz.odkaz)}" target="_blank" rel="noopener">CRZ ${esc(z.crz.id)}</a>` : ""}
