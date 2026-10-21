@@ -25955,6 +25955,7 @@ function b2bVykazModel(vstup){
   (vstup.osoby||[]).forEach(o=>{ osMap[o.id]=o; });
   (vstup.aktivity||[]).forEach(a=>{ aktMap[a.id]=a; });
   (D.oblasti||[]).forEach(o=>{ oblMap[o.id]=o.text; });
+  (D.aktivity_zmluvy||[]).forEach(a=>{ if(a && a.id) oblMap[a.id]=a.text; });   // väzba na aktivitu zo zmluvy (č. 294)
   pozicie.forEach(p=>(p.cinnosti||[]).forEach(c=>{ oblMap[c.id]=c.text; }));
   // Výstupy (E1b): záznam nesie ID výstupov; snímka pred E1b zoznam nemá → bez kontrol výstupov.
   const vystMap={}, typVyst={};
@@ -26779,11 +26780,12 @@ async function b2bUlozZaznam(id){
   const vEl=[...document.querySelectorAll(".b2bZVyst")];
   if(vEl.length) riadok.vystupy=vEl.filter(x=>x.checked).map(x=>x.value);
   try{
+    riadok.aktivita_id=await b2bAktivitaZVyberu(riadok.aktivita_id);   // aktivita zo zmluvy → aktivita projektu (č. 294)
     const r=id? await sb.from("b2b_zaznamy").update(riadok).eq("id",id).select("id")
               : await sb.from("b2b_zaznamy").insert(Object.assign({projekt_id:d.pid, osoba_id:os.id, zdroj:"rucne"}, riadok)).select("id");
     if(r.error) throw r.error;
     if(!r.data || !r.data.length) throw new Error("záznam sa neuložil (nemáte k nemu prístup)");
-    if(akt) await b2bZapamatajCastu(akt);
+    if(riadok.aktivita_id) await b2bZapamatajCastu(riadok.aktivita_id);
     closeModal(); b2bObnov();
   }catch(e){ b2bChyba(e, "Záznam sa nepodarilo uložiť"); }
 }
@@ -27806,7 +27808,7 @@ function b2bZaznamForm(z){
       <div class="mfield"><label>Od</label><input id="b2bZOd" type="time" value="${esc(z&&z.cas_od? String(z.cas_od).slice(0,5) : "")}"></div>
       <div class="mfield"><label>Do</label><input id="b2bZDo" type="time" value="${esc(z&&z.cas_do? String(z.cas_do).slice(0,5) : "")}"></div>
       <div class="mfield"><label>alebo hodín</label><input id="b2bZHod" inputmode="decimal" value="${z&&!z.cas_od? Math.round(z.minuty/6)/10 : ""}" placeholder="napr. 2,5"></div></div>
-    <div class="mfield"><label>Aktivita</label><select id="b2bZAkt"><option value="">— vyberte —</option>${akt.map(a=>`<option value="${a.id}"${z&&z.aktivita_id===a.id?" selected":""}>${esc(a.nazov)}</option>`).join("")}</select></div>
+    <div class="mfield"><label>Aktivita</label><select id="b2bZAkt"><option value="">— vyberte —</option>${b2bAktivityMoznosti(z&&z.aktivita_id)}</select></div>
     <div class="mfield"><label>Popis (voliteľné)</label><input id="b2bZPopis" maxlength="2000" value="${esc(z&&z.popis||"")}"></div>
     ${b2bZaznamVystupyHtml(z)}
     ${d.bezVystupov? "" : `<div id="b2bZVystNove"></div><div class="csub" style="margin:0 0 8px"><label style="color:var(--brand);cursor:pointer;text-decoration:underline">📎 Priložiť súbor ako nový výstup<input type="file" style="display:none" onchange="b2bZaznamPriloha(this)"></label></div>`}
@@ -27916,7 +27918,40 @@ function b2bAktOblastMoznosti(vsetky, vybrana){
   const obl=(D.oblasti||[]).map(o=>opt(o.id, o.text)).join("");
   const poz=(D.pozicie||[]).filter(p=>(p.cinnosti||[]).length && (vsetky || !moje.size || moje.has(p.id)))
     .map(p=>`<optgroup label="${esc((moje.has(p.id)? "Moja pozícia — " : "")+(p.nazov_vo_vykaze||p.nazov_v_zmluve||p.id))}">${p.cinnosti.map(c=>opt(c.id, c.text)).join("")}</optgroup>`).join("");
-  return `<option value="">—</option>${obl? `<optgroup label="Oblasti zo zmluvy">${obl}</optgroup>` : ""}${poz}`;
+  const azm=(D.aktivity_zmluvy||[]).filter(a=>a&&a.id).map(a=>opt(a.id, b2bAktZmluvyNazov(a))).join("");
+  return `<option value="">—</option>${obl? `<optgroup label="Oblasti zo zmluvy">${obl}</optgroup>` : ""}${azm? `<optgroup label="Aktivity zo zmluvy">${azm}</optgroup>` : ""}${poz}`;
+}
+// ── Aktivity zo zmluvy vo výbere Aktivita (Roman 21. 10. 2026, č. 294, snímka „Upraviť
+// záznam“: „prečo nie je možné priradiť aktivitu zo zmluvy… stále je tam len pomlčka“ —
+// projekt mal 7 aktivít zmluvy a 0 aktivít projektu). Výber ponúka aj aktivity zmluvy,
+// ktoré ešte nemajú aktivitu projektu; hodnota „zml:<id>“ sa pri uložení zmení na
+// aktivitu projektu s väzbou oblast = <id> (b2bAktivitaZVyberu).
+// Krátky názov: prvá veta (skratka „čl. 5“ ju neutne), najviac 120 znakov; celý text ostáva v zmluve.
+function b2bAktZmluvyNazov(a){
+  const t=String((a&&a.text)||"").replace(/\s+/g," ").trim();
+  const m=t.match(/^(.{12,}?[.;:])\s+(?=[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ])/);
+  const v=(m? m[1] : t).replace(/[;:]$/,"");
+  return v.length>120? v.slice(0,119).replace(/\s+\S*$/,"")+"…" : v;
+}
+function b2bAktivityMoznosti(vybrana){
+  const d=B2B.d, D=(d&&d.projekt&&d.projekt.data)||{}, vsetky=(d&&d.aktivity)||[];
+  const maju=new Set(vsetky.map(a=>a.oblast).filter(Boolean));
+  const zml=(D.aktivity_zmluvy||[]).filter(a=>a && a.id && !maju.has(a.id));
+  const opt=(v,t)=>`<option value="${esc(v)}"${vybrana===v?" selected":""}>${esc(t)}</option>`;
+  return vsetky.filter(a=>a.aktivna!==false).map(a=>opt(a.id, a.nazov)).join("")
+    + (zml.length? `<optgroup label="Aktivity zo zmluvy">${zml.map(a=>opt("zml:"+a.id, b2bAktZmluvyNazov(a))).join("")}</optgroup>` : "");
+}
+async function b2bAktivitaZVyberu(v){
+  if(!v || !/^zml:/.test(v)) return v||null;
+  const d=B2B.d, id=v.slice(4), D=d.projekt.data||{};
+  const uz=d.aktivity.find(a=>a.oblast===id); if(uz) return uz.id;
+  const a=(D.aktivity_zmluvy||[]).find(x=>x && x.id===id);
+  if(!a) throw new Error("Aktivita zo zmluvy "+id+" sa v projekte nenašla.");
+  const r=await sb.from("b2b_aktivity").insert({projekt_id:d.pid, nazov:b2bAktZmluvyNazov(a), oblast:id}).select("*");
+  if(r.error) throw r.error;
+  const nova=r.data && r.data[0]; if(!nova) throw new Error("Aktivitu zo zmluvy sa nepodarilo založiť.");
+  d.aktivity.push(nova);
+  return nova.id;
 }
 function b2bAktOblastVsetky(zapnut){
   const s=document.getElementById("b2bAOblast"); if(s) s.innerHTML=b2bAktOblastMoznosti(zapnut, s.value);
@@ -28986,7 +29021,7 @@ function b2bIcsOkno(){
   K.forEach(k=>{ k.uz=uz.has("ics:"+k.uid+"|"+k.datum); });
   const akt=d.aktivity.filter(a=>a.aktivna!==false);
   // Výber aktivity: „＋ Nová aktivita…“ ju založí bez zatvorenia okna (nový projekt aktivity nemá).
-  const sel=(id,v,i)=>`<select id="${id}" class="b2bIcsAkt" style="max-width:180px" onchange="b2bIcsAktZmena(this,${i==null? "null" : i})"><option value="">—</option>${akt.map(a=>`<option value="${esc(a.id)}"${v===a.id?" selected":""}>${esc(a.nazov)}</option>`).join("")}<option value="__nova">＋ Nová aktivita…</option></select>`;
+  const sel=(id,v,i)=>`<select id="${id}" class="b2bIcsAkt" style="max-width:180px" onchange="b2bIcsAktZmena(this,${i==null? "null" : i})"><option value="">—</option>${b2bAktivityMoznosti(v)}<option value="__nova">＋ Nová aktivita…</option></select>`;
   const kat=[...new Set(K.flatMap(k=>k.kategorie))];
   openModal("Import z kalendára", `
     <div class="csub">Zaškrtnite udalosti projektu (ťuknutím na riadok alebo výberom aktivity). Do projektu ide len dátum, čas a predmet — vidia ich všetci členovia. Účastníci ani text pozvánky sa neukladajú. Výber si appka zapamätá na budúci mesiac.</div>
@@ -28996,7 +29031,7 @@ function b2bIcsOkno(){
     ${kat.length? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"><span class="csub" style="margin:0;align-self:center">Kategórie:</span>${kat.map(c=>`<button class="apill" style="cursor:pointer;border:0" onclick="b2bIcsKategoria(this.dataset.k)" data-k="${esc(c)}">＋ ${esc(c)}</button>`).join("")}</div>` : ""}
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"><button class="aabtn" onclick="b2bIcsVsetkyOznac(true)" title="Zaškrtnúť všetky udalosti okrem odmietnutých, zrušených a už importovaných">Označiť všetky</button><button class="aabtn" onclick="b2bIcsVsetkyOznac(false)" title="Odznačiť všetky udalosti">Zrušiť výber</button></div>
     <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px;font-size:12.5px">Aktivita pre všetky označené: ${sel("b2bIcsVsetky","",null)}<button class="aabtn" onclick="b2bIcsAktVsetky()">Použiť</button></div>
-    ${akt.length? "" : `<div class="csub" style="margin:0 0 8px">Projekt zatiaľ nemá aktivity. Vo výbere zvoľte „＋ Nová aktivita…“ (názov sa predvyplní z predmetu udalosti), alebo importujte bez aktivity a doplňte ju neskôr.</div>`}
+    ${akt.length || ((d.projekt.data||{}).aktivity_zmluvy||[]).length? "" : `<div class="csub" style="margin:0 0 8px">Projekt zatiaľ nemá aktivity. Vo výbere zvoľte „＋ Nová aktivita…“ (názov sa predvyplní z predmetu udalosti), alebo importujte bez aktivity a doplňte ju neskôr.</div>`}
     <div data-scroll="b2bics" style="max-height:52vh;overflow:auto">${K.map((k,i)=>`<div style="display:flex;gap:4px 8px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line);padding:6px 0;font-size:12.5px${k.uz||k.zrusene||k.odmietnute?";opacity:.6":""}">
       <label for="b2bIc${i}" style="display:flex;gap:8px;align-items:center;flex:1 1 200px;min-width:0;cursor:pointer">
       <input type="checkbox" id="b2bIc${i}" style="width:20px;height:20px;flex:none;margin:0"${k.oznacene&&!k.uz?" checked":""}${k.uz?" disabled":""}>
@@ -29095,6 +29130,9 @@ async function b2bIcsUloz(){
   P.kategorie=[...new Set([...(P.kategorie||[]), ...(B2B._icsKat||[])])];
   const mail=String((document.getElementById("b2bIcsMail")||{}).value||"").trim().toLowerCase();
   try{
+    // Aktivita zo zmluvy → aktivita projektu, raz na celý import (č. 294).
+    for(const z of nove) z.aktivita_id=await b2bAktivitaZVyberu(z.aktivita_id);
+    for(const k of Object.keys(P.aktivity)) P.aktivity[k]=await b2bAktivitaZVyberu(P.aktivity[k]);
     for(let i=0;i<nove.length;i+=200){ const r=await sb.from("b2b_zaznamy").insert(nove.slice(i,i+200)); if(r.error) throw r.error; }
     // Pravidlá a e-mail kalendára sú moje — import za inú osobu ich neprepíše.
     if(ja){
@@ -29207,7 +29245,7 @@ function b2bImportOsoby(subor){
     <div class="mfield"><label>Osoba (keď súbor nemá stĺpec Osoba)</label><select id="b2bImpOsoba">${bez.map(o=>`<option value="${o.id}"${odos&&odos.id===o.id?" selected":""}>${esc(o.meno)}</option>`).join("")}<option value="">— nová osoba —</option></select>
       ${odos&&odos.user_id? `<div class="csub" style="margin:4px 0 0">Výkaz poslal(a) ${esc(odos.meno)} — má v projekte účet, hodiny si môže zapísať v appke sám. Import je pre osoby bez účtu.</div>` : ""}
       <input id="b2bImpNova" placeholder="Meno novej osoby" style="margin-top:6px"></div>
-    <div class="mfield"><label>Aktivita pre riadky bez aktivity</label><select id="b2bImpAkt"><option value="">— bez aktivity —</option>${d.aktivity.filter(a=>a.aktivna!==false).map(a=>`<option value="${esc(a.id)}">${esc(a.nazov)}</option>`).join("")}</select></div>
+    <div class="mfield"><label>Aktivita pre riadky bez aktivity</label><select id="b2bImpAkt"><option value="">— bez aktivity —</option>${b2bAktivityMoznosti(null)}</select></div>
     <div id="b2bImpRiadky"></div>`,
     ()=>b2bImportUloz(), null, null, "Importovať");
   if(subor) b2bImportCitajSubor(subor.nazov, subor.data);
@@ -29290,7 +29328,7 @@ async function b2bImportUloz(){
       vybrana=await najdiAleboZaloz(nm, null);
     }
     const akt={}; d.aktivity.forEach(a=>{ akt[norm(a.nazov)]=a.id; });
-    const aktVsetky=(document.getElementById("b2bImpAkt")||{}).value||null;
+    const aktVsetky=await b2bAktivitaZVyberu((document.getElementById("b2bImpAkt")||{}).value||null);   // aj aktivita zo zmluvy (č. 294)
     const riadky=[];
     for(let ri=0; ri<imp.riadky.length; ri++){
       const r=imp.riadky[ri];
