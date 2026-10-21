@@ -4,7 +4,7 @@
 window.NAVODY_SNIMKY = {
  "b2b_vykaz-email-2": {
   "m": {
-   "subor": "navody/b2b_vykaz-email-2.m.b09a8d96.webp",
+   "subor": "navody/b2b_vykaz-email-2.m.d5aabb49.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -15,12 +15,12 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/b2b_vykaz-email-2.d.825cac97.webp",
+   "subor": "navody/b2b_vykaz-email-2.d.a908e395.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
     "x": 267,
-    "y": 281,
+    "y": 336,
     "w": 162,
     "h": 37
    }
