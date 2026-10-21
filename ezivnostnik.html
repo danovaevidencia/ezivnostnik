@@ -28145,7 +28145,7 @@ function b2bNastaveniaHtml(){
       o.user_id && o.aktivny? `<a href="#" onclick="b2bSpravca('${o.id}',${o.spravca?"false":"true"});return false">${o.spravca?"odobrať správcu":"urobiť správcom"}</a>` : "",
       o.aktivny? `<a href="#" onclick="b2bOdober('${o.id}');return false">odobrať</a>` : ""].filter(Boolean).join(" · ") : "";
     // Kontaktný e-mail osoby a čakajúca pozvánka s odkazom pre správcu (admin_83, č. 292).
-    const poz=!o.user_id && (d.pozvankyOsob||[]).find(p=>p.osoba_id===o.id);
+    const poz=(d.pozvankyOsob||[]).find(p=>p.osoba_id===o.id);   // osoba s účtom je „účet“ aj s pozvánkou
     const pristup=o.user_id? "účet" : poz? `pozvaná do ${esc(fmtDatum(String(poz.plati_do).slice(0,10)))}${spravca? ` · <a href="#" onclick="b2bPozvankaOdkaz('${poz.id}');return false" title="Ukázať a skopírovať odkaz pozvánky">odkaz</a>` : ""}` : "bez účtu";
     return `<tr${o.aktivny?"":' style="opacity:.55"'}><td>${esc(o.meno)}${o.spravca? ' <span class="apill" style="font-size:10px">správca</span>' : ""}${b2bJeManagement(o)? ' <span class="apill" style="font-size:10px" title="Management a support — výkazy a objednávky tímu, nastavenia nemení, hodiny nezapisuje">management</span>' : ""}${o.aktivny? "" : " (odobratý)"}${o.email? `<div class="csub" style="margin:0;word-break:break-all">${esc(o.email)}</div>` : ""}</td><td>${esc(org[o.organizacia]||"—")}</td><td>${esc(b2bJeManagement(o)? "nerobí (Management a support)" : (m||"bez miesta"))}</td><td>${pristup}</td><td>${akcie}</td></tr>`;
   }).join("");
@@ -28582,6 +28582,7 @@ function b2bPrijataPolozkaHtml(x){
     if(x.stav==="nove"){
       if(x.druh==="vykaz") tl.push(`<button class="aabtn pri" onclick="b2bPrijateImport('${x.id}')" title="Načítať výkaz do importu osoby bez účtu — pred uložením uvidíte náhľad">Importovať</button>`);
       if(x.druh==="objednavka") tl.push(`<button class="aabtn pri" onclick="b2bPrijateObjednavka('${x.id}')" title="Porovnať s objednávkou projektu za to isté obdobie a označiť ju ako potvrdenú">Priradiť k objednávke</button>`);
+      if(b2bPrijateJeKalendar(x)) tl.push(`<button class="aabtn pri" onclick="b2bPrijateKalendar('${x.id}')" title="Načítať stretnutia z kalendára do hodín — pred uložením ich označíte">Importovať z kalendára</button>`);
       if(x.subor_cesta) tl.push(`<button class="aabtn" onclick="b2bPrijateStiahni('${x.id}')" title="Stiahnuť prijatý súbor">⬇ Stiahnuť</button>`);
       if(x.druh!=="vykaz" && x.druh!=="objednavka") tl.push(`<button class="aabtn" onclick="b2bPrijateStav('${x.id}','spracovane')" title="Označiť ako vybavené — ostane v zozname spracovaných">✓ Vybavené</button>`);
       tl.push(`<button class="aabtn" onclick="b2bPrijateStav('${x.id}','odmietnute')" title="Nepatrí do projektu — skryť zo zoznamu na spracovanie">Odmietnuť</button>`);
@@ -28604,7 +28605,7 @@ function b2bPrijemHtml(d){
   const obj=prijate.filter(b2bPrijateJeObj), objNove=obj.filter(x=>x.stav==="nove").length;
   const polozka=b2bPrijataPolozkaHtml;
   return `<div class="card" style="padding:12px 14px"><b>E-mail projektu</b>
-    <div class="csub" style="margin:4px 0 6px">Prepošlite sem objednávku od objednávateľa alebo výkaz kolegu (XLSX). Nič sa neuloží samo — počká tu na spracovanie. Adresu poznajú len členovia projektu.</div>
+    <div class="csub" style="margin:4px 0 6px">Prepošlite sem objednávku od objednávateľa, výkaz kolegu (XLSX) alebo export kalendára (.ics). Nič sa neuloží samo — počká tu na spracovanie. Adresu poznajú len členovia projektu.</div>
     ${adr? `<div style="display:flex;gap:6px"><input id="b2bPrijemAdr" value="${esc(adr)}" readonly><button class="aabtn" onclick="b2bPrijemKopiruj()" title="Skopírovať adresu projektu">Kopírovať</button></div>
       ${d.prijemAlias && stara? `<div class="csub" style="margin:4px 0 0">Stará adresa <span style="font-family:ui-monospace,monospace;word-break:break-all">${esc(stara)}</span> funguje ďalej.${spravca? ` <a href="#" onclick="b2bPrijemAdresaNova(true);return false" title="Vydať náhradu za starú adresu — stará prestane prijímať, adresa @${POSTA_DOMENA} sa nemení">vymeniť starú adresu</a>` : ""}</div>`
         : spravca && !d.bezAliasu? b2bPrijemAliasFormHtml(d)
@@ -28666,8 +28667,61 @@ async function b2bPrijateStiahni(id){
 }
 async function b2bPrijateImport(id){
   const x=(B2B.d.prijate||[]).find(p=>p.id===id); if(!x) return;
-  try{ b2bImportOsoby({nazov:x.subor_nazov||"vykaz.xlsx", data:await b2bPrijateSubor(x), prijate:id}); }
+  try{ b2bImportOsoby({nazov:x.subor_nazov||"vykaz.xlsx", data:await b2bPrijateSubor(x), prijate:id, od_koho:x.od_koho||""}); }
   catch(e){ b2bChyba(e, "Výkaz sa nepodarilo načítať"); }
+}
+// ── Kalendár a výkaz z e-mailu projektu podľa odosielateľa (Roman 21. 10. 2026, č. 293:
+// „nauč appku spracovať xlsx výkaz a export z kalendára aj do e-mailu projektu“; .ics,
+// osoba podľa odosielateľa). Edge funkcia .ics uloží ako „subor“; appka ho spozná sama.
+function b2bPrijateJeKalendar(x){
+  return !!x && x.druh==="subor" && (/\.ics$/i.test(String(x.subor_nazov||"")) || /calendar/i.test(String(x.subor_typ||"")));
+}
+// Osoba projektu s týmto kontaktným e-mailom (admin_83) — odosielateľ výkazu či kalendára.
+function b2bOsobaPodlaEmailu(d, email){
+  const e=String(email||"").trim().toLowerCase(); if(!e || !d) return null;
+  return (d.osoby||[]).find(o=>o.aktivny && o.email && String(o.email).toLowerCase()===e)||null;
+}
+// Komu smiem zapísať hodiny z kalendára: sebe a osobám bez účtu (nie Management a support).
+function b2bIcsCiele(d){
+  return ((d&&d.osoby)||[]).filter(o=>o.aktivny && !b2bJeManagement(o) && (o.user_id===_prihlasenyUser || !o.user_id));
+}
+// Cieľ importu z kalendára: vybraná osoba (z e-mailu projektu), inak ja.
+function b2bIcsOsoba(){
+  const d=B2B.d; if(!d) return null;
+  return B2B._icsOsoba? (d.osoby.find(o=>o.id===B2B._icsOsoba)||null) : b2bMojaOsoba();
+}
+// Stretnutia mesiaca z textu .ics. Odmietnuté sa spozná podľa e-mailu CIEĽOVEJ osoby.
+function b2bIcsNacitajText(text){
+  const d=B2B.d, os=b2bIcsOsoba(), ja=!!os && os.user_id===_prihlasenyUser;
+  const email=ja? ((d.moje&&d.moje.kalendarEmail)||_prihlasenyEmail) : ((os&&os.email)||"");
+  const evs=expandRecurring(parseICS(String(text), email));
+  B2B._ics=b2bIcsKandidati(evs, d.mesiac, d.moje&&d.moje.pravidla);
+  return evs;
+}
+async function b2bPrijateKalendar(id){
+  const d=B2B.d, x=((d&&d.prijate)||[]).find(p=>p.id===id); if(!x) return;
+  let text="";
+  try{ text=new TextDecoder("utf-8").decode(await b2bPrijateSubor(x)); }
+  catch(e){ return b2bChyba(e, "Kalendár sa nepodarilo načítať"); }
+  const ciele=b2bIcsCiele(d), odos=b2bOsobaPodlaEmailu(d, x.od_koho), ja=ciele.find(o=>o.user_id===_prihlasenyUser);
+  if(!ciele.length) return alert("Hodiny z kalendára sa zapisujú členovi tímu alebo osobe bez účtu — v projekte nie je komu.");
+  // Osoba s účtom si kalendár naimportuje sama; za ňu zapisovať nemôžem.
+  if(odos && odos.user_id && odos.user_id!==_prihlasenyUser
+     && !confirm("Kalendár poslal(a) "+odos.meno+" — má v projekte účet, do svojich hodín si ho naimportuje v appke (E-mail projektu → Importovať z kalendára).\n\nImportovať ho napriek tomu do iných hodín?")) return;
+  const ciel=(odos && ciele.find(o=>o.id===odos.id)) || ja || ciele[0];
+  B2B._icsOsoba=ciel.id; B2B._icsPrijate=id; B2B._icsText=text;
+  const evs=b2bIcsNacitajText(text);
+  if(!B2B._ics.length){
+    const mes=[...new Set(evs.filter(e=>e.start && !e.start.allDay).map(e=>e.start.iso.slice(0,7)))].sort();
+    B2B._icsOsoba=null; B2B._icsPrijate=null; B2B._icsText=null;
+    return alert("V kalendári nie sú stretnutia s časom za "+b2bMesTxt(d.mesiac)+"."+(mes.length? " Súbor má stretnutia za "+mes.map(b2bMesTxt).join(", ")+" — prepnite mesiac šípkami nad záložkami a skúste znova." : ""));
+  }
+  b2bIcsOkno();
+}
+function b2bIcsOsobaZmena(v){
+  B2B._icsOsoba=v||null;
+  if(B2B._icsText!=null) b2bIcsNacitajText(B2B._icsText);
+  b2bIcsOkno();
 }
 // Objednávka z textu mailu: obdobie a tabuľka. Outlook dáva bunky tabuľky po
 // riadkoch (názov, počet, ČH na experta, spolu ČH, cena, suma), náš koncept
@@ -28914,9 +28968,9 @@ function b2bIcsImport(){
     const rd=new FileReader();
     rd.onload=()=>{
       const d=B2B.d; if(!d) return;
-      const email=(d.moje&&d.moje.kalendarEmail)||_prihlasenyEmail;
-      const evs=expandRecurring(parseICS(String(rd.result), email));
-      B2B._ics=b2bIcsKandidati(evs, d.mesiac, d.moje&&d.moje.pravidla);
+      // Vlastný súbor ide do vlastných hodín (cieľ z e-mailu projektu sa zabudne).
+      B2B._icsOsoba=null; B2B._icsPrijate=null; B2B._icsText=null;
+      b2bIcsNacitajText(rd.result);
       if(!B2B._ics.length) return alert("V súbore nie sú udalosti s časom za "+B2B_MESIACE[+d.mesiac.slice(5)-1]+" "+d.mesiac.slice(0,4)+".");
       b2bIcsOkno();
     };
@@ -28925,7 +28979,7 @@ function b2bIcsImport(){
   inp.click();
 }
 function b2bIcsOkno(){
-  const d=B2B.d, os=b2bMojaOsoba(), K=B2B._ics||[];
+  const d=B2B.d, os=b2bIcsOsoba(), K=B2B._ics||[], ja=!!os && os.user_id===_prihlasenyUser;
   // Už importované = UID udalosti + deň, bez času — čas upravený pred importom
   // by inak pri ďalšom importe vyrobil duplicitu.
   const uz=new Set(d.zaznamy.filter(z=>os && z.osoba_id===os.id && /^ics:/.test(z.zdroj||"")).map(z=>z.zdroj+"|"+String(z.datum).slice(0,10)));
@@ -28936,7 +28990,9 @@ function b2bIcsOkno(){
   const kat=[...new Set(K.flatMap(k=>k.kategorie))];
   openModal("Import z kalendára", `
     <div class="csub">Zaškrtnite udalosti projektu (ťuknutím na riadok alebo výberom aktivity). Do projektu ide len dátum, čas a predmet — vidia ich všetci členovia. Účastníci ani text pozvánky sa neukladajú. Výber si appka zapamätá na budúci mesiac.</div>
-    <div class="mfield"><label>Váš e-mail v kalendári (podľa neho sa spozná odmietnuté stretnutie)</label><input id="b2bIcsMail" type="email" value="${esc((d.moje&&d.moje.kalendarEmail)||_prihlasenyEmail||"")}"></div>
+    ${B2B._icsPrijate? `<div class="mfield"><label>Do hodín osoby</label><select id="b2bIcsOs" onchange="b2bIcsOsobaZmena(this.value)">${b2bIcsCiele(d).map(o=>`<option value="${esc(o.id)}"${os&&o.id===os.id?" selected":""}>${esc(o.meno)}${o.user_id===_prihlasenyUser? " (vy)" : ""}</option>`).join("")}</select>
+      <div class="csub" style="margin:4px 0 0">Kalendár z e-mailu projektu — predvolená je osoba s kontaktným e-mailom odosielateľa. Osoba s účtom si ho importuje sama.</div></div>` : ""}
+    ${ja? `<div class="mfield"><label>Váš e-mail v kalendári (podľa neho sa spozná odmietnuté stretnutie)</label><input id="b2bIcsMail" type="email" value="${esc((d.moje&&d.moje.kalendarEmail)||_prihlasenyEmail||"")}"></div>` : ""}
     ${kat.length? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"><span class="csub" style="margin:0;align-self:center">Kategórie:</span>${kat.map(c=>`<button class="apill" style="cursor:pointer;border:0" onclick="b2bIcsKategoria(this.dataset.k)" data-k="${esc(c)}">＋ ${esc(c)}</button>`).join("")}</div>` : ""}
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"><button class="aabtn" onclick="b2bIcsVsetkyOznac(true)" title="Zaškrtnúť všetky udalosti okrem odmietnutých, zrušených a už importovaných">Označiť všetky</button><button class="aabtn" onclick="b2bIcsVsetkyOznac(false)" title="Odznačiť všetky udalosti">Zrušiť výber</button></div>
     <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px;font-size:12.5px">Aktivita pre všetky označené: ${sel("b2bIcsVsetky","",null)}<button class="aabtn" onclick="b2bIcsAktVsetky()">Použiť</button></div>
@@ -29010,7 +29066,9 @@ function b2bIcsAktVsetky(){
   if(!n) alert("Najprv zaškrtnite udalosti, ktorým chcete aktivitu dať.");
 }
 async function b2bIcsUloz(){
-  const d=B2B.d, os=b2bMojaOsoba(); if(!d || !os) return;
+  // Cieľová osoba: ja, alebo osoba vybraná pri kalendári z e-mailu projektu (č. 293).
+  const d=B2B.d, os=b2bIcsOsoba(); if(!d || !os) return;
+  const ja=os.user_id===_prihlasenyUser, prij=B2B._icsPrijate||null;
   const P=JSON.parse(JSON.stringify((d.moje&&d.moje.pravidla)||{})), predm=new Set(P.predmety||[]); P.aktivity=P.aktivity||{};
   const nove=[], zleCasy=[];
   (B2B._ics||[]).forEach((k,i)=>{
@@ -29038,11 +29096,17 @@ async function b2bIcsUloz(){
   const mail=String((document.getElementById("b2bIcsMail")||{}).value||"").trim().toLowerCase();
   try{
     for(let i=0;i<nove.length;i+=200){ const r=await sb.from("b2b_zaznamy").insert(nove.slice(i,i+200)); if(r.error) throw r.error; }
-    d.moje=Object.assign({}, d.moje, {pravidla:P}, mail? {kalendarEmail:mail} : {});
-    const r=await sb.from("b2b_moje").upsert({user_id:_prihlasenyUser, projekt_id:d.pid, data:d.moje, upravene:new Date().toISOString()}, {onConflict:"user_id,projekt_id"});
-    if(r.error) console.error("B2B: pravidlá kalendára sa neuložili", r.error);
-    B2B._ics=null; B2B._icsKat=null; closeModal();
-    oznamPas(nove.length+" "+sklon(nove.length,"záznam","záznamy","záznamov")+" z kalendára.");
+    // Pravidlá a e-mail kalendára sú moje — import za inú osobu ich neprepíše.
+    if(ja){
+      d.moje=Object.assign({}, d.moje, {pravidla:P}, mail? {kalendarEmail:mail} : {});
+      const r=await sb.from("b2b_moje").upsert({user_id:_prihlasenyUser, projekt_id:d.pid, data:d.moje, upravene:new Date().toISOString()}, {onConflict:"user_id,projekt_id"});
+      if(r.error) console.error("B2B: pravidlá kalendára sa neuložili", r.error);
+    }
+    const txt=nove.length+" "+sklon(nove.length,"záznam","záznamy","záznamov");
+    // kalendár z e-mailu projektu: prijatý sa označí spracovaný až po uložení záznamov
+    if(prij) await b2bPrijateStav(prij, "spracovane", "kalendár: "+txt+" — "+os.meno);
+    B2B._ics=null; B2B._icsKat=null; B2B._icsOsoba=null; B2B._icsPrijate=null; B2B._icsText=null; closeModal();
+    oznamPas(txt+" z kalendára"+(ja? "" : " pre "+os.meno)+".");
     b2bObnov();
   }catch(e){ b2bChyba(e, "Import z kalendára sa nepodaril"); }
 }
@@ -29133,12 +29197,15 @@ function b2bImportRozpoznaj(X, wb, D, mesiac){
 function b2bImportOsoby(subor){
   const d=B2B.d; B2B._imp=null; B2B._impSubor=subor||null;
   const D=d.projekt.data||{}, bez=d.osoby.filter(o=>!o.user_id && o.aktivny && !b2bJeManagement(o));
+  // Výkaz z e-mailu projektu: osoba podľa kontaktného e-mailu odosielateľa (č. 293).
+  const odos=subor&&subor.od_koho? b2bOsobaPodlaEmailu(d, subor.od_koho) : null;
   openModal("Výkaz osoby bez účtu (XLSX)", `
     <div class="csub">Pre ľudí, ktorí appku nepoužívajú. Rozpozná sa hárok Detail z exportu appky, jednoduchá tabuľka (Dátum, Osoba, Od–Do alebo Hodiny, Aktivita, Popis), výkaz prác (Pracovník, Dátum · Počet hodín · Poznámka) alebo hárok v tvare vzoru („Osoba N“). Načíta sa len ${esc(B2B_MESIACE[+d.mesiac.slice(5)-1])} ${d.mesiac.slice(0,4)}; predošlý import tých istých osôb za mesiac sa nahradí.</div>
     ${subor? `<div style="font-size:13px;margin:8px 0">📎 ${esc(subor.nazov)}${subor.prijate? " (z e-mailu projektu)" : ""}</div>` : `<div class="mfield"><input type="file" accept=".xlsx,.xls" onchange="b2bImportCitaj(this)"></div>`}
     <div id="b2bImpNahlad" class="csub"></div>
     <div class="mfield"><label>Organizácia nových osôb</label><select id="b2bImpOrg">${(D.organizacie||[]).map(o=>`<option value="${esc(o.id)}">${esc(o.nazov)}</option>`).join("")}</select></div>
-    <div class="mfield"><label>Osoba (keď súbor nemá stĺpec Osoba)</label><select id="b2bImpOsoba">${bez.map(o=>`<option value="${o.id}">${esc(o.meno)}</option>`).join("")}<option value="">— nová osoba —</option></select>
+    <div class="mfield"><label>Osoba (keď súbor nemá stĺpec Osoba)</label><select id="b2bImpOsoba">${bez.map(o=>`<option value="${o.id}"${odos&&odos.id===o.id?" selected":""}>${esc(o.meno)}</option>`).join("")}<option value="">— nová osoba —</option></select>
+      ${odos&&odos.user_id? `<div class="csub" style="margin:4px 0 0">Výkaz poslal(a) ${esc(odos.meno)} — má v projekte účet, hodiny si môže zapísať v appke sám. Import je pre osoby bez účtu.</div>` : ""}
       <input id="b2bImpNova" placeholder="Meno novej osoby" style="margin-top:6px"></div>
     <div class="mfield"><label>Aktivita pre riadky bez aktivity</label><select id="b2bImpAkt"><option value="">— bez aktivity —</option>${d.aktivity.filter(a=>a.aktivna!==false).map(a=>`<option value="${esc(a.id)}">${esc(a.nazov)}</option>`).join("")}</select></div>
     <div id="b2bImpRiadky"></div>`,

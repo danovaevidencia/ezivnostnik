@@ -1448,11 +1448,13 @@ b2b_vykaz: {
       tip: "Nič sa neuloží samo — všetko počká na spracovanie. Keď je na adrese niečo nové, nad záložkami svieti pás a počet pri záložke Objednávky (objednávka) alebo Projekt (výkaz a ostatné). Spracovanú objednávku otvoríte v Objednávkach pod „Spracované a odmietnuté“ — tam sa dá z mailu prevziať znova.",
       podrobnosti: [
         { nadpis: "Čo adresa prijme",
-          html: "<p>Výkazy v Exceli (XLSX, XLS, CSV), PDF, Word, obrázky, preposlaný mail (EML, MSG) a ZIP do 15 MB. Telo mailu sa uloží ako objednávka, keď hovorí o objednávke a má obdobie (napr. 1.11.2026 – 30.11.2026). Iné typy sa preskočia a v zozname je napísané prečo.</p>" },
+          html: "<p>Výkazy v Exceli (XLSX, XLS, CSV), export kalendára (ICS), PDF, Word, obrázky, preposlaný mail (EML, MSG) a ZIP do 15 MB. Telo mailu sa uloží ako objednávka, keď hovorí o objednávke a má obdobie (napr. 1.11.2026 – 30.11.2026). Iné typy sa preskočia a v zozname je napísané prečo.</p>" },
         { nadpis: "Kto adresu vidí",
           html: "<p>Adresu a všetko, čo na ňu príde, vidia členovia projektu. Adresa je náhodná; keď sa dostane k niekomu, komu nepatrí, správca vydá <b>novú adresu</b> a stará prestane prijímať.</p>" },
         { nadpis: "Výkaz za iný mesiac",
           html: "<p>Keď je výkaz za iný mesiac, než máte otvorený, okno importu ponúkne <b>Prepnúť</b> na mesiac súboru a importuje ho tam.</p>" },
+        { nadpis: "Kalendár a výkaz podľa odosielateľa",
+          html: "<p>Pri exporte kalendára (.ics) ťuknite na <b>Importovať z kalendára</b> — otvorí sa ten istý import ako v Mojom mesiaci. Hodiny idú osobe, ktorej kontaktný e-mail sa zhoduje s odosielateľom (dá sa zmeniť); výkaz v Exceli sa jej predvyberie rovnako. Osoba s účtom si svoj kalendár importuje sama. Stretnutia sa čítajú za otvorený mesiac — keď ich súbor má za iný, appka povie za ktorý.</p>" },
       ],
     },
     {
