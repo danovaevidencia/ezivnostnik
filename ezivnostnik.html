@@ -26765,6 +26765,27 @@ async function b2bOtvorProjekt(pid){ B2B.pid=pid; B2B.mesiac=B2B.mesiac||b2bMesi
 function b2bSpatZoznam(){ B2B.pid=null; B2B.d=null; appB2bVykaz(); }
 function b2bZmenMesiac(o){ B2B.mesiac=b2bPosunMesiac(B2B.mesiac||b2bMesiacTeraz(), o); B2B.d=null; appB2bVykaz(); }
 function b2bPohlad(p){ B2B.pohlad=p; appB2bVykaz(); }
+// Projektový reporting (dev/docs/NAVRH_B2B_REPORTING.md §13): kód je v lenivom
+// b2b_report.js (ako asistent.js) — štart appky pre ostatných nezdrží.
+let _repNacitanie=null, _repChybaNacitania="";
+function repNacitaj(){
+  if(typeof window.repZalozkaHtml==="function") return Promise.resolve();
+  if(_repNacitanie) return _repNacitanie;
+  _repNacitanie=new Promise((ok,zle)=>{
+    const s=document.createElement("script");
+    s.src="b2b_report.js?v="+encodeURIComponent(APP_VERZIA);
+    s.onload=ok; s.onerror=()=>zle(new Error("nenačítalo sa b2b_report.js"));
+    document.head.appendChild(s);
+  }).catch(e=>{ _repNacitanie=null; console.error(e); throw e; });
+  return _repNacitanie;
+}
+function b2bReportingHtml(){
+  if(typeof window.repZalozkaHtml==="function") return repZalozkaHtml();
+  if(_repChybaNacitania) return `<div class="card" style="padding:12px 14px;border-color:var(--neg)"><b style="color:var(--neg)">Reporting sa nenačítal</b><div class="csub">${esc(_repChybaNacitania)}</div><button class="aabtn" onclick="_repChybaNacitania='';appB2bVykaz()">Skúsiť znova</button></div>`;
+  repNacitaj().then(()=>{ if(B2B.pohlad==="reporting") appB2bVykaz(); })
+    .catch(e=>{ _repChybaNacitania=(e&&e.message)||String(e); if(B2B.pohlad==="reporting") appB2bVykaz(); });
+  return `<div class="aempty">Načítavam reporting…</div>`;
+}
 async function b2bObnov(){ B2B.d=null; appB2bVykaz(); }
 function b2bChyba(e, co){ console.error("B2B "+co, e); alert(co+": "+((e&&e.message)||e)); }
 // ── záznamy člena ──
@@ -28965,7 +28986,7 @@ function appB2bVykaz(){
   if(jaManagement && B2B.pohlad==="moj") B2B.pohlad="pv";
   // Počet čakajúcich pri záložke, kde čakajú: objednávky z mailu v Objednávkach, ostatné v Projekte (č. 290).
   const noveP=b2bPrijateNove(d), nObj=noveP.filter(b2bPrijateJeObj).length, nIne=noveP.length-nObj;
-  const obsah=B2B.pohlad==="pv"? b2bPvHtml() : B2B.pohlad==="tim"? b2bTimHtml() : B2B.pohlad==="projekt"? b2bNastaveniaHtml() : B2B.pohlad==="vystupy"? b2bVystupyHtml() : B2B.pohlad==="objednavky"? b2bObjednavkyHtml() : b2bMojMesiacHtml();
+  const obsah=B2B.pohlad==="pv"? b2bPvHtml() : B2B.pohlad==="tim"? b2bTimHtml() : B2B.pohlad==="projekt"? b2bNastaveniaHtml() : B2B.pohlad==="vystupy"? b2bVystupyHtml() : B2B.pohlad==="objednavky"? b2bObjednavkyHtml() : B2B.pohlad==="reporting"? b2bReportingHtml() : b2bMojMesiacHtml();
   s.innerHTML=appHlavicka("b2b_vykaz", (B2B.projekty.length>1||B2B.pozvanky.length||B2B.zakladatel? `<button class="aabtn" onclick="b2bSpatZoznam()">‹ Projekty</button>` : ""))+`
     <div data-scroll="b2b">
     <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center;margin:0 2px 12px">
@@ -28973,7 +28994,7 @@ function appB2bVykaz(){
       <div style="display:flex;gap:4px;align-items:center"><button class="aabtn" onclick="b2bZmenMesiac(-1)" aria-label="Predchádzajúci mesiac">‹</button>
         <b style="min-width:120px;text-align:center">${esc(B2B_MESIACE[+d.mesiac.slice(5)-1])} ${d.mesiac.slice(0,4)}</b>
         <button class="aabtn" onclick="b2bZmenMesiac(1)" aria-label="Nasledujúci mesiac">›</button></div></div>
-    <div style="display:flex;gap:6px;flex-wrap:wrap;margin:0 2px 12px">${jaManagement? "" : tab("moj","Môj mesiac")}${tab("tim","Tím")}${tab("pv","Spoločný výkaz")}${tab("vystupy","Výstupy")}${tab("objednavky","Objednávky"+(nObj? " · 📥"+nObj : ""))}${tab("projekt","Projekt"+(nIne? " · 📥"+nIne : ""))}</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin:0 2px 12px">${jaManagement? "" : tab("moj","Môj mesiac")}${tab("tim","Tím")}${tab("pv","Spoločný výkaz")}${tab("vystupy","Výstupy")}${tab("objednavky","Objednávky"+(nObj? " · 📥"+nObj : ""))}${tab("reporting","Reporting")}${tab("projekt","Projekt"+(nIne? " · 📥"+nIne : ""))}</div>
     ${b2bPrijateBanner(d)}${obsah}</div>`;
 }
 // ── B2B: import kalendára (.ics) — ten istý parser ako Výkazy (návrh §6) ──

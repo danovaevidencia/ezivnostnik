@@ -1368,3 +1368,433 @@ function repPptx(PptxGenJS, layout, meta){
   }
   return pres;
 }
+
+// ── 16. Protokol pred odoslaním: len počty a kódy, reťazce do 100 znakov ─
+function repProtokolOrez(x, hlbka){
+  hlbka = hlbka || 0;
+  if (x == null || typeof x === "number" || typeof x === "boolean") return x;
+  if (typeof x === "string") return x.length > 100 ? x.slice(0, 99) + "…" : x;
+  if (hlbka >= 4) return null;
+  if (Array.isArray(x)) return x.slice(0, 200).map(v => repProtokolOrez(v, hlbka + 1));
+  const o = {}; for (const [k, v] of Object.entries(x)) o[k] = repProtokolOrez(v, hlbka + 1); return o;
+}
+
+// Vodoznak konceptu (§9.2): výstupy neuzavretého cyklu ho nesú na každej strane.
+function repVodoznak(layout){
+  const T = repTema(layout.tema);
+  for (const st of layout.strany) st.prvky.push({ t: "text", x: REP_L, y: 7.24, w: 4.5, h: 0.18, s: "PRACOVNÁ VERZIA — cyklus nie je uzavretý", pt: 8, bold: true, color: T.red, align: "l", valign: "m", font: T.font });
+  return layout;
+}
+
+// ── 17. Appka: záložka Reporting v B2B projekte (§10) ───────────
+const REP = { pid: null, pohlad: "programy", programy: null, program: null, profil: null, profilVerzia: 0, profilNavrh: null,
+  vstupy: [], cykly: [], cyklus: null, cyklusObsah: null, krok: "vstupy", plany: {}, registre: {}, chyba: "", pracuje: "",
+  verziaSnimka: null };
+
+function repJeUzky(){ return (window.innerWidth || 1280) < 900; }
+function repMozemPisat(){ const o = b2bMojaOsoba(); return !!(o && (o.spravca || o.rola !== "management")); }
+function repPrekresli(){ if (typeof appB2bVykaz === "function") appB2bVykaz(); }
+function repChyba(e, co){ console.error("Reporting " + co, e); REP.pracuje = ""; alert(co + ": " + ((e && e.message) || e)); repPrekresli(); }
+const REP_DRUHY = { plan: "Plán (MS Project XML)", issue: "Issue Log", ct: "Commitment Tracker", dep: "Dependency Log", zistenia: "Register zistení" };
+
+function repZalozkaHtml(){
+  if (REP.pid !== B2B.pid) { Object.assign(REP, { pid: B2B.pid, pohlad: "programy", programy: null, program: null, cyklus: null, plany: {}, registre: {} }); repNacitajProgramy(); }
+  if (REP.programy == null) return '<div class="aempty">Načítavam programy…</div>';
+  if (REP.chyba) return '<div class="card" style="padding:12px 14px;border-color:var(--neg)"><b style="color:var(--neg)">Reporting sa nepodarilo načítať</b><div class="csub">' + esc(REP.chyba) + '</div><button class="aabtn" onclick="repNacitajProgramy()">Skúsiť znova</button></div>';
+  const prac = REP.pracuje ? '<div class="card" style="padding:8px 12px;margin-bottom:10px"><span class="csub" style="margin:0">⏳ ' + esc(REP.pracuje) + '</span></div>' : "";
+  if (REP.pohlad === "program" && REP.program) return prac + repProgramHtml();
+  if (REP.pohlad === "profil" && REP.program) return prac + repProfilHtml();
+  if (REP.pohlad === "cyklus" && REP.cyklus) return prac + repCyklusHtml();
+  return prac + repProgramyHtml();
+}
+
+async function repNacitajProgramy(){
+  try {
+    REP.chyba = "";
+    const { data, error } = await sb.from("b2b_programy").select("id, projekt_id, nazov, kod, stav, profil_verzia, vytvoril, vytvorene, upravil, upravene").eq("projekt_id", REP.pid).order("vytvorene");
+    if (error) throw error;
+    REP.programy = data || [];
+    const ids = REP.programy.map(p => p.id);
+    REP.posledne = {};
+    if (ids.length) {
+      const { data: cy } = await sb.from("b2b_rep_cykly").select("id, program_id, stav_ku_dnu, nazov, stav, verzia, upravene").in("program_id", ids).order("stav_ku_dnu", { ascending: false });
+      for (const c of cy || []) if (!REP.posledne[c.program_id]) REP.posledne[c.program_id] = c;
+    }
+  } catch (e) { REP.programy = REP.programy || []; REP.chyba = (e && e.message) || String(e); console.error("Reporting programy", e); }
+  repPrekresli();
+}
+
+function repProgramyHtml(){
+  const sprav = b2bSomSpravca();
+  const zoz = REP.programy.filter(p => p.stav !== "archiv").map(p => {
+    const c = REP.posledne && REP.posledne[p.id];
+    return '<div class="card" style="padding:10px 14px;margin-bottom:8px;display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap">' +
+      '<div><b>' + esc(p.nazov) + '</b> <span class="csub" style="margin:0 0 0 4px">' + esc(p.kod) + '</span><div class="csub" style="margin:2px 0 0">' +
+      (c ? "posledný cyklus " + esc(repDMR(c.stav_ku_dnu)) + " · " + esc({ koncept: "koncept", uzavrety: "uzavretý", odoslany: "odoslaný" }[c.stav] || c.stav) : "zatiaľ bez cyklu") +
+      (p.profil_verzia ? "" : " · profil nie je nastavený") + '</div></div>' +
+      '<button class="aabtn pri" onclick="repOtvorProgram(\'' + esc(p.id) + '\')">Otvoriť</button></div>';
+  }).join("");
+  return '<div class="card" style="padding:12px 14px;margin-bottom:10px"><b>Projektový reporting</b><div class="csub" style="margin:4px 0 0">Z plánu MS Project a registrov (Issue Log, záväzky, závislosti, zistenia) zostaví report s rovnakými pravidlami v každom cykle. ' +
+    'Vstupy sú v cloude projektu šifrované a vidí ich len tím projektu.</div></div>' +
+    (zoz || '<div class="aempty">Projekt zatiaľ nesleduje žiadny program.</div>') +
+    (sprav && !repJeUzky() ? '<div class="card" style="padding:10px 14px"><b>Nový program</b><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">' +
+      '<input id="repNovyNazov" placeholder="Názov programu" maxlength="200" style="flex:2;min-width:180px">' +
+      '<input id="repNovyKod" placeholder="Kód (A–Z, 0–9)" maxlength="10" style="flex:1;min-width:110px;text-transform:uppercase">' +
+      '<button class="aabtn pri" onclick="repZalozProgram()">Založiť</button></div><div class="csub">Kód ide do názvov súborov (napr. <code>ALFA_Roadmapa_2026-06-25.pptx</code>).</div></div>' : "");
+}
+
+async function repZalozProgram(){
+  const nazov = (document.getElementById("repNovyNazov").value || "").trim(), kod = (document.getElementById("repNovyKod").value || "").trim().toUpperCase();
+  if (!nazov) return alert("Zadajte názov programu.");
+  if (!/^[A-Z0-9]{2,10}$/.test(kod)) return alert("Kód má 2–10 znakov A–Z a 0–9.");
+  try { const { error } = await sb.rpc("b2b_program_zaloz", { p_projekt: REP.pid, p_nazov: nazov, p_kod: kod }); if (error) throw error; await repNacitajProgramy(); }
+  catch (e) { repChyba(e, "Program sa nepodarilo založiť"); }
+}
+
+async function repOtvorProgram(id){
+  REP.program = REP.programy.find(p => p.id === id) || null;
+  if (!REP.program) return;
+  REP.pohlad = "program"; REP.pracuje = "Načítavam program…"; repPrekresli();
+  try {
+    const [pr, vs, cy] = await Promise.all([
+      b2bEdge("rep_profil_nacitaj", { program: id }),
+      sb.from("b2b_rep_vstupy").select("id, program_id, druh, nazov_suboru, sha256, velkost, datum_suboru, povodny_velkost, protokol, nahral, nahrane").eq("program_id", id).order("nahrane", { ascending: false }),
+      sb.from("b2b_rep_cykly").select("id, program_id, stav_ku_dnu, nazov, stav, verzia, vytvoril, vytvorene, upravil, upravene").eq("program_id", id).order("stav_ku_dnu", { ascending: false }) ]);
+    if (vs.error) throw vs.error; if (cy.error) throw cy.error;
+    REP.profil = pr.obsah || null; REP.profilVerzia = pr.verzia || 0;
+    REP.vstupy = vs.data || []; REP.cykly = cy.data || [];
+    REP.pracuje = "";
+  } catch (e) { return repChyba(e, "Program sa nepodarilo načítať"); }
+  repPrekresli();
+}
+
+function repPosledny(druh){ return REP.vstupy.find(v => v.druh === druh) || null; }
+async function repNacitajVstup(id){
+  if (REP.plany[id]) return REP.plany[id];
+  const d = await b2bEdge("rep_vstup_nacitaj", { vstup: id });
+  REP.plany[id] = d.obsah;
+  return d.obsah;
+}
+function repProtokolText(v){
+  const p = v.protokol || {};
+  if (v.druh === "plan") return (p.ulohy || 0) + " úloh · " + (p.milniky || 0) + " míľnikov" + (p.pridane || p.odobrate ? " · +" + (p.pridane || 0) + " / −" + (p.odobrate || 0) + " oproti minulému" : "") + (p.premenovane ? " · " + p.premenovane + " premenovaných" : "");
+  const k = [];
+  k.push((p.riadky || 0) + " záznamov");
+  if (p.duplicitneId && p.duplicitneId.length) k.push(p.duplicitneId.length + " duplicitných ID");
+  if (p.chybajucePovinne && p.chybajucePovinne.length) k.push("chýba: " + p.chybajucePovinne.join(", "));
+  const dt = p.datumy || {}; if (dt.americke || dt.bezRoka || dt.neplatne) k.push("dátumy: " + [dt.americke ? dt.americke + "× M/D/RR" : "", dt.bezRoka ? dt.bezRoka + "× bez roka" : "", dt.neplatne ? dt.neplatne + "× neplatné" : ""].filter(Boolean).join(", "));
+  if (p.prazdnyStav) k.push(p.prazdnyStav + "× prázdny stav");
+  return k.join(" · ");
+}
+
+function repProgramHtml(){
+  const p = REP.program, pis = repMozemPisat() && p.stav !== "archiv", uzky = repJeUzky();
+  const hlav = '<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center;margin:0 2px 10px">' +
+    '<div><button class="aabtn" onclick="REP.pohlad=\'programy\';repPrekresli()">‹ Programy</button> <b style="font-size:15px;margin-left:6px">' + esc(p.nazov) + '</b> <span class="csub" style="margin:0">' + esc(p.kod) + '</span></div>' +
+    (uzky ? "" : '<div style="display:flex;gap:6px">' + (REP.profil ? '<button class="aabtn" onclick="repOtvorProfil()">Profil programu</button>' : "") +
+      (pis && REP.profil && repPosledny("plan") ? '<button class="aabtn pri" onclick="repNovyCyklus()">+ Nový cyklus</button>' : "") + '</div>') + '</div>';
+  if (uzky) return hlav + repMobilPrehladHtml();
+  let navod = "";
+  if (!repPosledny("plan")) navod = '<div class="card" style="padding:12px 14px;margin-bottom:10px;border-color:var(--acc)"><b>1. Nahrajte plán z MS Project</b><div class="csub" style="margin:4px 0 0">V MS Project: Súbor → Uložiť ako → typ <b>XML</b>. Súbor .mpp sa načítať nedá. Plán sa prečíta v prehliadači; na server ide len potrebný výťah (úlohy, míľniky, % a vlastné polia), šifrovane, a pôvodný súbor zbalený na kontrolu.</div></div>';
+  else if (!REP.profil) navod = '<div class="card" style="padding:12px 14px;margin-bottom:10px;border-color:var(--acc)"><b>2. Nastavte profil programu</b><div class="csub" style="margin:4px 0 6px">Nástroj navrhne oblasti, fázy a dlaždice z plánu; vy ich potvrdíte.</div><button class="aabtn pri" onclick="repOtvorProfil()">Navrhnúť profil z plánu</button></div>';
+  const cykly = REP.cykly.map(c => '<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-top:1px solid var(--line);align-items:center;flex-wrap:wrap">' +
+    '<div><b>' + esc(c.nazov || ("Report k " + repDMR(c.stav_ku_dnu))) + '</b><div class="csub" style="margin:0">' + esc({ koncept: "koncept", uzavrety: "uzavretý", odoslany: "odoslaný" }[c.stav] || c.stav) + " · verzia " + c.verzia + " · " + esc(String(c.upravene || "").slice(0, 10)) + '</div></div>' +
+    '<button class="aabtn" onclick="repOtvorCyklus(\'' + esc(c.id) + '\')">Otvoriť</button></div>').join("");
+  const vstupy = Object.keys(REP_DRUHY).map(d => {
+    const v = repPosledny(d);
+    return '<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-top:1px solid var(--line);align-items:center;flex-wrap:wrap">' +
+      '<div style="min-width:220px;flex:1"><b>' + esc(REP_DRUHY[d]) + '</b><div class="csub" style="margin:0">' + (v ? esc(v.nazov_suboru) + " · " + esc(String(v.nahrane || "").slice(0, 10)) + " · " + esc(repProtokolText(v)) : "zatiaľ nenahraté") + '</div></div>' +
+      (pis ? '<label class="aabtn" style="cursor:pointer">' + (v ? "Nahrať novší" : "Nahrať") + '<input type="file" accept="' + (d === "plan" ? ".xml" : ".xlsx,.xlsm") + '" style="display:none" onchange="repImport(\'' + d + '\', this)"></label>' : "") + '</div>';
+  }).join("");
+  return hlav + navod +
+    '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>Cykly reportu</b>' + (cykly || '<div class="csub">Zatiaľ žiadny cyklus.</div>') + '</div>' +
+    '<div class="card" style="padding:10px 14px"><b>Vstupy</b><div class="csub" style="margin:2px 0 4px">Excel zostáva zdrojom pravdy PMO; každý import je nová snímka, staré ostávajú pre porovnanie.</div>' + vstupy + '</div>';
+}
+
+async function repImport(druh, input){
+  const f = input.files && input.files[0]; input.value = "";
+  if (!f) return;
+  if (druh === "plan" && /\.mpp$/i.test(f.name)) return alert("Súbor .mpp sa načítať nedá. V MS Project ho uložte cez Súbor → Uložiť ako → XML.");
+  REP.pracuje = "Čítam " + f.name + "…"; repPrekresli();
+  try {
+    const u8 = new Uint8Array(await f.arrayBuffer());
+    const sha = await b2bSha256(u8);
+    let obsah, protokol, datumSuboru = null;
+    if (druh === "plan") {
+      const plan = repPlanZXml(new TextDecoder("utf-8").decode(u8));
+      const pred = repPosledny("plan") ? await repNacitajVstup(repPosledny("plan").id) : null;
+      protokol = repPlanProtokol(plan, pred);
+      obsah = plan; datumSuboru = plan.projekt.statusDate || plan.projekt.lastSaved || null;
+    } else {
+      const X = await ensureXLSX();
+      const r = repRegisterZXlsx(X, u8.buffer, druh);
+      if (r.protokol.chybajucePovinne.length && !confirm("V súbore chýbajú povinné stĺpce: " + r.protokol.chybajucePovinne.join(", ") + ".\nNahrať aj tak (neúplný import)?")) { REP.pracuje = ""; return repPrekresli(); }
+      protokol = r.protokol; obsah = { riadky: r.riadky, protokol: r.protokol };
+      datumSuboru = f.lastModified ? new Date(f.lastModified).toISOString().slice(0, 10) : null;
+    }
+    REP.pracuje = "Ukladám šifrovane…"; repPrekresli();
+    const d = await b2bEdge("rep_vstup_nahraj", { program: REP.program.id, druh, nazov: f.name, sha256: sha, velkost: u8.length, datum_suboru: datumSuboru, protokol: repProtokolOrez(protokol), obsah });
+    REP.plany[d.id] = obsah;
+    try { const F = await ensureFflate(); await b2bEdgeSubor({ akcia: "rep_vstup_povodny", vstup: d.id }, F.gzipSync(u8)); }
+    catch (e) { console.error("Reporting: pôvodný súbor sa neuložil", e); alert("Výťah sa uložil, pôvodný súbor nie (" + ((e && e.message) || e) + "). Report sa dá zostaviť; originál nahrajte znova neskôr."); }
+    await repOtvorProgram(REP.program.id);
+    if (druh === "plan" && !REP.profil) repOtvorProfil();
+  } catch (e) { repChyba(e, "Import sa nepodaril"); }
+}
+
+// ── Profil programu (§5) ─────────────────────────────────────
+async function repOtvorProfil(){
+  const v = repPosledny("plan");
+  if (!v) return alert("Najprv nahrajte plán.");
+  try {
+    REP.pracuje = "Načítavam plán…"; repPrekresli();
+    const plan = await repNacitajVstup(v.id);
+    REP.profilNavrh = JSON.parse(JSON.stringify(REP.profil || Object.assign(repProfilNavrh(plan), { nazov: REP.program.nazov, kod: REP.program.kod })));
+    REP.profilPlan = plan;
+    REP.pohlad = "profil"; REP.pracuje = "";
+  } catch (e) { return repChyba(e, "Plán sa nepodarilo načítať"); }
+  repPrekresli();
+}
+function repProfilHtml(){
+  const P = REP.profilNavrh, pis = repMozemPisat();
+  const skupOpt = k => P.skupiny.map(s => '<option value="' + esc(s.kluc) + '"' + (s.kluc === k ? " selected" : "") + ">" + esc(s.nazov) + "</option>").join("");
+  const fazy = P.fazy.map((f, i) => '<tr><td><input value="' + esc(f.kluc) + '" maxlength="8" style="width:70px" onchange="REP.profilNavrh.fazy[' + i + '].kluc=this.value.trim()"></td>' +
+    '<td><input value="' + esc(f.legenda || "") + '" style="width:160px" onchange="REP.profilNavrh.fazy[' + i + '].legenda=this.value"></td>' +
+    '<td><input value="' + esc((f.pravidlo.obsahuje || []).join("; ")) + '" style="width:100%" onchange="REP.profilNavrh.fazy[' + i + '].pravidlo.obsahuje=this.value.split(\';\').map(x=>x.trim()).filter(Boolean)"></td>' +
+    '<td style="text-align:center"><input type="checkbox"' + (f.pravidlo.lenMilniky ? " checked" : "") + ' onchange="REP.profilNavrh.fazy[' + i + '].pravidlo.lenMilniky=this.checked"></td></tr>').join("");
+  const oblasti = P.oblasti.map((o, i) => '<tr><td style="text-align:center"><input type="checkbox"' + (o.zobrazit !== false ? " checked" : "") + ' onchange="REP.profilNavrh.oblasti[' + i + '].zobrazit=this.checked"></td>' +
+    '<td><input value="' + esc(o.kratky) + '" maxlength="40" style="width:140px" onchange="REP.profilNavrh.oblasti[' + i + '].kratky=this.value;REP.profilNavrh.oblasti[' + i + '].aliasy=[this.value]"></td>' +
+    '<td class="csub" style="margin:0">' + esc(o.nazov) + '</td><td><select onchange="REP.profilNavrh.oblasti[' + i + '].skupina=this.value">' + skupOpt(o.skupina) + '</select></td></tr>').join("");
+  const temy = Object.keys(REP_TEMY).map(k => '<option value="' + k + '"' + (P.tema === k ? " selected" : "") + ">" + esc(REP_TEMY[k].nazov) + "</option>").join("");
+  const polia = Object.entries(P.polia.popis || {}).map(([k, v]) => esc({ kodZavazku: "kód záväzku", stitokOblasti: "štítok oblasti", bpKod: "BP kód", mmp: "príznak" }[k] || k) + " = " + esc(v)).join(" · ");
+  return '<div style="margin:0 2px 10px"><button class="aabtn" onclick="REP.pohlad=\'program\';repPrekresli()">‹ ' + esc(REP.program.nazov) + '</button> <b style="margin-left:6px">Profil programu</b> ' +
+    (REP.profil ? '<span class="csub" style="margin:0">verzia ' + REP.profilVerzia + '</span>' : '<span class="csub" style="margin:0">návrh z plánu — skontrolujte a uložte</span>') + '</div>' +
+    '<div class="card" style="padding:10px 14px;margin-bottom:10px"><div style="display:flex;gap:10px;flex-wrap:wrap">' +
+    '<div class="mfield" style="flex:2;min-width:200px"><label>Názov v reporte</label><input value="' + esc(P.nazov) + '" onchange="REP.profilNavrh.nazov=this.value"></div>' +
+    '<div class="mfield" style="flex:1;min-width:150px"><label>Cieľový termín programu</label><input type="date" value="' + esc(P.cielovyTermin || "") + '" onchange="REP.profilNavrh.cielovyTermin=this.value||null"></div>' +
+    '<div class="mfield" style="flex:1;min-width:180px"><label>Téma výstupov</label><select onchange="REP.profilNavrh.tema=this.value">' + temy + '</select></div></div>' +
+    '<div class="csub" style="margin:4px 0 0">Cieľový termín je biznisové rozhodnutie, nie najneskorší dátum plánu — dlaždica „Dní do konca“ stojí na ňom. Polia plánu: ' + (polia || "nenašli sa") + '.</div></div>' +
+    '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>Fázy (brány) kritickej cesty</b><div class="csub" style="margin:2px 0 6px">Míľnik patrí fáze, keď jeho názov obsahuje text (bez ohľadu na veľkosť písmen a diakritiku). Viac textov oddeľte bodkočiarkou.</div>' +
+    '<table style="width:100%"><tr class="csub"><th>Kľúč</th><th>Legenda</th><th>Názov obsahuje</th><th>Len míľniky</th></tr>' + fazy + '</table></div>' +
+    '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>Oblasti (dráhy)</b><div class="csub" style="margin:2px 0 6px">Oblasť je naviazaná na úlohu plánu cez jej UID — premenovanie v pláne ju neodpojí.</div>' +
+    '<table style="width:100%"><tr class="csub"><th>Zobraziť</th><th>Krátky názov</th><th>Úloha v pláne</th><th>Skupina</th></tr>' + oblasti + '</table></div>' +
+    (pis ? '<button class="aabtn pri" onclick="repUlozProfil()">Uložiť profil</button>' : '<div class="csub">Profil môže meniť člen tímu, nie rola Management a support.</div>');
+}
+async function repUlozProfil(){
+  const P = REP.profilNavrh;
+  const kluce = P.fazy.map(f => f.kluc);
+  if (!kluce.length || kluce.some(k => !k) || new Set(kluce).size !== kluce.length) return alert("Každá fáza musí mať jedinečný kľúč.");
+  if (P.fazy.some(f => !(f.pravidlo.obsahuje || []).length)) return alert("Každá fáza potrebuje text, podľa ktorého sa jej míľniky nájdu.");
+  try {
+    REP.pracuje = "Ukladám profil…"; repPrekresli();
+    const d = await b2bEdge("rep_profil_uloz", { program: REP.program.id, verzia: REP.profilVerzia, obsah: P });
+    REP.profil = JSON.parse(JSON.stringify(P)); REP.profilVerzia = d.verzia; REP.pracuje = ""; REP.pohlad = "program";
+  } catch (e) {
+    if (e.stav === 409) { REP.pracuje = ""; alert("Profil medzitým uložil niekto iný. Otvorte ho znova — vaše úpravy treba zopakovať."); return repOtvorProgram(REP.program.id); }
+    return repChyba(e, "Profil sa nepodarilo uložiť");
+  }
+  repPrekresli();
+}
+
+// ── Cyklus (§10.3) ────────────────────────────────────────────
+async function repNovyCyklus(){
+  try {
+    const v = repPosledny("plan"), plan = await repNacitajVstup(v.id);
+    const navrh = plan.projekt.statusDate || plan.projekt.currentDate || plan.projekt.lastSaved || "";
+    const stav = prompt("Stav ku dňu (RRRR-MM-DD). Návrh je zo súboru plánu, nie z hodín počítača:", navrh);
+    if (!stav) return;
+    if (!repDatum(stav)) return alert("Dátum musí byť v tvare RRRR-MM-DD.");
+    if (REP.cykly.some(c => c.stav_ku_dnu === stav)) return alert("Cyklus k " + repDMR(stav) + " už existuje.");
+    const vstupy = {}; for (const d of Object.keys(REP_DRUHY)) { const x = repPosledny(d); if (x) vstupy[d] = x.id; }
+    const obsah = { vstupy, usudok: {}, vyber: {}, tema: REP.profil.tema || "clean" };
+    REP.pracuje = "Zakladám cyklus…"; repPrekresli();
+    const d = await b2bEdge("rep_cyklus_uloz", { program: REP.program.id, stav_ku_dnu: stav, nazov: "Report k " + repDMR(stav), obsah });
+    await repOtvorProgram(REP.program.id);
+    await repOtvorCyklus(d.id);
+  } catch (e) { repChyba(e, "Cyklus sa nepodarilo založiť"); }
+}
+
+async function repOtvorCyklus(id){
+  try {
+    REP.pracuje = "Načítavam cyklus…"; repPrekresli();
+    const d = await b2bEdge("rep_cyklus_nacitaj", { cyklus: id });
+    REP.cyklus = d.cyklus; REP.cyklusObsah = d.obsah || { vstupy: {}, usudok: {}, vyber: {} };
+    REP.verziaSnimka = null;
+    if (REP.cyklus.stav !== "koncept") {
+      const { data } = await sb.from("b2b_rep_cykly_verzie").select("cislo").eq("cyklus_id", id).order("cislo", { ascending: false }).limit(1);
+      if (data && data[0]) REP.verziaSnimka = (await b2bEdge("rep_cyklus_verzia_nacitaj", { cyklus: id, cislo: data[0].cislo })).obsah;
+    }
+    for (const vid of Object.values(REP.cyklusObsah.vstupy || {})) await repNacitajVstup(vid);
+    REP.krok = REP.cyklus.stav === "koncept" ? (REP.krok || "vstupy") : "nahlad";
+    REP.pohlad = "cyklus"; REP.pracuje = "";
+  } catch (e) { return repChyba(e, "Cyklus sa nepodarilo načítať"); }
+  repPrekresli();
+}
+
+// Kontext reportu z obsahu cyklu (jeden zdroj pre náhľad aj súbor).
+function repKontextCyklu(){
+  if (REP.verziaSnimka) return REP.verziaSnimka;                // uzavretý cyklus = nemenná snímka
+  const O = REP.cyklusObsah, P = REP.profil, V = O.vstupy || {};
+  const plan = V.plan ? REP.plany[V.plan] : null;
+  if (!plan || !P) return null;
+  const model = repModel(plan, P, REP.cyklus.stav_ku_dnu);
+  const reg = d => (V[d] && REP.plany[V[d]]) ? REP.plany[V[d]].riadky : null;
+  const kontroly = repKontroly(model, plan, P);
+  const ct = reg("ct") ? repCtSulad(plan, P, reg("ct"), REP.cyklus.stav_ku_dnu, (O.anotacie || {}).ct) : null;
+  const dep = reg("dep") ? repDepVyhodnot(reg("dep"), plan, P, ct, REP.cyklus.stav_ku_dnu, reg("issue")) : null;
+  const il = reg("issue") ? repIssueKpi(reg("issue"), P, REP.cyklus.stav_ku_dnu) : null;
+  const view = repView(model, { profil: P, cyklus: O });
+  return { model, view, kontroly, ct, dep, il, tema: O.tema || P.tema || "clean" };
+}
+
+function repCyklusHtml(){
+  const c = REP.cyklus, kon = c.stav === "koncept", pis = kon && repMozemPisat();
+  const krok = (k, n) => '<button class="aabtn' + (REP.krok === k ? " pri" : "") + '" onclick="REP.krok=\'' + k + '\';repPrekresli()">' + n + '</button>';
+  const hlav = '<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center;margin:0 2px 10px">' +
+    '<div><button class="aabtn" onclick="REP.pohlad=\'program\';repPrekresli()">‹ ' + esc(REP.program.nazov) + '</button> <b style="margin-left:6px">' + esc(c.nazov || ("Report k " + repDMR(c.stav_ku_dnu))) + '</b> <span class="csub" style="margin:0">' +
+    esc({ koncept: "koncept", uzavrety: "uzavretý", odoslany: "odoslaný" }[c.stav] || c.stav) + " · verzia " + c.verzia + '</span></div>' +
+    '<div style="display:flex;gap:6px">' + (pis ? '<button class="aabtn" onclick="repUlozCyklus()">Uložiť</button>' : "") +
+    (!kon && repMozemPisat() ? '<button class="aabtn" onclick="repOtvorZnova()">Znova otvoriť</button>' : "") + '</div></div>';
+  if (repJeUzky()) return hlav + repMobilPrehladHtml();
+  const kroky = '<div style="display:flex;gap:6px;flex-wrap:wrap;margin:0 2px 10px">' + (kon ? krok("vstupy", "1 Vstupy") + krok("kontrola", "2 Kontrola dát") + krok("usudok", "3 Úsudok") : "") + krok("nahlad", (kon ? "4 " : "") + "Náhľad a výber") + krok("export", (kon ? "5 " : "") + "Export") + '</div>';
+  let K;
+  try { K = repKontextCyklu(); } catch (e) { console.error(e); return hlav + '<div class="card" style="padding:12px;border-color:var(--neg)">Report sa nedá zostaviť: ' + esc(e.message) + '</div>'; }
+  if (!K) return hlav + kroky + '<div class="aempty">Cyklus nemá plán alebo program nemá profil.</div>';
+  const telo = REP.krok === "vstupy" ? repKrokVstupy() : REP.krok === "kontrola" ? repKrokKontrola(K) : REP.krok === "usudok" ? repKrokUsudok(K) : REP.krok === "export" ? repKrokExport(K) : repKrokNahlad(K);
+  return hlav + kroky + telo;
+}
+
+function repKrokVstupy(){
+  const O = REP.cyklusObsah;
+  return '<div class="card" style="padding:10px 14px"><b>Vstupy cyklu</b><div class="csub" style="margin:2px 0 6px">Každý druh vstupu je konkrétny import. Nový import nahrajte v programe a tu ho vyberte.</div>' +
+    Object.keys(REP_DRUHY).map(d => {
+      const moz = REP.vstupy.filter(v => v.druh === d);
+      return '<div class="mfield"><label>' + esc(REP_DRUHY[d]) + '</label><select onchange="repVyberVstup(\'' + d + '\', this.value)"><option value="">— bez —</option>' +
+        moz.map(v => '<option value="' + esc(v.id) + '"' + ((O.vstupy || {})[d] === v.id ? " selected" : "") + ">" + esc(v.nazov_suboru + " · " + String(v.nahrane || "").slice(0, 10)) + "</option>").join("") + '</select></div>';
+    }).join("") + '</div>';
+}
+async function repVyberVstup(druh, id){
+  const O = REP.cyklusObsah; O.vstupy = O.vstupy || {};
+  if (id) { O.vstupy[druh] = id; try { await repNacitajVstup(id); } catch (e) { return repChyba(e, "Vstup sa nepodarilo načítať"); } }
+  else delete O.vstupy[druh];
+  repPrekresli();
+}
+
+function repKrokKontrola(K){
+  const riadok = (u, t) => '<div style="padding:4px 0;border-top:1px solid var(--line)"><span style="color:' + (u === "chyba" ? "var(--neg)" : u === "upozornenie" ? "var(--warn,#b7791f)" : "var(--muted)") + '">' + (u === "chyba" ? "✗" : u === "upozornenie" ? "!" : "i") + '</span> ' + esc(t) + '</div>';
+  let h = '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>Plán — ' + K.kontroly.length + ' upozornení</b><div class="csub" style="margin:2px 0 4px">Nástroj chyby v pláne zviditeľní, neopravuje ich. Opravuje ich PMO v zdrojovom pláne.</div>' +
+    (K.kontroly.map(k => riadok(k.uroven, k.text)).join("") || '<div class="csub">Bez nálezov.</div>') + '</div>';
+  if (K.il) h += '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>Issue Log</b><div class="csub" style="margin:2px 0">' +
+    K.il.aktivne + " aktívnych · " + K.il.kriticke + " kritických · " + K.il.eskalovane + " eskalovaných podľa úrovne (stav Escalated: " + K.il.eskalovaneStav + ") · " + K.il.poTermine + " po termíne · " + K.il.bezTerminu + " bez dátumu" + (K.il.neznamyStav ? " · " + K.il.neznamyStav + " s prázdnym stavom (rátané ako aktívne)" : "") + '</div></div>';
+  if (K.ct) h += '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>Záväzky vs. plán</b><div class="csub" style="margin:2px 0">' +
+    Object.entries(K.ct.pocty).filter(([, n]) => n).map(([k, n]) => n + "× " + esc(REP_CT_POPIS[k])).join(" · ") + (K.ct.planBezZavazku.length ? " · v pláne bez záväzku: " + esc(K.ct.planBezZavazku.slice(0, 10).join(", ")) : "") + '</div></div>';
+  if (K.dep) h += '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>Závislosti</b><div class="csub" style="margin:2px 0">' +
+    K.dep.kpi.aktivne + " aktívnych · " + K.dep.kpi.blokujuce + " blokuje míľnik · " + K.dep.kpi.poTermine + " po termíne · " + K.dep.kpi.bezPrislubu + " bez prísľubu" +
+    (K.dep.osireleZIssue.length ? " · Issue Log odkazuje na neexistujúce: " + esc([...new Set(K.dep.osireleZIssue.map(o => o.dep))].join(", ")) : "") + '</div></div>';
+  return h;
+}
+
+function repKrokUsudok(K){
+  const O = REP.cyklusObsah, us = O.usudok || {}, pz = us.poznamky || {};
+  const auto = repNaratiV(K.model, REP.profil);
+  const nar = us.naratiV && us.naratiV.text ? us.naratiV.text : "";
+  const drahy = K.model.drahy.filter(d => !d.chyba).map(d => {
+    const a = repAutoPoznamka(d, REP.profil.fazy).text;
+    return '<tr><td><b>' + esc(d.kratky) + '</b></td><td style="width:70%"><input value="' + esc(pz[d.kluc] || "") + '" placeholder="' + esc(a ? "auto: " + a : "") + '" style="width:100%" onchange="repPoznamka(\'' + esc(d.kluc) + '\', this.value)"></td></tr>';
+  }).join("");
+  return '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>Exekutívny súhrn</b><div class="csub" style="margin:2px 0 6px">Prázdne pole = automatický text z dát. Napísaný text má prednosť a vo výstupe je označený ako ručný.</div>' +
+    '<textarea rows="5" style="width:100%" placeholder="' + esc(auto) + '" onchange="repNastavNaratiV(this.value)">' + esc(nar) + '</textarea></div>' +
+    '<div class="card" style="padding:10px 14px"><b>Poznámka k oblasti</b><div class="csub" style="margin:2px 0 6px">Jedna veta o skutočnom stave (čo je hotové, čo beží, čo blokuje). Prázdne = automatická poznámka z míľnikov.</div><table style="width:100%">' + drahy + '</table></div>';
+}
+function repPoznamka(kluc, text){ const u = REP.cyklusObsah.usudok = REP.cyklusObsah.usudok || {}; u.poznamky = u.poznamky || {}; if (text.trim()) u.poznamky[kluc] = text.trim(); else delete u.poznamky[kluc]; }
+function repNastavNaratiV(text){ const u = REP.cyklusObsah.usudok = REP.cyklusObsah.usudok || {}; u.naratiV = text.trim() ? { text: text.trim(), zdroj: "rucne" } : null; }
+
+function repKrokNahlad(K){
+  const O = REP.cyklusObsah, vy = O.vyber = O.vyber || {}, kon = REP.cyklus.stav === "koncept" && !REP.verziaSnimka;
+  const L = repLayout(K.view, K.tema, null, { lenZahrnute: false });
+  const manif = K.view.manifest;
+  const vyberHtml = kon ? '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>Čo pôjde do výstupu</b><div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px">' +
+    manif.map(m => '<label style="display:flex;gap:4px;align-items:center"><input type="checkbox"' + (m.zahrnuta ? " checked" : "") + ' onchange="repVyberSnimky(\'' + esc(m.kluc) + '\', this.checked)"> ' + esc(m.nazov) + '</label>').join("") + '</div>' +
+    '<div class="csub" style="margin:8px 0 4px">Oblasti v Gantte a v detailoch oneskorení (KPI sa skrytím nemenia):</div><div style="display:flex;gap:10px;flex-wrap:wrap">' +
+    K.model.drahy.filter(d => !d.chyba).map(d => '<label style="display:flex;gap:4px;align-items:center"><input type="checkbox"' + ((vy.skryteOblasti || []).includes(d.kluc) ? "" : " checked") + ' onchange="repSkryOblast(\'' + esc(d.kluc) + '\', !this.checked)"> ' + esc(d.kratky) + '</label>').join("") + '</div>' +
+    '<div class="mfield" style="max-width:320px;margin-top:8px"><label>Téma</label><select onchange="REP.cyklusObsah.tema=this.value;repPrekresli()">' + Object.keys(REP_TEMY).map(k => '<option value="' + k + '"' + (K.tema === k ? " selected" : "") + ">" + esc(REP_TEMY[k].nazov) + "</option>").join("") + '</select></div></div>' : "";
+  const zahrnute = L.strany.filter(st => (manif.find(m => m.kluc === st.kluc) || {}).zahrnuta).length;
+  const strany = L.strany.map(st => {
+    const zahr = (manif.find(m => m.kluc === st.kluc) || {}).zahrnuta;
+    return '<div style="margin:0 0 12px;opacity:' + (zahr ? 1 : 0.35) + '"><div class="csub" style="margin:0 0 4px">' + esc(st.nadpis || st.kluc) + (zahr ? "" : " — nejde do výstupu") + '</div>' +
+      '<div style="border:1px solid var(--line);border-radius:6px;overflow:hidden">' + repSvgStrana(L, st).replace("<svg ", '<svg style="display:block;width:100%;height:auto" ') + '</div></div>';
+  }).join("");
+  return vyberHtml + '<div class="csub" style="margin:0 2px 8px">Výstup: <b>' + zahrnute + '</b> strán. Náhľad je ten istý obraz, z ktorého sa skladá PPTX aj PDF.</div>' + strany;
+}
+function repVyberSnimky(kluc, zap){ const v = REP.cyklusObsah.vyber = REP.cyklusObsah.vyber || {}; v.snimky = v.snimky || {}; if (zap) delete v.snimky[kluc]; else v.snimky[kluc] = false; repPrekresli(); }
+function repSkryOblast(kluc, skryt){ const v = REP.cyklusObsah.vyber = REP.cyklusObsah.vyber || {}; const s = new Set(v.skryteOblasti || []); if (skryt) s.add(kluc); else s.delete(kluc); v.skryteOblasti = [...s]; repPrekresli(); }
+
+function repKrokExport(K){
+  const kon = REP.cyklus.stav === "koncept";
+  const L = repLayout(K.view, K.tema);
+  const chyby = L.problemy;
+  return '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>Kontrola pred exportom</b><div class="csub" style="margin:2px 0">' +
+    (chyby.length ? '<span style="color:var(--neg)">' + chyby.length + " problémov rozloženia — export je zablokovaný.</span> " + esc(chyby.slice(0, 3).join("; ")) : L.strany.length + " strán bez problémov rozloženia.") + '</div></div>' +
+    '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>Výstupy</b><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">' +
+    '<button class="aabtn pri"' + (chyby.length ? " disabled" : "") + ' onclick="repStiahniPptx()">⬇ Roadmapa (PPTX)</button>' +
+    '<button class="aabtn" disabled title="Kolo R2">QA report (PPTX)</button><button class="aabtn" disabled title="Kolo R2">XLSX</button><button class="aabtn" disabled title="Kolo R2">PDF</button><button class="aabtn" disabled title="Kolo R2">E-mail (.eml)</button><button class="aabtn" disabled title="Kolo R2">HTML report</button></div>' +
+    '<div class="csub" style="margin:6px 0 0">' + (kon ? "Koncept nesie na každej strane vodoznak „PRACOVNÁ VERZIA“. Po uzavretí cyklu sa výstupy skladajú z nemennej snímky." : "Výstupy sa skladajú z uzavretej snímky cyklu.") + '</div></div>' +
+    (kon && repMozemPisat() ? '<div class="card" style="padding:10px 14px"><b>Uzavrieť cyklus</b><div class="csub" style="margin:2px 0 6px">Uzavretím sa vstupy, úsudok a výber zamknú do snímky. Zmena potom znamená znova otvoriť a novú verziu.</div><button class="aabtn"' + (chyby.length ? " disabled" : "") + ' onclick="repUzavri()">Uzavrieť cyklus</button></div>' : "");
+}
+
+function ensurePptx(){
+  return nacitajKniznicu("https://cdn.jsdelivr.net/npm/pptxgenjs@4.0.1/dist/pptxgen.bundle.js", () => window.PptxGenJS, "Knižnica pre PowerPoint");
+}
+async function repStiahniPptx(){
+  try {
+    REP.pracuje = "Skladám PowerPoint…"; repPrekresli();
+    const K = repKontextCyklu(), P = await ensurePptx();
+    const L = repLayout(K.view, K.tema);
+    if (L.problemy.length) throw new Error("rozloženie má problémy: " + L.problemy[0]);
+    if (REP.cyklus.stav === "koncept" && !REP.verziaSnimka) repVodoznak(L);
+    const blob = await repPptx(P, L, { nazov: K.view.nazov }).write({ outputType: "blob" });
+    downloadBlob(blob, (REP.program.kod || "report") + "_Roadmapa_" + REP.cyklus.stav_ku_dnu + (REP.cyklus.stav === "koncept" ? "_koncept" : "") + ".pptx");
+    REP.pracuje = "";
+  } catch (e) { return repChyba(e, "PowerPoint sa nepodarilo zostaviť"); }
+  repPrekresli();
+}
+
+async function repUlozCyklus(){
+  try {
+    REP.pracuje = "Ukladám cyklus…"; repPrekresli();
+    const d = await b2bEdge("rep_cyklus_uloz", { cyklus: REP.cyklus.id, verzia: REP.cyklus.verzia, obsah: REP.cyklusObsah });
+    REP.cyklus.verzia = d.verzia; REP.pracuje = "";
+  } catch (e) {
+    if (e.stav === 409) { REP.pracuje = ""; alert("Cyklus medzitým zmenil niekto iný. Načítam aktuálny stav — vaše posledné úpravy treba zopakovať."); return repOtvorCyklus(REP.cyklus.id); }
+    return repChyba(e, "Cyklus sa nepodarilo uložiť");
+  }
+  repPrekresli();
+}
+async function repUzavri(){
+  if (!confirm("Uzavrieť cyklus " + repDMR(REP.cyklus.stav_ku_dnu) + "? Vstupy, úsudok a výber sa zamknú do snímky.")) return;
+  try {
+    await repUlozCyklus();
+    const K = repKontextCyklu();
+    const snimka = { schema: 1, model: K.model, view: K.view, kontroly: K.kontroly, ct: K.ct, dep: K.dep, il: K.il, tema: K.tema,
+      profilVerzia: REP.profilVerzia, vstupy: Object.assign({}, REP.cyklusObsah.vstupy), obsah: REP.cyklusObsah };
+    REP.pracuje = "Uzatváram…"; repPrekresli();
+    await b2bEdge("rep_cyklus_uzavri", { cyklus: REP.cyklus.id, verzia: REP.cyklus.verzia, obsah: snimka });
+    await repOtvorProgram(REP.program.id); await repOtvorCyklus(REP.cyklus.id);
+  } catch (e) { repChyba(e, "Cyklus sa nepodarilo uzavrieť"); }
+}
+async function repOtvorZnova(){
+  if (!confirm("Znova otvoriť cyklus? Vznikne nová verzia konceptu; uzavretá snímka ostáva v histórii.")) return;
+  try { await b2bEdge("rep_cyklus_otvor", { cyklus: REP.cyklus.id, verzia: REP.cyklus.verzia }); await repOtvorProgram(REP.program.id); await repOtvorCyklus(REP.cyklus.id); }
+  catch (e) { repChyba(e, "Cyklus sa nepodarilo otvoriť"); }
+}
+
+// Mobil (D11): len čítanie — posledný uzavretý cyklus.
+function repMobilPrehladHtml(){
+  const K = REP.pohlad === "cyklus" ? (function(){ try { return repKontextCyklu(); } catch (e) { return null; } })() : null;
+  if (!K) return '<div class="aempty">Report sa tvorí a upravuje na počítači. Na mobile uvidíte prehľad uzavretého cyklu — otvorte cyklus zo zoznamu.</div>' +
+    (REP.pohlad === "program" ? REP.cykly.map(c => '<div class="card" style="padding:8px 12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center"><span>' + esc(c.nazov || repDMR(c.stav_ku_dnu)) + '</span><button class="aabtn" onclick="repOtvorCyklus(\'' + esc(c.id) + '\')">Prehľad</button></div>').join("") : "");
+  const ex = K.view.snimky.find(x => x.typ === "exec");
+  const kpi = ex ? ex.kpi : [], poz = ex ? ex.pozornost : [];
+  return '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">' + kpi.map(k => '<div class="card" style="padding:8px 10px"><div class="csub" style="margin:0">' + esc(k.popis) + '</div><b style="font-size:20px">' + esc(k.hodnota) + '</b></div>').join("") + '</div>' +
+    '<div class="card" style="padding:10px 12px"><b>Vyžaduje pozornosť</b>' + (poz.map(p => '<div style="padding:4px 0;border-top:1px solid var(--line)"><b>' + esc(p.kratky) + '</b> <span class="csub" style="margin:0">' + esc(p.dovod) + '</span></div>').join("") || '<div class="csub">Nič.</div>') + '</div>';
+}
