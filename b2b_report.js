@@ -1724,7 +1724,7 @@ function repKrokNahlad(K){
     return '<div style="margin:0 0 12px;opacity:' + (zahr ? 1 : 0.35) + '"><div class="csub" style="margin:0 0 4px">' + esc(st.nadpis || st.kluc) + (zahr ? "" : " — nejde do výstupu") + '</div>' +
       '<div style="border:1px solid var(--line);border-radius:6px;overflow:hidden">' + repSvgStrana(L, st).replace("<svg ", '<svg style="display:block;width:100%;height:auto" ') + '</div></div>';
   }).join("");
-  return vyberHtml + '<div class="csub" style="margin:0 2px 8px">Výstup: <b>' + zahrnute + '</b> strán. Náhľad je ten istý obraz, z ktorého sa skladá PPTX aj PDF.</div>' + strany;
+  return vyberHtml + '<div class="csub" style="margin:0 2px 8px">Výstup: <b>' + zahrnute + '</b> strán. Náhľad je ten istý obraz, z ktorého sa skladá PowerPoint.</div>' + strany;
 }
 function repVyberSnimky(kluc, zap){ const v = REP.cyklusObsah.vyber = REP.cyklusObsah.vyber || {}; v.snimky = v.snimky || {}; if (zap) delete v.snimky[kluc]; else v.snimky[kluc] = false; repPrekresli(); }
 function repSkryOblast(kluc, skryt){ const v = REP.cyklusObsah.vyber = REP.cyklusObsah.vyber || {}; const s = new Set(v.skryteOblasti || []); if (skryt) s.add(kluc); else s.delete(kluc); v.skryteOblasti = [...s]; repPrekresli(); }
@@ -1737,7 +1737,7 @@ function repKrokExport(K){
     (chyby.length ? '<span style="color:var(--neg)">' + chyby.length + " problémov rozloženia — export je zablokovaný.</span> " + esc(chyby.slice(0, 3).join("; ")) : L.strany.length + " strán bez problémov rozloženia.") + '</div></div>' +
     '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>Výstupy</b><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">' +
     '<button class="aabtn pri"' + (chyby.length ? " disabled" : "") + ' onclick="repStiahniPptx()">⬇ Roadmapa (PPTX)</button>' +
-    '<button class="aabtn" disabled title="Kolo R2">QA report (PPTX)</button><button class="aabtn" disabled title="Kolo R2">XLSX</button><button class="aabtn" disabled title="Kolo R2">PDF</button><button class="aabtn" disabled title="Kolo R2">E-mail (.eml)</button><button class="aabtn" disabled title="Kolo R2">HTML report</button></div>' +
+    '</div><div class="csub" style="margin:6px 0 0">Pripravujeme: QA report (PPTX), XLSX, PDF, e-mail pre Outlook a HTML report.</div>' +
     '<div class="csub" style="margin:6px 0 0">' + (kon ? "Koncept nesie na každej strane vodoznak „PRACOVNÁ VERZIA“. Po uzavretí cyklu sa výstupy skladajú z nemennej snímky." : "Výstupy sa skladajú z uzavretej snímky cyklu.") + '</div></div>' +
     (kon && repMozemPisat() ? '<div class="card" style="padding:10px 14px"><b>Uzavrieť cyklus</b><div class="csub" style="margin:2px 0 6px">Uzavretím sa vstupy, úsudok a výber zamknú do snímky. Zmena potom znamená znova otvoriť a novú verziu.</div><button class="aabtn"' + (chyby.length ? " disabled" : "") + ' onclick="repUzavri()">Uzavrieť cyklus</button></div>' : "");
 }
