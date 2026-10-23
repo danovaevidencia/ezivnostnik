@@ -499,7 +499,7 @@ window.NAVODY_SNIMKY = {
  },
  "b2b_vykaz-reporting-5": {
   "d": {
-   "subor": "navody/b2b_vykaz-reporting-5.d.afeab092.webp",
+   "subor": "navody/b2b_vykaz-reporting-5.d.47d68ae3.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -512,7 +512,7 @@ window.NAVODY_SNIMKY = {
  },
  "b2b_vykaz-reporting-6": {
   "d": {
-   "subor": "navody/b2b_vykaz-reporting-6.d.dfc0b8b1.webp",
+   "subor": "navody/b2b_vykaz-reporting-6.d.e7b33958.webp",
    "w": 1024,
    "h": 600,
    "ciel": {

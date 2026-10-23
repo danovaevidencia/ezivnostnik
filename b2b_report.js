@@ -928,6 +928,8 @@ function repView(model, kontext){
     kpi: ["postupProgramu", "nasadene", "dokoncene", "oneskoreneOblasti", "pomalyPostup", "dniDoKonca"].map(t => repKpiHodnota({ typ: t }, model, p)),
     naratiV: us.naratiV && us.naratiV.text ? us.naratiV.text : repNaratiV(model, p), naratiVZdroj: us.naratiV && us.naratiV.text ? (us.naratiV.zdroj || "rucne") : "auto",
     metoda: "Postup programu: " + model.program.metoda + ".", pozornost });
+  // 2b. Zmeny od minula, podstatné zmeny a trend (R3a, §6.7) — z porovnania snímok plánu
+  for (const z of repZmenySnimky(kontext, vybrane)) snimky.push(z);
   // 3. Najbližšie míľniky
   const tyzdne = (vy.najblizsieTyzdne || (p.metriky && p.metriky.oknoNajblizsieTyzdne) || 6);
   const doDna = repPlusDni(model.stavKuDnu, tyzdne * 7);
@@ -939,6 +941,9 @@ function repView(model, kontext){
   }
   polozky.sort((a, b) => (a.datum < b.datum ? -1 : a.datum > b.datum ? 1 : a.kratky.localeCompare(b.kratky)));
   snimky.push({ kluc: "najblizsie", typ: "najblizsie", nazov: "Najbližšie míľniky (" + tyzdne + " týždňov)", zahrnuta: vybrane("najblizsie"), tyzdne, polozky });
+  // 3b. Finančný report (R3a, D8) — len keď ho úsudok cyklu má
+  const fin = repFinancie(us.financie);
+  if (fin) snimky.push({ kluc: "financie", typ: "financie", nazov: "Finančný report", zahrnuta: vybrane("financie"), fin });
   // 4. Detaily oneskorených oblastí
   const prah = (p.metriky && p.metriky.nizkyPostupUlohy) || 50;
   const skrytePod = vy.skrytePodsekcie || {};
@@ -958,6 +963,7 @@ function repView(model, kontext){
   for (const s of snimky) s.balik = "roadmapa";
   // QA report (R2): snímky dohľadu kvality idú do vlastného balíka (QA PPTX/PDF)
   if (kontext.qa) for (const s of repQaSnimky(kontext.qa, vybrane)) { s.balik = "qa"; snimky.push(s); }
+  if (kontext.qa && kontext.zmenyRegistrov) snimky.push(Object.assign(repQaZmenyRegistrovSnimka(kontext.zmenyRegistrov, vybrane), { balik: "qa" }));
   return { nazov: p.nazov || "", kod: p.kod || "", stavKuDnu: model.stavKuDnu, cielovyTermin: model.cielovyTermin, pocetUloh: model.pocty.ulohy,
     farby: (p.metriky && p.metriky.farby) || null, snimky,
     manifest: snimky.map(s => ({ kluc: s.kluc, nazov: s.nazov, zahrnuta: s.zahrnuta, balik: s.balik })) };
@@ -996,7 +1002,8 @@ function repLayout(view, temaKluc, tokeny, volby){
 function repOverLayout(strany){
   const o = [];
   strany.forEach((st, i) => st.prvky.forEach((p, j) => {
-    for (const k of ["x", "y", "w", "h", "x1", "y1", "x2", "y2", "pt"].concat(p.t === "mark" ? ["s"] : [])) if (k in p && !Number.isFinite(p[k])) o.push("strana " + (i + 1) + ", prvok " + j + " (" + p.t + "): " + k + " = " + p[k]);
+    for (const k of ["x", "y", "w", "h", "x1", "y1", "x2", "y2", "pt", "cx", "cy", "r"].concat(p.t === "mark" ? ["s"] : [])) if (k in p && !Number.isFinite(p[k])) o.push("strana " + (i + 1) + ", prvok " + j + " (" + p.t + "): " + k + " = " + p[k]);
+    if (p.t === "kolac" && (p.cx - p.r < -0.01 || p.cx + p.r > REP_W + 0.01 || p.cy - p.r < -0.01 || p.cy + p.r > REP_H + 0.01)) o.push("strana " + (i + 1) + ", prvok " + j + " (kolac) presahuje stranu");
     if ("x" in p && "w" in p && (p.x < -0.01 || p.x + p.w > REP_W + 0.01)) o.push("strana " + (i + 1) + ", prvok " + j + " (" + p.t + ") presahuje šírku strany");
     if ("y" in p && "h" in p && (p.y < -0.01 || p.y + p.h > REP_H + 0.01)) o.push("strana " + (i + 1) + ", prvok " + j + " (" + p.t + ") presahuje výšku strany");
   }));
@@ -1047,7 +1054,7 @@ function repDlazdice(A, T, kpi, y, h, farby){
   const ptH = n <= 4 ? 24 : n === 5 ? 21 : 19;
   kpi.forEach((k, i) => {
     const x = REP_L + i * (w + medzera);
-    const ak = k.akcent === "red" ? T.red : k.akcent === "green" ? T.green : k.akcent === "amber" ? T.amber : k.akcent === "textSec" ? T.textSec : (k.pct != null ? repFarbaStavu(k.pct, farby, T) : T.blue);
+    const ak = k.farba ? k.farba : k.akcent === "red" ? T.red : k.akcent === "green" ? T.green : k.akcent === "amber" ? T.amber : k.akcent === "textSec" ? T.textSec : (k.pct != null ? repFarbaStavu(k.pct, farby, T) : T.blue);
     A.rect(x, y, w, h, { fill: T.panel, r: T.rounded ? 0.08 : 0 });
     A.rect(x, y, 0.06, h, { fill: ak });
     A.text(x + 0.17, y + 0.07, w - 0.25, 0.22, repSkrat(k.popis, w - 0.25, 10, false, T.font), { pt: 10, color: T.textSec });
@@ -1323,6 +1330,17 @@ function repSvgStrana(layout, strana, volby){
       if (p.tvar === "stvorec") o.push('<rect x="' + f(x - r) + '" y="' + f(y - r) + '" width="' + f(p.s) + '" height="' + f(p.s) + '"' + st + "/>");
       else if (p.tvar === "kosostvorec") o.push('<polygon points="' + [[x, y - r * 1.15], [x + r * 1.15, y], [x, y + r * 1.15], [x - r * 1.15, y]].map(q => f(q[0]) + "," + f(q[1])).join(" ") + '"' + st + "/>");
       else o.push('<circle cx="' + f(x) + '" cy="' + f(y) + '" r="' + f(r) + '"' + st + "/>");
+    } else if (p.t === "kolac") {
+      const sum = p.diely.reduce((s, d) => s + d.v, 0);
+      let a = -Math.PI / 2;
+      for (const d of p.diely) {
+        if (!(d.v > 0)) continue;
+        const da = d.v / sum * 2 * Math.PI, st = ' fill="#' + d.farba + '" stroke="#' + (p.okraj || layout.bg) + '" stroke-width="1.5"';
+        if (da >= 2 * Math.PI - 1e-6) { o.push('<circle cx="' + f(p.cx) + '" cy="' + f(p.cy) + '" r="' + f(p.r) + '"' + st + "/>"); break; }
+        const x0 = p.cx + p.r * Math.cos(a), y0 = p.cy + p.r * Math.sin(a), x1 = p.cx + p.r * Math.cos(a + da), y1 = p.cy + p.r * Math.sin(a + da);
+        o.push('<path d="M' + f(p.cx) + " " + f(p.cy) + " L" + f(x0) + " " + f(y0) + " A" + f(p.r) + " " + f(p.r) + " 0 " + (da > Math.PI ? 1 : 0) + " 1 " + f(x1) + " " + f(y1) + ' Z"' + st + "/>");
+        a += da;
+      }
     } else if (p.t === "text") {
       const riadky = Array.isArray(p.s) ? p.s : [String(p.s)];
       const lh = (p.lh || 1.2) * p.pt / 72;
@@ -1361,6 +1379,12 @@ function repPptx(PptxGenJS, layout, meta){
         const r = p.s / 2, sh = p.tvar === "stvorec" ? (S.RECTANGLE || S.rect) : p.tvar === "kosostvorec" ? (S.DIAMOND || S.diamond) : (S.OVAL || S.ellipse);
         const k = p.tvar === "kosostvorec" ? 1.15 : 1;
         s.addShape(sh, { x: p.x - r * k, y: p.y - r * k, w: p.s * k, h: p.s * k, fill: { color: p.fill }, line: { color: p.line, width: p.lw || 1 } });
+      } else if (p.t === "kolac") {
+        // natívny graf PowerPointu, nie obrázok (koláč generátora bol natiahnutá elipsa, §3.4)
+        const D = p.diely.filter(d => d.v > 0);
+        s.addChart((pres.charts && pres.charts.PIE) || "pie", [{ name: "Zložky", labels: D.map(d => d.nazov), values: D.map(d => d.v) }],
+          { x: p.cx - p.r, y: p.cy - p.r, w: 2 * p.r, h: 2 * p.r, chartColors: D.map(d => d.farba), showLegend: false, showValue: false, showPercent: false,
+            showLabel: false, showTitle: false, firstSliceAng: 0, layout: { x: 0, y: 0, w: 1, h: 1 }, dataBorder: { pt: 1, color: p.okraj || layout.bg } });
       } else if (p.t === "text") {
         const riadky = Array.isArray(p.s) ? p.s : [String(p.s)];
         s.addText(riadky.join("\n"), { x: p.x, y: p.y, w: p.w, h: p.h, fontSize: p.pt, bold: !!p.bold, italic: !!p.italic, color: p.color,
@@ -1638,7 +1662,7 @@ async function repNovyCyklus(){
     const pred = REP.cykly.filter(c => c.stav_ku_dnu < stav).sort((a, b) => (a.stav_ku_dnu < b.stav_ku_dnu ? 1 : -1))[0];
     if (pred) {
       const po = ((await b2bEdge("rep_cyklus_nacitaj", { cyklus: pred.id })).obsah) || {};
-      Object.assign(obsah, repPrenesUsudok(po, pred.stav_ku_dnu));
+      Object.assign(obsah, repPrenesUsudok(po, pred.stav_ku_dnu), repPrenesPorovnanie(po, pred));
     }
     const d = await b2bEdge("rep_cyklus_uloz", { program: REP.program.id, stav_ku_dnu: stav, nazov: "Report k " + repDMR(stav), obsah });
     await repOtvorProgram(REP.program.id);
@@ -1656,7 +1680,14 @@ async function repOtvorCyklus(id){
       const { data } = await sb.from("b2b_rep_cykly_verzie").select("cislo").eq("cyklus_id", id).order("cislo", { ascending: false }).limit(1);
       if (data && data[0]) REP.verziaSnimka = (await b2bEdge("rep_cyklus_verzia_nacitaj", { cyklus: id, cislo: data[0].cislo })).obsah;
     }
-    for (const vid of Object.values(REP.cyklusObsah.vstupy || {})) await repNacitajVstup(vid);
+    const VS = repVstupyCyklu(REP.cyklusObsah);
+    for (const vid of VS.vlastne) await repNacitajVstup(vid);
+    // vstup porovnania, ktorý sa nedá načítať, cyklus nezhodí — v karte Porovnanie svieti
+    REP.porovnanieChyba = "";
+    for (const vid of VS.porovnanie) {
+      try { await repNacitajVstup(vid); }
+      catch (e) { console.error("Reporting: vstup porovnania " + vid, e); REP.porovnanieChyba = (e && e.message) || String(e); }
+    }
     REP.krok = REP.cyklus.stav === "koncept" ? (REP.krok || "vstupy") : "nahlad";
     REP.pohlad = "cyklus"; REP.pracuje = "";
   } catch (e) { return repChyba(e, "Cyklus sa nepodarilo načítať"); }
@@ -1669,7 +1700,7 @@ async function repOtvorCyklus(id){
 function repKontextCyklu(){
   if (REP.verziaSnimka) {                                         // uzavretý cyklus = nemenná snímka
     const S = REP.verziaSnimka;
-    return Object.assign({ usudok: ((S.obsah || {}).usudok) || {}, protokoly: S.protokoly || {}, qa: null }, S);
+    return Object.assign({ usudok: ((S.obsah || {}).usudok) || {}, protokoly: S.protokoly || {}, qa: null, zmeny: null, trend: null, zmenyRegistrov: null }, S);
   }
   const O = REP.cyklusObsah, P = REP.profil, V = O.vstupy || {};
   const plan = V.plan ? REP.plany[V.plan] : null;
@@ -1684,10 +1715,43 @@ function repKontextCyklu(){
   const zistenia = rz && rz.obsah ? rz.obsah : null;
   const qa = (il || ct || dep || (zistenia && zistenia.riadky.length))
     ? repQa({ model, profil: P, il, ilRiadky: reg("issue"), ct, dep, zistenia, usudok: O.usudok }) : null;
-  const view = repView(model, { profil: P, cyklus: O, qa });
+  const { zmeny, trend, zmenyRegistrov } = repKontextZmien(O, P, plan, model, reg);
+  const view = repView(model, { profil: P, cyklus: O, qa, zmeny, trend, zmenyRegistrov });
   const protokoly = {};
   for (const d of ["issue", "ct", "dep"]) { const v = V[d] && REP.vstupy.find(x => x.id === V[d]); if (v) protokoly[d] = v.protokol; }
-  return { model, view, kontroly, ct, dep, il, qa, usudok: O.usudok || {}, protokoly, registreVerzie: { zistenia: rz ? rz.verzia : 0 }, tema: O.tema || P.tema || "clean" };
+  return { model, view, kontroly, ct, dep, il, qa, zmeny, trend, zmenyRegistrov, usudok: O.usudok || {}, protokoly, registreVerzie: { zistenia: rz ? rz.verzia : 0 }, tema: O.tema || P.tema || "clean" };
+}
+
+// Model staršej snímky plánu k jej vlastnému stavu ku dňu (N24: nie k dnešnému).
+// Pamäť podľa vstupu, stavu a verzie profilu — prekreslenie ho nepočíta znova.
+function repModelBodu(vstupId, stav){
+  const plan = REP.plany[vstupId];
+  if (!plan || !stav) return null;
+  const k = vstupId + "|" + stav + "|" + REP.profilVerzia;
+  REP.modelCache = REP.modelCache || {};
+  return REP.modelCache[k] || (REP.modelCache[k] = repModel(plan, REP.profil, stav));
+}
+// Porovnanie (O.porovnanie) a body trendu (O.trend.body) cyklu; len snímky so
+// stavom ku dňu PRED týmto cyklom.
+function repKontextZmien(O, P, plan, model, reg){
+  const por = O.porovnanie || {}, stav = REP.cyklus.stav_ku_dnu;
+  let zmeny = null, trend = null, zmenyRegistrov = null;
+  if (por.plan && REP.plany[por.plan] && por.stavKuDnu && por.stavKuDnu < stav)
+    zmeny = repZmeny({ plan: REP.plany[por.plan], stavKuDnu: por.stavKuDnu, model: repModelBodu(por.plan, por.stavKuDnu), popis: por.popis }, { plan, stavKuDnu: stav, model }, P);
+  // ten istý import na oboch stranách nie je porovnanie — strana by tvrdila „nič sa nezmenilo“
+  const regP = d => (por[d] && por[d] !== (O.vstupy || {})[d] && REP.plany[por[d]] ? REP.plany[por[d]].riadky : null);
+  if (["issue", "ct", "dep"].some(d => regP(d) && reg(d)))
+    zmenyRegistrov = repZmenyRegistrov({ issue: regP("issue"), ct: regP("ct"), dep: regP("dep") }, { issue: reg("issue"), ct: reg("ct"), dep: reg("dep") });
+  const body = ((O.trend || {}).body || []).filter(b => b.plan && REP.plany[b.plan] && b.stavKuDnu && b.stavKuDnu < stav)
+    .map(b => ({ stavKuDnu: b.stavKuDnu, popis: b.popis || "", model: repModelBodu(b.plan, b.stavKuDnu) }));
+  if (body.length) trend = repTrend(body.concat([{ stavKuDnu: stav, popis: "tento cyklus", model }]), P);
+  return { zmeny, trend, zmenyRegistrov };
+}
+// Všetky vstupy, ktoré cyklus potrebuje načítať (vlastné, porovnanie, trend).
+function repVstupyCyklu(O){
+  const por = O.porovnanie || {}, s = new Set(Object.values(O.vstupy || {}));
+  const dalsie = new Set([por.plan, por.issue, por.ct, por.dep].concat(((O.trend || {}).body || []).map(b => b.plan)).filter(Boolean));
+  return { vlastne: [...s], porovnanie: [...dalsie].filter(id => !s.has(id)) };
 }
 
 function repCyklusHtml(){
@@ -1715,7 +1779,7 @@ function repKrokVstupy(){
       const moz = REP.vstupy.filter(v => v.druh === d);
       return '<div class="mfield"><label>' + esc(REP_DRUHY[d]) + '</label><select onchange="repVyberVstup(\'' + d + '\', this.value)"><option value="">— bez —</option>' +
         moz.map(v => '<option value="' + esc(v.id) + '"' + ((O.vstupy || {})[d] === v.id ? " selected" : "") + ">" + esc(v.nazov_suboru + " · " + String(v.nahrane || "").slice(0, 10)) + "</option>").join("") + '</select></div>';
-    }).join("") + '</div>';
+    }).join("") + '</div>' + repPorovnanieHtml();
 }
 async function repVyberVstup(druh, id){
   const O = REP.cyklusObsah; O.vstupy = O.vstupy || {};
@@ -1747,12 +1811,12 @@ function repKrokUsudok(K){
     return '<tr><td><b>' + esc(d.kratky) + '</b></td><td style="width:70%"><input value="' + esc(pz[d.kluc] || "") + '" placeholder="' + esc(a ? "auto: " + a : "") + '" style="width:100%" onchange="repPoznamka(\'' + esc(d.kluc) + '\', this.value)"></td></tr>';
   }).join("");
   const pren = us.prenesene ? '<div class="card" style="padding:10px 14px;margin-bottom:10px;border-color:var(--acc)"><b>Prenesené z cyklu k ' + esc(repDMR(us.prenesene.z)) + ' — overte</b>' +
-    '<div class="csub" style="margin:2px 0 6px">Kľúčové otázky (★), hodnotenie RAG, poznámky k oblastiam a výber strán sú z minulého cyklu. Čísla a súhrny sa počítajú nanovo.</div>' +
+    '<div class="csub" style="margin:2px 0 6px">Kľúčové otázky (★), hodnotenie RAG, poznámky k oblastiam, finančný report a výber strán sú z minulého cyklu — sumy financií prepíšte na aktuálne. Čísla z plánu a súhrny sa počítajú nanovo.</div>' +
     '<button class="aabtn" onclick="repPreneseneOverene()">Overené</button></div>' : "";
   return pren + '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>Exekutívny súhrn</b><div class="csub" style="margin:2px 0 6px">Prázdne pole = automatický text z dát. Napísaný text má prednosť a vo výstupe je označený ako ručný.</div>' +
     '<textarea rows="5" style="' + REP_TEXTAREA + '" placeholder="' + esc(auto) + '" onchange="repNastavNaratiV(this.value)">' + esc(nar) + '</textarea></div>' +
     '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>Poznámka k oblasti</b><div class="csub" style="margin:2px 0 6px">Jedna veta o skutočnom stave (čo je hotové, čo beží, čo blokuje). Prázdne = automatická poznámka z míľnikov.</div><table style="width:100%">' + drahy + '</table></div>' +
-    repKrokUsudokQa(K);
+    repFinancieHtml() + repKrokUsudokQa(K);
 }
 function repPoznamka(kluc, text){ const u = REP.cyklusObsah.usudok = REP.cyklusObsah.usudok || {}; u.poznamky = u.poznamky || {}; if (text.trim()) u.poznamky[kluc] = text.trim(); else delete u.poznamky[kluc]; }
 function repNastavNaratiV(text){ const u = REP.cyklusObsah.usudok = REP.cyklusObsah.usudok || {}; u.naratiV = text.trim() ? { text: text.trim(), zdroj: "rucne" } : null; }
@@ -1873,7 +1937,8 @@ async function repUzavri(){
     const K = repKontextCyklu();
     // QA kontext bez modelu a registrov — tie sú v snímke raz
     const qa = K.qa ? Object.assign({}, K.qa, { model: undefined, ct: undefined, dep: undefined, il: undefined }) : null;
-    const snimka = { schema: 2, model: K.model, view: K.view, kontroly: K.kontroly, ct: K.ct, dep: K.dep, il: K.il, qa, tema: K.tema,
+    const snimka = { schema: 3, model: K.model, view: K.view, kontroly: K.kontroly, ct: K.ct, dep: K.dep, il: K.il, qa, tema: K.tema,
+      zmeny: K.zmeny, trend: K.trend, zmenyRegistrov: K.zmenyRegistrov,
       protokoly: K.protokoly, registreVerzie: K.registreVerzie,
       profilVerzia: REP.profilVerzia, vstupy: Object.assign({}, REP.cyklusObsah.vstupy), obsah: REP.cyklusObsah };
     REP.pracuje = "Uzatváram…"; repPrekresli();
@@ -2256,6 +2321,31 @@ function repXlsxBalik(X, K){
     K.dep.zavislosti.map(z => [z.id, z.nazov || "", z.typ || "", z.poskytovatel || "", z.prijemca || "", (z.vazba || []).join("; "), repXlsxDatum(z.potrebne), repXlsxDatum(z.prislub),
       z.stav || "", z.dopad || "", z.priznaky.join(", "), z.milniky.map(x => x.nazov + " (" + repDMR(x.finish) + ")").join("; "), z.dniDoPotreby == null ? "" : z.dniDoPotreby]),
     [10, 36, 14, 18, 18, 18, 12, 12, 12, 10, 30, 40, 10]));
+  if (K.zmeny) {
+    const Z = K.zmeny, rz = [];
+    const riadok = (typ, x, pred, ter, dni) => rz.push([typ, x.oblast || "", x.faza || "", x.uid, x.nazov, pred, ter, dni == null ? "" : dni, x.pct == null ? "" : repXlsxPct(x.pct)]);
+    for (const x of Z.novoOneskorene) riadok("Novo oneskorené", x, repXlsxDatum(x.predtym), repXlsxDatum(x.teraz), x.dni);
+    for (const x of Z.posuny) riadok(x.dni > 0 ? "Posun" : "Uvoľnenie", x, repXlsxDatum(x.predtym), repXlsxDatum(x.teraz), x.dni);
+    for (const x of Z.regresie) riadok("Regresia (−" + x.pokles + " b.)", x, repXlsxPct(x.pctPred), repXlsxPct(x.pct), null);
+    for (const x of Z.dokoncene) riadok("Dokončené", x, "", repXlsxDatum(x.teraz), null);
+    for (const x of Z.noveMilniky) riadok("Nový míľnik", x, "", repXlsxDatum(x.teraz), null);
+    for (const x of Z.odobrateMilniky) riadok("Odobratý míľnik", x, repXlsxDatum(x.predtym), "", null);
+    rz.push([], ["Porovnanie", "predtým k " + repDMR(Z.pred.stavKuDnu), "teraz k " + repDMR(Z.teraz.stavKuDnu), "", "Prahy: posun ≥ " + Z.prahy.posunDni + " dní, pokles ≥ " + Z.prahy.poklesBodov + " b."]);
+    rz.push(["Rozsah", "úlohy " + Z.rozsah.ulohyPred + " → " + Z.rozsah.ulohyTeraz, "míľniky " + Z.rozsah.milnikyPred + " → " + Z.rozsah.milnikyTeraz, "",
+      "Nové kódy: " + (Z.rozsah.kodyPridane.join(", ") || "—") + " · odobraté: " + (Z.rozsah.kodyOdobrate.join(", ") || "—")]);
+    pridaj("Zmeny", repXlsxHarok(X, ["Zmena", "Oblasť", "Fáza", "UID", "Úloha", "Predtým", "Teraz", "Δ dní", "%"], rz, [18, 16, 8, 8, 50, 14, 14, 8, 8]));
+  }
+  if (K.trend) pridaj("Trend", repXlsxHarok(X, ["Oblasť", "Fáza"].concat(K.trend.body.map(b => "k " + repDMR(b.stavKuDnu))).concat(["Posun spolu (dni)"]),
+    K.trend.riadky.map(r => [r.kratky, r.faza].concat(r.seria.map(repXlsxDatum)).concat([r.spolu]))));
+  const finX = repFinancie(us.financie);
+  if (finX) pridaj("Financie", repXlsxHarok(X, ["Zložka", "Suma (" + finX.mena + ")", "Podiel"],
+    finX.polozky.map(p => [p.popis, p.suma, finX.sucet > 0 ? { t: "n", v: p.suma / finX.sucet, z: "0.0 %" } : ""])
+      .concat([[], ["Súčet zložiek", finX.sucet, ""], [finX.popisCelku + (finX.rucny ? " (zadané ručne)" : ""), finX.celok, ""], ["Rozdiel", finX.rozdiel, ""]]), [40, 16, 10]));
+  if (K.zmenyRegistrov) {
+    const nm = { issue: "Issue Log", ct: "Záväzky", dep: "Závislosti" };
+    pridaj("Zmeny v registroch", repXlsxHarok(X, ["Register", "ID", "Zmena", "Predtým", "Teraz", "Popis"],
+      K.zmenyRegistrov.zmeny.map(z => [nm[z.reg], z.id, z.zmena, z.predtym, z.teraz, z.popis]), [12, 14, 22, 14, 14, 70]));
+  }
   pridaj("Na opravu pre PMO", repXlsxHarok(X, ["Zdroj", "Kód", "Popis"], repNaOpravu(K, protokoly), [16, 18, 100]));
   return wb;
 }
@@ -2327,7 +2417,7 @@ function repSablonaXlsx(X, F, druh, volby){
 // ktorý písmo nemá, by v PDF ticho zmizol; preto náhrada podľa tabuľky, potom
 // základné písmeno bez diakritiky, inak „?“ (vidno, že tam niečo bolo).
 const REP_PDF_ZNAKY = { "—": "-", "–": "-", "…": "...", "“": "\"", "„": "\"", "”": "\"", "‘": "'", "’": "'", "‚": "'", "•": "-", "·": "-", "×": "x",
-  "→": "->", "←": "<-", "↑": "^", "↓": "v", "⚠": "!", "✓": "OK", "√": "OK", "◆": "*", "◇": "*", "♦": "*", "○": "o", "□": "o", "▾": "-", "▼": "-", "★": "*", "Δ": "+/-",
+  "→": "->", "←": "<-", "↑": "^", "↓": "v", "−": "-", "≥": ">=", "≤": "<=", "⚠": "!", "✓": "OK", "√": "OK", "◆": "*", "◇": "*", "♦": "*", "○": "o", "□": "o", "▾": "-", "▼": "-", "★": "*", "Δ": "+/-",
   "\u00a0": " ", "\u202f": " ", "\u2009": " " };
 function repPdfText(s, ma){
   let o = "";
@@ -2369,6 +2459,20 @@ function repPdf(jsPDF, layout, fp){
         if (p.tvar === "stvorec") doc.rect(p.x - r, p.y - r, p.s, p.s, "FD");
         else if (p.tvar === "kosostvorec") { const k = r * 1.15; doc.lines([[k, k], [-k, k], [-k, -k]], p.x, p.y - k, [1, 1], "FD", true); }
         else doc.circle(p.x, p.y, r, "FD");
+      } else if (p.t === "kolac") {
+        // výseč ako mnohouholník (oblúk po ≤ 4°), rovnaký začiatok a smer ako SVG a PPTX
+        const sum = p.diely.reduce((s, d) => s + d.v, 0);
+        let a = -Math.PI / 2;
+        for (const d of p.diely) {
+          if (!(d.v > 0)) continue;
+          const da = d.v / sum * 2 * Math.PI, n = Math.max(2, Math.ceil(da / (Math.PI / 45)));
+          const body = [[p.cx, p.cy]];
+          for (let k = 0; k <= n; k++) body.push([p.cx + p.r * Math.cos(a + da * k / n), p.cy + p.r * Math.sin(a + da * k / n)]);
+          const rel = body.slice(1).map((b, k) => [b[0] - body[k][0], b[1] - body[k][1]]);
+          doc.setFillColor(...rgb(d.farba)); doc.setDrawColor(...rgb(p.okraj || layout.bg)); doc.setLineWidth(1 / 72);
+          doc.lines(rel, p.cx, p.cy, [1, 1], "FD", true);
+          a += da;
+        }
       } else if (p.t === "text") {
         doc.setFont("LibSans", p.bold ? "bold" : "normal");
         doc.setFontSize(p.pt); doc.setTextColor(...rgb(p.color));
@@ -2392,6 +2496,12 @@ function repEmlSprava(K){
   const predmet = (view.nazov || "Program") + " — stav k " + repDMR(view.stavKuDnu);
   const body = [];
   if (ex) body.push(["Stav programu", [ex.naratiV]]);
+  if (K.zmeny) {
+    const S = K.zmeny.sumar;
+    body.push(["Od minulého reportu (" + repDMR(K.zmeny.pred.stavKuDnu) + ")", ["Postup programu: " + S.postupPred + " % → " + S.postupTeraz + " %",
+      "Posunuté míľniky: " + S.posunute + (S.uvolnene ? " (uvoľnené " + S.uvolnene + ")" : ""), "Novo oneskorené: " + S.novoOneskorene, "Dokončené míľniky: " + S.dokoncene]
+      .concat(K.zmeny.posuny.filter(p => p.dni > 0).slice(0, 3).map(p => p.oblast + (p.faza ? " " + p.faza : "") + ": +" + p.dni + " dní (" + repDMR(p.teraz) + ")"))]);
+  }
   if (ex && ex.pozornost.length) body.push(["Vyžaduje pozornosť", ex.pozornost.slice(0, 10).map(p => p.kratky + ": " + p.dovod)]);
   if (na && na.polozky && na.polozky.length) body.push(["Najbližšie míľniky", na.polozky.slice(0, 8).map(p => repDM(p.datum) + " " + p.kratky + " — " + p.faza)]);
   if (Q) {
@@ -2558,11 +2668,24 @@ function repPrenesUsudok(po, z){
   if ((u.kluceOtazky || []).length) us.kluceOtazky = u.kluceOtazky.slice();
   if (u.rag && Object.keys(u.rag).length) us.rag = JSON.parse(JSON.stringify(u.rag));
   if (u.poznamky && Object.keys(u.poznamky).length) us.poznamky = Object.assign({}, u.poznamky);
+  if (u.financie && (u.financie.polozky || []).length) us.financie = JSON.parse(JSON.stringify(u.financie));
   if (Object.keys(us).length) { us.prenesene = { z }; o.usudok = us; }
   if (po.vyber && Object.keys(po.vyber).length) o.vyber = JSON.parse(JSON.stringify(po.vyber));
   if (po.anotacie) o.anotacie = JSON.parse(JSON.stringify(po.anotacie));
   if (po.tema) o.tema = po.tema;
   return o;
+}
+// Porovnanie nového cyklu = vstupy predošlého cyklu k jeho stavu ku dňu; trend
+// pokračuje bodmi predošlého cyklu (najviac 7 starších bodov + tento cyklus).
+function repPrenesPorovnanie(po, pred){
+  const V = po.vstupy || {};
+  if (!V.plan) return {};
+  const popis = "cyklus k " + repDMR(pred.stav_ku_dnu);
+  const body = (((po.trend || {}).body) || []).concat([{ plan: V.plan, stavKuDnu: pred.stav_ku_dnu, popis }]);
+  const videne = new Set(), uniq = [];
+  for (const b of body) { const k = b.plan + "|" + b.stavKuDnu; if (!videne.has(k)) { videne.add(k); uniq.push(b); } }
+  return { porovnanie: { plan: V.plan, stavKuDnu: pred.stav_ku_dnu, popis, issue: V.issue || null, ct: V.ct || null, dep: V.dep || null, cyklus: pred.id },
+    trend: { body: uniq.slice(-7) } };
 }
 function repUsudok(){ return REP.cyklusObsah.usudok = REP.cyklusObsah.usudok || {}; }
 function repPreneseneOverene(){ delete repUsudok().prenesene; repPrekresli(); }
@@ -2626,3 +2749,381 @@ function repKrokUsudokQa(K){
     '<div class="csub" style="margin:2px 0 6px">Označené problémy z Issue Logu idú na stranu „Kľúčové otvorené otázky“. Výber sa prenáša do ďalšieho cyklu.</div>' +
     '<div data-scroll style="max-height:360px;overflow:auto">' + (otazky || '<div class="csub">Issue Log nemá aktívne problémy.</div>') + "</div></div>";
 }
+
+// ═══ 26. Zmeny, trend a financie (kolo R3a; NAVRH §6.7, §6.8, §9.2) ═══
+// Porovnanie dvoch snímok plánu je po UID (premenovanie úlohu neodpojí, N2).
+// „Novo oneskorené“ = po termíne k stavu tejto snímky a NIE po termíne k stavu
+// predošlej (generátor 4.0 porovnával predošlý termín s dnešným stavom, N12).
+const REP_ZMENY_PRAHY = { posunDni: 7, poklesBodov: 10 };
+
+function repOblastUloh(plan, profil){
+  const strom = repStrom(plan), korene = new Map(), mapa = new Map();
+  for (const ob of profil.oblasti || []) for (const uid of ob.uids || []) korene.set(uid, ob);
+  for (const u of plan.ulohy) {
+    let x = u.uid, ob = null;
+    while (x != null && !ob) { ob = korene.get(x) || null; x = strom.rodic.get(x); }
+    if (ob) mapa.set(u.uid, ob);
+  }
+  return mapa;
+}
+function repFazaUlohy(u, profil){ const f = (profil.fazy || []).find(f => repFazaZhoda(u, f)); return f ? f.kluc : ""; }
+
+// pred/teraz: { plan, stavKuDnu, model, popis? }
+function repZmeny(pred, teraz, profil, volby){
+  const pr = Object.assign({}, REP_ZMENY_PRAHY, (profil.metriky && profil.metriky.zmeny) || {}, volby || {});
+  const P = new Map(pred.plan.ulohy.map(u => [u.uid, u])), N = new Map(teraz.plan.ulohy.map(u => [u.uid, u]));
+  const obN = repOblastUloh(teraz.plan, profil), obP = repOblastUloh(pred.plan, profil);
+  const meno = (u, mapa) => { const o = mapa.get(u.uid); return o ? (o.kratky || repKratky(o.nazov)) : ""; };
+  const jeMilnik = u => !u.suhrn && (!!u.milnik || !!repFazaUlohy(u, profil));
+  const poTermine = (u, stav) => !!(u && u.finish && u.pct < 100 && stav && u.finish < stav);
+  const posuny = [], novoOneskorene = [], dokoncene = [], regresie = [], noveMilniky = [], odobrateMilniky = [];
+  for (const u of teraz.plan.ulohy) {
+    const p = P.get(u.uid), mil = jeMilnik(u);
+    const z = { uid: u.uid, nazov: u.nazov, oblast: meno(u, obN), faza: repFazaUlohy(u, profil), teraz: u.finish || null, pct: u.pct };
+    if (mil) {
+      if (!p) {
+        noveMilniky.push(z);
+        if (poTermine(u, teraz.stavKuDnu)) novoOneskorene.push(Object.assign({ predtym: null, dni: null, novy: true }, z));
+      } else {
+        const dd = p.finish && u.finish ? repDni(p.finish, u.finish) : null;
+        if (dd != null && Math.abs(dd) >= pr.posunDni) posuny.push(Object.assign({ predtym: p.finish, dni: dd, hotove: u.pct >= 100, poTermine: poTermine(u, teraz.stavKuDnu) }, z));
+        if (p.pct < 100 && u.pct >= 100) dokoncene.push(z);
+        if (poTermine(u, teraz.stavKuDnu) && !poTermine(p, pred.stavKuDnu)) novoOneskorene.push(Object.assign({ predtym: p.finish, dni: dd }, z));
+      }
+    }
+    if (p && (u.suhrn || mil) && p.pct - u.pct >= pr.poklesBodov) regresie.push(Object.assign({ pctPred: p.pct, pokles: p.pct - u.pct }, z));
+  }
+  for (const p of pred.plan.ulohy) if (!N.has(p.uid) && jeMilnik(p)) odobrateMilniky.push({ uid: p.uid, nazov: p.nazov, oblast: meno(p, obP), faza: repFazaUlohy(p, profil), predtym: p.finish || null });
+  const pole = profil.polia && profil.polia.kodZavazku;
+  const kody = plan => { const s = new Set(); if (pole) for (const u of plan.ulohy) for (const t of repTokeny(u.polia[pole])) { const k = repKanonKod(t); if (k && !/^N\/?A$/.test(k)) s.add(k); } return s; };
+  const kP = kody(pred.plan), kN = kody(teraz.plan);
+  const rozsah = { ulohyPred: pred.plan.ulohy.length, ulohyTeraz: teraz.plan.ulohy.length,
+    pridane: teraz.plan.ulohy.filter(u => !P.has(u.uid)).length, odobrate: pred.plan.ulohy.filter(u => !N.has(u.uid)).length,
+    milnikyPred: pred.plan.ulohy.filter(jeMilnik).length, milnikyTeraz: teraz.plan.ulohy.filter(jeMilnik).length,
+    noveMilniky: noveMilniky.length, odobrateMilniky: odobrateMilniky.length,
+    kodyPridane: [...kN].filter(k => !kP.has(k)).sort(), kodyOdobrate: [...kP].filter(k => !kN.has(k)).sort() };
+  const fazy = profil.fazy || [], posl = fazy.length ? fazy[fazy.length - 1].kluc : null;
+  const mP = new Map(pred.model.drahy.filter(d => !d.chyba).map(d => [d.kluc, d]));
+  const oblasti = [];
+  for (const d of teraz.model.drahy.filter(d => !d.chyba)) {
+    const p = mP.get(d.kluc);
+    if (!p) continue;
+    const rn = posl && d.fazy[posl], rp = posl && p.fazy[posl];
+    oblasti.push({ kluc: d.kluc, kratky: d.kratky, pctPred: p.pct, pctTeraz: d.pct, delta: d.pct - p.pct,
+      poslednaPred: rp ? rp.datum : null, poslednaTeraz: rn ? rn.datum : null,
+      posunPoslednej: rp && rn && rp.datum && rn.datum ? repDni(rp.datum, rn.datum) : null, dokoncena: p.pct < 100 && d.pct >= 100 });
+  }
+  oblasti.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta) || a.kratky.localeCompare(b.kratky));
+  posuny.sort((a, b) => Math.abs(b.dni) - Math.abs(a.dni) || String(a.oblast).localeCompare(String(b.oblast)) || a.uid - b.uid);
+  novoOneskorene.sort((a, b) => String(a.teraz).localeCompare(String(b.teraz)) || a.uid - b.uid);
+  regresie.sort((a, b) => b.pokles - a.pokles || a.uid - b.uid);
+  dokoncene.sort((a, b) => String(a.teraz).localeCompare(String(b.teraz)) || a.uid - b.uid);
+  return { pred: { stavKuDnu: pred.stavKuDnu, popis: pred.popis || "" }, teraz: { stavKuDnu: teraz.stavKuDnu }, prahy: pr,
+    posuny, novoOneskorene, dokoncene, regresie, noveMilniky, odobrateMilniky, rozsah, oblasti,
+    sumar: { posunute: posuny.filter(x => x.dni > 0).length, uvolnene: posuny.filter(x => x.dni < 0).length, novoOneskorene: novoOneskorene.length,
+      dokoncene: dokoncene.length, regresie: regresie.length, postupPred: pred.model.program.pct, postupTeraz: teraz.model.program.pct,
+      oblastiHore: oblasti.filter(o => o.delta > 0).length, oblastiDole: oblasti.filter(o => o.delta < 0).length } };
+}
+
+// Trend (§6.7): séria reprezentantov oblasť × fáza cez body zoradené podľa
+// stavu ku dňu, nie podľa popisu (G:5517). Posledný bod je tento cyklus.
+function repTrend(body, profil){
+  const B = body.slice().sort((a, b) => (a.stavKuDnu < b.stavKuDnu ? -1 : a.stavKuDnu > b.stavKuDnu ? 1 : 0));
+  if (B.length < 2) return null;
+  const fazy = profil.fazy || [], mapy = B.map(b => new Map(b.model.drahy.filter(d => !d.chyba).map(d => [d.kluc, d])));
+  const riadky = [];
+  for (const d of B[B.length - 1].model.drahy.filter(d => !d.chyba)) for (const f of fazy) {
+    const seria = mapy.map(m => { const x = m.get(d.kluc), r = x && x.fazy[f.kluc]; return r && r.datum ? r.datum : null; });
+    const idx = seria.map((v, i) => (v ? i : -1)).filter(i => i >= 0);
+    if (idx.length < 2) continue;
+    const kroky = []; let prev = null;
+    for (const v of seria) { if (!v) { kroky.push(null); continue; } kroky.push(prev ? repDni(prev, v) : 0); prev = v; }
+    const r = d.fazy[f.kluc];
+    riadky.push({ kluc: d.kluc, kratky: d.kratky, faza: f.kluc, seria, kroky, spolu: repDni(seria[idx[0]], seria[idx[idx.length - 1]]),
+      hotove: !!(r && r.hotove), oneskorene: !!(r && r.oneskorene) });
+  }
+  riadky.sort((a, b) => Math.abs(b.spolu) - Math.abs(a.spolu) || a.kratky.localeCompare(b.kratky) || a.faza.localeCompare(b.faza));
+  return { body: B.map(b => ({ stavKuDnu: b.stavKuDnu, popis: b.popis || "" })), riadky, posunute: riadky.filter(r => r.spolu !== 0).length };
+}
+
+// Zmeny v registroch medzi dvoma importmi (§6.7, QA balík). Identita = ID záznamu.
+function repZmenyRegistrov(pred, teraz){
+  const z = [], txt = s => String(s == null ? "" : s).replace(/\s+/g, " ").trim();
+  // identita = kluc importu (duplicitné ID dostanú „#2“), inak by sa prvý riadok
+  // porovnal s posledným a vznikli by zmeny, ktoré neexistujú
+  const id = r => r.kluc || repNorm(r.id);
+  if (pred.issue && teraz.issue) {
+    const P = new Map(pred.issue.filter(r => r.id).map(r => [id(r), r])), N = new Set(teraz.issue.filter(r => r.id).map(id));
+    const vaha = { critical: 0, high: 1, medium: 2, low: 3 };
+    for (const r of teraz.issue) {
+      if (!r.id) continue;
+      const p = P.get(id(r)), popis = txt(r.popis).slice(0, 140), v = vaha[r.prioritaKluc] ?? 4;
+      if (!p) { if (r.aktivny) z.push({ reg: "issue", id: r.id, druh: "nove", zmena: "Nový problém", predtym: "", teraz: REP_PRIORITA_TXT[r.prioritaKluc] || r.priorita || "", popis, vaha: v }); continue; }
+      if (p.aktivny && !r.aktivny) z.push({ reg: "issue", id: r.id, druh: "uzavrete", zmena: "Uzavretý", predtym: p.stav || "", teraz: r.stav || "", popis, vaha: 10 + v });
+      else if (!p.aktivny && r.aktivny) z.push({ reg: "issue", id: r.id, druh: "znovu", zmena: "Znova otvorený", predtym: p.stav || "", teraz: r.stav || "", popis, vaha: v });
+      if (r.aktivny && p.prioritaKluc && r.prioritaKluc && p.prioritaKluc !== r.prioritaKluc)
+        z.push({ reg: "issue", id: r.id, druh: "priorita", zmena: (vaha[r.prioritaKluc] < vaha[p.prioritaKluc] ? "Vyššia" : "Nižšia") + " priorita", predtym: REP_PRIORITA_TXT[p.prioritaKluc], teraz: REP_PRIORITA_TXT[r.prioritaKluc], popis, vaha: v + 1 });
+      if (r.aktivny && p.termin && r.termin && p.termin !== r.termin) {
+        const d = repDni(p.termin, r.termin);
+        z.push({ reg: "issue", id: r.id, druh: "termin", zmena: "Termín " + (d > 0 ? "+" : "") + d + " d", predtym: repDMR(p.termin), teraz: repDMR(r.termin), popis, vaha: v + 2, dni: d });
+      }
+    }
+    for (const p of pred.issue) if (p.id && p.aktivny && !N.has(id(p))) z.push({ reg: "issue", id: p.id, druh: "zmiznute", zmena: "Chýba v novom importe", predtym: p.stav || "", teraz: "", popis: txt(p.popis).slice(0, 140), vaha: 5 });
+  }
+  if (pred.ct && teraz.ct) {
+    const P = new Map(pred.ct.filter(r => r.kod).map(r => [r.kod, r])), N = new Set(teraz.ct.filter(r => r.kod).map(r => r.kod));
+    for (const r of teraz.ct) {
+      if (!r.kod) continue;
+      const p = P.get(r.kod), popis = txt(r.dodavka || r.oblast).slice(0, 100);
+      if (!p) { z.push({ reg: "ct", id: r.id, druh: "nove", zmena: "Nový záväzok", predtym: "", teraz: r.commit ? repDMR(r.commit) : "bez dátumu", popis, vaha: 6 }); continue; }
+      if (!p.dodane && r.dodane) z.push({ reg: "ct", id: r.id, druh: "dodane", zmena: "Dodané", predtym: p.commit ? repDMR(p.commit) : "", teraz: "dodané", popis, vaha: 12 });
+      if (p.commit && r.commit && p.commit !== r.commit) { const d = repDni(p.commit, r.commit); z.push({ reg: "ct", id: r.id, druh: "termin", zmena: "Záväzok " + (d > 0 ? "+" : "") + d + " d", predtym: repDMR(p.commit), teraz: repDMR(r.commit), popis, vaha: d > 0 ? 3 : 8, dni: d }); }
+      else if (p.commit && !r.commit) z.push({ reg: "ct", id: r.id, druh: "bez", zmena: "Dátum záväzku zmizol", predtym: repDMR(p.commit), teraz: "", popis, vaha: 4 });
+    }
+    for (const p of pred.ct) if (p.kod && !N.has(p.kod)) z.push({ reg: "ct", id: p.id, druh: "zmiznute", zmena: "Chýba v novom importe", predtym: p.commit ? repDMR(p.commit) : "", teraz: "", popis: txt(p.dodavka || p.oblast).slice(0, 100), vaha: 7 });
+  }
+  if (pred.dep && teraz.dep) {
+    const P = new Map(pred.dep.filter(r => r.id).map(r => [id(r), r]));
+    for (const r of teraz.dep) {
+      if (!r.id) continue;
+      const p = P.get(id(r)), popis = txt(r.nazov).slice(0, 100);
+      if (!p) { if (r.aktivny !== false) z.push({ reg: "dep", id: r.id, druh: "nove", zmena: "Nová závislosť", predtym: "", teraz: r.stav || "", popis, vaha: 6 }); continue; }
+      if (p.stavKluc !== r.stavKluc) z.push({ reg: "dep", id: r.id, druh: "stav", zmena: "Stav", predtym: p.stav || "", teraz: r.stav || "", popis, vaha: r.stavKluc === "blokuje" || r.stavKluc === "ohrozena" ? 0 : 9 });
+      if (p.prislub && r.prislub && p.prislub !== r.prislub) { const d = repDni(p.prislub, r.prislub); z.push({ reg: "dep", id: r.id, druh: "termin", zmena: "Prísľub " + (d > 0 ? "+" : "") + d + " d", predtym: repDMR(p.prislub), teraz: repDMR(r.prislub), popis, vaha: d > 0 ? 2 : 8, dni: d }); }
+    }
+  }
+  z.sort((a, b) => a.vaha - b.vaha || String(a.reg).localeCompare(String(b.reg)) || String(a.id).localeCompare(String(b.id)));
+  const pocet = (reg, druh) => z.filter(x => x.reg === reg && (!druh || x.druh === druh)).length;
+  return { zmeny: z, sumar: { noveIssue: pocet("issue", "nove"), uzavrete: pocet("issue", "uzavrete"), znovu: pocet("issue", "znovu"), priorita: pocet("issue", "priorita"),
+    terminIssue: pocet("issue", "termin"), zavazky: pocet("ct"), zavislosti: pocet("dep") }, porovnane: { issue: !!(pred.issue && teraz.issue), ct: !!(pred.ct && teraz.ct), dep: !!(pred.dep && teraz.dep) } };
+}
+
+// Financie (§6.8, D8): zložky z úsudku cyklu, celok súčtom alebo ručne,
+// rozdiel svieti. V kóde žiadne predvolené sumy.
+const REP_FIN_PALETA = ["1F3864", "2E75B6", "70AD47", "FFC000", "C00000", "7030A0", "00B0F0", "A5A5A5"];
+function repFinancie(f){
+  if (!f || !(f.polozky || []).length) return null;
+  const polozky = f.polozky.map((p, i) => {
+    const h = String(p.farba || "").replace("#", "");
+    return { popis: String(p.popis || ""), suma: Number(p.suma) || 0, farba: /^[0-9A-Fa-f]{6}$/.test(h) ? h.toUpperCase() : REP_FIN_PALETA[i % REP_FIN_PALETA.length] };
+  });
+  const sucet = Math.round(polozky.reduce((s, p) => s + p.suma, 0) * 100) / 100;
+  const rucny = f.celkom != null && f.celkom !== "" && Number.isFinite(Number(f.celkom));
+  const celok = rucny ? Number(f.celkom) : sucet;
+  return { nadpis: f.nadpis || "Prehľad stavu čerpania finančných prostriedkov", mena: f.mena || "EUR", popisCelku: f.popisCelku || "Celkový rozpočet",
+    polozky, sucet, celok, rucny, rozdiel: Math.round((celok - sucet) * 100) / 100 };
+}
+function repSuma(v){ const n = Math.round(Number(v) || 0), s = String(Math.abs(n)).replace(/\B(?=(\d{3})+(?!\d))/g, " "); return (n < 0 ? "-" : "") + s; }
+
+// Snímky R3a — skladá ich view-model, nie zapisovač (§3.4).
+function repZmenySnimky(k, vybrane){
+  const s = [], Z = k.zmeny;
+  if (Z) {
+    s.push({ kluc: "zmeny", typ: "zmeny", nazov: "Čo sa zmenilo od minula", zahrnuta: vybrane("zmeny"),
+      zmeny: { pred: Z.pred, teraz: Z.teraz, sumar: Z.sumar, prahy: Z.prahy, oblasti: Z.oblasti.filter(o => o.delta || o.posunPoslednej), posuny: Z.posuny } });
+    const R = Z.rozsah, pm = (a, b) => (a ? "+" + a : "0") + " / " + (b ? "−" + b : "0");
+    s.push({ kluc: "podstatne", typ: "tabulka", nazov: "Podstatné zmeny v projekte", zahrnuta: vybrane("podstatne"), kicker: "Report zmien", nadpis: "Podstatné zmeny v projekte",
+      sumar: [{ popis: "Úlohy (pridané / odobraté)", hodnota: pm(R.pridane, R.odobrate), akcent: "textSec" }, { popis: "Míľniky (nové / odobraté)", hodnota: pm(R.noveMilniky, R.odobrateMilniky), akcent: "textSec" },
+        { popis: "Kódy záväzkov (nové / odobraté)", hodnota: pm(R.kodyPridane.length, R.kodyOdobrate.length), akcent: "textSec" },
+        { popis: "Novo oneskorené", hodnota: String(Z.sumar.novoOneskorene), akcent: Z.sumar.novoOneskorene ? "red" : "green" }, { popis: "Regresie postupu", hodnota: String(Z.sumar.regresie), akcent: Z.sumar.regresie ? "amber" : "green" }],
+      tabulka: repTabPodstatne(Z) });
+  }
+  if (k.trend) s.push({ kluc: "trend", typ: "tabulka", nazov: "Trend míľnikov", zahrnuta: vybrane("trend"), kicker: "Trend míľnikov", nadpis: "Posuny termínov cez verzie plánu",
+    sumar: [{ popis: "Verzie v trende", hodnota: String(k.trend.body.length), akcent: "textSec" }, { popis: "Míľniky s posunom", hodnota: String(k.trend.posunute), akcent: k.trend.posunute ? "amber" : "green" },
+      { popis: "Najväčší sklz", hodnota: k.trend.riadky.length && k.trend.riadky[0].spolu > 0 ? "+" + k.trend.riadky[0].spolu + " d" : "—", akcent: "red" }],
+    tabulka: repTabTrend(k.trend) });
+  return s;
+}
+function repTabPodstatne(Z){
+  const r = [], dt = d => (d ? repDMR(d) : "—");
+  for (const x of Z.novoOneskorene) r.push({ b: ["Novo oneskorené", x.oblast, x.faza, x.nazov, dt(x.predtym), dt(x.teraz), x.novy ? "nový" : x.dni ? (x.dni > 0 ? "+" : "") + x.dni + " d" : "", x.pct + " %"], farby: { 0: "red" } });
+  for (const x of Z.posuny) r.push({ b: [x.dni > 0 ? "Posun" : "Uvoľnenie", x.oblast, x.faza, x.nazov, dt(x.predtym), dt(x.teraz), (x.dni > 0 ? "+" : "") + x.dni + " d", x.pct + " %" + (x.poTermine ? " !" : "")], farby: { 0: x.dni > 0 ? "amber" : "green", 6: x.dni > 0 ? "red" : "green" } });
+  for (const x of Z.regresie) r.push({ b: ["Regresia", x.oblast, x.faza, x.nazov, x.pctPred + " %", x.pct + " %", "−" + x.pokles + " b.", ""], farby: { 0: "amber" } });
+  for (const x of Z.dokoncene) r.push({ b: ["Dokončené", x.oblast, x.faza, x.nazov, "", dt(x.teraz), "", "100 %"], farby: { 0: "green" } });
+  for (const x of Z.noveMilniky) if (!Z.novoOneskorene.some(y => y.uid === x.uid)) r.push({ b: ["Nový míľnik", x.oblast, x.faza, x.nazov, "", dt(x.teraz), "", x.pct + " %"], farby: {} });
+  for (const x of Z.odobrateMilniky) r.push({ b: ["Odobratý míľnik", x.oblast, x.faza, x.nazov, dt(x.predtym), "", "", ""], farby: { 0: "textSec" } });
+  if (Z.rozsah.kodyPridane.length) r.push({ b: ["Nové kódy", "", "", Z.rozsah.kodyPridane.join(", "), "", "", "", ""], farby: {} });
+  if (Z.rozsah.kodyOdobrate.length) r.push({ b: ["Odobraté kódy", "", "", Z.rozsah.kodyOdobrate.join(", "), "", "", "", ""], farby: {} });
+  return { stlpce: [{ n: "Zmena", w: 0.12 }, { n: "Oblasť", w: 0.11 }, { n: "Fáza", w: 0.06 }, { n: "Úloha", w: 0.37 }, { n: "Predtým", w: 0.09 }, { n: "Teraz", w: 0.09 }, { n: "Δ", w: 0.07 }, { n: "%", w: 0.09 }],
+    riadky: r, prazdne: "Od " + repDMR(Z.pred.stavKuDnu) + " sa v pláne nič podstatné nezmenilo (prahy: posun ≥ " + Z.prahy.posunDni + " dní, pokles ≥ " + Z.prahy.poklesBodov + " b.)." };
+}
+function repTabTrend(Tr){
+  const n = Tr.body.length, wB = Math.min(0.11, 0.62 / n);
+  const riadky = Tr.riadky.filter(r => r.spolu !== 0 || r.kroky.some(k => k));
+  return { stlpce: [{ n: "Oblasť", w: 0.16 }, { n: "Fáza", w: 0.08 }].concat(Tr.body.map((b, i) => ({ n: i === n - 1 ? "Teraz" : repDM(b.stavKuDnu) + (b.stavKuDnu.slice(0, 4) !== Tr.body[n - 1].stavKuDnu.slice(0, 4) ? b.stavKuDnu.slice(2, 4) : ""), w: wB })))
+      .concat([{ n: "Spolu", w: 1 - 0.24 - wB * n }]),
+    riadky: riadky.map(r => ({ b: [r.kratky, r.faza].concat(r.seria.map(d => (d ? repDM(d) : "—"))).concat([(r.spolu > 0 ? "+" : "") + r.spolu + " d"]),
+      farby: Object.assign({ [2 + n]: r.spolu > 0 ? "red" : r.spolu < 0 ? "green" : null }, Object.fromEntries(r.kroky.map((k, i) => [2 + i, k > 0 ? "red" : k < 0 ? "green" : null]))) })),
+    prazdne: "Medzi verziami plánu sa žiadny fázový míľnik nepohol." };
+}
+function repQaZmenyRegistrovSnimka(ZR, vybrane){
+  const S = ZR.sumar, nm = { issue: "Issue Log", ct: "Záväzky", dep: "Závislosti" };
+  return { kluc: "qa-registre", typ: "qaTabulka", nazov: "QA: zmeny v registroch", zahrnuta: vybrane("qa-registre"), kicker: "Dohľad kvality", nadpis: "Zmeny v registroch od minulého reportu",
+    sumar: [{ popis: "Nové problémy", hodnota: String(S.noveIssue), akcent: S.noveIssue ? "amber" : "green" }, { popis: "Uzavreté", hodnota: String(S.uzavrete), akcent: "green" },
+      { popis: "Zmena priority", hodnota: String(S.priorita), akcent: "textSec" }, { popis: "Posun termínu (IL)", hodnota: String(S.terminIssue), akcent: S.terminIssue ? "amber" : "green" },
+      { popis: "Záväzky / závislosti", hodnota: S.zavazky + " / " + S.zavislosti, akcent: "textSec" }],
+    tabulka: { stlpce: [{ n: "Register", w: 0.1 }, { n: "ID", w: 0.1 }, { n: "Zmena", w: 0.15 }, { n: "Predtým", w: 0.11 }, { n: "Teraz", w: 0.11 }, { n: "Popis", w: 0.43 }],
+      riadky: ZR.zmeny.map(x => ({ b: [nm[x.reg], x.id, x.zmena, x.predtym, x.teraz, x.popis], farby: { 2: x.druh === "uzavrete" || x.druh === "dodane" ? "green" : (x.dni > 0 || x.druh === "nove" || x.druh === "znovu" || x.druh === "zmiznute") ? "amber" : null } })),
+      prazdne: "Medzi porovnávanými importmi sa v registroch nič nezmenilo." } };
+}
+
+// Tabuľka so sumárom je spoločná pre QA aj roadmapu.
+REP_LAYOUTY.tabulka = REP_LAYOUTY.qaTabulka;
+
+REP_LAYOUTY.zmeny = function(s, view, T){
+  const A = repPrvky(T), Z = s.zmeny, S = Z.sumar, d = S.postupTeraz - S.postupPred;
+  let y = repHlavicka(A, T, "Report zmien", "Čo sa zmenilo od minula", "predtým " + repDMR(Z.pred.stavKuDnu) + " → " + repDMR(Z.teraz.stavKuDnu));
+  repDlazdice(A, T, [
+    { popis: "Postup programu", hodnota: S.postupTeraz + " %", sub: "predtým " + S.postupPred + " % (" + (d >= 0 ? "+" : "") + d + " b.)", akcent: d < 0 ? "red" : "green" },
+    { popis: "Posunuté míľniky", hodnota: String(S.posunute), sub: "≥ " + Z.prahy.posunDni + " dní · uvoľnené " + S.uvolnene, akcent: S.posunute ? "amber" : "green" },
+    { popis: "Novo oneskorené", hodnota: String(S.novoOneskorene), sub: "po termíne k " + repDMR(Z.teraz.stavKuDnu), akcent: S.novoOneskorene ? "red" : "green" },
+    { popis: "Dokončené míľniky", hodnota: String(S.dokoncene), sub: "od minulého reportu", akcent: "green" },
+    { popis: "Oblasti ↑ / ↓", hodnota: S.oblastiHore + " / " + S.oblastiDole, sub: "zmena postupu", akcent: S.oblastiDole ? "amber" : "green" }], y, 0.85, view.farby);
+  y += 0.85 + 0.3;
+  const wL = 5.6, xR = REP_L + wL + 0.3, wR = REP_CW - wL - 0.3;
+  A.text(REP_L, y, wL, 0.24, "ZMENY POSTUPU OBLASTÍ", { pt: 10, bold: true, color: T.textSec });
+  A.text(xR, y, wR, 0.24, "NAJVÄČŠIE POSUNY MÍĽNIKOV", { pt: 10, bold: true, color: T.textSec });
+  y += 0.3;
+  const tO = { stlpce: [{ n: "Oblasť", w: 0.34 }, { n: "Predtým", w: 0.17 }, { n: "Teraz", w: 0.15 }, { n: "Δ", w: 0.12 }, { n: "Posledná fáza", w: 0.22 }],
+    riadky: Z.oblasti.map(o => ({ b: [o.kratky, o.pctPred + " %", o.pctTeraz + " %", (o.delta > 0 ? "+" : "") + o.delta, o.posunPoslednej ? (o.posunPoslednej > 0 ? "+" : "") + o.posunPoslednej + " d" : ""],
+      farby: { 3: o.delta < 0 ? "red" : o.delta > 0 ? "green" : null, 4: o.posunPoslednej > 0 ? "red" : o.posunPoslednej < 0 ? "green" : null } })), prazdne: "Postup oblastí sa nezmenil." };
+  const tP = { stlpce: [{ n: "Oblasť", w: 0.2 }, { n: "Fáza", w: 0.1 }, { n: "Míľnik", w: 0.38 }, { n: "Nový termín", w: 0.17 }, { n: "Posun", w: 0.15 }],
+    riadky: Z.posuny.map(p => ({ b: [p.oblast, p.faza, p.nazov, repDMR(p.teraz), (p.dni > 0 ? "+" : "") + p.dni + " d" + (p.poTermine ? " !" : "")], farby: { 4: p.dni > 0 ? "red" : "green" } })),
+    prazdne: "Žiadny míľnik sa neposunul o " + Z.prahy.posunDni + " a viac dní." };
+  const iO = repKresliTabulku(A, T, REP_L, y, wL, tO, 0, 6.85, 9), iP = repKresliTabulku(A, T, xR, y, wR, tP, 0, 6.85, 9);
+  const zvysok = [];
+  if (iO < tO.riadky.length) zvysok.push((tO.riadky.length - iO) + " oblastí");
+  if (iP < tP.riadky.length) zvysok.push((tP.riadky.length - iP) + " posunov");
+  A.text(REP_L, 6.95, REP_CW - 3.2, 0.18, zvysok.length ? "Nezobrazené: " + zvysok.join(", ") + " — celý zoznam je v XLSX a na strane Podstatné zmeny." : "Porovnanie podľa UID úloh; ! = míľnik po termíne.", { pt: 7.5, italic: true, color: T.textTer });
+  A.text(REP_W - REP_L - 3, 6.95, 3, 0.18, "Zdroj: MS Project · dve snímky plánu", { pt: 7.5, italic: true, color: T.textTer, align: "r" });
+  return [{ prvky: A.prvky, nadpis: s.nazov }];
+};
+
+REP_LAYOUTY.financie = function(s, view, T){
+  const A = repPrvky(T), F = s.fin;
+  let y = repHlavicka(A, T, "Financie", F.nadpis, "Stav " + repDMR(view.stavKuDnu));
+  const dl = [{ popis: F.popisCelku + " (" + F.mena + ")", hodnota: repSuma(F.celok), sub: F.rucny ? "zadané ručne" : "súčet zložiek", farba: T.text }]
+    .concat(F.polozky.slice(0, F.polozky.length > 5 ? 3 : 4).map(p => ({ popis: p.popis, hodnota: repSuma(p.suma), sub: F.mena, farba: p.farba })));
+  if (F.polozky.length > 5) dl.push({ popis: "Ďalšie zložky (" + (F.polozky.length - 3) + ")", hodnota: repSuma(F.polozky.slice(3).reduce((a, p) => a + p.suma, 0)), sub: F.mena, akcent: "textSec" });
+  repDlazdice(A, T, dl, y, 0.85, view.farby);
+  y += 0.85 + 0.3;
+  const kladne = F.polozky.filter(p => p.suma > 0), spolu = kladne.reduce((a, p) => a + p.suma, 0);
+  const r = 1.95, cx = REP_L + 0.25 + r, cy = y + 0.35 + r;
+  A.text(REP_L, y, 5.2, 0.24, "ROZPAD", { pt: 10, bold: true, color: T.textSec });
+  if (spolu > 0) {
+    A.prvky.push({ t: "kolac", cx, cy, r, okraj: T.bg, diely: kladne.map(p => ({ nazov: p.popis, v: p.suma, farba: p.farba })) });
+    let a = -Math.PI / 2;
+    for (const p of kladne) {
+      const da = p.suma / spolu * 2 * Math.PI, m = a + da / 2;
+      if (p.suma / spolu >= 0.06) A.text(cx + 0.62 * r * Math.cos(m) - 0.5, cy + 0.62 * r * Math.sin(m) - 0.13, 1, 0.26, Math.round(p.suma / spolu * 1000) / 10 + " %", { pt: 10, bold: true, color: T.white, align: "c" });
+      a += da;
+    }
+  } else A.text(REP_L, y + 0.4, 5.2, 0.3, "Žiadna zložka nemá kladnú sumu — rozpad sa nedá nakresliť.", { pt: 11, color: T.textSec });
+  const xL = REP_L + 5.4, wL = REP_W - REP_L - xL;
+  A.text(xL, y, wL, 0.24, "ZLOŽKY", { pt: 10, bold: true, color: T.textSec });
+  let yy = y + 0.35;
+  const rh = Math.min(0.42, (6.4 - yy) / Math.max(1, F.polozky.length + 2));
+  for (const p of F.polozky) {
+    A.rect(xL, yy + rh / 2 - 0.09, 0.18, 0.18, { fill: p.farba });
+    A.text(xL + 0.3, yy, wL - 2.9, rh, repSkrat(p.popis, wL - 2.9, 11, false, T.font), { pt: 11 });
+    A.text(xL + wL - 2.55, yy, 1.75, rh, repSuma(p.suma) + " " + F.mena, { pt: 11, bold: true, align: "r" });
+    A.text(xL + wL - 0.75, yy, 0.75, rh, spolu > 0 && p.suma > 0 ? Math.round(p.suma / spolu * 1000) / 10 + " %" : "—", { pt: 10, color: T.textSec, align: "r" });
+    yy += rh;
+  }
+  A.line(xL, yy + 0.04, xL + wL, yy + 0.04, { color: T.border, lw: 0.75 });
+  A.text(xL + 0.3, yy + 0.06, wL - 2.9, rh, "Súčet zložiek", { pt: 11, bold: true });
+  A.text(xL + wL - 2.55, yy + 0.06, 1.75, rh, repSuma(F.sucet) + " " + F.mena, { pt: 11, bold: true, align: "r" });
+  if (F.rozdiel) A.text(xL, yy + 0.1 + rh, wL, 0.4, repZalom(F.popisCelku + " " + repSuma(F.celok) + " " + F.mena + " sa líši od súčtu zložiek o " + repSuma(F.rozdiel) + " " + F.mena + ".", wL, 10, true, T.font, 2), { pt: 10, bold: true, color: T.red, valign: "t" });
+  return [{ prvky: A.prvky, nadpis: s.nazov }];
+};
+
+// ═══ 27. UI kola R3a: porovnanie a trend, financie ════════════════
+// Stav ku dňu staršej snímky plánu: z cyklu, ktorý ju použil (porovnanie
+// prenesené z cyklu), inak dátum stavu v súbore plánu (datum_suboru).
+function repStavVstupu(v){ return v ? (v.datum_suboru || String(v.nahrane || "").slice(0, 10)) : null; }
+function repPorovnanieHtml(){
+  const O = REP.cyklusObsah, por = O.porovnanie || {}, V = O.vstupy || {}, stav = REP.cyklus.stav_ku_dnu;
+  const pis = REP.cyklus.stav === "koncept" && !REP.verziaSnimka && repMozemPisat();
+  const lbl = v => esc(v.nazov_suboru + " · " + repDMR(repStavVstupu(v)));
+  const vyber = (druh, nazov) => {
+    const moz = REP.vstupy.filter(v => v.druh === druh && v.id !== V[druh]);
+    if (!moz.length) return "";
+    return '<div class="mfield" style="flex:1;min-width:220px"><label>' + nazov + '</label><select' + (pis ? "" : " disabled") + ' onchange="repNastavPorovnanie(\'' + druh + '\', this.value)"><option value="">— bez porovnania —</option>' +
+      moz.map(v => '<option value="' + esc(v.id) + '"' + (por[druh] === v.id ? " selected" : "") + ">" + lbl(v) + "</option>").join("") + "</select></div>";
+  };
+  const plany = REP.vstupy.filter(v => v.druh === "plan" && v.id !== V.plan);
+  const body = ((O.trend || {}).body) || [];
+  const neskor = por.stavKuDnu && por.stavKuDnu >= stav;
+  const trend = plany.map(v => {
+    const b = body.find(x => x.plan === v.id), st = b ? b.stavKuDnu : repStavVstupu(v), zly = st >= stav;
+    return '<label style="display:flex;gap:6px;align-items:center;padding:2px 0"><input type="checkbox"' + (b ? " checked" : "") + (pis && !zly ? "" : " disabled") +
+      ' onchange="repTrendBod(\'' + esc(v.id) + '\', this.checked)"> ' + esc(v.nazov_suboru) + ' <span class="csub" style="margin:0">stav ' + esc(repDMR(st)) + (zly ? " — nie je pred týmto cyklom" : "") + "</span></label>";
+  }).join("");
+  return '<div class="card" style="padding:10px 14px;margin-top:10px"><b>Porovnanie a trend</b><div class="csub" style="margin:2px 0 6px">Zmeny od minula a podstatné zmeny sa počítajú proti staršej snímke plánu po UID úloh, ' +
+    'k jej vlastnému stavu ku dňu. Nový cyklus si porovnanie a trend prevezme z predošlého cyklu.' + (por.popis ? " Teraz: <b>" + esc(por.popis) + "</b>." : "") + "</div>" +
+    (REP.porovnanieChyba ? '<div style="color:var(--neg);font-size:12px;margin-bottom:6px">Vstup porovnania sa nenačítal: ' + esc(REP.porovnanieChyba) + "</div>" : "") +
+    (neskor ? '<div style="color:var(--neg);font-size:12px;margin-bottom:6px">Porovnávaná snímka má stav ku dňu ' + esc(repDMR(por.stavKuDnu)) + " — nie je staršia než cyklus, zmeny sa nepočítajú.</div>" : "") +
+    '<div style="display:flex;gap:10px;flex-wrap:wrap">' + vyber("plan", "Plán na porovnanie") + vyber("issue", "Issue Log na porovnanie") + vyber("ct", "Commitment Tracker na porovnanie") + vyber("dep", "Dependency Log na porovnanie") + "</div>" +
+    (plany.length ? '<div class="csub" style="margin:6px 0 2px">Body trendu míľnikov (tento cyklus je vždy posledný):</div>' + trend : '<div class="csub">Zatiaľ je nahratý len jeden plán — trend a porovnanie potrebujú staršiu snímku plánu.</div>') + "</div>";
+}
+async function repNastavPorovnanie(druh, id){
+  const O = REP.cyklusObsah, por = O.porovnanie = O.porovnanie || {};
+  if (!id) { delete por[druh]; if (druh === "plan") { delete por.stavKuDnu; delete por.popis; } return repPrekresli(); }
+  const v = REP.vstupy.find(x => x.id === id);
+  try { await repNacitajVstup(id); } catch (e) { return repChyba(e, "Vstup na porovnanie sa nepodarilo načítať"); }
+  por[druh] = id;
+  if (druh === "plan") { por.stavKuDnu = repStavVstupu(v); por.popis = "plán " + (v ? v.nazov_suboru : "") + " k " + repDMR(por.stavKuDnu); delete por.cyklus; }
+  repPrekresli();
+}
+async function repTrendBod(id, zap){
+  const O = REP.cyklusObsah, T = O.trend = O.trend || {}, body = T.body = T.body || [];
+  const i = body.findIndex(b => b.plan === id);
+  if (!zap) { if (i >= 0) body.splice(i, 1); return repPrekresli(); }
+  const v = REP.vstupy.find(x => x.id === id);
+  try { await repNacitajVstup(id); } catch (e) { return repChyba(e, "Plán pre trend sa nepodarilo načítať"); }
+  if (i < 0) body.push({ plan: id, stavKuDnu: repStavVstupu(v), popis: v ? v.nazov_suboru : "" });
+  body.sort((a, b) => (a.stavKuDnu < b.stavKuDnu ? -1 : 1));
+  repPrekresli();
+}
+
+// Financie (§6.8): zložky s farbou, celok súčtom alebo ručne; žiadne predvolené sumy.
+function repFinancieHtml(){
+  const f = repUsudok().financie;
+  if (!f) return '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>Finančný report</b><div class="csub" style="margin:2px 0 6px">Voliteľná strana s rozpadom rozpočtu (koláčový graf). Sumy zadáte ručne, appka nič nepredvypĺňa.</div>' +
+    '<button class="aabtn" onclick="repFinZaloz()">+ Pridať finančný report</button></div>';
+  const F = repFinancie(f) || { sucet: 0, celok: Number(f.celkom) || 0, rozdiel: 0, mena: f.mena || "EUR" };
+  const riadky = (f.polozky || []).map((p, i) => {
+    const farba = (F.polozky && F.polozky[i] ? F.polozky[i].farba : REP_FIN_PALETA[i % REP_FIN_PALETA.length]);
+    return '<tr><td><input type="color" value="#' + esc(farba) + '" onchange="repFinPolozka(' + i + ',\'farba\',this.value)" style="width:38px;height:30px;padding:0;border:0"></td>' +
+      '<td style="width:60%"><input value="' + esc(p.popis || "") + '" placeholder="napr. Vyčerpané" style="width:100%" onchange="repFinPolozka(' + i + ',\'popis\',this.value)"></td>' +
+      '<td><input type="number" step="0.01" value="' + esc(p.suma === "" || p.suma == null ? "" : p.suma) + '" style="width:130px;text-align:right" onchange="repFinPolozka(' + i + ',\'suma\',this.value)"></td>' +
+      '<td><button class="aabtn" title="Odstrániť zložku" onclick="repFinOdober(' + i + ')">×</button></td></tr>';
+  }).join("");
+  const pole = (k, n, ph, typ, w) => '<div class="mfield" style="flex:1;min-width:' + (w || 160) + 'px"><label>' + n + '</label><input' + (typ ? ' type="' + typ + '" step="0.01"' : "") + ' value="' + esc(f[k] == null ? "" : f[k]) + '" placeholder="' + esc(ph) + '" onchange="repFinUprav(\'' + k + '\', this.value)"></div>';
+  return '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>Finančný report</b><div class="csub" style="margin:2px 0 6px">Celok je súčet zložiek, kým ho nezadáte ručne; keď sa líši od súčtu, strana to ukáže červeno. Finančné sumy nejdú žiadnemu jazykovému modelu.</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap">' + pole("nadpis", "Nadpis strany", "Prehľad stavu čerpania finančných prostriedkov", "", 260) + pole("popisCelku", "Popis celku", "Celkový rozpočet") +
+    pole("celkom", "Celok (prázdne = súčet)", repSuma(F.sucet), "number") + pole("mena", "Mena", "EUR", "", 80) + "</div>" +
+    '<table style="width:100%;margin-top:4px"><tr class="csub"><th></th><th style="text-align:left">Zložka</th><th style="text-align:right">Suma</th><th></th></tr>' + riadky + "</table>" +
+    '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px"><button class="aabtn" onclick="repFinPridaj()">+ Zložka</button>' +
+    '<span class="csub" style="margin:0">súčet ' + esc(repSuma(F.sucet)) + " · celok " + esc(repSuma(F.celok)) + (F.rozdiel ? ' · <b style="color:var(--neg)">rozdiel ' + esc(repSuma(F.rozdiel)) + "</b>" : "") + "</span>" +
+    '<button class="aabtn" onclick="repFinZrus()">Odstrániť finančný report</button></div></div>';
+}
+function repFinZaloz(){ repUsudok().financie = { nadpis: "", popisCelku: "", celkom: null, mena: "EUR", polozky: [{ popis: "", suma: "" }] }; repPrekresli(); }
+function repFinUprav(k, v){
+  const f = repUsudok().financie;
+  v = String(v == null ? "" : v).trim();
+  if (k === "celkom") f.celkom = v === "" ? null : Number(v);
+  else f[k] = v;
+  repPrekresli();
+}
+function repFinPolozka(i, k, v){
+  const p = repUsudok().financie.polozky[i];
+  if (!p) return;
+  if (k === "suma") p.suma = String(v).trim() === "" ? "" : Number(v);
+  else if (k === "farba") p.farba = String(v).replace("#", "").toUpperCase();
+  else p[k] = String(v).trim();
+  repPrekresli();
+}
+function repFinPridaj(){ repUsudok().financie.polozky.push({ popis: "", suma: "" }); repPrekresli(); }
+function repFinOdober(i){ repUsudok().financie.polozky.splice(i, 1); repPrekresli(); }
+function repFinZrus(){ if (!confirm("Odstrániť finančný report z tohto cyklu?")) return; delete repUsudok().financie; repPrekresli(); }
