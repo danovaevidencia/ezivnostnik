@@ -486,7 +486,7 @@ window.NAVODY_SNIMKY = {
  },
  "b2b_vykaz-reporting-3": {
   "d": {
-   "subor": "navody/b2b_vykaz-reporting-3.d.2b0e5de4.webp",
+   "subor": "navody/b2b_vykaz-reporting-3.d.aa58ad07.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -497,22 +497,9 @@ window.NAVODY_SNIMKY = {
    }
   }
  },
- "b2b_vykaz-reporting-4": {
-  "d": {
-   "subor": "navody/b2b_vykaz-reporting-4.d.431655fa.webp",
-   "w": 1024,
-   "h": 600,
-   "ciel": {
-    "x": 267,
-    "y": 266,
-    "w": 162,
-    "h": 20
-   }
-  }
- },
  "b2b_vykaz-reporting-5": {
   "d": {
-   "subor": "navody/b2b_vykaz-reporting-5.d.dfe9f814.webp",
+   "subor": "navody/b2b_vykaz-reporting-5.d.afeab092.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -520,6 +507,19 @@ window.NAVODY_SNIMKY = {
     "y": 281,
     "w": 154,
     "h": 37
+   }
+  }
+ },
+ "b2b_vykaz-reporting-6": {
+  "d": {
+   "subor": "navody/b2b_vykaz-reporting-6.d.dfc0b8b1.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 267,
+    "y": 290,
+    "w": 169,
+    "h": 20
    }
   }
  },
@@ -712,6 +712,32 @@ window.NAVODY_SNIMKY = {
     "y": 301,
     "w": 436,
     "h": 16
+   }
+  }
+ },
+ "b2b_vykaz-zistenia-1": {
+  "d": {
+   "subor": "navody/b2b_vykaz-zistenia-1.d.fb58d206.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 869,
+    "y": 433,
+    "w": 124,
+    "h": 37
+   }
+  }
+ },
+ "b2b_vykaz-zistenia-2": {
+  "d": {
+   "subor": "navody/b2b_vykaz-zistenia-2.d.55a4e552.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 600,
+    "y": 161,
+    "w": 125,
+    "h": 37
    }
   }
  },

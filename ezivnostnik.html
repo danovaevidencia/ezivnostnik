@@ -11449,6 +11449,10 @@ function vykazMailText(w){
 function b64Utf8(s){ const b=new TextEncoder().encode(String(s)); let r=""; for(let i=0;i<b.length;i+=0x8000) r+=String.fromCharCode.apply(null, b.subarray(i,i+0x8000)); return btoa(r); }
 // S html (objednávka B2B) je telo multipart/alternative — text aj HTML; prázdny
 // adresát = bez hlavičky To (Outlook nechá pole prázdne).
+// Typ prílohy podľa prípony (reporting pribalí PPTX a XLSX, nielen PDF).
+const EML_TYPY={pdf:"application/pdf", pptx:"application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  xlsx:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", html:"text/html", zip:"application/zip", xml:"application/xml"};
+function emlTypPrilohy(p){ return p.typ || EML_TYPY[String(p.nazov||"").split(".").pop().toLowerCase()] || "application/octet-stream"; }
 async function vykazEml(komu, predmet, text, prilohy, html){
   const hr="ezivnostnik_"+Date.now().toString(36), CRLF="\r\n";
   const zalom=s=>s.replace(/.{1,76}/g, x=>x+CRLF);
@@ -11461,7 +11465,7 @@ async function vykazEml(komu, predmet, text, prilohy, html){
   for(const p of prilohy||[]){
     const buf=new Uint8Array(await p.blob.arrayBuffer()); let bin="";
     for(let i=0;i<buf.length;i+=0x8000) bin+=String.fromCharCode.apply(null, buf.subarray(i,i+0x8000));
-    out+=CRLF+["--"+hr, "Content-Type: application/pdf; name=\""+p.nazov+"\"", "Content-Disposition: attachment; filename=\""+p.nazov+"\"",
+    out+=CRLF+["--"+hr, "Content-Type: "+emlTypPrilohy(p)+"; name=\""+p.nazov+"\"", "Content-Disposition: attachment; filename=\""+p.nazov+"\"",
       "Content-Transfer-Encoding: base64", "", zalom(btoa(bin))].join(CRLF);
   }
   out+=CRLF+"--"+hr+"--"+CRLF;
