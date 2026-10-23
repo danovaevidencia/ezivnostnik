@@ -1622,6 +1622,8 @@ function repProfilHtml(){
     '<div class="mfield" style="flex:2;min-width:200px"><label>Názov v reporte</label><input value="' + esc(P.nazov) + '" onchange="REP.profilNavrh.nazov=this.value"></div>' +
     '<div class="mfield" style="flex:1;min-width:150px"><label>Cieľový termín programu</label><input type="date" value="' + esc(P.cielovyTermin || "") + '" onchange="REP.profilNavrh.cielovyTermin=this.value||null"></div>' +
     '<div class="mfield" style="flex:1;min-width:180px"><label>Téma výstupov</label><select onchange="REP.profilNavrh.tema=this.value">' + temy + '</select></div></div>' +
+    '<label style="display:flex;gap:6px;align-items:flex-start;margin:6px 0 0"><input type="checkbox"' + (P.aiNavrhy ? " checked" : "") + ' onchange="REP.profilNavrh.aiNavrhy=this.checked">' +
+    '<span>Povoliť <b>✨ návrh textov</b> jazykovým modelom (Anthropic) — <span class="csub" style="margin:0">model dostane len čísla a termíny reportu s názvami oblastí z profilu, nie texty registrov, mená ani financie. Zapnite, len keď s tým objednávateľ súhlasí.</span></span></label>' +
     '<div class="csub" style="margin:4px 0 0">Cieľový termín je biznisové rozhodnutie, nie najneskorší dátum plánu — dlaždica „Dní do konca“ stojí na ňom. Polia plánu: ' + (polia || "nenašli sa") + '.</div></div>' +
     '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>Fázy (brány) kritickej cesty</b><div class="csub" style="margin:2px 0 6px">Míľnik patrí fáze, keď jeho názov obsahuje text (bez ohľadu na veľkosť písmen a diakritiku). Viac textov oddeľte bodkočiarkou.</div>' +
     '<table style="width:100%"><tr class="csub"><th>Kľúč</th><th>Legenda</th><th>Názov obsahuje</th><th>Len míľniky</th></tr>' + fazy + '</table></div>' +
@@ -1675,10 +1677,10 @@ async function repOtvorCyklus(id){
     REP.pracuje = "Načítavam cyklus…"; repPrekresli();
     const d = await b2bEdge("rep_cyklus_nacitaj", { cyklus: id });
     REP.cyklus = d.cyklus; REP.cyklusObsah = d.obsah || { vstupy: {}, usudok: {}, vyber: {} };
-    REP.verziaSnimka = null;
+    REP.verziaSnimka = null; REP.verziaCislo = null;
     if (REP.cyklus.stav !== "koncept") {
       const { data } = await sb.from("b2b_rep_cykly_verzie").select("cislo").eq("cyklus_id", id).order("cislo", { ascending: false }).limit(1);
-      if (data && data[0]) REP.verziaSnimka = (await b2bEdge("rep_cyklus_verzia_nacitaj", { cyklus: id, cislo: data[0].cislo })).obsah;
+      if (data && data[0]) { REP.verziaSnimka = (await b2bEdge("rep_cyklus_verzia_nacitaj", { cyklus: id, cislo: data[0].cislo })).obsah; REP.verziaCislo = data[0].cislo; }
     }
     const VS = repVstupyCyklu(REP.cyklusObsah);
     for (const vid of VS.vlastne) await repNacitajVstup(vid);
@@ -1813,13 +1815,14 @@ function repKrokUsudok(K){
   const pren = us.prenesene ? '<div class="card" style="padding:10px 14px;margin-bottom:10px;border-color:var(--acc)"><b>Prenesené z cyklu k ' + esc(repDMR(us.prenesene.z)) + ' — overte</b>' +
     '<div class="csub" style="margin:2px 0 6px">Kľúčové otázky (★), hodnotenie RAG, poznámky k oblastiam, finančný report a výber strán sú z minulého cyklu — sumy financií prepíšte na aktuálne. Čísla z plánu a súhrny sa počítajú nanovo.</div>' +
     '<button class="aabtn" onclick="repPreneseneOverene()">Overené</button></div>' : "";
-  return pren + '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>Exekutívny súhrn</b><div class="csub" style="margin:2px 0 6px">Prázdne pole = automatický text z dát. Napísaný text má prednosť a vo výstupe je označený ako ručný.</div>' +
+  const zdroj = us.naratiV && REP_ZDROJ_TXT[us.naratiV.zdroj] && us.naratiV.zdroj !== "rucne" ? ' <span class="csub" style="margin:0">· ' + esc(REP_ZDROJ_TXT[us.naratiV.zdroj]) + "</span>" : "";
+  return pren + repAiNavrhHtml(K) + '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>Exekutívny súhrn</b>' + zdroj + '<div class="csub" style="margin:2px 0 6px">Prázdne pole = automatický text z dát. Napísaný text má prednosť a vo výstupe je označený ako ručný.</div>' +
     '<textarea rows="5" style="' + REP_TEXTAREA + '" placeholder="' + esc(auto) + '" onchange="repNastavNaratiV(this.value)">' + esc(nar) + '</textarea></div>' +
     '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>Poznámka k oblasti</b><div class="csub" style="margin:2px 0 6px">Jedna veta o skutočnom stave (čo je hotové, čo beží, čo blokuje). Prázdne = automatická poznámka z míľnikov.</div><table style="width:100%">' + drahy + '</table></div>' +
     repFinancieHtml() + repKrokUsudokQa(K);
 }
 function repPoznamka(kluc, text){ const u = REP.cyklusObsah.usudok = REP.cyklusObsah.usudok || {}; u.poznamky = u.poznamky || {}; if (text.trim()) u.poznamky[kluc] = text.trim(); else delete u.poznamky[kluc]; }
-function repNastavNaratiV(text){ const u = REP.cyklusObsah.usudok = REP.cyklusObsah.usudok || {}; u.naratiV = text.trim() ? { text: text.trim(), zdroj: "rucne" } : null; }
+function repNastavNaratiV(text){ const u = REP.cyklusObsah.usudok = REP.cyklusObsah.usudok || {}; u.naratiV = text.trim() ? { text: text.trim(), zdroj: repZdrojPoUprave(u.naratiV && u.naratiV.zdroj) } : null; }
 
 function repKrokNahlad(K){
   const O = REP.cyklusObsah, vy = O.vyber = O.vyber || {}, kon = REP.cyklus.stav === "koncept" && !REP.verziaSnimka;
@@ -1900,6 +1903,7 @@ async function repStiahni(druh){
     REP.pracuje = "Skladám výstup…"; repPrekresli();
     const s = await repSubor(druh, repKontextCyklu());
     downloadBlob(s.blob, s.nazov);
+    await repLogExport({ roadmapa: "roadmapa_pptx", qa: "qa_pptx" }[druh] || druh, s.blob);
     REP.pracuje = "";
   } catch (e) { return repChyba(e, "Výstup sa nepodarilo zostaviť"); }
   repPrekresli();
@@ -1913,6 +1917,7 @@ async function repStiahniEml(){
     const sp = repEmlSprava(K);
     const eml = await vykazEml("", sp.predmet, sp.text, prilohy, '<!doctype html><html><head><meta charset="utf-8"></head><body>' + sp.html + "</body></html>");
     downloadBlob(eml, (REP.program.kod || "report") + "_Email_" + REP.cyklus.stav_ku_dnu + ".eml");
+    await repLogExport("eml", eml);
     REP.pracuje = "";
   } catch (e) { return repChyba(e, "E-mail sa nepodarilo zostaviť"); }
   repPrekresli();
@@ -2693,6 +2698,7 @@ function repRagNastav(kluc, pole, v){
   const u = repUsudok(); u.rag = u.rag || {};
   const r = u.rag[kluc] = u.rag[kluc] || {};
   v = String(v || "").trim();
+  if (pole === "komentar" && r.zdrojKomentara) { if (v) r.zdrojKomentara = repZdrojPoUprave(r.zdrojKomentara); else delete r.zdrojKomentara; }
   if (v) r[pole] = v; else delete r[pole];
   if (!Object.keys(r).length) delete u.rag[kluc];
   repPrekresli();
@@ -2704,7 +2710,7 @@ function repKpiPrepis(kluc, pole, v){
   if (!p.hodnota) delete u.kpiPrepisy[kluc];
   repPrekresli();
 }
-function repNastavQaNaratiV(text){ const u = repUsudok(); u.qaNaratiV = text.trim() ? { text: text.trim(), zdroj: "rucne" } : null; }
+function repNastavQaNaratiV(text){ const u = repUsudok(); u.qaNaratiV = text.trim() ? { text: text.trim(), zdroj: repZdrojPoUprave(u.qaNaratiV && u.qaNaratiV.zdroj) } : null; }
 function repHviezda(kluc, zap){
   const u = repUsudok(), s = new Set(u.kluceOtazky || []);
   if (zap) s.add(kluc); else s.delete(kluc);
@@ -2724,7 +2730,8 @@ function repKrokUsudokQa(K){
       '<td style="vertical-align:top;padding-top:6px"><select onchange="repRagNastav(\'' + d.kluc + '\',\'farba\',this.value)"><option value="">' + (d.navrh ? "podľa návrhu" : "—") + "</option>" +
       Object.keys(REP_RAG).map(k => '<option value="' + k + '"' + (u.farba === k ? " selected" : "") + ">" + REP_RAG[k] + "</option>").join("") + "</select></td>" +
       '<td style="width:45%;vertical-align:top;padding-top:6px"><input value="' + esc(u.komentar || "") + '" placeholder="' + esc(d.navrh && !u.farba ? d.navrh.dovod : "komentár QA") + '" style="width:100%" onchange="repRagNastav(\'' + d.kluc + '\',\'komentar\',this.value)">' +
-      (bezDovodu ? '<div style="color:var(--neg);font-size:12px">Farba sa líši od návrhu — napíšte dôvod.</div>' : "") + "</td></tr>";
+      (bezDovodu ? '<div style="color:var(--neg);font-size:12px">Farba sa líši od návrhu — napíšte dôvod.</div>' : "") +
+      (u.zdrojKomentara ? '<div class="csub" style="margin:0">' + esc(REP_ZDROJ_TXT[u.zdrojKomentara] || "") + "</div>" : "") + "</td></tr>";
   }).join("");
   const kpi = Q.kpi.map(k => {
     const p = kp[k.kluc] || {};
@@ -2741,7 +2748,8 @@ function repKrokUsudokQa(K){
     ' <span class="csub" style="margin:0">' + esc(String(z.popis || "").slice(0, 160)) + "</span></span></label>").join("");
   return '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>Hodnotenie QA (RAG)</b><div class="csub" style="margin:2px 0 6px">Návrh farby je z dát a s dôvodom; kde dáta nehovoria, rozhoduje len QA. Farba iná než návrh potrebuje komentár — vo výstupe je označená „úsudok QA“.</div>' +
     '<table style="width:100%;border-collapse:collapse">' + rag + "</table></div>" +
-    '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>Celkový stav (QA)</b><div class="csub" style="margin:2px 0 6px">Prázdne pole = automatický text z výsledných hodnôt dlaždíc.</div>' +
+    '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>Celkový stav (QA)</b>' + (us.qaNaratiV && us.qaNaratiV.zdroj && us.qaNaratiV.zdroj !== "rucne" ? ' <span class="csub" style="margin:0">· ' + esc(REP_ZDROJ_TXT[us.qaNaratiV.zdroj] || "") + "</span>" : "") +
+    '<div class="csub" style="margin:2px 0 6px">Prázdne pole = automatický text z výsledných hodnôt dlaždíc.</div>' +
     '<textarea rows="4" style="' + REP_TEXTAREA + '" placeholder="' + esc(auto) + '" onchange="repNastavQaNaratiV(this.value)">' + esc(us.qaNaratiV && us.qaNaratiV.text || "") + "</textarea></div>" +
     '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>KPI dohľadu kvality</b><div class="csub" style="margin:2px 0 6px">Vypočítanú hodnotu môže QA prepísať len s dôvodom; výstup ukáže prepis s hviezdičkou a vypočítanú hodnotu pod ním.</div>' +
     '<table style="width:100%;border-collapse:collapse"><tr class="csub"><th style="text-align:left">KPI</th><th>Vypočítané</th><th style="text-align:left">Prepis</th><th style="text-align:left">Dôvod</th></tr>' + kpi + "</table></div>" +
@@ -3127,3 +3135,95 @@ function repFinPolozka(i, k, v){
 function repFinPridaj(){ repUsudok().financie.polozky.push({ popis: "", suma: "" }); repPrekresli(); }
 function repFinOdober(i){ repUsudok().financie.polozky.splice(i, 1); repPrekresli(); }
 function repFinZrus(){ if (!confirm("Odstrániť finančný report z tohto cyklu?")) return; delete repUsudok().financie; repPrekresli(); }
+
+// ═══ 28. Návrh textov modelom (kolo R3b; NAVRH §11, D7, č. 301) ═══
+// Modelu ide len AGREGÁT podľa bieleho zoznamu: čísla, termíny, kľúče fáz
+// a dimenzií a názvy oblastí a skupín z profilu. Žiadne texty registrov, mená,
+// poznámky, naratívy, komentáre ani finančné sumy (D14). Server vstup postaví
+// nanovo (repAiVstupServer v edge b2b) — toto je len prvá vrstva.
+const REP_AI_KPI = ["aktivne", "kriticke", "vysoke", "eskalovane", "oneskorene"];
+function repAiVstup(K){
+  const m = K.model, fazy = (m.fazy || []).map(f => f.kluc), skup = {};
+  for (const s of m.skupiny || []) skup[s.kluc] = s.nazov;
+  const v = { stavKuDnu: m.stavKuDnu, cielovyTermin: m.cielovyTermin || null, postupProgramu: m.program.pct,
+    metodaPostupu: String(m.program.metoda).indexOf("súhrnná") === 0 ? "suhrn" : "priemer",
+    pocty: { oblasti: m.pocty.drahy, dokoncene: m.pocty.hotove, nasadene: m.pocty.nasadene, oneskorene: m.pocty.oneskorene, pomale: m.pocty.pomale, dniDoKonca: m.dniDoKonca },
+    fazy,
+    oblasti: m.drahy.filter(d => !d.chyba).slice(0, 60).map(d => ({ oblast: d.kratky, skupina: skup[d.skupina] || null, pct: d.pct,
+      fazy: Object.fromEntries(fazy.filter(k => d.fazy[k]).map(k => { const r = d.fazy[k]; return [k, { datum: r.datum, stav: r.hotove ? "hotove" : r.oneskorene ? "oneskorene" : "planovane", dniPoTermine: r.dniPoTermine || 0 }]; })) })) };
+  if (K.qa) {
+    v.kpi = Object.fromEntries(K.qa.kpi.filter(k => REP_AI_KPI.includes(k.kluc) && Number.isFinite(Number(k.hodnota))).map(k => [k.kluc, Number(k.hodnota)]));
+    v.rag = K.qa.rag.map(d => ({ dimenzia: d.kluc, navrh: d.navrh ? d.navrh.farba : null, farba: d.farba }));
+  }
+  if (K.il) v.issue = { aktivne: K.il.aktivne, kriticke: K.il.kriticke, vysoke: K.il.vysoke, eskalovane: K.il.eskalovane, poTermine: K.il.poTermine, bezTerminu: K.il.bezTerminu };
+  if (K.ct) v.zavazky = { spolu: K.ct.zavazky.length, sparovane: K.ct.sparovane, vNesulade: K.ct.vNesulade, pocty: Object.assign({}, K.ct.pocty) };
+  if (K.dep) v.zavislosti = Object.assign({}, K.dep.kpi);
+  if (K.zmeny) {
+    const S = K.zmeny.sumar;
+    v.zmeny = { od: K.zmeny.pred.stavKuDnu, posunute: S.posunute, uvolnene: S.uvolnene, novoOneskorene: S.novoOneskorene, dokoncene: S.dokoncene, regresie: S.regresie,
+      postupPred: S.postupPred, posuny: K.zmeny.posuny.filter(p => p.oblast).slice(0, 15).map(p => ({ oblast: p.oblast, faza: p.faza || null, dni: p.dni, termin: p.teraz })) };
+  }
+  if (K.zmenyRegistrov) v.zmenyRegistrov = Object.assign({}, K.zmenyRegistrov.sumar);
+  if (K.trend) v.trend = { body: K.trend.body.map(b => b.stavKuDnu), riadky: K.trend.riadky.filter(r => r.spolu).slice(0, 15).map(r => ({ oblast: r.kratky, faza: r.faza, spolu: r.spolu })) };
+  return v;
+}
+// Odpoveď sa neberie naslepo: len známe polia, dĺžky a dimenzie, ktoré report má.
+function repAiNavrhZOdpovede(n, K){
+  const txt = (x, max) => String(x == null ? "" : x).replace(/\s+/g, " ").trim().slice(0, max);
+  const dim = new Set(((K.qa && K.qa.rag) || []).map(d => d.kluc));
+  const rag = {};
+  for (const d of (n && Array.isArray(n.rag) ? n.rag : [])) { const k = String(d && d.dimenzia || ""); if (dim.has(k) && !rag[k]) { const t = txt(d.komentar, 300); if (t) rag[k] = t; } }
+  return { naratiV: txt(n && n.naratiV, 1200), qaNaratiV: K.qa ? txt(n && n.qaNaratiV, 900) : "", rag };
+}
+const REP_ZDROJ_TXT = { ai: "AI návrh", ai_upraveny: "AI návrh, upravený", rucne: "ručne" };
+function repZdrojPoUprave(predtym){ return predtym === "ai" || predtym === "ai_upraveny" ? "ai_upraveny" : "rucne"; }
+
+async function repAiNavrh(){
+  const cid = REP.cyklus.id;
+  try {
+    const K = repKontextCyklu();
+    REP.aiNavrh = { cyklus: cid, caka: true }; REP.pracuje = "Model pripravuje návrh textov…"; repPrekresli();
+    const d = await b2bEdge("rep_navrh", { cyklus: cid, vstup: repAiVstup(K) });
+    if (!REP.cyklus || REP.cyklus.id !== cid) {                       // medzitým iný cyklus — návrh patrí inam
+      if (REP.aiNavrh && REP.aiNavrh.cyklus === cid) REP.aiNavrh = null;
+      REP.pracuje = ""; return repPrekresli();
+    }
+    REP.aiNavrh = Object.assign({ cyklus: cid, model: d.model }, repAiNavrhZOdpovede(d.navrh, K));
+    REP.pracuje = "";
+  } catch (e) { REP.aiNavrh = null; return repChyba(e, "Návrh textov sa nepodaril"); }
+  repPrekresli();
+}
+function repAiPouzi(pole, kluc){
+  const N = REP.aiNavrh, u = repUsudok();
+  if (!N || N.cyklus !== REP.cyklus.id) return;
+  if (pole === "naratiV" && N.naratiV) u.naratiV = { text: N.naratiV, zdroj: "ai" };
+  else if (pole === "qaNaratiV" && N.qaNaratiV) u.qaNaratiV = { text: N.qaNaratiV, zdroj: "ai" };
+  else if (pole === "rag" && N.rag[kluc]) { u.rag = u.rag || {}; const r = u.rag[kluc] = u.rag[kluc] || {}; r.komentar = N.rag[kluc]; r.zdrojKomentara = "ai"; }
+  else if (pole === "vsetko") { repAiPouzi("naratiV"); repAiPouzi("qaNaratiV"); for (const k of Object.keys(N.rag)) repAiPouzi("rag", k); return; }
+  repPrekresli();
+}
+function repAiNavrhHtml(K){
+  const P = REP.profil || {};
+  if (!P.aiNavrhy) return '<div class="csub" style="margin:0 2px 10px">✨ Návrh textov modelom je vypnutý — zapína ho profil programu, keď s tým objednávateľ súhlasí.</div>';
+  const N = REP.aiNavrh && REP.aiNavrh.cyklus === REP.cyklus.id ? REP.aiNavrh : null;
+  const blok = (nazov, text, pole, kluc) => text ? '<div style="padding:6px 0;border-top:1px solid var(--line)"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><b>' + esc(nazov) + "</b>" +
+    '<button class="aabtn" onclick="repAiPouzi(\'' + pole + "'" + (kluc ? ",'" + kluc + "'" : "") + ')">Použiť</button></div><div style="margin-top:2px">' + esc(text) + "</div></div>" : "";
+  const dim = K.qa ? K.qa.rag : [];
+  return '<div class="card" style="padding:10px 14px;margin-bottom:10px"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap"><b>✨ Návrh textov</b>' +
+    '<button class="aabtn' + (N ? "" : " pri") + '"' + (N && N.caka ? " disabled" : "") + ' onclick="repAiNavrh()">' + (N && !N.caka ? "Navrhnúť znova" : "Navrhnúť texty") + "</button></div>" +
+    '<div class="csub" style="margin:2px 0 6px">Model dostane len čísla a termíny reportu s názvami oblastí z profilu — nie texty registrov, mená, poznámky ani financie. Návrh sa prevezme až tlačidlom Použiť; ' +
+    "prevzatý text je v úsudku označený ako AI návrh.</div>" +
+    (N && !N.caka ? blok("Exekutívny súhrn", N.naratiV, "naratiV") + blok("Celkový stav (QA)", N.qaNaratiV, "qaNaratiV") +
+      dim.map(d => blok("RAG — " + d.nazov, N.rag[d.kluc], "rag", d.kluc)).join("") +
+      '<div style="margin-top:6px"><button class="aabtn" onclick="repAiPouzi(\'vsetko\')">Použiť všetko</button></div>' : "") + "</div>";
+}
+
+// Log exportov (§12.3): zapisuje server (b2b_rep_export_log) — kto, ktorý
+// cyklus a verzia, aký výstup a jeho sha256. Neúspech log export nezastaví.
+async function repLogExport(druh, blob){
+  try {
+    const sha = await b2bSha256(new Uint8Array(await blob.arrayBuffer()));
+    const { error } = await sb.rpc("b2b_rep_export_log", { p_cyklus: REP.cyklus.id, p_cislo: REP.verziaSnimka ? (REP.verziaCislo || null) : null, p_druh: druh, p_sha256: sha });
+    if (error) throw error;
+  } catch (e) { console.error("Reporting: export sa nezapísal do logu projektu", e); }
+}

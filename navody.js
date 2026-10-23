@@ -1531,7 +1531,9 @@ b2b_vykaz: {
         { nadpis: "Oblasti a fázy",
           html: "<p>Oblasť je naviazaná na úlohu plánu jej identifikátorom, nie názvom — premenovanie v pláne ju neodpojí a podobné názvy sa nezlejú. Míľnik patrí fáze podľa textu v názve, ktorý nastavíte v profile.</p>" },
         { nadpis: "Kto čo vidí",
-          html: "<p>Programy, vstupy a reporty vidia všetci členovia projektu; rola Management a support ich len číta. Údaje sa ukladajú šifrovane a z reportingu nejde nič jazykovému modelu.</p>" },
+          html: "<p>Programy, vstupy a reporty vidia všetci členovia projektu; rola Management a support ich len číta. Údaje sa ukladajú šifrovane; jazykovému modelu ide len agregát reportu pri návrhu textov, a to len keď ho profil programu povolí.</p>" },
+        { nadpis: "Návrh textov",
+          html: "<p>Keď to profil programu povolí (so súhlasom objednávateľa), v kroku Úsudok tlačidlo <b>Navrhnúť texty</b> pripraví návrh exekutívneho súhrnu, celkového stavu QA a komentárov k hodnoteniu RAG. Model dostane len čísla a termíny reportu s názvami oblastí a fáz z profilu — nie texty registrov, mená, poznámky ani financie. Návrh prevezmete tlačidlom <b>Použiť</b>; v úsudku je označený ako AI návrh, po úprave ako AI návrh, upravený.</p>" },
       ],
     },
     {
