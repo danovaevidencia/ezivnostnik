@@ -362,8 +362,8 @@ function repPrierez(plan, profil){
 }
 
 // ── 5. Kontrola dát (§6.5): zviditeľniť, neopravovať ────────────
-function repKontroly(model, plan, profil){
-  const o = [];
+function repKontroly(model, plan, profil, volby){
+  const o = [], jeSviatok = volby && volby.jeSviatok;
   const fazy = profil.fazy || [];
   const prva = fazy[0], posl = fazy[fazy.length - 1];
   for (const d of model.drahy) {
@@ -386,6 +386,8 @@ function repKontroly(model, plan, profil){
       for (const mi of r.milniky) {
         if (mi.pct < 100 && mi.datum && d.finish && +mi.datum.slice(0, 4) < +d.finish.slice(0, 4))
           o.push({ kod: "stary-rok", uroven: "upozornenie", draha: d.kluc, text: d.kratky + ": nehotový míľnik " + f.kluc + " má dátum " + repDMR(mi.datum) + " (rok pred koncom oblasti)." });
+        if (jeSviatok && mi.pct < 100 && mi.datum && jeSviatok(String(mi.datum).slice(0, 10)))
+          o.push({ kod: "sviatok", uroven: "upozornenie", draha: d.kluc, text: d.kratky + ": nehotový míľnik " + f.kluc + " („" + mi.nazov + "“) má dátum " + repDMR(mi.datum) + " — deň pracovného pokoja." });
         if (!mi.milnik && !(f.pravidlo && f.pravidlo.lenMilniky))
           o.push({ kod: "nie-milnik", uroven: "info", draha: d.kluc, text: d.kratky + ": úloha fázy " + f.kluc + " nie je v pláne označená ako míľnik („" + mi.nazov + "“)." });
       }
@@ -1624,10 +1626,13 @@ function repProfilHtml(){
     '<div class="card" style="padding:10px 14px;margin-bottom:10px"><div style="display:flex;gap:10px;flex-wrap:wrap">' +
     '<div class="mfield" style="flex:2;min-width:200px"><label>Názov v reporte</label><input value="' + esc(P.nazov) + '" onchange="REP.profilNavrh.nazov=this.value"></div>' +
     '<div class="mfield" style="flex:1;min-width:150px"><label>Cieľový termín programu</label><input type="date" value="' + esc(P.cielovyTermin || "") + '" onchange="REP.profilNavrh.cielovyTermin=this.value||null"></div>' +
-    '<div class="mfield" style="flex:1;min-width:180px"><label>Téma výstupov</label><select onchange="REP.profilNavrh.tema=this.value">' + temy + '</select></div></div>' +
+    '<div class="mfield" style="flex:1;min-width:180px"><label>Téma výstupov</label><select onchange="REP.profilNavrh.tema=this.value">' + temy + '</select></div>' +
+    '<div class="mfield" style="flex:2;min-width:220px"><label>Baseline programu</label><select onchange="repBaselineNastav(this.value)"><option value="">— bez baseline —</option>' +
+    REP.vstupy.filter(v => v.druh === "plan").map(v => '<option value="' + esc(v.id) + '"' + ((P.baseline || {}).plan === v.id ? " selected" : "") + ">" + esc(v.nazov_suboru + " · stav " + repDMR(repStavVstupu(v))) + "</option>").join("") + "</select></div></div>" +
     '<label style="display:flex;gap:6px;align-items:flex-start;margin:6px 0 0"><input type="checkbox"' + (P.aiNavrhy ? " checked" : "") + ' onchange="REP.profilNavrh.aiNavrhy=this.checked">' +
     '<span>Povoliť <b>✨ návrh textov</b> jazykovým modelom (Anthropic) — <span class="csub" style="margin:0">model dostane len čísla a termíny reportu s názvami oblastí z profilu, nie texty registrov, mená ani financie. Zapnite, len keď s tým objednávateľ súhlasí.</span></span></label>' +
-    '<div class="csub" style="margin:4px 0 0">Cieľový termín je biznisové rozhodnutie, nie najneskorší dátum plánu — dlaždica „Dní do konca“ stojí na ňom. Polia plánu: ' + (polia || "nenašli sa") + '.</div></div>' +
+    '<div class="csub" style="margin:4px 0 0">Baseline je snímka plánu, proti ktorej sa ráta sklz fázových míľnikov (strana Sklz proti baseline) — plán v MS Projecte vlastnú baseline mať nemusí. ' +
+    'Cieľový termín je biznisové rozhodnutie, nie najneskorší dátum plánu — dlaždica „Dní do konca“ stojí na ňom. Polia plánu: ' + (polia || "nenašli sa") + '.</div></div>' +
     '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>Fázy (brány) kritickej cesty</b><div class="csub" style="margin:2px 0 6px">Míľnik patrí fáze, keď jeho názov obsahuje text (bez ohľadu na veľkosť písmen a diakritiku). Viac textov oddeľte bodkočiarkou.</div>' +
     '<table style="width:100%"><tr class="csub"><th>Kľúč</th><th>Legenda</th><th>Názov obsahuje</th><th>Len míľniky</th></tr>' + fazy + '</table></div>' +
     '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>Oblasti (dráhy)</b><div class="csub" style="margin:2px 0 6px">Oblasť je naviazaná na úlohu plánu cez jej UID — premenovanie v pláne ju neodpojí.</div>' +
@@ -1668,6 +1673,9 @@ async function repNovyCyklus(){
     if (pred) {
       const po = ((await b2bEdge("rep_cyklus_nacitaj", { cyklus: pred.id })).obsah) || {};
       Object.assign(obsah, repPrenesUsudok(po, pred.stav_ku_dnu), repPrenesPorovnanie(po, pred));
+      const bod = po.ragVysledok || (pred.stav !== "koncept" ? await repRagBodZoSnimky(pred) : null);
+      const hist = repPrenesRag(po, bod);
+      if (hist.length) obsah.ragHistoria = hist;
     }
     const d = await b2bEdge("rep_cyklus_uloz", { program: REP.program.id, stav_ku_dnu: stav, nazov: "Report k " + repDMR(stav), obsah });
     await repOtvorProgram(REP.program.id);
@@ -1689,6 +1697,8 @@ async function repOtvorCyklus(id){
     for (const vid of VS.vlastne) await repNacitajVstup(vid);
     // vstup porovnania, ktorý sa nedá načítať, cyklus nezhodí — v karte Porovnanie svieti
     REP.porovnanieChyba = "";
+    const bp = ((REP.profil || {}).baseline || {}).plan;
+    if (bp && !VS.vlastne.includes(bp) && !VS.porovnanie.includes(bp)) VS.porovnanie.push(bp);
     for (const vid of VS.porovnanie) {
       try { await repNacitajVstup(vid); }
       catch (e) { console.error("Reporting: vstup porovnania " + vid, e); REP.porovnanieChyba = (e && e.message) || String(e); }
@@ -1705,14 +1715,14 @@ async function repOtvorCyklus(id){
 function repKontextCyklu(){
   if (REP.verziaSnimka) {                                         // uzavretý cyklus = nemenná snímka
     const S = REP.verziaSnimka;
-    return Object.assign({ usudok: ((S.obsah || {}).usudok) || {}, protokoly: S.protokoly || {}, qa: null, zmeny: null, trend: null, zmenyRegistrov: null }, S);
+    return Object.assign({ usudok: ((S.obsah || {}).usudok) || {}, protokoly: S.protokoly || {}, qa: null, zmeny: null, trend: null, zmenyRegistrov: null, baseline: null }, S);
   }
   const O = REP.cyklusObsah, P = REP.profil, V = O.vstupy || {};
   const plan = V.plan ? REP.plany[V.plan] : null;
   if (!plan || !P) return null;
   const model = repModel(plan, P, REP.cyklus.stav_ku_dnu);
   const reg = d => (V[d] && REP.plany[V[d]]) ? REP.plany[V[d]].riadky : null;
-  const kontroly = repKontroly(model, plan, P);
+  const kontroly = repKontroly(model, plan, P, { jeSviatok: repJeSviatokFn() });
   // anotácie a číselník oblastí žijú v programe (R4) — platia pre každý cyklus a import
   const issueR = repIssueSAnotaciami(reg("issue"), repAnotPolozky("anotacie_issue"));
   const cis = REP.registre && REP.registre.ciselnik_oblasti, mapa = (cis && cis.obsah && cis.obsah.mapa) || {};
@@ -1724,10 +1734,12 @@ function repKontextCyklu(){
   const qa = (il || ct || dep || (zistenia && zistenia.riadky.length))
     ? repQa({ model, profil: P, il, ilRiadky: issueR, ct, dep, zistenia, usudok: O.usudok, oblastIssue: repOblastIssueFn(P, mapa), oblastPopis: repOblastIssuePopis(P, mapa) }) : null;
   const { zmeny, trend, zmenyRegistrov } = repKontextZmien(O, P, plan, model, reg);
-  const view = repView(model, { profil: P, cyklus: O, qa, zmeny, trend, zmenyRegistrov });
+  if (qa) qa.ragTrend = repRagTrend(O.ragHistoria, qa.rag, REP.cyklus.stav_ku_dnu);
+  const B = P.baseline, baseline = B && B.plan && REP.plany[B.plan] ? repBaseline(B, repModelBodu(B.plan, B.stavKuDnu), model, REP.cyklus.stav_ku_dnu, P) : null;
+  const view = repView(model, { profil: P, cyklus: O, qa, zmeny, trend, zmenyRegistrov, baseline });
   const protokoly = {};
   for (const d of ["issue", "ct", "dep"]) { const v = V[d] && REP.vstupy.find(x => x.id === V[d]); if (v) protokoly[d] = v.protokol; }
-  return { model, view, kontroly, ct, dep, il, qa, zmeny, trend, zmenyRegistrov, usudok: O.usudok || {}, protokoly, registreVerzie: Object.fromEntries(["zistenia"].concat(REP_REGISTRE_PROGRAMU).map(d => [d, ((REP.registre || {})[d] || {}).verzia || 0])), tema: O.tema || P.tema || "clean" };
+  return { model, view, kontroly, ct, dep, il, qa, zmeny, trend, zmenyRegistrov, baseline, usudok: O.usudok || {}, protokoly, registreVerzie: Object.fromEntries(["zistenia"].concat(REP_REGISTRE_PROGRAMU).map(d => [d, ((REP.registre || {})[d] || {}).verzia || 0])), tema: O.tema || P.tema || "clean" };
 }
 
 // Model staršej snímky plánu k jej vlastnému stavu ku dňu (N24: nie k dnešnému).
@@ -1946,12 +1958,15 @@ async function repUzavri(){
   if (REP.registre.zistenia && REP.registre.zistenia.zmenene) return alert("Register zistení má neuložené zmeny — uložte ho, potom cyklus uzavrite.");
   if (!confirm("Uzavrieť cyklus " + repDMR(REP.cyklus.stav_ku_dnu) + "? Vstupy, úsudok, register zistení a výber sa zamknú do snímky.")) return;
   try {
+    // výsledné farby RAG idú do obsahu cyklu — z nich nový cyklus skladá vývoj RAG
+    const K0 = repKontextCyklu(), bod = K0 && K0.qa ? repRagBod(REP.cyklus.stav_ku_dnu, K0.qa.rag) : null;
+    if (bod) REP.cyklusObsah.ragVysledok = bod; else delete REP.cyklusObsah.ragVysledok;
     await repUlozCyklus();
     const K = repKontextCyklu();
     // QA kontext bez modelu a registrov — tie sú v snímke raz
     const qa = K.qa ? Object.assign({}, K.qa, { model: undefined, ct: undefined, dep: undefined, il: undefined }) : null;
     const snimka = { schema: 3, model: K.model, view: K.view, kontroly: K.kontroly, ct: K.ct, dep: K.dep, il: K.il, qa, tema: K.tema,
-      zmeny: K.zmeny, trend: K.trend, zmenyRegistrov: K.zmenyRegistrov,
+      zmeny: K.zmeny, trend: K.trend, zmenyRegistrov: K.zmenyRegistrov, baseline: K.baseline,
       protokoly: K.protokoly, registreVerzie: K.registreVerzie,
       profilVerzia: REP.profilVerzia, vstupy: Object.assign({}, REP.cyklusObsah.vstupy), obsah: REP.cyklusObsah };
     REP.pracuje = "Uzatváram…"; repPrekresli();
@@ -2065,6 +2080,7 @@ function repQaSnimky(Q, vybrane){
   const s = [];
   // snímka nesie len to, čo kreslí — model je v snímke cyklu už raz
   s.push({ kluc: "qa-dashboard", typ: "qaDashboard", nazov: "QA: dohľad kvality", zahrnuta: vybrane("qa-dashboard"), qa: { kpi: Q.kpi, rag: Q.rag, naratiV: Q.naratiV } });
+  if (Q.ragTrend) s.push(repRagTrendSnimka(Q.ragTrend, vybrane));
   if (Q.kluceOtazky.length) s.push({ kluc: "qa-otazky", typ: "qaTabulka", nazov: "QA: kľúčové otvorené otázky", zahrnuta: vybrane("qa-otazky"),
     kicker: "Dohľad kvality", nadpis: "Kľúčové otvorené otázky", tabulka: repQaTabOtazky(Q.kluceOtazky) });
   if (Q.zistenia.length) s.push({ kluc: "qa-zistenia", typ: "qaTabulka", nazov: "QA: register zistení", zahrnuta: vybrane("qa-zistenia"),
@@ -2362,6 +2378,10 @@ function repXlsxBalik(X, K){
   }
   if (K.trend) pridaj("Trend", repXlsxHarok(X, ["Oblasť", "Fáza"].concat(K.trend.body.map(b => "k " + repDMR(b.stavKuDnu))).concat(["Posun spolu (dni)"]),
     K.trend.riadky.map(r => [r.kratky, r.faza].concat(r.seria.map(repXlsxDatum)).concat([r.spolu]))));
+  if (K.baseline) pridaj("Baseline", repXlsxHarok(X, ["Oblasť", "Fáza", "Baseline (k " + repDMR(K.baseline.baseline.stavKuDnu) + ")", "Teraz", "Sklz (dni)", "Stav"],
+    K.baseline.riadky.map(r => [r.kratky, r.faza, repXlsxDatum(r.seria[0]), repXlsxDatum(r.seria[r.seria.length - 1]), r.spolu, r.hotove ? "hotové" : r.oneskorene ? "po termíne" : ""]), [16, 8, 14, 12, 10, 14]));
+  if (Q && Q.ragTrend) pridaj("Vývoj RAG", repXlsxHarok(X, ["Dimenzia"].concat(Q.ragTrend.body.map(b => "k " + repDMR(b))).concat(["Teraz", "Oproti minulému"]),
+    Q.ragTrend.riadky.map(r => [r.nazov].concat(r.seria.map(f => (f ? REP_RAG[f] : ""))).concat([r.teraz ? REP_RAG[r.teraz] : "", r.zmena == null ? "" : r.zmena > 0 ? "zhoršenie" : r.zmena < 0 ? "zlepšenie" : "bez zmeny"]))));
   const finX = repFinancie(us.financie);
   if (finX) pridaj("Financie", repXlsxHarok(X, ["Zložka", "Suma (" + finX.mena + ")", "Podiel"],
     finX.polozky.map(p => [p.popis, p.suma, finX.sucet > 0 ? { t: "n", v: p.suma / finX.sucet, z: "0.0 %" } : ""])
@@ -2527,11 +2547,17 @@ function repEmlSprava(K){
       "Posunuté míľniky: " + S.posunute + (S.uvolnene ? " (uvoľnené " + S.uvolnene + ")" : ""), "Novo oneskorené: " + S.novoOneskorene, "Dokončené míľniky: " + S.dokoncene]
       .concat(K.zmeny.posuny.filter(p => p.dni > 0).slice(0, 3).map(p => p.oblast + (p.faza ? " " + p.faza : "") + ": +" + p.dni + " dní (" + repDMR(p.teraz) + ")"))]);
   }
+  if (K.baseline) {
+    const sk = K.baseline.riadky.filter(r => r.spolu > 0).sort((a, b) => b.spolu - a.spolu);
+    body.push(["Proti baseline (" + repDMR(K.baseline.baseline.stavKuDnu) + ")", ["Míľniky so sklzom: " + sk.length]
+      .concat(sk.slice(0, 3).map(r => r.kratky + " " + r.faza + ": +" + r.spolu + " dní (" + repDMR(r.seria[r.seria.length - 1]) + ")"))]);
+  }
   if (ex && ex.pozornost.length) body.push(["Vyžaduje pozornosť", ex.pozornost.slice(0, 10).map(p => p.kratky + ": " + p.dovod)]);
   if (na && na.polozky && na.polozky.length) body.push(["Najbližšie míľniky", na.polozky.slice(0, 8).map(p => repDM(p.datum) + " " + p.kratky + " — " + p.faza)]);
   if (Q) {
     body.push(["Dohľad kvality", Q.kpi.map(k => k.popis + ": " + k.hodnota + (k.prepis ? " (upravené QA)" : ""))]);
-    body.push(["Hodnotenie RAG", Q.rag.map(d => d.nazov + ": " + (d.farba ? REP_RAG[d.farba] : "—") + (d.komentar ? " — " + d.komentar : ""))]);
+    const minule = k => { const r = Q.ragTrend && Q.ragTrend.riadky.find(x => x.kluc === k); return r && r.pred && r.pred !== r.teraz ? " (minule " + REP_RAG[r.pred] + ")" : ""; };
+    body.push(["Hodnotenie RAG", Q.rag.map(d => d.nazov + ": " + (d.farba ? REP_RAG[d.farba] : "—") + minule(d.kluc) + (d.komentar ? " — " + d.komentar : ""))]);
   }
   const text = body.map(([n, r]) => n + "\n" + r.map(x => (r.length > 1 ? "• " : "") + x).join("\n")).join("\n\n") + "\n";
   const html = '<div style="font-family:Calibri,Arial,sans-serif;font-size:11pt">' + body.map(([n, r]) => "<p><b>" + repEsc(n) + "</b></p>" +
@@ -2738,6 +2764,11 @@ function repHviezda(kluc, zap){
 }
 
 // Úsudok QA (§6.8): návrh z dát s dôvodom, rozhoduje QA; prepis KPI vždy s dôvodom.
+function repRagMinule(Q, kluc){
+  const T = Q.ragTrend, r = T && T.riadky.find(x => x.kluc === kluc);
+  // pred = posledná známa farba (bod, kde dimenzia chýba, sa preskočí) — dátum k nej
+  return r && r.pred ? "<br>minule (" + esc(repDMR(T.body[r.seria.lastIndexOf(r.pred)])) + "): " + repRagCip(r.pred) : "";
+}
 function repKrokUsudokQa(K){
   const Q = K.qa;
   if (!Q) return '<div class="card" style="padding:10px 14px"><b>Dohľad kvality (QA)</b><div class="csub" style="margin:2px 0 0">QA hodnotenie sa ponúkne, keď cyklus má Issue Log, záväzky alebo závislosti, alebo keď register zistení nie je prázdny.</div></div>';
@@ -2745,7 +2776,7 @@ function repKrokUsudokQa(K){
   const rag = Q.rag.map(d => {
     const u = ragUs[d.kluc] || {}, bezDovodu = u.farba && d.navrh && u.farba !== d.navrh.farba && !u.komentar;
     return '<tr style="border-top:1px solid var(--line)"><td style="padding:6px 6px 6px 0;vertical-align:top"><b>' + esc(d.nazov) + '</b><div class="csub" style="margin:2px 0 0">' +
-      (d.navrh ? "návrh z dát: " + repRagCip(d.navrh.farba) + " " + esc(d.navrh.dovod) : "dáta nehovoria — len úsudok QA") + "</div></td>" +
+      (d.navrh ? "návrh z dát: " + repRagCip(d.navrh.farba) + " " + esc(d.navrh.dovod) : "dáta nehovoria — len úsudok QA") + repRagMinule(Q, d.kluc) + "</div></td>" +
       '<td style="vertical-align:top;padding-top:6px"><select onchange="repRagNastav(\'' + d.kluc + '\',\'farba\',this.value)"><option value="">' + (d.navrh ? "podľa návrhu" : "—") + "</option>" +
       Object.keys(REP_RAG).map(k => '<option value="' + k + '"' + (u.farba === k ? " selected" : "") + ">" + REP_RAG[k] + "</option>").join("") + "</select></td>" +
       '<td style="width:45%;vertical-align:top;padding-top:6px"><input value="' + esc(u.komentar || "") + '" placeholder="' + esc(d.navrh && !u.farba ? d.navrh.dovod : "komentár QA") + '" style="width:100%" onchange="repRagNastav(\'' + d.kluc + '\',\'komentar\',this.value)">' +
@@ -2964,6 +2995,7 @@ function repZmenySnimky(k, vybrane){
     sumar: [{ popis: "Verzie v trende", hodnota: String(k.trend.body.length), akcent: "textSec" }, { popis: "Míľniky s posunom", hodnota: String(k.trend.posunute), akcent: k.trend.posunute ? "amber" : "green" },
       { popis: "Najväčší sklz", hodnota: k.trend.riadky.length && k.trend.riadky[0].spolu > 0 ? "+" + k.trend.riadky[0].spolu + " d" : "—", akcent: "red" }],
     tabulka: repTabTrend(k.trend) });
+  if (k.baseline) s.push(repBaselineSnimka(k.baseline, vybrane));
   return s;
 }
 function repTabPodstatne(Z){
@@ -3096,7 +3128,15 @@ function repPorovnanieHtml(){
     (REP.porovnanieChyba ? '<div style="color:var(--neg);font-size:12px;margin-bottom:6px">Vstup porovnania sa nenačítal: ' + esc(REP.porovnanieChyba) + "</div>" : "") +
     (neskor ? '<div style="color:var(--neg);font-size:12px;margin-bottom:6px">Porovnávaná snímka má stav ku dňu ' + esc(repDMR(por.stavKuDnu)) + " — nie je staršia než cyklus, zmeny sa nepočítajú.</div>" : "") +
     '<div style="display:flex;gap:10px;flex-wrap:wrap">' + vyber("plan", "Plán na porovnanie") + vyber("issue", "Issue Log na porovnanie") + vyber("ct", "Commitment Tracker na porovnanie") + vyber("dep", "Dependency Log na porovnanie") + "</div>" +
-    (plany.length ? '<div class="csub" style="margin:6px 0 2px">Body trendu míľnikov (tento cyklus je vždy posledný):</div>' + trend : '<div class="csub">Zatiaľ je nahratý len jeden plán — trend a porovnanie potrebujú staršiu snímku plánu.</div>') + "</div>";
+    (plany.length ? '<div class="csub" style="margin:6px 0 2px">Body trendu míľnikov (tento cyklus je vždy posledný):</div>' + trend : '<div class="csub">Zatiaľ je nahratý len jeden plán — trend a porovnanie potrebujú staršiu snímku plánu.</div>') +
+    repBaselineRiadok(stav) + "</div>";
+}
+function repBaselineRiadok(stav){
+  const B = (REP.profil || {}).baseline;
+  if (!B || !B.plan) return '<div class="csub" style="margin:6px 0 0">Baseline programu nie je nastavená — nastavíte ju v profile programu.</div>';
+  const zla = !B.stavKuDnu || B.stavKuDnu >= stav;
+  return '<div class="csub" style="margin:6px 0 0">Baseline programu: <b>' + esc(B.popis || "plán") + " k " + esc(repDMR(B.stavKuDnu)) + "</b> (mení sa v profile programu)" +
+    (zla ? ' — <span style="color:var(--neg)">nie je staršia než cyklus, sklz sa nepočíta</span>' : !REP.plany[B.plan] ? ' — <span style="color:var(--neg)">plán sa nenačítal</span>' : "") + ".</div>";
 }
 async function repNastavPorovnanie(druh, id){
   const O = REP.cyklusObsah, por = O.porovnanie = O.porovnanie || {};
@@ -3507,5 +3547,102 @@ async function repUlozDoVystupov(){
     const pred = (ulozene.length ? "Uložené: " + ulozene.join(", ") + ". " : "") + (rozpracovany ? "Výstup " + rozpracovany + " je založený, ale nie je dokončený (súbor alebo väzba na verziu) — skontrolujte ho v záložke Výstupy. " : "");
     return repChyba(e, pred + "Uloženie do Výstupov sa nepodarilo");
   }
+  repPrekresli();
+}
+
+// ═══ 30. Kolo R5: sviatky v pláne, vývoj RAG, baseline programu (NAVRH §17) ═══
+// ── Míľnik na deň pracovného pokoja ─────────────────────────────
+// Pravidlo dní pokoja je JEDNO — appka (isSviatok nad sadzby.js, aj Veľká noc
+// a zmeny zákona); reporting si vlastný zoznam sviatkov nedrží. Bez appky
+// (napr. test samotného modelu) sa kontrola nerobí.
+function repJeSviatokFn(){
+  return typeof isSviatok === "function" ? iso => isSviatok(new Date(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10))) : null;
+}
+
+// ── Vývoj hodnotenia RAG po dimenziách ──────────────────────────
+// Bod = výsledné farby UZAVRETÉHO cyklu (úsudok QA, inak návrh z dát).
+// Uzavretie ho zapíše do obsahu cyklu (ragVysledok), nový cyklus z neho
+// a z histórie predošlého zloží ragHistoria (najviac 7 bodov).
+const REP_RAG_PORADIE = { zelena: 0, oranzova: 1, cervena: 2 };
+function repRagBod(stavKuDnu, rag){
+  const farby = {};
+  for (const d of rag || []) if (d.farba && REP_RAG_PORADIE[d.farba] != null) farby[d.kluc] = d.farba;
+  return Object.keys(farby).length ? { stavKuDnu, farby } : null;
+}
+function repPrenesRag(po, bod){
+  const m = new Map();
+  for (const b of (po.ragHistoria || []).concat(bod ? [bod] : [])) if (b && b.stavKuDnu && b.farby) m.set(b.stavKuDnu, b);
+  return [...m.values()].sort((a, b) => (a.stavKuDnu < b.stavKuDnu ? -1 : a.stavKuDnu > b.stavKuDnu ? 1 : 0)).slice(-7);
+}
+function repRagTrend(historia, rag, stav){
+  const body = (historia || []).filter(b => b && b.stavKuDnu && b.farby && b.stavKuDnu < stav)
+    .sort((a, b) => (a.stavKuDnu < b.stavKuDnu ? -1 : 1)).slice(-7);
+  if (!body.length || !rag || !rag.length) return null;
+  const riadky = rag.map(d => {
+    const seria = body.map(b => b.farby[d.kluc] || null);
+    const pred = seria.filter(Boolean).pop() || null, teraz = d.farba || null;
+    return { kluc: d.kluc, nazov: d.nazov, seria, teraz, pred, zmena: pred && teraz ? REP_RAG_PORADIE[teraz] - REP_RAG_PORADIE[pred] : null };
+  });
+  return { body: body.map(b => b.stavKuDnu), riadky, zhorsene: riadky.filter(r => r.zmena > 0).length, zlepsene: riadky.filter(r => r.zmena < 0).length };
+}
+function repRagFarbaTab(f){ return f === "zelena" ? "green" : f === "oranzova" ? "amber" : f === "cervena" ? "red" : null; }
+function repTabRagTrend(T){
+  const n = T.body.length, wB = Math.min(0.12, 0.5 / (n + 1)), rok = T.body[n - 1].slice(0, 4);
+  return { stlpce: [{ n: "Dimenzia", w: 0.22 }].concat(T.body.map(s => ({ n: repDM(s) + (s.slice(0, 4) !== rok ? s.slice(2, 4) : ""), w: wB })))
+      .concat([{ n: "Teraz", w: wB }, { n: "Oproti minulému", w: 1 - 0.22 - wB * (n + 1) }]),
+    riadky: T.riadky.map(r => ({ b: [r.nazov].concat(r.seria.map(f => (f ? REP_RAG[f] : "—"))).concat([r.teraz ? REP_RAG[r.teraz] : "—",
+      r.zmena == null ? "" : r.zmena > 0 ? "zhoršenie" : r.zmena < 0 ? "zlepšenie" : "bez zmeny"]),
+      farby: Object.assign(Object.fromEntries(r.seria.map((f, i) => [1 + i, repRagFarbaTab(f)])), { [1 + n]: repRagFarbaTab(r.teraz), [2 + n]: r.zmena > 0 ? "red" : r.zmena < 0 ? "green" : null }) })) };
+}
+function repRagTrendSnimka(T, vybrane){
+  return { kluc: "qa-rag-trend", typ: "qaTabulka", nazov: "QA: vývoj hodnotenia RAG", zahrnuta: vybrane("qa-rag-trend"), kicker: "Dohľad kvality", nadpis: "Vývoj hodnotenia RAG",
+    sumar: [{ popis: "Cyklov v porovnaní", hodnota: String(T.body.length + 1), akcent: "textSec" }, { popis: "Zhoršené dimenzie", hodnota: String(T.zhorsene), akcent: T.zhorsene ? "red" : "green" },
+      { popis: "Zlepšené dimenzie", hodnota: String(T.zlepsene), akcent: T.zlepsene ? "green" : "textSec" }],
+    tabulka: repTabRagTrend(T) };
+}
+// Bod z uzavretej snímky predošlého cyklu — pre cykly uzavreté pred R5, ktoré
+// ragVysledok v obsahu nemajú. Chyba bod vynechá, cyklus sa založí aj tak.
+async function repRagBodZoSnimky(pred){
+  try {
+    const { data, error } = await sb.from("b2b_rep_cykly_verzie").select("cislo").eq("cyklus_id", pred.id).order("cislo", { ascending: false }).limit(1);
+    if (error) throw error;
+    if (!data || !data[0]) return null;
+    const S = (await b2bEdge("rep_cyklus_verzia_nacitaj", { cyklus: pred.id, cislo: data[0].cislo })).obsah;
+    return S && S.qa ? repRagBod(pred.stav_ku_dnu, S.qa.rag) : null;
+  } catch (e) { console.error("Reporting: RAG predošlého cyklu sa nenačítal", e); return null; }
+}
+
+// ── Baseline programu: plán z vybraného importu ako pevný bod ───
+// Trend míľnikov s dvoma bodmi — baseline a tento cyklus (§17, plán bez
+// MS Project baseline). Baseline je v profile (platí pre program), snímka
+// plánu sa ráta k jej vlastnému stavu ku dňu.
+function repBaseline(B, mB, model, stav, profil){
+  if (!B || !mB || !B.stavKuDnu || B.stavKuDnu >= stav) return null;
+  const T = repTrend([{ stavKuDnu: B.stavKuDnu, popis: "baseline", model: mB }, { stavKuDnu: stav, popis: "tento cyklus", model }], profil);
+  return T ? Object.assign(T, { baseline: { stavKuDnu: B.stavKuDnu, popis: B.popis || "" } }) : null;
+}
+function repTabBaseline(Bl){
+  const rows = Bl.riadky.filter(r => r.spolu !== 0).sort((a, b) => b.spolu - a.spolu || a.kratky.localeCompare(b.kratky) || a.faza.localeCompare(b.faza));
+  return { stlpce: [{ n: "Oblasť", w: 0.18 }, { n: "Fáza", w: 0.1 }, { n: "Baseline", w: 0.14 }, { n: "Teraz", w: 0.14 }, { n: "Sklz", w: 0.12 }, { n: "Stav", w: 0.32 }],
+    riadky: rows.map(r => ({ b: [r.kratky, r.faza, repDMR(r.seria[0]), repDMR(r.seria[r.seria.length - 1]), (r.spolu > 0 ? "+" : "") + r.spolu + " d",
+      r.hotove ? "hotové" : r.oneskorene ? "po termíne" : r.spolu > 0 ? "neskôr než baseline" : "skôr než baseline"],
+      farby: { 4: r.spolu > 0 ? "red" : "green", 5: r.oneskorene ? "red" : r.hotove ? "green" : null } })),
+    prazdne: "Všetky fázové míľniky sú v termíne baseline." };
+}
+function repBaselineSnimka(Bl, vybrane){
+  const sk = Bl.riadky.filter(r => r.spolu > 0), max = sk.reduce((m, r) => Math.max(m, r.spolu), 0);
+  return { kluc: "baseline", typ: "tabulka", nazov: "Sklz proti baseline", zahrnuta: vybrane("baseline"), kicker: "Baseline programu", nadpis: "Sklz proti baseline k " + repDMR(Bl.baseline.stavKuDnu),
+    sumar: [{ popis: "Míľniky so sklzom", hodnota: String(sk.length), akcent: sk.length ? "red" : "green" }, { popis: "Najväčší sklz", hodnota: max ? "+" + max + " d" : "—", akcent: max ? "red" : "green" },
+      { popis: "Skôr než baseline", hodnota: String(Bl.riadky.filter(r => r.spolu < 0).length), akcent: "green" },
+      { popis: "V termíne baseline", hodnota: String(Bl.riadky.filter(r => r.spolu === 0).length), akcent: "textSec" }],
+    tabulka: repTabBaseline(Bl) };
+}
+// Výber v profile: snímka plánu sa načíta hneď, aby náhľad po uložení profilu sedel.
+async function repBaselineNastav(id){
+  const P = REP.profilNavrh;
+  if (!id) { delete P.baseline; return repPrekresli(); }
+  const v = REP.vstupy.find(x => x.id === id);
+  try { await repNacitajVstup(id); } catch (e) { return repChyba(e, "Plán pre baseline sa nepodarilo načítať"); }
+  P.baseline = { plan: id, stavKuDnu: repStavVstupu(v), popis: v ? v.nazov_suboru : "" };
   repPrekresli();
 }
