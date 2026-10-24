@@ -1732,7 +1732,7 @@ function repKontextCyklu(){
   const rz = REP.registre && REP.registre.zistenia;
   const zistenia = rz && rz.obsah ? rz.obsah : null;
   const qa = (il || ct || dep || (zistenia && zistenia.riadky.length))
-    ? repQa({ model, profil: P, il, ilRiadky: issueR, ct, dep, zistenia, usudok: O.usudok, oblastIssue: repOblastIssueFn(P, mapa), oblastPopis: repOblastIssuePopis(P, mapa) }) : null;
+    ? repQa({ model, profil: P, il, ilRiadky: issueR, ct, dep, zistenia, usudok: O.usudok, oblastIssue: repOblastIssueFn(P, mapa), oblastPopis: repOblastIssuePopis(P, mapa), pohybOd: (O.porovnanie || {}).stavKuDnu }) : null;
   const { zmeny, trend, zmenyRegistrov } = repKontextZmien(O, P, plan, model, reg);
   if (qa) qa.ragTrend = repRagTrend(O.ragHistoria, qa.rag, REP.cyklus.stav_ku_dnu);
   const B = P.baseline, baseline = B && B.plan && REP.plany[B.plan] ? repBaseline(B, repModelBodu(B.plan, B.stavKuDnu), model, REP.cyklus.stav_ku_dnu, P) : null;
@@ -1813,7 +1813,9 @@ function repKrokKontrola(K){
   let h = '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>Plán — ' + K.kontroly.length + ' upozornení</b><div class="csub" style="margin:2px 0 4px">Nástroj chyby v pláne zviditeľní, neopravuje ich. Opravuje ich PMO v zdrojovom pláne.</div>' +
     (K.kontroly.map(k => riadok(k.uroven, k.text)).join("") || '<div class="csub">Bez nálezov.</div>') + '</div>';
   if (K.il) h += '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>Issue Log</b><div class="csub" style="margin:2px 0">' +
-    K.il.aktivne + " aktívnych · " + K.il.kriticke + " kritických · " + K.il.eskalovane + " eskalovaných podľa úrovne (stav Escalated: " + K.il.eskalovaneStav + ") · " + K.il.poTermine + " po termíne · " + K.il.bezTerminu + " bez dátumu" + (K.il.neznamyStav ? " · " + K.il.neznamyStav + " s prázdnym stavom (rátané ako aktívne)" : "") + '</div></div>';
+    K.il.aktivne + " aktívnych · " + K.il.kriticke + " kritických · " + K.il.eskalovane + " eskalovaných podľa úrovne (stav Escalated: " + K.il.eskalovaneStav + ") · " + K.il.poTermine + " po termíne · " + K.il.bezTerminu + " bez dátumu" + (K.il.neznamyStav ? " · " + K.il.neznamyStav + " s prázdnym stavom (rátané ako aktívne)" : "") +
+    (K.qa && K.qa.pohyb ? '<div class="csub" style="margin:2px 0 0">Denník (Ďalšie kroky): ' + K.qa.pohyb.zaznamov + " záznamov s dátumom v " + K.qa.pohyb.sDennikom + " problémoch" +
+      (K.qa.pohyb.bezDatumu ? " · " + K.qa.pohyb.bezDatumu + " problémov má text bez dátumovej predpony (napr. „28.5.: …“) — do pohybu sa nerátajú" : "") + "</div>" : "") + '</div></div>';
   if (K.ct) h += '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>Záväzky vs. plán</b><div class="csub" style="margin:2px 0">' +
     Object.entries(K.ct.pocty).filter(([, n]) => n).map(([k, n]) => n + "× " + esc(REP_CT_POPIS[k])).join(" · ") + (K.ct.planBezZavazku.length ? " · v pláne bez záväzku: " + esc(K.ct.planBezZavazku.slice(0, 10).join(", ")) : "") + '</div></div>';
   if (K.dep) h += '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>Závislosti</b><div class="csub" style="margin:2px 0">' +
@@ -2040,7 +2042,7 @@ function repQaNaratiV(Q, kv){
 
 // Kontext QA: všetko, z čoho sa skladajú QA snímky, XLSX aj e-mail (jedno miesto).
 function repQa(vstup){
-  const { model, profil, il, ilRiadky, ct, dep, zistenia, usudok, oblastIssue, oblastPopis } = vstup;
+  const { model, profil, il, ilRiadky, ct, dep, zistenia, usudok, oblastIssue, oblastPopis, pohybOd } = vstup;
   const us = usudok || {}, prepisy = us.kpiPrepisy || {}, ragUs = us.rag || {};
   const Q = { model, il, ct, dep };
   const kpiVyp = [
@@ -2065,12 +2067,13 @@ function repQa(vstup){
   const hviezdy = new Set(us.kluceOtazky || []);
   const pri = { critical: 0, high: 1, medium: 2, low: 3 };
   const zoradIssue = (a, b) => (b.aktivny === a.aktivny ? 0 : a.aktivny ? -1 : 1) || ((pri[a.prioritaKluc] ?? 9) - (pri[b.prioritaKluc] ?? 9)) || String(a.id).localeCompare(String(b.id));
-  const issue = (ilRiadky || []).map(z => (oblastPopis ? Object.assign({}, z, { oblastProfil: oblastPopis(z) }) : z)).sort(zoradIssue);
+  const issue = (ilRiadky || []).map(z => Object.assign({}, z, oblastPopis ? { oblastProfil: oblastPopis(z) } : {}, { dennik: repDennik(z.dalsieKroky, model.stavKuDnu) })).sort(zoradIssue);
+  const pohyb = ilRiadky ? repPohybIssue(issue, model.stavKuDnu, pohybOd, profil.metriky && profil.metriky.bezPohybuDni) : null;
   const kluceOtazky = issue.filter(z => hviezdy.has(z.kluc));
   const zist = ((zistenia && zistenia.riadky) || []).filter(z => z.stav !== "zrusene");
   const kv = Object.fromEntries(kpi.map(k => [k.kluc, k.hodnota]));
   return { kpi, rag, naratiV: us.qaNaratiV && us.qaNaratiV.text ? us.qaNaratiV.text : repQaNaratiV(Q, kv), naratiVZdroj: us.qaNaratiV && us.qaNaratiV.text ? "rucne" : "auto",
-    kluceOtazky, issue, zistenia: zist, ct, dep, il, model,
+    kluceOtazky, issue, pohyb, zistenia: zist, ct, dep, il, model,
     postup: model.drahy.filter(d => !d.chyba).map(d => ({ kratky: d.kratky, skupina: ((profil.skupiny || []).find(s => s.kluc === d.skupina) || {}).nazov || "",
       pct: d.pct, fazy: profil.fazy.map(f => ({ kluc: f.kluc, r: d.fazy[f.kluc] })), oneskorena: d.oneskorena,
       problemy: ilRiadky && oblastIssue ? repProblemyOblasti(ilRiadky, oblastIssue, d.kluc) : null })) };
@@ -2083,6 +2086,7 @@ function repQaSnimky(Q, vybrane){
   if (Q.ragTrend) s.push(repRagTrendSnimka(Q.ragTrend, vybrane));
   if (Q.kluceOtazky.length) s.push({ kluc: "qa-otazky", typ: "qaTabulka", nazov: "QA: kľúčové otvorené otázky", zahrnuta: vybrane("qa-otazky"),
     kicker: "Dohľad kvality", nadpis: "Kľúčové otvorené otázky", tabulka: repQaTabOtazky(Q.kluceOtazky) });
+  if (Q.pohyb && Q.pohyb.sDennikom) s.push(repPohybSnimka(Q.pohyb, vybrane));
   if (Q.zistenia.length) s.push({ kluc: "qa-zistenia", typ: "qaTabulka", nazov: "QA: register zistení", zahrnuta: vybrane("qa-zistenia"),
     kicker: "Dohľad kvality", nadpis: "Register zistení a odporúčaní", tabulka: repQaTabZistenia(Q.zistenia) });
   if (Q.ct) s.push({ kluc: "qa-zavazky", typ: "qaTabulka", nazov: "QA: záväzky vs. plán", zahrnuta: vybrane("qa-zavazky"),
@@ -2345,12 +2349,14 @@ function repXlsxBalik(X, K){
       mi.pct < 100 && mi.datum && mi.datum < m.stavKuDnu ? repDni(mi.datum, m.stavKuDnu) : ""]); }
   pridaj("Míľniky", repXlsxHarok(X, ["Oblasť", "Fáza", "UID", "Úloha", "Dátum", "%", "Míľnik v pláne", "Hotové", "Dní po termíne"], mil, [16, 8, 8, 50, 12, 8, 10, 8, 10]));
   if (Q && Q.issue.length) {
-    const hv = new Set(Q.kluceOtazky.map(z => z.kluc));
-    pridaj("Issue Log", repXlsxHarok(X, ["★", "ID", "Oblasť", "Kategória", "Popis", "Dopad", "Priorita", "Riešiteľ", "Cieľový dátum", "Cieľový dátum (text)", "Stav", "Aktívny", "Eskalované na", "Riešenie / akcia", "Ďalšie kroky", "Oblasť v profile", "Nezapočítané do KPI"],
+    const hv = new Set(Q.kluceOtazky.map(z => z.kluc)), pohybZ = new Map(((Q.pohyb || {}).riadky || []).map(p => [p.kluc, p]));
+    pridaj("Issue Log", repXlsxHarok(X, ["★", "ID", "Oblasť", "Kategória", "Popis", "Dopad", "Priorita", "Riešiteľ", "Cieľový dátum", "Cieľový dátum (text)", "Stav", "Aktívny", "Eskalované na", "Riešenie / akcia", "Ďalšie kroky", "Oblasť v profile", "Nezapočítané do KPI", "Posledný záznam denníka", "Dní bez pohybu"],
       Q.issue.map(z => [hv.has(z.kluc) ? "★" : "", z.id, (z.oblast || []).join(", "), z.kategoria || "", z.popis || "", z.dopad || "", REP_PRIORITA_TXT[z.prioritaKluc] || z.priorita || "",
         z.riesitel || "", repXlsxDatum(z.termin), z.terminText || "", z.stav || "", z.aktivny ? "áno" : "nie", z.eskalacia || "", z.riesenie || "", z.dalsieKroky || "",
-        z.oblastProfil || "", z.anotacia && z.anotacia.nezapocitat ? "áno — " + (z.anotacia.nezapocitat.dovod || "") : ""]),
-      [4, 14, 16, 14, 60, 30, 10, 18, 12, 16, 12, 8, 16, 40, 50, 22, 30]));
+        z.oblastProfil || "", z.anotacia && z.anotacia.nezapocitat ? "áno — " + (z.anotacia.nezapocitat.dovod || "") : ""].concat((p => [p ? repXlsxDatum(p.posledny) : "", p && p.dniBezPohybu != null ? p.dniBezPohybu : ""])(pohybZ.get(z.kluc)))),
+      [4, 14, 16, 14, 60, 30, 10, 18, 12, 16, 12, 8, 16, 40, 50, 22, 30, 14, 10]));
+    const dn = Q.issue.flatMap(z => (z.dennik || []).map(e => [z.id || "", repXlsxDatum(e.datum), e.text]));
+    if (dn.length) pridaj("Denník problémov", repXlsxHarok(X, ["ID", "Dátum", "Záznam"], dn, [14, 12, 90]));
   }
   if (Q) pridaj("Register zistení", repZisteniaHarok(X, Q.zistenia, false));
   if (K.ct) pridaj("Záväzky", repXlsxHarok(X, ["ID", "Dodávka", "Oblasť (tracker)", "Brána", "Záväzok", "Baseline", "Posun oproti baseline (d)", "Úloha v pláne", "UID", "Koniec v pláne", "%", "Δ dní", "Stav", "Príznaky", "Ručný prepis / dôvod"],
@@ -2555,7 +2561,9 @@ function repEmlSprava(K){
   if (ex && ex.pozornost.length) body.push(["Vyžaduje pozornosť", ex.pozornost.slice(0, 10).map(p => p.kratky + ": " + p.dovod)]);
   if (na && na.polozky && na.polozky.length) body.push(["Najbližšie míľniky", na.polozky.slice(0, 8).map(p => repDM(p.datum) + " " + p.kratky + " — " + p.faza)]);
   if (Q) {
-    body.push(["Dohľad kvality", Q.kpi.map(k => k.popis + ": " + k.hodnota + (k.prepis ? " (upravené QA)" : ""))]);
+    const P = Q.pohyb && Q.pohyb.sDennikom ? Q.pohyb : null;
+    body.push(["Dohľad kvality", Q.kpi.map(k => k.popis + ": " + k.hodnota + (k.prepis ? " (upravené QA)" : ""))
+      .concat(P ? ["Pohyb v problémoch: pohnuté " + (P.odMinula ? "od " + repDMR(P.od) : "za 7 dní") + " " + P.pohnute + ", bez pohybu " + P.prah + "+ dní " + P.bezPohybu + ", bez záznamu " + P.bezZaznamu] : [])]);
     const minule = k => { const r = Q.ragTrend && Q.ragTrend.riadky.find(x => x.kluc === k); return r && r.pred && r.pred !== r.teraz ? " (minule " + REP_RAG[r.pred] + ")" : ""; };
     body.push(["Hodnotenie RAG", Q.rag.map(d => d.nazov + ": " + (d.farba ? REP_RAG[d.farba] : "—") + minule(d.kluc) + (d.komentar ? " — " + d.komentar : ""))]);
   }
@@ -3645,4 +3653,76 @@ async function repBaselineNastav(id){
   try { await repNacitajVstup(id); } catch (e) { return repChyba(e, "Plán pre baseline sa nepodarilo načítať"); }
   P.baseline = { plan: id, stavKuDnu: repStavVstupu(v), popis: v ? v.nazov_suboru : "" };
   repPrekresli();
+}
+
+// ═══ 31. Kolo R6: denník problému z „Ďalšie kroky“ (NAVRH §17) ═══
+// Bunka NEXT STEPS je denník v jednom texte s dátumovými predponami
+// („28.5.: preverené; 4.6.: čaká sa…“, aj „1.4.2026 - …“ po riadkoch).
+// Rozdelí sa na záznamy; text bez predpony patrí k predošlému záznamu
+// (alebo je záznam bez dátumu). Rok bez zápisu = rok stavu ku dňu; dátum
+// viac než mesiac PO stave = minulý rok (decembrový záznam čítaný v januári).
+// Predpona chce za mesiacom bodku alebo dvojbodku — „1.2 milióna“ dátum nie je.
+const REP_DENNIK_PREDPONA = /^(\d{1,2})\.\s?(\d{1,2})(?:\.(\d{4}|\d{2})?|(?=\s*:))\s*[:\-–]?\s*/;
+function repDennik(text, stav){
+  const rokStavu = +String(stav || "").slice(0, 4) || new Date().getFullYear();
+  const out = [];
+  for (const kus of String(text || "").split(/\r?\n|;/)) {
+    const s = kus.trim();
+    if (!s) continue;
+    const m = s.match(REP_DENNIK_PREDPONA);
+    let iso = null;
+    if (m) {
+      const d = +m[1], mes = +m[2], r = m[3] ? (m[3].length === 2 ? 2000 + +m[3] : +m[3]) : rokStavu;
+      const dt = new Date(Date.UTC(r, mes - 1, d));
+      if (mes >= 1 && mes <= 12 && dt.getUTCDate() === d && dt.getUTCMonth() === mes - 1) {
+        iso = dt.toISOString().slice(0, 10);
+        if (!m[3] && stav && repDni(stav, iso) > 31) iso = (r - 1) + iso.slice(4);
+      }
+    }
+    if (iso) out.push({ datum: iso, text: s.slice(m[0].length).trim() });
+    else if (out.length) out[out.length - 1].text += (out[out.length - 1].text ? "; " : "") + s;
+    else out.push({ datum: null, text: s });
+  }
+  return out;
+}
+// Pohyb v problémoch k stavu ku dňu: posledný záznam (nie neskorší než stav),
+// dni bez pohybu, pohnuté od minulého reportu (inak za 7 dní), vek otvorených.
+// Nezapočítaný problém (anotácia) sa do počtov nedostane — rovnako ako do KPI.
+function repPohybIssue(issue, stav, odDna, prah){
+  prah = prah || 21;
+  const odMinula = !!(odDna && odDna < stav), od = odMinula ? odDna : repPlusDni(stav, -7);
+  const riadky = (issue || []).map(z => {
+    const zazn = (z.dennik || []).filter(e => e.datum && e.datum <= stav);
+    const posl = zazn.reduce((a, e) => (!a || e.datum >= a.datum ? e : a), null);
+    return { kluc: z.kluc, id: z.id, oblast: z.oblast, prioritaKluc: z.prioritaKluc, aktivny: z.aktivny, nezapocitat: !!(z.anotacia && z.anotacia.nezapocitat),
+      posledny: posl ? posl.datum : null, poslednyText: posl ? posl.text : "", dniBezPohybu: posl ? repDni(posl.datum, stav) : null,
+      pohnute: zazn.some(e => e.datum > od), vek: z.vznik && z.vznik <= stav ? repDni(z.vznik, stav) : null };
+  });
+  const akt = riadky.filter(r => r.aktivny && !r.nezapocitat), veky = akt.map(r => r.vek).filter(v => v != null).sort((a, b) => a - b), k = veky.length;
+  return { od, odMinula, prah, riadky,
+    pohnute: riadky.filter(r => r.pohnute && !r.nezapocitat).length,
+    bezPohybu: akt.filter(r => r.dniBezPohybu != null && r.dniBezPohybu >= prah).length,
+    bezZaznamu: akt.filter(r => r.posledny == null).length,
+    medianVeku: k ? (k % 2 ? veky[(k - 1) / 2] : Math.round((veky[k / 2 - 1] + veky[k / 2]) / 2)) : null,
+    zaznamov: (issue || []).reduce((a, z) => a + (z.dennik || []).filter(e => e.datum).length, 0),
+    sDennikom: (issue || []).filter(z => (z.dennik || []).some(e => e.datum)).length,
+    bezDatumu: (issue || []).filter(z => (z.dennik || []).some(e => !e.datum)).length };
+}
+function repTabPohyb(P){
+  const vaha = { critical: 0, high: 1 }, bez = r => (r.dniBezPohybu == null ? 1e6 : r.dniBezPohybu);
+  const rows = P.riadky.filter(r => r.aktivny && !r.nezapocitat && vaha[r.prioritaKluc] != null)
+    .sort((a, b) => bez(b) - bez(a) || vaha[a.prioritaKluc] - vaha[b.prioritaKluc] || String(a.id).localeCompare(String(b.id)));
+  return { stlpce: [{ n: "ID", w: 0.1 }, { n: "Oblasť", w: 0.12 }, { n: "Priorita", w: 0.08 }, { n: "Posledný záznam", w: 0.11 }, { n: "Bez pohybu", w: 0.09 }, { n: "Posledný krok", w: 0.5 }],
+    riadky: rows.map(r => ({ b: [r.id || "—", (r.oblast || []).join(", "), REP_PRIORITA_TXT[r.prioritaKluc], r.posledny ? repDMR(r.posledny) : "bez záznamu",
+      r.dniBezPohybu == null ? "—" : r.dniBezPohybu + " d", r.poslednyText],
+      farby: { 2: r.prioritaKluc === "critical" ? "red" : "amber", 3: r.posledny ? null : "amber", 4: r.dniBezPohybu != null && r.dniBezPohybu >= P.prah ? "red" : null } })),
+    prazdne: "Žiadny aktívny kritický ani vysoký problém." };
+}
+function repPohybSnimka(P, vybrane){
+  return { kluc: "qa-pohyb", typ: "qaTabulka", nazov: "QA: pohyb v problémoch", zahrnuta: vybrane("qa-pohyb"), kicker: "Dohľad kvality", nadpis: "Pohyb v kritických a vysokých problémoch",
+    sumar: [{ popis: P.odMinula ? "Pohnuté od " + repDMR(P.od) : "Pohnuté za 7 dní", hodnota: String(P.pohnute), akcent: "blue" },
+      { popis: "Bez pohybu " + P.prah + "+ dní", hodnota: String(P.bezPohybu), akcent: P.bezPohybu ? "red" : "green" },
+      { popis: "Bez záznamu v denníku", hodnota: String(P.bezZaznamu), akcent: P.bezZaznamu ? "amber" : "green" },
+      { popis: "Medián veku otvorených", hodnota: P.medianVeku == null ? "—" : P.medianVeku + " d", akcent: "textSec" }],
+    tabulka: repTabPohyb(P) };
 }
