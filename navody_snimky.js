@@ -499,7 +499,7 @@ window.NAVODY_SNIMKY = {
  },
  "b2b_vykaz-reporting-5": {
   "d": {
-   "subor": "navody/b2b_vykaz-reporting-5.d.5dd15b2d.webp",
+   "subor": "navody/b2b_vykaz-reporting-5.d.6cdd68c3.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -538,7 +538,7 @@ window.NAVODY_SNIMKY = {
  },
  "b2b_vykaz-vyhodnotenie-2": {
   "d": {
-   "subor": "navody/b2b_vykaz-vyhodnotenie-2.d.52b671df.webp",
+   "subor": "navody/b2b_vykaz-vyhodnotenie-2.d.2fa13c12.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -551,7 +551,7 @@ window.NAVODY_SNIMKY = {
  },
  "b2b_vykaz-vyhodnotenie-3": {
   "d": {
-   "subor": "navody/b2b_vykaz-vyhodnotenie-3.d.62a446d3.webp",
+   "subor": "navody/b2b_vykaz-vyhodnotenie-3.d.20743a9a.webp",
    "w": 1024,
    "h": 600,
    "ciel": {

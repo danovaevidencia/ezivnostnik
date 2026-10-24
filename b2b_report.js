@@ -3695,7 +3695,8 @@ function repPohybIssue(issue, stav, odDna, prah){
     const zazn = (z.dennik || []).filter(e => e.datum && e.datum <= stav);
     const posl = zazn.reduce((a, e) => (!a || e.datum >= a.datum ? e : a), null);
     return { kluc: z.kluc, id: z.id, oblast: z.oblast, prioritaKluc: z.prioritaKluc, aktivny: z.aktivny, nezapocitat: !!(z.anotacia && z.anotacia.nezapocitat),
-      posledny: posl ? posl.datum : null, poslednyText: posl ? posl.text : "", dniBezPohybu: posl ? repDni(posl.datum, stav) : null,
+      // bez záznamu s dátumom ukáže aspoň text bez dátumu — býva to stav („čaká sa na …“)
+      posledny: posl ? posl.datum : null, poslednyText: posl ? posl.text : ((z.dennik || []).find(e => !e.datum) || {}).text || "", dniBezPohybu: posl ? repDni(posl.datum, stav) : null,
       pohnute: zazn.some(e => e.datum > od), vek: z.vznik && z.vznik <= stav ? repDni(z.vznik, stav) : null };
   });
   const akt = riadky.filter(r => r.aktivny && !r.nezapocitat), veky = akt.map(r => r.vek).filter(v => v != null).sort((a, b) => a - b), k = veky.length;
