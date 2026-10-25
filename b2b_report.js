@@ -3959,7 +3959,7 @@ const REP_STYL_R8B = [
   ".rep-il{width:100%;border-collapse:collapse}",
   ".rep-il th{position:sticky;top:0;background:var(--paper);text-align:left;font-size:12px;color:var(--ink-soft);padding:4px 6px;border-bottom:1px solid var(--line);z-index:1}",
   ".rep-il td{padding:4px 6px;border-top:1px solid var(--line);vertical-align:top;font-size:13px}",
-  ".rep-il tr.rep-il-uzav td{opacity:.6}",
+  ".rep-il tr.rep-il-uzav td{opacity:.6}.rep-il td:nth-child(7){white-space:nowrap}.rep-il td:nth-child(8){min-width:160px}.rep-il .aabtn{padding:3px 10px;font-size:12px}",
   ".rep-pill{display:inline-block;padding:1px 8px;border-radius:9px;font-size:12px;font-weight:600;white-space:nowrap}",
   ".rep-p-critical{background:var(--sfc-neg);color:var(--ink-neg)}.rep-p-high{background:var(--sfc-warn);color:var(--ink-warn)}",
   ".rep-p-medium{background:var(--sfc-info);color:var(--ink-info)}.rep-p-low,.rep-p-uzav{background:var(--bg-deep);color:var(--ink-soft)}.rep-p-akt{background:var(--sfc-pos);color:var(--ink-pos)}",
@@ -4044,8 +4044,8 @@ function repIssueTabulkaHtml(K){
       '<td><span class="rep-pill ' + (z.aktivny ? "rep-p-akt" : "rep-p-uzav") + '">' + esc(z.stav || (z.aktivny ? "aktívny" : "uzavretý")) + "</span></td>" +
       "<td>" + esc(repTerminTxt(z.termin, z.terminText)) + "</td>" +
       "<td>" + (p && p.posledny ? esc(repDM(p.posledny)) + (p.dniBezPohybu >= ((Q.pohyb || {}).prah || 21) ? ' <span style="color:var(--neg)">' + p.dniBezPohybu + " d</span>" : "") : "—") + "</td>" +
-      "<td>" + esc(String(z.popis || "").slice(0, 160)) + (nz ? '<div style="color:var(--warn)">nezapočítaný: ' + esc(nz.dovod || "") + "</div>" : "") + "</td>" +
-      "<td>" + (pis && (z.aktivny || nz) ? '<button class="aabtn" style="white-space:nowrap" onclick="repIssueNezapocitat(\'' + esc(z.kluc) + "', " + (nz ? "false" : "true") + ')">' + (nz ? "Započítať" : "Nezapočítať") + "</button>" : "") + "</td></tr>";
+      "<td>" + esc(String(z.popis || "").slice(0, 160)) + (nz ? '<div style="color:var(--warn)">nezapočítaný: ' + esc(nz.dovod || "") + "</div>" : "") +
+      (pis && (z.aktivny || nz) ? '<div style="margin-top:3px"><button class="aabtn" style="white-space:nowrap" onclick="repIssueNezapocitat(\'' + esc(z.kluc) + "', " + (nz ? "false" : "true") + ')">' + (nz ? "Započítať" : "Nezapočítať") + "</button></div>" : "") + "</td></tr>";
   }).join("");
   const sel = (pole, moz) => '<select onchange="repIlFiltruj(\'' + pole + '\', this.value)">' + moz.map(([v, t]) => '<option value="' + v + '"' + (F[pole] === v ? " selected" : "") + ">" + t + "</option>").join("") + "</select>";
   return '<div class="card" style="padding:10px 14px"><b>Kľúčové otvorené otázky (★)</b> <span class="csub" style="margin:0">vybraných <span id="repHviezdyPocet">' + hv.size + "</span></span>" +
@@ -4055,7 +4055,7 @@ function repIssueTabulkaHtml(K){
     sel("stav", [["aktivne", "aktívne a ★"], ["vsetky", "všetky"], ["uzavrete", "uzavreté"]]) +
     '<label style="display:flex;gap:4px;align-items:center;margin:0"><input type="checkbox"' + (F.hv ? " checked" : "") + ' onchange="repIlFiltruj(\'hv\', this.checked)"> len ★</label>' +
     '<span class="csub" style="margin:0">zobrazené <span id="repIlPocet">' + n + "</span> z " + Q.issue.length + "</span></div>" +
-    (Q.issue.length ? '<div data-scroll style="max-height:420px;overflow:auto"><table class="rep-il" id="repIlTab"><thead><tr><th>★</th><th>ID</th><th>Oblasť</th><th>Priorita</th><th>Stav</th><th>Termín</th><th>Posledný záznam</th><th>Popis</th><th></th></tr></thead><tbody>' + riadky + "</tbody></table></div>"
+    (Q.issue.length ? '<div data-scroll style="max-height:420px;overflow:auto"><table class="rep-il" id="repIlTab"><thead><tr><th>★</th><th>ID</th><th>Oblasť</th><th>Priorita</th><th>Stav</th><th>Termín</th><th>Posledný záznam</th><th>Popis</th></tr></thead><tbody>' + riadky + "</tbody></table></div>"
       : '<div class="csub">Issue Log nemá problémy.</div>') + "</div>";
 }
 
