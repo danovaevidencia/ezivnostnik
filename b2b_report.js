@@ -777,13 +777,22 @@ function repRegisterZXlsx(XLSX, data, druh, volby){
   const ws = wb.Sheets[harok];
   const posun = ws["!ref"] ? XLSX.utils.decode_range(ws["!ref"]).s.r : 0;   // hárok nemusí začínať riadkom 1
   const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: "", blankrows: true });
+  return repRegisterZRiadkov(rows, druh, volby, { harok, preskoceneHarky: mena.filter(m => m !== harok), posun });
+}
+// Jedno pravidlo pre import z Excelu aj úpravu v appke (R10): z mriežky buniek
+// (riadky polí, hlavička medzi prvými 15) vznikne ten istý výťah a protokol.
+function repRegisterZRiadkov(rows, druh, volby, info){
+  const def = REP_REGISTRE[druh];
+  if (!def) throw new Error("Neznámy register: " + druh);
+  volby = volby || {}; info = info || {};
+  const harok = info.harok || null, posun = info.posun || 0;
   let najlepsi = -1, mapa = null, skore = -1;
   for (let r = 0; r < Math.min(15, rows.length); r++) {
     const mp = repMapujHlavicku(rows[r].map(String), def);
     const n = Object.keys(mp).length + def.stlpce.filter(s => s.povinny && mp[s.kluc] != null).length;
     if (n > skore) { skore = n; najlepsi = r; mapa = mp; }
   }
-  const protokol = { register: druh, harok, preskoceneHarky: mena.filter(m => m !== harok), riadokHlavicky: najlepsi + 1 + posun,
+  const protokol = { register: druh, harok, preskoceneHarky: info.preskoceneHarky || [], riadokHlavicky: najlepsi + 1 + posun,
     rozpoznane: [], chybajucePovinne: [], nerozpoznane: [], riadky: 0, bezId: 0, duplicitneId: [], datumy: { americke: 0, bezRoka: 0, neplatne: 0, text: 0 },
     nezname: {}, osobneVynechane: [] };
   if (najlepsi < 0) return { riadky: [], protokol };
@@ -1638,7 +1647,7 @@ const REP_DRUHY = { plan: "Plán (MS Project .mpp alebo XML)", issue: "Issue Log
 
 function repZalozkaHtml(){
   repStyl();
-  if (REP.pid !== B2B.pid) { Object.assign(REP, { pid: B2B.pid, pohlad: "programy", programy: null, program: null, cyklus: null, plany: {}, registre: {}, ov: null, importVysledky: null }); repNacitajProgramy(); }
+  if (REP.pid !== B2B.pid) { Object.assign(REP, { pid: B2B.pid, pohlad: "programy", programy: null, program: null, cyklus: null, plany: {}, registre: {}, ov: null, importVysledky: null, reg: null, zistHist: null, zistCitanie: null }); repNacitajProgramy(); }
   if (REP.programy == null) return '<div class="aempty">Načítavam programy…</div>';
   if (REP.chyba) return '<div class="card" style="padding:12px 14px;border-color:var(--neg)"><b style="color:var(--neg)">Reporting sa nepodarilo načítať</b><div class="csub">' + esc(REP.chyba) + '</div><button class="aabtn" onclick="repNacitajProgramy()">Skúsiť znova</button></div>';
   const prac = REP.pracuje ? '<div class="card" style="padding:8px 12px;margin-bottom:10px"><span class="csub" style="margin:0">⏳ ' + esc(REP.pracuje) + '</span></div>' : "";
@@ -1646,6 +1655,7 @@ function repZalozkaHtml(){
   if (REP.pohlad === "profil" && REP.program) return prac + repProfilHtml();
   if (REP.pohlad === "cyklus" && REP.cyklus) return prac + repCyklusHtml();
   if (REP.pohlad === "zistenia" && REP.program) return prac + repZisteniaHtml();
+  if (REP.pohlad === "register" && REP.reg && REP.program) return prac + repRegHtml();
   return prac + repProgramyHtml();
 }
 
@@ -1728,6 +1738,7 @@ function repProtokolText(v){
   if (p.chybajucePovinne && p.chybajucePovinne.length) k.push("chýba: " + p.chybajucePovinne.join(", "));
   const dt = p.datumy || {}; if (dt.americke || dt.bezRoka || dt.neplatne) k.push("dátumy: " + [dt.americke ? dt.americke + "× M/D/RR" : "", dt.bezRoka ? dt.bezRoka + "× bez roka" : "", dt.neplatne ? dt.neplatne + "× neplatné" : ""].filter(Boolean).join(", "));
   if (p.prazdnyStav) k.push(p.prazdnyStav + "× prázdny stav");
+  if (p.oproti) k.push(repRegRozdielText(p.oproti) + " oproti minulej verzii");
   return k.join(" · ");
 }
 
@@ -1749,8 +1760,9 @@ function repProgramHtml(){
     const v = repPosledny(d);
     return '<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-top:1px solid var(--line);align-items:center;flex-wrap:wrap"' +
       (pis ? ' ondragover="event.preventDefault()" ondrop="event.preventDefault();repImportSubory(event.dataTransfer.files,\'' + d + '\')"' : "") + '>' +
-      '<div style="min-width:220px;flex:1"><b>' + esc(REP_DRUHY[d]) + '</b><div class="csub" style="margin:0">' + (v ? esc(v.nazov_suboru) + " · " + esc(String(v.nahrane || "").slice(0, 10)) + " · " + esc(repProtokolText(v)) : "zatiaľ nenahraté") + '</div></div>' +
-      '<div style="display:flex;gap:6px">' + sablona(d) + (pis ? '<label class="aabtn" style="cursor:pointer">' + (v ? "Nahrať novší" : "Nahrať") + '<input type="file" accept="' + (d === "plan" ? ".mpp,.xml" : ".xlsx,.xlsm") + '" style="display:none" onchange="repImport(\'' + d + '\', this)"></label>' : "") + '</div></div>';
+      '<div style="min-width:220px;flex:1"><b>' + esc(REP_DRUHY[d]) + '</b><div class="csub" style="margin:0">' + (v ? esc(repZdrojVerzie(v)) + " · " + esc(String(v.nahrane || "").slice(0, 10)) + " · " + esc(repProtokolText(v)) : "zatiaľ nenahraté") + '</div>' + repHistoriaHtml(d) + '</div>' +
+      '<div style="display:flex;gap:6px">' + sablona(d) + (v && REP_REG_UPRAVITELNE.includes(d) ? '<button class="aabtn" onclick="repRegOtvor(\'' + d + '\')">' + (pis && !repJeUzky() ? "Upraviť" : "Zobraziť") + "</button>" : "") +
+      (pis ? '<label class="aabtn" style="cursor:pointer">' + (v ? "Nahrať novší" : "Nahrať") + '<input type="file" accept="' + (d === "plan" ? ".mpp,.xml" : ".xlsx,.xlsm") + '" style="display:none" onchange="repImport(\'' + d + '\', this)"></label>' : "") + '</div></div>';
   }).join("");
   const rz = REP.registre.zistenia, zr = rz ? rz.obsah.riadky.filter(z => z.stav !== "zrusene") : [];
   const registerHtml = '<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-top:1px solid var(--line);align-items:center;flex-wrap:wrap">' +
@@ -1759,7 +1771,7 @@ function repProgramHtml(){
     '<button class="aabtn pri" onclick="REP.pohlad=\'zistenia\';repPrekresli()">Otvoriť register</button></div></div>';
   return hlav + repPripravenostHtml(repPripravenostProgram()) + navod + (pis ? repDropHtml() : "") +
     '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>Cykly reportu</b>' + (cykly || '<div class="csub">Zatiaľ žiadny cyklus.</div>') + '</div>' +
-    '<div class="card" style="padding:10px 14px"><b>Vstupy</b><div class="csub" style="margin:2px 0 4px">Excel zostáva zdrojom pravdy PMO; každý import je nová snímka, staré ostávajú pre porovnanie. Šablóna má hlavičku, zoznamy povolených hodnôt a pokyny — súbor z nej sa načíta bez úprav.</div>' + vstupy + registerHtml + '</div>';
+    '<div class="card" style="padding:10px 14px"><b>Vstupy</b><div class="csub" style="margin:2px 0 4px">Registre vedie appka a Excel je ich vstup aj výstup: každý import aj úprava v appke je nová verzia s dátumom, staršie ostávajú v histórii a pre porovnanie. Plán sa mení len novým súborom z MS Project. Šablóna má hlavičku, zoznamy povolených hodnôt a pokyny — súbor z nej sa načíta bez úprav.</div>' + vstupy + registerHtml + '</div>';
 }
 
 // Šablóny vstupov (§4.6): CT so stĺpcami dodávateľov z posledného importu a bránami z profilu.
@@ -1798,6 +1810,9 @@ async function repImportSubor(druh, f, volby){
       if (druh === "zistenia") { await repZisteniaZXlsx(r); return { stav: "ok", druh, text: r.riadky.length + " riadkov zlúčených do registra" }; }
       protokol = r.protokol; obsah = { riadky: r.riadky, protokol: r.protokol };
       datumSuboru = f.lastModified ? new Date(f.lastModified).toISOString().slice(0, 10) : null;
+      // Rozdiel oproti poslednej verzii registra (R10) — v histórii aj v súhrne importu.
+      const posl = repPosledny(druh);
+      if (posl) { const pred = await repNacitajVstup(posl.id); protokol.oproti = repRegRozdielPocty(repRegRozdiel((pred && pred.riadky) || [], r.riadky, druh)); }
     }
     REP.pracuje = "Ukladám šifrovane…"; repPrekresli();
     const d = await b2bEdge("rep_vstup_nahraj", { program: REP.program.id, druh, nazov: f.name, sha256: sha, velkost: u8.length, datum_suboru: datumSuboru, protokol: repProtokolOrez(protokol), obsah });
@@ -2832,7 +2847,8 @@ async function repNacitajRegister(){
   REP.registre.zistenia = { verzia: rz.verzia || 0, obsah: rz.obsah || repZisteniaPrazdny(), zmenene: false };
 }
 function repZisteniaHtml(){
-  const R = REP.registre.zistenia, doc = R.obsah, pis = repMozemPisat() && REP.program.stav !== "archiv" && !repJeUzky();
+  // Staršia verzia (z histórie) sa zobrazí len na čítanie, s možnosťou obnovy (R10).
+  const R = REP.registre.zistenia, C = REP.zistCitanie, doc = C ? C.obsah : R.obsah, pis = !C && repMozemPisat() && REP.program.stav !== "archiv" && !repJeUzky();
   const opt = (zoz, v, prazdne) => (prazdne ? '<option value="">' + prazdne + "</option>" : "") + zoz.map(p => '<option value="' + p.kluc + '"' + (p.kluc === v ? " selected" : "") + ">" + esc(p.nazov) + "</option>").join("");
   const riadky = doc.riadky.map((z, i) => ({ z, i }));
   const akt = riadky.filter(x => x.z.stav !== "zrusene"), zrus = riadky.filter(x => x.z.stav === "zrusene");
@@ -2855,7 +2871,8 @@ function repZisteniaHtml(){
       '<div style="display:flex;gap:8px;flex-wrap:wrap">' + pole(i, "zistenie", "Zistenie (QA)", z, "area") + pole(i, "odporucanie", "Odporúčanie / nápravné opatrenie", z, "area") + "</div>" +
       '<div style="display:flex;gap:8px;flex-wrap:wrap">' + vyber(i, "sulad", "Súlad s metodikou", REP_CISELNIKY.sulad, z, "—") + pole(i, "suladKomentar", "Komentár k súladu", z) + "</div>" +
       pole(i, "buduce", "Odporúčanie pre budúce projekty", z, "area") +
-      '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">' + meta + '<button class="aabtn" onclick="repZistZrus(' + i + ')">Zrušiť zistenie</button></div></details>';
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">' + meta + '<div style="display:flex;gap:6px"><button class="aabtn" onclick="repZistZrus(' + i + ')">Zrušiť zistenie</button>' +
+      '<button class="aabtn" onclick="repZistVymaz(' + i + ')">Vymazať</button></div></div></details>';
   };
   const hlav = '<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center;margin:0 2px 10px">' +
     '<div><button class="aabtn" onclick="repZistOdist()">‹ ' + esc(REP.program.nazov) + '</button> <b style="margin-left:6px">Register zistení</b> <span class="csub" style="margin:0">' +
@@ -2863,7 +2880,10 @@ function repZisteniaHtml(){
     '<div style="display:flex;gap:6px;flex-wrap:wrap">' + (pis ? '<button class="aabtn" onclick="repZistNove()">+ Nové zistenie</button>' +
       '<label class="aabtn" style="cursor:pointer">Import z Excelu<input type="file" accept=".xlsx,.xlsm" style="display:none" onchange="repImport(\'zistenia\', this)"></label>' : "") +
     '<button class="aabtn" onclick="repZisteniaExport()">⬇ XLSX</button>' + (pis ? '<button class="aabtn pri" onclick="repZistUloz()">Uložiť</button>' : "") + "</div></div>";
-  return hlav + '<div class="csub" style="margin:0 2px 8px">ID (QA-nn) dáva systém a po zrušení sa znova nepoužije. Import z Excelu pridá len zistenia s novým ID — to, čo je v portáli, neprepíše. ' +
+  const citanie = C ? '<div class="card" style="padding:8px 12px;margin-bottom:10px;border-color:var(--warn)"><b>Verzia ' + C.verzia + " z " + esc(repCasText(C.upravene)) + (repKtoMeno(C.upravil) ? " · " + esc(repKtoMeno(C.upravil)) : "") +
+    ' — len na čítanie.</b><div style="display:flex;gap:6px;margin-top:6px">' + (repMozemPisat() && REP.program.stav !== "archiv" ? '<button class="aabtn pri" onclick="repZistObnovVerziu()">Obnoviť túto verziu</button>' : "") +
+    '<button class="aabtn" onclick="REP.zistCitanie=null;repPrekresli()">Späť na aktuálnu</button></div></div>' : "";
+  return hlav + citanie + repZistHistoriaHtml() + '<div class="csub" style="margin:0 2px 8px">ID (QA-nn) dáva systém a po zrušení či vymazaní sa znova nepoužije. Vymazané zistenie ostane v predošlých verziách registra. Import z Excelu pridá len zistenia s novým ID — to, čo je v portáli, neprepíše. ' +
     'Do QA reportu idú zistenia okrem zrušených; uzavretie cyklu zamkne ich stav do snímky.</div>' +
     (akt.map(karta).join("") || '<div class="aempty">Register je prázdny.</div>') +
     (zrus.length ? '<details style="margin-top:10px"><summary class="csub" style="cursor:pointer">Zrušené (' + zrus.length + ')</summary>' + zrus.map(({ z, i }) =>
@@ -2908,7 +2928,7 @@ async function repZistUloz(){
   try {
     REP.pracuje = "Ukladám register zistení…"; repPrekresli();
     const d = await b2bEdge("rep_register_uloz", { program: REP.program.id, druh: "zistenia", verzia: R.verzia, obsah: R.obsah });
-    R.verzia = d.verzia; R.zmenene = false; REP.pracuje = "";
+    R.verzia = d.verzia; R.zmenene = false; REP.pracuje = ""; REP.zistHist = null;
   } catch (e) {
     if (e.stav === 409) { REP.pracuje = ""; alert("Register medzitým uložil niekto iný. Načítam aktuálny stav — vaše neuložené úpravy treba zopakovať."); try { await repNacitajRegister(); } catch (e2) { repChyba(e2, "Register sa nepodarilo načítať"); return false; } repPrekresli(); return false; }
     repChyba(e, "Register sa nepodarilo uložiť"); return false;
@@ -2922,7 +2942,7 @@ async function repZistOdist(){
     if (!confirm("Register má neuložené zmeny. Odísť bez uloženia?")) return;
     try { await repNacitajRegister(); } catch (e) { return repChyba(e, "Register sa nepodarilo načítať"); }
   }
-  REP.zistOtvorene = null; REP.pohlad = "program"; repPrekresli();
+  REP.zistOtvorene = null; REP.zistCitanie = null; REP.zistHist = null; REP.pohlad = "program"; repPrekresli();
 }
 // Import zistení z XLSX: zlúčenie do registra a uloženie (repZisteniaImport, N22).
 async function repZisteniaZXlsx(r){
@@ -4281,4 +4301,310 @@ function repPomocHtml(){
     '<button class="aabtn" onclick="REP.pomoc=false;repPrekresli()">Zavrieť</button></div><div style="margin:4px 0 8px">' + esc(REP_POMOC[k] || "") + "</div>" +
     '<div style="display:flex;gap:6px;flex-wrap:wrap">' + (dalsi ? '<button class="aabtn pri" onclick="REP.krok=\'' + dalsi + '\';repPrekresli()">Ďalej: ' + esc(REP_KROKY_NAZOV[dalsi]) + " →</button>" : "") +
     '<button class="aabtn" onclick="otvorNavod(\'b2b_report\',\'reporting\')">Celý návod</button></div></div>';
+}
+
+// ═══ 34. Registre s verziami (R10, NAVRH §25.4, č. 310) ═══════════════
+// Issue Log, Commitment Tracker a Dependency Log sa dajú upraviť v appke. Každé
+// uloženie je nový vstup (verzia) s dnešným dátumom a tým, kto ho uložil — ako
+// import, len zdrojom je appka; pôvodným súborom verzie je XLSX v tvare šablóny
+// z tej istej mriežky. Bunky → riadky ide JEDNÝM pravidlom s importom
+// (repRegisterZRiadkov). Vymazaný riadok ostane v predošlých verziách.
+// Plán sa neupravuje — zdrojom pravdy je MS Project.
+const REP_REG_UPRAVITELNE = ["issue", "ct", "dep"];
+const REP_REG_SUHRN = { issue: ["popis", "priorita", "stav", "termin"], ct: ["dodavka", "brana", "baseline"], dep: ["nazov", "stav", "dopad", "potrebne"] };
+const REP_REG_DLHE = ["popis", "dopad", "riesenie", "rozhodnutie", "poznamka", "dalsieKroky", "dod"];
+
+// Verzia registra → mriežka buniek (ako v Exceli). Osobné stĺpce, ktoré import
+// vynechal, sa nevracajú. CT: stĺpce záväzkov podľa dodávateľov a riadky sekcií.
+function repRegisterNaMriezku(obsah, druh){
+  const def = REP_REGISTRE[druh], R = (obsah && obsah.riadky) || [], P = (obsah && obsah.protokol) || {};
+  const stlpce = def.stlpce.filter(s => !s.osoba || R.some(z => z[s.kluc] !== undefined));
+  const dod = def.siroky ? ((P.dodavatelia || []).length ? P.dodavatelia.slice() : [...new Set(R.flatMap(z => (z.commity || []).map(c => c.dodavatel)))]) : [];
+  const bunka = (z, s) => s.typ === "datum" ? (z[s.kluc] ? repDMR(z[s.kluc]) : (z[s.kluc + "Text"] || ""))
+    : s.viac ? (z[s.kluc] || []).join("; ") : z[s.kluc] == null ? "" : String(z[s.kluc]);
+  const commit = c => !c ? "" : c.stav === "datum" ? repDMR(c.datum) : c.stav === "x" ? "x" : c.stav === "dodane" ? "dodané" : (c.text || (c.stav === "na" ? "N/A" : ""));
+  const riadky = [];
+  let sekcia = "";
+  for (const z of R) {
+    if (def.siroky && (z.sekcia || "") !== sekcia) { sekcia = z.sekcia || ""; if (sekcia) riadky.push({ sekcia }); }
+    riadky.push({ bunky: stlpce.map(s => bunka(z, s)).concat(dod.map(d => commit((z.commity || []).find(c => c.dodavatel === d)))), kluc: z.kluc });
+  }
+  return { druh, hlavicka: stlpce.map(s => s.nazov).concat(dod.map(d => "Commit " + d)), stlpce: stlpce.map(s => s.kluc), dod, riadky };
+}
+function repMriezkaNaRiadky(M){
+  const n = M.hlavicka.length;
+  return [M.hlavicka.slice()].concat(M.riadky.map(r => r.sekcia != null ? ["■ " + r.sekcia].concat(Array(n - 1).fill("")) : r.bunky.slice()));
+}
+function repMriezkaParse(M){
+  const osoby = {};
+  for (const s of REP_REGISTRE[M.druh].stlpce) if (s.osoba) osoby[s.kluc] = M.stlpce.includes(s.kluc);
+  const r = repRegisterZRiadkov(repMriezkaNaRiadky(M), M.druh, { osoby }, { harok: REP_REGISTRE[M.druh].nazov });
+  // Riadok bez ID má identitu podľa čísla riadka v hárku — z mriežky by vyšla iná,
+  // preto si nesie pôvodnú (anotácie a rozdiel verzií na nej stoja).
+  for (const z of r.riadky) { const g = M.riadky[z.riadok - 2]; if (/^riadok/.test(z.kluc) && g && /^riadok/.test(g.kluc || "")) z.kluc = g.kluc; }
+  return r;
+}
+// XLSX verzie: hárok v tvare šablóny, dátumy ako dátumové bunky — import ho prečíta späť.
+function repRegisterXlsx(X, F, M){
+  const rows = repMriezkaNaRiadky(M), def = REP_REGISTRE[M.druh];
+  const datum = new Set(M.stlpce.map((k, i) => (def.stlpce.find(s => s.kluc === k) || {}).typ === "datum" ? i : -1).filter(i => i >= 0));
+  M.dod.forEach((_, j) => datum.add(M.stlpce.length + j));
+  const telo = rows.slice(1).map(r => r.map((v, i) => { if (!datum.has(i) || !v) return v; const d = repDatumZBunky(v); return d.datum && !d.problem ? repXlsxDatum(d.datum) : v; }));
+  const wb = X.utils.book_new();
+  X.utils.book_append_sheet(wb, repXlsxHarok(X, rows[0], telo), def.nazov.slice(0, 31));
+  return repXlsxDopln(F, new Uint8Array(X.write(wb, { type: "array", bookType: "xlsx" })));
+}
+
+// Rozdiel dvoch verzií po riadkoch (identita = kľúč importu, pri CT kód záväzku).
+function repRegRozdiel(pred, teraz, druh){
+  const def = REP_REGISTRE[druh], kl = z => (druh === "ct" ? z.kod : z.kluc) || ("riadok" + z.riadok);
+  const hodnoty = z => def.stlpce.map(s => JSON.stringify(z[s.kluc] == null || z[s.kluc] === "" ? null : z[s.kluc]) + (s.typ === "datum" ? "|" + (z[s.kluc + "Text"] || "") : ""))
+    .concat(def.siroky ? [JSON.stringify((z.commity || []).map(c => [c.dodavatel, c.stav, c.datum || c.text || ""]))] : []);
+  const P = new Map((pred || []).map(z => [kl(z), z])), N = new Map((teraz || []).map(z => [kl(z), z]));
+  const out = { pridane: [], zmazane: [], upravene: [] };
+  for (const [k, z] of N) {
+    const p = P.get(k);
+    if (!p) { out.pridane.push(z.id || k); continue; }
+    const a = hodnoty(p), b = hodnoty(z), polia = [];
+    def.stlpce.forEach((s, i) => { if (a[i] !== b[i]) polia.push(s.nazov); });
+    if (def.siroky && a[a.length - 1] !== b[b.length - 1]) polia.push("Commit");
+    if (polia.length) out.upravene.push({ id: z.id || k, polia });
+  }
+  for (const [k, p] of P) if (!N.has(k)) out.zmazane.push(p.id || k);
+  return out;
+}
+function repRegRozdielPocty(r){ return { pridane: r.pridane.length, upravene: r.upravene.length, zmazane: r.zmazane.length }; }
+function repRegRozdielText(o){ return o ? "+" + (o.pridane || 0) + " / ~" + (o.upravene || 0) + " / −" + (o.zmazane || 0) : ""; }
+function repCasText(ts){
+  if (!ts) return "";
+  const d = new Date(ts); if (isNaN(d)) return String(ts).slice(0, 10);
+  return d.getDate() + ". " + (d.getMonth() + 1) + ". " + d.getFullYear() + " " + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+}
+// Meno podľa používateľa (vstupy a registre nesú user id) aj podľa osoby (zistenia).
+function repKtoMeno(id){ const o = ((typeof B2B !== "undefined" && B2B.d && B2B.d.osoby) || []).find(x => x.user_id === id || x.id === id); return o ? o.meno || "" : ""; }
+function repZdrojVerzie(v){ const p = v.protokol || {}; return p.zdroj === "aplikacia" ? "úprava v appke" : p.zdroj === "obnova" ? "obnovená staršia verzia" : (v.nazov_suboru || "import"); }
+
+// Uloženie verzie (úprava aj obnova): výťah + protokol ako pri importe, súbor = XLSX z mriežky.
+async function repUlozVerziuRegistra(M, extra, nazov){
+  const r = repMriezkaParse(M);
+  const X = await ensureXlsxStyle(), F = await ensureFflate();
+  const u8 = repRegisterXlsx(X, F, M), sha = await b2bSha256(u8);
+  const protokol = Object.assign({}, r.protokol, extra), obsah = { riadky: r.riadky, protokol };
+  const d = await b2bEdge("rep_vstup_nahraj", { program: REP.program.id, druh: M.druh, nazov, sha256: sha, velkost: u8.length, datum_suboru: repDnes(), protokol: repProtokolOrez(protokol), obsah });
+  REP.plany[d.id] = obsah;
+  try { await b2bEdgeSubor({ akcia: "rep_vstup_povodny", vstup: d.id }, F.gzipSync(u8)); }
+  catch (e) { console.error("Reporting: XLSX verzie sa neuložil", e); alert("Verzia sa uložila, jej XLSX nie (" + ((e && e.message) || e) + "). Report sa dá zostaviť."); }
+  return d.id;
+}
+// Novšia verzia, ktorá medzičasom pribudla (druhý človek uložil alebo importoval).
+async function repRegNovsia(druh, odId){
+  const q = await sb.from("b2b_rep_vstupy").select("id, nahral, nahrane, nazov_suboru, protokol").eq("program_id", REP.program.id).eq("druh", druh).order("nahrane", { ascending: false }).limit(1);
+  if (q.error) throw q.error;
+  const v = (q.data || [])[0];
+  return v && v.id !== odId ? v : null;
+}
+
+async function repRegOtvor(druh, vstupId){
+  const v = vstupId ? REP.vstupy.find(x => x.id === vstupId) : repPosledny(druh);
+  if (!v) return alert(REP_DRUHY[druh] + " zatiaľ nie je nahraný — najprv ho nahrajte z Excelu (pomôže Šablóna).");
+  REP.pracuje = "Otváram " + REP_DRUHY[druh] + "…"; repPrekresli();
+  try {
+    const obsah = await repNacitajVstup(v.id), posl = repPosledny(druh);
+    const M = repRegisterNaMriezku(obsah, druh);
+    M.riadky.forEach(r => { r.stav = ""; });
+    REP.reg = Object.assign(M, { vstupId: v.id, starsia: !!(posl && posl.id !== v.id), zmenene: false, otvoreny: null, zmazane: [], povodne: obsah.riadky || [] });
+    REP.pohlad = "register"; REP.pracuje = "";
+  } catch (e) { return repChyba(e, "Register sa nepodarilo otvoriť"); }
+  repPrekresli();
+}
+function repRegMozemPisat(){ const E = REP.reg; return !!E && !E.starsia && repMozemPisat() && REP.program.stav !== "archiv" && !repJeUzky(); }
+function repRegHtml(){
+  const E = REP.reg, def = REP_REGISTRE[E.druh], pis = repRegMozemPisat(), v = REP.vstupy.find(x => x.id === E.vstupId) || {};
+  const ix = k => E.stlpce.indexOf(k), sum = REP_REG_SUHRN[E.druh].map(ix).filter(i => i >= 0), idI = ix("id");
+  const defS = i => i < E.stlpce.length ? def.stlpce.find(s => s.kluc === E.stlpce[i]) : { kluc: "commit", nazov: E.hlavicka[i], typ: "datum" };
+  const odznak = r => r.stav === "novy" ? ' <span class="rep-pill rep-p-akt">nový</span>' : r.stav === "upraveny" ? ' <span class="rep-pill rep-p-medium">upravený</span>' : "";
+  const pole = (r, i, c) => {
+    const s = defS(c), val = esc(r.bunky[c] || ""), dis = pis ? "" : " disabled", dlhe = !s.ciselnik && REP_REG_DLHE.includes(s.kluc);
+    const vstup = dlhe ? '<textarea rows="2" style="' + REP_TEXTAREA + '"' + dis + ' onchange="repRegUprav(' + i + "," + c + ',this.value)">' + val + "</textarea>"
+      : '<input value="' + val + '"' + (s.ciselnik ? ' list="repRegCis_' + s.ciselnik + '"' : "") + (s.typ === "datum" ? ' placeholder="d. m. rrrr"' : "") + dis + ' onchange="repRegUprav(' + i + "," + c + ',this.value)">';
+    return '<div class="mfield" style="flex:1;min-width:' + (dlhe ? 260 : 150) + 'px"><label>' + esc(E.hlavicka[c]) + "</label>" + vstup + "</div>";
+  };
+  const karta = (r, i) => {
+    if (r.sekcia != null) return '<div class="csub" style="margin:12px 2px 4px;font-weight:700">■ ' + esc(r.sekcia) + "</div>";
+    const hl = "<b>" + esc(r.bunky[idI] || "(bez ID)") + "</b>" + odznak(r) + sum.map(c => r.bunky[c] ? ' <span class="csub" style="margin:0">· ' + esc(String(r.bunky[c]).slice(0, 90)) + "</span>" : "").join("");
+    return '<details class="card rep-reg-r" data-rr="' + i + '" style="padding:8px 12px;margin-bottom:6px"' + (E.otvoreny === i ? " open" : "") + '><summary style="cursor:pointer">' + hl + "</summary>" +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">' + E.hlavicka.map((_, c) => pole(r, i, c)).join("") + "</div>" +
+      (pis ? '<div style="display:flex;justify-content:flex-end"><button class="aabtn" onclick="repRegVymaz(' + i + ')">Vymazať riadok</button></div>' : "") + "</details>";
+  };
+  const cis = [...new Set(def.stlpce.filter(s => s.ciselnik).map(s => s.ciselnik))].map(c => '<datalist id="repRegCis_' + c + '">' + (REP_CISELNIKY[c] || []).map(p => '<option value="' + esc(p.nazov) + '">').join("") + "</datalist>").join("");
+  const hlav = '<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center;margin:0 2px 10px">' +
+    '<div><button class="aabtn" onclick="repRegOdist()">‹ ' + esc(REP.program.nazov) + '</button> <b style="margin-left:6px">' + esc(def.nazov) + '</b> <span class="csub" style="margin:0">verzia z ' + esc(repCasText(v.nahrane)) +
+    (repKtoMeno(v.nahral) ? " · " + esc(repKtoMeno(v.nahral)) : "") + " · " + esc(repZdrojVerzie(v)) + '</span> <span id="repRegStav" class="csub" style="margin:0;color:var(--neg)">' + (E.zmenene ? "· neuložené zmeny" : "") + "</span></div>" +
+    '<div style="display:flex;gap:6px;flex-wrap:wrap">' + (pis ? '<button class="aabtn" onclick="repRegNovy()">+ Nový riadok</button>' : "") +
+    '<button class="aabtn" onclick="repRegExport()">⬇ XLSX</button>' +
+    (pis ? '<button class="aabtn" onclick="repRegZahod()">Zahodiť zmeny</button><button class="aabtn pri" onclick="repRegUloz()">Uložiť ako novú verziu</button>' : "") +
+    (E.starsia && repMozemPisat() && REP.program.stav !== "archiv" ? '<button class="aabtn pri" onclick="repRegObnov()">Obnoviť túto verziu</button>' : "") + "</div></div>";
+  const info = E.starsia ? '<div class="card" style="padding:8px 12px;margin-bottom:10px;border-color:var(--warn)"><b>Staršia verzia — len na čítanie.</b> ' + repRegRozdielHtml() + "</div>"
+    : '<div class="csub" style="margin:0 2px 8px">Uloženie vytvorí novú verziu s dnešným dátumom; predošlé verzie ostanú v histórii programu aj s vymazanými riadkami. Hodnoty číselníkov (stav, priorita) sa čítajú rovnako ako z Excelu.' +
+      (pis ? "" : repJeUzky() ? " Upravuje sa na počítači." : "") + "</div>";
+  const filtr = '<input type="search" placeholder="Hľadať v registri…" oninput="repRegFiltruj(this.value)" style="width:100%;max-width:420px;margin:0 2px 8px">';
+  const zmaz = E.zmazane.length ? '<details style="margin-top:10px"><summary class="csub" style="cursor:pointer">Vymazané v tejto verzii (' + E.zmazane.length + ")</summary>" +
+    E.zmazane.map((x, j) => '<div class="card" style="padding:8px 12px;margin:6px 0;opacity:.7"><b>' + esc(x.r.bunky[idI] || "(bez ID)") + "</b>" + sum.map(c => x.r.bunky[c] ? " · " + esc(String(x.r.bunky[c]).slice(0, 80)) : "").join("") +
+      ' <button class="aabtn" onclick="repRegVrat(' + j + ')">Vrátiť</button></div>').join("") + "</details>" : "";
+  return cis + hlav + info + filtr + (E.riadky.map(karta).join("") || '<div class="aempty">Register je prázdny.</div>') + zmaz;
+}
+function repRegRozdielHtml(){
+  const E = REP.reg, posl = repPosledny(E.druh), teraz = posl && REP.plany[posl.id];
+  if (!teraz) return '<button class="aabtn" onclick="repRegRozdielNacitaj()">Rozdiel oproti poslednej verzii</button>';
+  const r = repRegRozdiel(E.povodne, teraz.riadky || [], E.druh), zoz = (n, a) => a.length ? "<div><b>" + n + ":</b> " + esc(a.slice(0, 40).join(", ")) + (a.length > 40 ? " …" : "") + "</div>" : "";
+  return '<div class="csub" style="margin:4px 0 0">Posledná verzia oproti tejto: ' + repRegRozdielText(repRegRozdielPocty(r)) + "</div>" + zoz("Pribudli", r.pridane) + zoz("Vymazané", r.zmazane) +
+    zoz("Upravené", r.upravene.map(u => u.id + " (" + u.polia.join(", ") + ")"));
+}
+async function repRegRozdielNacitaj(){ try { await repNacitajVstup(repPosledny(REP.reg.druh).id); } catch (e) { return repChyba(e, "Poslednú verziu sa nepodarilo načítať"); } repPrekresli(); }
+function repRegFiltruj(q){
+  const w = repNorm(q).split(/\s+/).filter(Boolean), E = REP.reg;
+  for (const el of document.querySelectorAll(".rep-reg-r")) {
+    const r = E.riadky[+el.getAttribute("data-rr")], t = r ? repNorm(r.bunky.join(" ")) : "";
+    el.style.display = w.every(x => t.indexOf(x) >= 0) ? "" : "none";
+  }
+}
+function repRegZmena(i){
+  const E = REP.reg, r = E.riadky[i];
+  if (r && r.stav !== "novy") r.stav = "upraveny";
+  E.zmenene = true; E.otvoreny = i;
+  const el = document.getElementById("repRegStav"); if (el) el.textContent = "· neuložené zmeny";
+}
+function repRegUprav(i, c, v){
+  const r = REP.reg.riadky[i];
+  if (!r || r.sekcia != null) return;
+  r.bunky[c] = String(v == null ? "" : v).trim();
+  repRegZmena(i);
+}
+function repRegNovy(){
+  const E = REP.reg;
+  E.riadky.push({ bunky: Array(E.hlavicka.length).fill(""), stav: "novy" });
+  repRegZmena(E.riadky.length - 1); repPrekresli();
+}
+function repRegVymaz(i){
+  const E = REP.reg, r = E.riadky[i];
+  if (!r || !confirm("Vymazať riadok " + (r.bunky[E.stlpce.indexOf("id")] || "(bez ID)") + "?\n\nV novej verzii registra nebude; predošlé verzie ho zachovajú v histórii.")) return;
+  E.zmazane.push({ r, i }); E.riadky.splice(i, 1);
+  E.zmenene = true; E.otvoreny = null; repPrekresli();
+}
+function repRegVrat(j){
+  const E = REP.reg, x = E.zmazane.splice(j, 1)[0];
+  if (!x) return;
+  E.riadky.splice(Math.min(x.i, E.riadky.length), 0, x.r);
+  E.zmenene = true; repPrekresli();
+}
+async function repRegZahod(){
+  const E = REP.reg;
+  if (E.zmenene && !confirm("Zahodiť neuložené zmeny registra?")) return;
+  return repRegOtvor(E.druh, E.vstupId);
+}
+function repRegOdist(){
+  if (REP.reg && REP.reg.zmenene && !confirm("Register má neuložené zmeny. Odísť bez uloženia?")) return;
+  REP.reg = null; REP.pohlad = "program"; repPrekresli();
+}
+async function repRegExport(){
+  try {
+    const E = REP.reg, X = await ensureXlsxStyle(), F = await ensureFflate();
+    downloadBlob(new Blob([repRegisterXlsx(X, F, E)], { type: REP_MIME.xlsx }), (REP.program.kod || "program") + "_" + REP_REGISTRE[E.druh].nazov.replace(/\s+/g, "") + "_" + repDnes() + ".xlsx");
+  } catch (e) { repChyba(e, "Export registra sa nepodaril"); }
+}
+async function repRegUloz(){
+  const E = REP.reg;
+  if (!E || !E.zmenene) return alert("Žiadna zmena — verzia sa neukladá.");
+  try {
+    const r = repMriezkaParse(E), o = repRegRozdielPocty(repRegRozdiel(E.povodne, r.riadky, E.druh)), p = r.protokol;
+    const pozor = [p.bezId ? p.bezId + " riadkov bez ID" : "", p.duplicitneId.length ? "opakované ID: " + p.duplicitneId.slice(0, 5).join(", ") : "",
+      Object.keys(p.nezname).length ? "neznáme hodnoty: " + Object.entries(p.nezname).map(([k, a]) => k + " " + a.slice(0, 3).join(", ")).join("; ") : ""].filter(Boolean);
+    if (!confirm("Uložiť " + REP_REGISTRE[E.druh].nazov + " ako novú verziu z " + repDMR(repDnes()) + "?\n\nOproti otvorenej verzii: " + repRegRozdielText(o) + " (nové / upravené / vymazané riadky)." +
+      (pozor.length ? "\n\nPozor: " + pozor.join(" · ") : "") + "\n\nPredošlé verzie ostanú v histórii.")) return;
+    REP.pracuje = "Kontrolujem, či medzičasom nepribudla novšia verzia…"; repPrekresli();
+    const nov = await repRegNovsia(E.druh, E.vstupId);
+    if (nov && !confirm("Medzičasom pribudla novšia verzia (" + repCasText(nov.nahrane) + (repKtoMeno(nov.nahral) ? ", " + repKtoMeno(nov.nahral) : "") + ").\nVaša verzia ju nahradí a jej zmeny v nej nebudú. Uložiť aj tak?")) { REP.pracuje = ""; repPrekresli(); return; }
+    REP.pracuje = "Ukladám novú verziu…"; repPrekresli();
+    await repUlozVerziuRegistra(E, { zdroj: "aplikacia", zaklad: E.vstupId, oproti: o }, (REP.program.kod || "program") + "_" + REP_REGISTRE[E.druh].nazov.replace(/\s+/g, "") + "_" + repDnes() + "_appka.xlsx");
+    REP.reg = null; REP.pracuje = "";
+    await repOtvorProgram(REP.program.id);
+    REP.importVysledky = [{ nazov: REP_REGISTRE[E.druh].nazov, stav: "ok", druh: E.druh, text: "nová verzia z appky · " + repRegRozdielText(o) }];
+    repPrekresli();
+  } catch (e) { repChyba(e, "Novú verziu sa nepodarilo uložiť"); }
+}
+async function repRegObnov(){
+  const E = REP.reg, v = REP.vstupy.find(x => x.id === E.vstupId) || {};
+  if (!confirm("Obnoviť verziu z " + repCasText(v.nahrane) + " ako novú (najnovšiu) verziu?\n\nTerajšia posledná verzia ostane v histórii.")) return;
+  try {
+    const posl = repPosledny(E.druh), teraz = posl ? await repNacitajVstup(posl.id) : null;
+    const o = teraz ? repRegRozdielPocty(repRegRozdiel(teraz.riadky || [], repMriezkaParse(E).riadky, E.druh)) : null;
+    REP.pracuje = "Obnovujem verziu…"; repPrekresli();
+    await repUlozVerziuRegistra(E, { zdroj: "obnova", zaklad: E.vstupId, oproti: o }, (REP.program.kod || "program") + "_" + REP_REGISTRE[E.druh].nazov.replace(/\s+/g, "") + "_" + repDnes() + "_obnova.xlsx");
+    REP.reg = null; REP.pracuje = "";
+    await repOtvorProgram(REP.program.id);
+  } catch (e) { repChyba(e, "Verziu sa nepodarilo obnoviť"); }
+}
+
+// História verzií vstupu v programe: kto, kedy, zdroj, +N / ~N / −N; otvoriť, stiahnuť súbor.
+function repHistoriaHtml(druh){
+  const V = REP.vstupy.filter(v => v.druh === druh);
+  if (!V.length) return "";
+  const riadok = (v, k) => '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap;padding:4px 0;border-top:1px dashed var(--line)">' +
+    '<div class="csub" style="margin:0">' + (k === 0 ? "<b>posledná</b> · " : "") + esc(repCasText(v.nahrane)) + (repKtoMeno(v.nahral) ? " · " + esc(repKtoMeno(v.nahral)) : "") + " · " + esc(repZdrojVerzie(v)) +
+    ((v.protokol || {}).oproti ? " · " + repRegRozdielText(v.protokol.oproti) : "") + "</div>" +
+    '<div style="display:flex;gap:6px">' + (REP_REG_UPRAVITELNE.includes(druh) ? '<button class="aabtn" onclick="repRegOtvor(\'' + druh + "','" + v.id + "')\">" + (k === 0 ? "Otvoriť" : "Zobraziť") + "</button>" : "") +
+    (v.povodny_velkost ? '<button class="aabtn" onclick="repStiahniPovodny(\'' + v.id + "')\">⬇ súbor</button>" : "") + "</div></div>";
+  return '<details style="margin:4px 0 0"><summary class="csub" style="cursor:pointer;margin:0">História verzií (' + V.length + ")</summary>" + V.map(riadok).join("") + "</details>";
+}
+async function repStiahniPovodny(id){
+  try {
+    const tok = await ziskajToken(); if (!tok) throw new Error(CHYBA_SESSION);
+    const res = await fetch(SUPABASE_URL + "/functions/v1/b2b", { method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + tok }, body: JSON.stringify({ akcia: "rep_vstup_povodny_stiahni", vstup: id }) });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.chyba || ("b2b odpovedal " + res.status)); }
+    const F = await ensureFflate(), u8 = F.gunzipSync(new Uint8Array(await res.arrayBuffer()));
+    const nazov = decodeURIComponent(res.headers.get("x-b2b-nazov") || "subor.gz").replace(/\.gz$/, "");
+    if (res.headers.get("x-b2b-sha256") && (await b2bSha256(u8)) !== res.headers.get("x-b2b-sha256")) throw new Error("súbor nesedí s odtlačkom vstupu");
+    downloadBlob(new Blob([u8]), nazov);
+  } catch (e) { repChyba(e, "Súbor sa nepodarilo stiahnuť"); }
+}
+
+// Register zistení: vymazanie v novej verzii a história verzií (server ich drží všetky).
+function repZistVymaz(i){
+  const R = REP.registre.zistenia, z = R.obsah.riadky[i];
+  if (!z || !confirm("Vymazať zistenie " + z.id + "?\n\nV novej verzii registra nebude; predošlé verzie ho zachovajú a jeho ID sa znova nepoužije.")) return;
+  R.obsah.dalsieCislo = repZisteniaDalsieId(R.obsah).dalsieCislo - 1;   // pred vymazaním: najvyššie ID ostane obsadené
+  R.obsah.riadky.splice(i, 1);
+  R.zmenene = true; REP.zistOtvorene = null; repPrekresli();
+}
+async function repZistHistoria(){
+  try {
+    const q = await sb.from("b2b_rep_registre_verzie").select("verzia, upravil, upravene").eq("program_id", REP.program.id).eq("druh", "zistenia").order("verzia", { ascending: false });
+    if (q.error) throw q.error;
+    REP.zistHist = q.data || [];
+  } catch (e) { return repChyba(e, "Históriu registra sa nepodarilo načítať"); }
+  repPrekresli();
+}
+function repZistHistoriaHtml(){
+  const H = REP.zistHist, R = REP.registre.zistenia;
+  const telo = !H ? '<div class="csub">Načítavam…</div>' : !H.length ? '<div class="csub">Register zatiaľ nemá uloženú verziu.</div>' : H.map(h =>
+    '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap;padding:4px 0;border-top:1px dashed var(--line)"><div class="csub" style="margin:0">' +
+    (h.verzia === R.verzia ? "<b>aktuálna</b> · " : "") + "verzia " + h.verzia + " · " + esc(repCasText(h.upravene)) + (repKtoMeno(h.upravil) ? " · " + esc(repKtoMeno(h.upravil)) : "") + "</div>" +
+    (h.verzia !== R.verzia ? '<button class="aabtn" onclick="repZistZobrazVerziu(' + h.verzia + ')">Zobraziť</button>' : "") + "</div>").join("");
+  return '<details style="margin:0 2px 10px"' + (H ? " open" : "") + ' ontoggle="if(this.open&&!REP.zistHist)repZistHistoria()"><summary class="csub" style="cursor:pointer;margin:0">História verzií</summary>' + telo + "</details>";
+}
+async function repZistZobrazVerziu(ver){
+  try {
+    const d = await b2bEdge("rep_register_nacitaj", { program: REP.program.id, druh: "zistenia", verzia: ver });
+    REP.zistCitanie = { verzia: d.verzia, upravil: d.upravil, upravene: d.upravene, obsah: d.obsah || repZisteniaPrazdny() };
+  } catch (e) { return repChyba(e, "Verziu registra sa nepodarilo načítať"); }
+  repPrekresli();
+}
+async function repZistObnovVerziu(){
+  const C = REP.zistCitanie, R = REP.registre.zistenia;
+  if (!C || !confirm("Obnoviť verziu " + C.verzia + " ako novú verziu registra?\n\nTerajšia verzia ostane v histórii. ID vymazaných zistení sa znova nepoužijú.")) return;
+  if (R.zmenene && !confirm("Register má neuložené zmeny — obnovou sa stratia. Pokračovať?")) return;
+  const doc = JSON.parse(JSON.stringify(C.obsah));
+  doc.dalsieCislo = Math.max(repZisteniaDalsieId(doc).dalsieCislo, repZisteniaDalsieId(R.obsah).dalsieCislo) - 1;
+  R.obsah = doc; R.zmenene = true; REP.zistCitanie = null; REP.zistHist = null;
+  await repZistUloz();
 }
