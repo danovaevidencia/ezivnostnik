@@ -1529,7 +1529,7 @@ b2b_report: {
         { nadpis: "Plán z MS Project",
           html: "<p>Appka číta súbor <b>.mpp</b> z MS Project 2010 a novšieho aj MS Project XML (Súbor → Uložiť ako → XML). Z .mpp berie úlohy, termíny, % plnenia, míľniky, väzby a vlastné textové polia (Text1–Text30); keď súbor nevie prečítať spoľahlivo — starší MS Project, heslo, poškodenie —, nenahrá ho a poradí uložiť plán ako XML. Plán sa prečíta v prehliadači; na server ide len výťah — úlohy, termíny, % plnenia, väzby a vlastné polia — a pôvodný súbor, oboje šifrovane. Pri ďalšom importe appka ukáže, koľko úloh pribudlo, zmizlo alebo sa premenovalo.</p>" },
         { nadpis: "Registre z Excelu",
-          html: "<p>Issue Log, Commitment Tracker a Dependency Log sa nahrávajú z Excelu — aj viac súborov naraz spolu s plánom; či ide o plán alebo ktorý register, appka rozpozná podľa hárku a hlavičky. Appka nájde hárok aj riadok hlavičky, zjednotí stavy a dátumy a v protokole ukáže, čo nesedí — duplicitné ID, dátumy bez roka alebo v americkom tvare, chýbajúce stĺpce. Excel ostáva zdrojom pravdy. Pri každom registri je <b>Šablóna</b> — prázdny Excel so zoznamami povolených hodnôt a pokynmi, ktorý appka načíta bez úprav. Register zistení sa vedie priamo v appke — [[navod:b2b_report/zistenia|ako viesť register zistení]].</p><p>Stĺpec <b>Ďalšie kroky</b> (NEXT STEPS) appka číta ako denník: záznam začína dátumom, napríklad „28.5.: čaká sa na dodávateľa“. QA report z neho ukáže, ktoré problémy sa od minulého reportu pohli, ktoré stoja a ktoré nemajú záznam; Kontrola dát povie, koľko textu je bez dátumu.</p>" },
+          html: "<p>Issue Log, Commitment Tracker a Dependency Log sa nahrávajú z Excelu — aj viac súborov naraz spolu s plánom; či ide o plán alebo ktorý register, appka rozpozná podľa hárku a hlavičky. Appka nájde hárok aj riadok hlavičky, zjednotí stavy a dátumy a v protokole ukáže, čo nesedí — duplicitné ID, dátumy bez roka alebo v americkom tvare, chýbajúce stĺpce. Registre potom vedie appka a Excel je ich vstup aj výstup: nový import je ďalšia verzia a appka pri ňom napíše, koľko riadkov pribudlo, zmenilo sa a zmizlo. Pri každom registri je <b>Šablóna</b> — prázdny Excel so zoznamami povolených hodnôt a pokynmi, ktorý appka načíta bez úprav. Register zistení sa vedie priamo v appke — [[navod:b2b_report/zistenia|ako viesť register zistení]].</p><p>Stĺpec <b>Ďalšie kroky</b> (NEXT STEPS) appka číta ako denník: záznam začína dátumom, napríklad „28.5.: čaká sa na dodávateľa“. QA report z neho ukáže, ktoré problémy sa od minulého reportu pohli, ktoré stoja a ktoré nemajú záznam; Kontrola dát povie, koľko textu je bez dátumu.</p>" },
         { nadpis: "Zmeny od minula a trend",
           html: "<p>Nový cyklus sa porovná s plánom predošlého cyklu — po identifikátoroch úloh a k stavu ku dňu každej snímky. Strany <b>Čo sa zmenilo od minula</b>, <b>Podstatné zmeny v projekte</b> a <b>Trend míľnikov</b> ukážu posunuté, novo oneskorené a dokončené míľniky a poklesy postupu; QA report pridá zmeny v registroch. Inú staršiu snímku plánu alebo registrov vyberiete v kroku Vstupy v časti Porovnanie a trend.</p><p>Pevný bod — <b>baseline</b> — vyberiete v profile programu ako jednu z nahratých snímok plánu. Strana <b>Sklz proti baseline</b> ukáže, o koľko sa fázové míľniky oblastí posunuli proti nej; plán v MS Projecte vlastnú baseline mať nemusí.</p>" },
         { nadpis: "Finančný report",
@@ -1576,6 +1576,23 @@ b2b_report: {
       ],
     },
     {
+      id: "verzie",
+      nazov: "Upraviť register a jeho verzie",
+      kedy: "V Issue Logu, Commitment Trackeri alebo Dependency Logu treba opraviť stav, doplniť problém alebo riadok vymazať — bez prepisovania Excelu. Registre vedie appka; Excel je ich vstup aj výstup.",
+      kroky: [
+        { text: "Otvorte program a pri registri ťuknite na <b>Upraviť</b>. Otvorí sa jeho posledná verzia.", tlacidlo: "Upraviť", snimka: "b2b_report-verzie-1" },
+        { text: "Rozbaľte riadok a prepíšte bunky — stav, prioritu, termín, ďalšie kroky. <b>+ Nový riadok</b> pridá záznam, <b>Vymazať riadok</b> ho odoberie. Hotové uložte tlačidlom <b>Uložiť ako novú verziu</b>.", tlacidlo: "Uložiť ako novú verziu", snimka: "b2b_report-verzie-2" },
+        { text: "Staršie verzie sú pod <b>História verzií</b> pri registri: kto a kedy ich uložil a koľko riadkov pribudlo, zmenilo sa a zmizlo. <b>Zobraziť</b> otvorí verziu na čítanie aj s rozdielom oproti poslednej; <b>Obnoviť túto verziu</b> z nej urobí novú.", tlacidlo: "Obnoviť túto verziu", snimka: "b2b_report-verzie-3" },
+      ],
+      tip: "Bunky sa čítajú presne ako z Excelu — „Closed“ je uzavretý problém, dátum píšte ako d. m. rrrr. ⬇ XLSX stiahne verziu v tvare šablóny; jej nový import je ďalšia verzia.",
+      podrobnosti: [
+        { nadpis: "Verzie a mazanie",
+          html: "<p>Každé uloženie aj import je nová verzia s dátumom a menom toho, kto ju uložil. Vymazaný riadok v novej verzii nebude, predošlé verzie ho zachovajú — v histórii ho nájdete. Cyklus reportu berie verziu, ktorá platila pri jeho zostavení; nový cyklus ponúkne poslednú. Plán sa v appke neupravuje — nová verzia plánu je nový súbor z MS Project.</p>" },
+        { nadpis: "Keď upravuje viac ľudí",
+          html: "<p>Pred uložením appka overí, či medzičasom nepribudla novšia verzia (kolega uložil úpravu alebo nahral Excel). Ak áno, povie kto a kedy a vaša verzia ju nahradí, len keď to potvrdíte — jeho zmeny ostanú v histórii a dajú sa obnoviť.</p>" },
+      ],
+    },
+    {
       id: "zistenia",
       nazov: "Viesť register zistení",
       kedy: "Dohľad kvality (QA) eviduje zistenia a odporúčania k programu. Register sa vedie v appke a QA report berie jeho aktuálny stav.",
@@ -1586,7 +1603,7 @@ b2b_report: {
       tip: "Číslo zistenia (QA-01, QA-02…) dáva appka a po zrušení sa znova nepoužije. Import z Excelu pridá len zistenia s novým číslom — to, čo je v appke, neprepíše.",
       podrobnosti: [
         { nadpis: "Zrušenie a história",
-          html: "<p>Zistenie sa nemaže, ale ruší s dôvodom — ostane v registri medzi zrušenými a dá sa obnoviť. Každé uloženie je nová verzia; keď medzitým uložil register niekto iný, appka to povie a načíta jeho stav. Uzavretie cyklu zamkne stav zistení do snímky reportu.</p>" },
+          html: "<p>Zistenie sa ruší s dôvodom — ostane v registri medzi zrušenými a dá sa obnoviť —, alebo sa <b>vymaže</b>: v novej verzii registra nebude, predošlé verzie ho zachovajú. Číslo zrušeného ani vymazaného zistenia sa znova nepoužije. Každé uloženie je nová verzia; pod <b>História verzií</b> otvoríte staršiu na čítanie a <b>Obnoviť túto verziu</b> z nej urobí novú. Keď medzitým uložil register niekto iný, appka to povie a načíta jeho stav. Uzavretie cyklu zamkne stav zistení do snímky reportu.</p>" },
       ],
     },
   ],
