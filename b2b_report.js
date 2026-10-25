@@ -113,6 +113,209 @@ function repPlanZXml(text, Parser){
   return { verzia: 1, projekt, polia, ulohy, pocty };
 }
 
+// ── 1b. Import plánu: MS Project .mpp (MPP14 = Project 2010 a novší), NAVRH §25.3 ──
+// Číta sa v prehliadači (kontajner CFB zo SheetJS); na server ide ten istý výťah ako
+// z XML. Polohu poľa berie z mapy polí súboru (Props 131092), nie z pevných posunov —
+// tie sa medzi verziami Projectu líšia. Číta len to, čo reporting používa: úlohy,
+// termíny, % plnenia, míľnik, súhrn, WBS, vlastné textové polia a väzby. Rezerva,
+// kritickosť a baseline úloh ostanú prázdne. Výsledok musí prejsť bránou repMppBrana:
+// pochybne prečítaný súbor sa nenahrá a človek dostane radu uložiť plán ako XML.
+const REP_MPP_EPOCHA = "1983-12-31";
+const REP_MPP_MAGIC = 0xFADFADBA;
+// Identifikátory polí MS Project (dolné slovo 0x0B40xxxx) — rovnaké ako FieldID v XML.
+const REP_MPP_POLE = { id: 23, uid: 86, nazov: 14, wbs: 16, pct: 32, start: 37, finish: 38, uroven: 249, milnik: 71, suhrn: 132 };
+// Text1–Text10 nejdú v rade (Text6 = 66, Text7 = 67), Text11–Text30 = 317–336.
+const REP_MPP_TEXT = [51, 54, 57, 60, 63, 66, 67, 68, 69, 70].concat(Array.from({ length: 20 }, (_, i) => 317 + i));
+const REP_MPP_PROPS = { mapaUloh: 131092, titul: 37748744, minutDen: 37748765, aliasy: 71303169 };
+
+function repMppCitac(u8){
+  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  return { u16: o => dv.getUint16(o, true), u32: o => dv.getUint32(o, true), i32: o => dv.getInt32(o, true) };
+}
+function repMppText(u8, od, dlzka){
+  const kon = Math.min(u8.length, dlzka == null ? u8.length : od + dlzka);
+  let s = "";
+  for (let i = od; i + 1 < kon; i += 2) { const c = u8[i] | (u8[i + 1] << 8); if (!c) break; s += String.fromCharCode(c); }
+  return s;
+}
+// Props14: hlavička 16 B (počet na +12), potom záznamy veľkosť · kľúč · ? · dáta (zarovnané na 2).
+function repMppProps(u8){
+  const m = new Map();
+  if (!u8 || u8.length < 16) return m;
+  const r = repMppCitac(u8), pocet = r.u16(12);
+  let o = 16;
+  while (m.size < pocet && o + 12 <= u8.length) {
+    const vel = r.i32(o), kluc = r.i32(o + 4);
+    o += 12;
+    if (vel < 1 || o + vel > u8.length) break;
+    m.set(kluc, u8.subarray(o, o + vel));
+    o += vel + (vel % 2);
+  }
+  return m;
+}
+// Mapa polí úloh: záznamy po 28 B — maska bitu, posun v pevných dátach, umiestnenie
+// (10 = pevné dáta, 4 = premenlivé, 18 = príznaky v meta položke), id poľa, veľkosť,
+// index v meta. Pevné polia idú po blokoch; nižší posun = ďalší blok (Fixed2Data).
+function repMppMapaPoli(u8){
+  const r = repMppCitac(u8), pole = new Map();
+  let blok = 0, posl = 0;
+  for (let o = 0; o + 28 <= u8.length; o += 28) {
+    const loc = u8[o + 8], off = r.u16(o + 4), cele = r.u32(o + 12);
+    if (loc === 10) { if (off < posl) blok++; posl = off; }
+    if ((cele >>> 16) !== 0x0B40) continue;
+    const id = cele & 0xffff;
+    if (!pole.has(id)) pole.set(id, { loc, off, blok, vel: r.u16(o + 22), maska: r.u32(o), idx: r.u32(o + 24) });
+  }
+  return pole;
+}
+// Dátum uloženia dáva volajúci (dátum súboru): SummaryInformation v .mpp MS Project
+// pri uložení neaktualizuje — vzorka v ňom mala dátum o 2,5 mesiaca starší.
+function repPlanZMpp(data, CFB, nazovSuboru, ulozene){
+  if (!CFB || !CFB.read) throw new Error("Chýba knižnica na čítanie .mpp — skúste to znova, alebo plán uložte ako XML.");
+  const u8 = data instanceof Uint8Array ? data : new Uint8Array(data);
+  let cfb;
+  try { cfb = CFB.read(u8, { type: "array" }); }
+  catch (e) { throw new Error("Súbor nie je .mpp z MS Project — nedá sa otvoriť. V MS Project ho uložte cez Súbor → Uložiť ako → XML a nahrajte XML."); }
+  const cesty = cfb.FullPaths || [];
+  const najdi = kon => {
+    const i = cesty.findIndex(p => p.endsWith(kon));
+    const c = i < 0 ? null : cfb.FileIndex[i].content;
+    return !c || !c.length ? null : c instanceof Uint8Array ? c : Uint8Array.from(c);
+  };
+  const ulozteXml = " V MS Project ho uložte cez Súbor → Uložiť ako → XML a nahrajte XML.";
+  if (!cesty.some(p => p.indexOf("/   114/") >= 0)) {
+    if (cesty.some(p => /\/ {3}1[0-9]{1,2}\//.test(p))) throw new Error("Súbor .mpp je zo staršej verzie MS Project (2007 alebo staršej) — ten formát appka nečíta." + ulozteXml);
+    throw new Error("Súbor nie je plán MS Project (.mpp)." + ulozteXml);
+  }
+  const PP = repMppProps(najdi("/   114/Props"));
+  const mapaB = PP.get(REP_MPP_PROPS.mapaUloh);
+  if (!mapaB) throw new Error("Súbor .mpp sa nedá prečítať — je chránený heslom alebo poškodený." + ulozteXml);
+  const pole = repMppMapaPoli(mapaB), P = REP_MPP_POLE;
+  const F = k => {
+    const f = pole.get(P[k]);
+    const ok = f && (["milnik", "suhrn"].includes(k) ? f.loc === 18 && f.idx + 4 <= 47 : f.loc === 10 && f.blok === 0);
+    if (!ok) throw new Error("Súbor .mpp má nečakané rozloženie (pole " + k + ")." + ulozteXml);
+    return f;
+  };
+  const T = "/   114/TBkndTask/";
+  const fm = najdi(T + "FixedMeta"), fd = najdi(T + "FixedData"), vmB = najdi(T + "VarMeta"), v2 = najdi(T + "Var2Data");
+  if (!fm || !fd || !vmB || !v2) throw new Error("V súbore .mpp chýbajú úlohy." + ulozteXml);
+  const rf = repMppCitac(fm), rv = repMppCitac(vmB), r2 = repMppCitac(v2), rd = repMppCitac(fd);
+  if (rf.u32(0) !== REP_MPP_MAGIC || rv.u32(0) !== REP_MPP_MAGIC) throw new Error("Súbor .mpp sa nedá prečítať — je chránený heslom alebo poškodený." + ulozteXml);
+
+  // Premenlivé dáta: (UID, pole) → posun v Var2Data, tam dĺžka a UTF-16.
+  const varMap = new Map();
+  for (let i = 0, o = 24, n = rv.u32(8); i < n && o + 12 <= vmB.length; i++, o += 12) {
+    const uid = rv.i32(o); let m = varMap.get(uid);
+    if (!m) varMap.set(uid, m = new Map());
+    m.set(rv.u16(o + 8), rv.i32(o + 4));
+  }
+  const varText = (uid, kl) => {
+    const m = varMap.get(uid), off = m ? m.get(kl) : null;
+    if (off == null || off < 0 || off + 4 > v2.length) return null;
+    const vel = r2.i32(off);
+    return vel < 0 || off + 4 + vel > v2.length ? null : repMppText(v2, off + 4, vel);
+  };
+
+  // Pevné dáta: meta položka 47 B (posun na +4, príznaky), blok úlohy v FixedData.
+  // Veľkosť bloku = vzdialenosť k najbližšiemu ďalšiemu posunu; krátke bloky nie sú úlohy.
+  const KROK = 47, f = {};
+  for (const k of ["id", "uid", "pct", "start", "finish", "uroven", "milnik", "suhrn"]) f[k] = F(k);
+  const potreba = Math.max(...["id", "uid", "pct", "start", "finish", "uroven"].map(k => f[k].off + (f[k].vel === 2 ? 2 : 4)));
+  const n = Math.min(rf.u32(8), Math.floor((fm.length - 16) / KROK));
+  const posuny = []; for (let i = 0; i < n; i++) posuny.push(rf.u32(16 + i * KROK + 4));
+  const zor = [...new Set(posuny)].sort((a, b) => a - b), dlzka = new Map(zor.map((p, k) => [p, (k + 1 < zor.length ? zor[k + 1] : fd.length) - p]));
+  const cislo = (b, x) => x.vel === 2 ? rd.u16(b + x.off) : rd.i32(b + x.off);
+  const den = (b, x) => { const d = rd.u16(b + x.off + 2), t = rd.u16(b + x.off); return d === 65535 || (!d && !t) ? null : repPlusDni(REP_MPP_EPOCHA, d); };
+  const ulohy = [], videne = new Set();
+  let zlePct = 0;
+  for (let i = 0; i < n; i++) {
+    const b = posuny[i];
+    if (dlzka.get(b) < potreba || b + potreba > fd.length) continue;
+    const uid = rd.i32(b + f.uid.off);
+    if (videne.has(uid) || !varMap.has(uid)) continue;   // prázdny riadok plánu nemá premenlivé dáta (v XML IsNull)
+    videne.add(uid);
+    const meta = fm.subarray(16 + i * KROK, 16 + (i + 1) * KROK), rm = repMppCitac(meta);
+    const priznak = x => (rm.u32(x.idx) & x.maska) !== 0;
+    const pct = cislo(b, f.pct); if (pct > 100) zlePct++;
+    const u = { uid, id: cislo(b, f.id), nazov: varText(uid, P.nazov) || "", uroven: cislo(b, f.uroven), outline: "", wbs: varText(uid, P.wbs),
+      start: den(b, f.start), finish: den(b, f.finish), pct: Math.max(0, Math.min(100, pct)), milnik: priznak(f.milnik), suhrn: priznak(f.suhrn),
+      aktivna: true, kriticka: false, rezervaDni: null, baseline: null, polia: {}, predchodcovia: [] };
+    for (const t of REP_MPP_TEXT) { const v = varText(uid, t); if (v) u.polia[String(0x0B400000 + t)] = v; }
+    ulohy.push(u);
+  }
+  ulohy.sort((a, b) => a.id - b.id);
+  // Číslo v osnove z úrovní (v .mpp sa neukladá); WBS bez vlastného kódu = osnova.
+  const pocitadla = [];
+  for (const u of ulohy) {
+    const l = Math.max(0, u.uroven);
+    if (l === 0) u.outline = "0";
+    else { pocitadla.length = l; for (let k = 0; k < l; k++) pocitadla[k] = pocitadla[k] || 0; pocitadla[l - 1]++; u.outline = pocitadla.join("."); }
+    if (u.wbs == null || u.wbs === "") u.wbs = u.outline;
+  }
+  // Väzby: TBkndCons, záznam 20 B — predchodca +4, nasledovník +8, typ +12, oneskorenie +14.
+  // Platné sú len záznamy, na ktoré ukazuje meta položka; ostatné sú zmazané väzby.
+  const consM = najdi("/   114/TBkndCons/FixedMeta"), cons = najdi("/   114/TBkndCons/FixedData");
+  if (cons && consM && consM.length >= 16 && repMppCitac(consM).u32(0) === REP_MPP_MAGIC) {
+    const rc = repMppCitac(cons), rcm = repMppCitac(consM), idx = new Map(ulohy.map(u => [u.uid, u])), vid = new Set();
+    const nm = rcm.u32(8), krokC = nm ? Math.floor((consM.length - 16) / nm) : 0;
+    for (let i = 0; i < nm && krokC >= 8; i++) {
+      const o = rcm.u32(16 + i * krokC + 4);
+      if (o + 20 > cons.length) continue;
+      const a = rc.i32(o + 4), b = rc.i32(o + 8), u = idx.get(b);
+      if (!u || a === b || !idx.has(a) || vid.has(a + ">" + b)) continue;
+      vid.add(a + ">" + b);
+      u.predchodcovia.push({ uid: a, typ: rc.u16(o + 12), lag: rc.i32(o + 14) });
+    }
+  }
+  // Vlastné polia: aliasy z vlastností úloh (počet +8, dvojice id · posun od +4, UTF-16).
+  const aliasy = new Map(), ab = repMppProps(najdi("/   114/TBkndTask/Props")).get(REP_MPP_PROPS.aliasy);
+  if (ab && ab.length >= 12) {
+    const r = repMppCitac(ab);
+    for (let i = 0, k = r.u32(8); i < k && 20 + i * 8 <= ab.length; i++) { const off = 4 + r.u32(16 + i * 8); if (off < ab.length) aliasy.set(r.u32(12 + i * 8), repMppText(ab, off)); }
+  }
+  const polia = [];
+  REP_MPP_TEXT.forEach((t, k) => {
+    const id = 0x0B400000 + t, vyplnene = ulohy.filter(u => u.polia[String(id)] != null).length;
+    if (vyplnene || aliasy.get(id)) polia.push({ fieldId: String(id), nazov: "Text" + (k + 1), alias: aliasy.get(id) || null, vyplnene });
+  });
+  const titul = PP.get(REP_MPP_PROPS.titul), md = PP.get(REP_MPP_PROPS.minutDen);
+  const minDen = md && md.length >= 4 ? repMppCitac(md).i32(0) : 0;
+  const u0 = ulohy.find(u => u.uid === 0);
+  const projekt = { nazov: nazovSuboru || "", title: titul ? repMppText(titul, 0) : "",
+    lastSaved: repDatum(ulozene), statusDate: null, currentDate: null,
+    start: u0 ? u0.start : ulohy.reduce((m, u) => repMin(m, u.start), null), finish: u0 ? u0.finish : ulohy.reduce((m, u) => repMax(m, u.finish), null),
+    minutesPerDay: minDen >= 60 && minDen <= 1440 ? minDen : 480 };
+  const pocetUid = c => { const b = najdi(c); if (!b || b.length < 24) return 0; const r = repMppCitac(b), s = new Set(); for (let i = 0, o = 24; i < r.u32(8) && o + 12 <= b.length; i++, o += 12) s.add(r.i32(o)); return s.size; };
+  const pocty = { ulohy: ulohy.length, milniky: ulohy.filter(u => u.milnik).length, suhrny: ulohy.filter(u => u.suhrn).length,
+    zdroje: pocetUid("/   114/TBkndRsc/VarMeta"), priradenia: pocetUid("/   114/TBkndAssn/VarMeta"), kalendare: pocetUid("/   114/TBkndCal/VarMeta"),
+    timephased: 0, velkostZnaky: u8.length };
+  const plan = { verzia: 1, zdroj: "mpp", projekt, polia, ulohy, pocty };
+  const chyby = repMppBrana(plan, zlePct);
+  if (chyby.length) throw new Error("Súbor .mpp sa nepodarilo spoľahlivo prečítať (" + chyby.join("; ") + ")." + ulozteXml);
+  return plan;
+}
+// Brána vierohodnosti: čo nesedí so štruktúrou plánu, sa nenahrá — radšej XML než
+// tichý omyl v roadmape. Prahy pripúšťajú jednotlivé zvláštnosti, nie rozsypaný súbor.
+function repMppBrana(plan, zlePct){
+  const U = plan.ulohy, ch = [];
+  if (U.length < 2) return ["plán bez úloh"];
+  if (new Set(U.map(u => u.id)).size !== U.length) ch.push("opakované ID úloh");
+  if (U.some(u => !(u.uroven >= 0 && u.uroven <= 60))) ch.push("úroveň osnovy mimo rozsahu");
+  let skok = 0; for (let i = 1; i < U.length; i++) if (U[i].uroven > U[i - 1].uroven + 1) skok++;
+  if (skok) ch.push(skok + "× skok v osnove");
+  const rok = d => +String(d).slice(0, 4);
+  const zleD = U.filter(u => [u.start, u.finish].some(d => d && (rok(d) < 1990 || rok(d) > 2100)) || (u.start && u.finish && u.start > u.finish)).length;
+  if (zleD > U.length * 0.02) ch.push(zleD + " úloh s nezmyselným termínom");
+  const bezMena = U.filter(u => !u.nazov).length;
+  if (bezMena > U.length * 0.1) ch.push(bezMena + " úloh bez názvu");
+  if (zlePct) ch.push(zlePct + " úloh s plnením nad 100 %");
+  const S = repStrom(plan);
+  const sumNesedi = U.filter(u => u.uroven > 0 && u.suhrn !== (S.deti.get(u.uid).length > 0)).length;
+  if (sumNesedi > U.length * 0.02) ch.push(sumNesedi + " súhrnných úloh nesedí s osnovou");
+  return ch;
+}
+
 // Protokol importu: len počty a kódy, bez obsahu (ide do DB nešifrovaný, §4.1).
 function repPlanProtokol(plan, predosly){
   const p = { ulohy: plan.pocty.ulohy, milniky: plan.pocty.milniky, suhrny: plan.pocty.suhrny,
@@ -219,7 +422,7 @@ function repProfilNavrh(plan){
   kpi.push({ typ: "dniDoKonca", popis: "Dní do konca" });
 
   return {
-    schema: 1, nazov: plan.projekt.title || plan.projekt.nazov.replace(/\.xml$/i, ""), kod: "", jazyk: "sk",
+    schema: 1, nazov: plan.projekt.title || plan.projekt.nazov.replace(/\.(xml|mpp)$/i, ""), kod: "", jazyk: "sk",
     cielovyTermin: plan.projekt.finish, polia, urovenOblasti: uroven, fazy, skupiny, oblasti,
     metriky: { postupProgramu: "suhrn", farby: { zelena: 70, modra: 40, jantarova: 10 }, pomalyPostup: 40,
       podstatnyPosunDni: 7, regresiaBodov: 10, nesuladCtDni: 14, nizkyPostupUlohy: 50, oknoNajblizsieTyzdne: 6 },
@@ -1431,7 +1634,7 @@ function repJeUzky(){ return (window.innerWidth || 1280) < 900; }
 function repMozemPisat(){ const o = b2bMojaOsoba(); return !!(o && (o.spravca || o.rola !== "management")); }
 function repPrekresli(){ if (typeof appB2bReport === "function") appB2bReport(); repOverlayKresli(); }   // samostatný modul Reporting (č. 305)
 function repChyba(e, co){ console.error("Reporting " + co, e); REP.pracuje = ""; alert(co + ": " + ((e && e.message) || e)); repPrekresli(); }
-const REP_DRUHY = { plan: "Plán (MS Project XML)", issue: "Issue Log", ct: "Commitment Tracker", dep: "Dependency Log", zistenia: "Register zistení" };
+const REP_DRUHY = { plan: "Plán (MS Project .mpp alebo XML)", issue: "Issue Log", ct: "Commitment Tracker", dep: "Dependency Log", zistenia: "Register zistení" };
 
 function repZalozkaHtml(){
   repStyl();
@@ -1536,7 +1739,7 @@ function repProgramHtml(){
       (pis && REP.profil && repPosledny("plan") ? '<button class="aabtn pri" onclick="repNovyCyklus()">+ Nový cyklus</button>' : "") + '</div>') + '</div>';
   if (uzky) return hlav + repMobilPrehladHtml();
   let navod = "";
-  if (!repPosledny("plan")) navod = '<div class="card" style="padding:12px 14px;margin-bottom:10px;border-color:var(--acc)"><b>1. Nahrajte plán z MS Project</b><div class="csub" style="margin:4px 0 0">V MS Project: Súbor → Uložiť ako → typ <b>XML</b>. Súbor .mpp sa načítať nedá. Plán sa prečíta v prehliadači; na server ide len potrebný výťah (úlohy, míľniky, % a vlastné polia), šifrovane, a pôvodný súbor zbalený na kontrolu.</div></div>';
+  if (!repPosledny("plan")) navod = '<div class="card" style="padding:12px 14px;margin-bottom:10px;border-color:var(--acc)"><b>1. Nahrajte plán z MS Project</b><div class="csub" style="margin:4px 0 0">Súbor <b>.mpp</b> (MS Project 2010 a novší) alebo XML (Súbor → Uložiť ako → XML). Plán sa prečíta v prehliadači; na server ide len potrebný výťah (úlohy, míľniky, % a vlastné polia), šifrovane, a pôvodný súbor zbalený na kontrolu.</div></div>';
   else if (!REP.profil) navod = '<div class="card" style="padding:12px 14px;margin-bottom:10px;border-color:var(--acc)"><b>2. Nastavte profil programu</b><div class="csub" style="margin:4px 0 6px">Nástroj navrhne oblasti, fázy a dlaždice z plánu; vy ich potvrdíte.</div><button class="aabtn pri" onclick="repOtvorProfil()">Navrhnúť profil z plánu</button></div>';
   const cykly = REP.cykly.map(c => '<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-top:1px solid var(--line);align-items:center;flex-wrap:wrap">' +
     '<div><b>' + esc(c.nazov || ("Report k " + repDMR(c.stav_ku_dnu))) + '</b><div class="csub" style="margin:0">' + esc({ koncept: "koncept", uzavrety: "uzavretý", odoslany: "odoslaný" }[c.stav] || c.stav) + " · verzia " + c.verzia + " · " + esc(String(c.upravene || "").slice(0, 10)) + '</div></div>' +
@@ -1547,7 +1750,7 @@ function repProgramHtml(){
     return '<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-top:1px solid var(--line);align-items:center;flex-wrap:wrap"' +
       (pis ? ' ondragover="event.preventDefault()" ondrop="event.preventDefault();repImportSubory(event.dataTransfer.files,\'' + d + '\')"' : "") + '>' +
       '<div style="min-width:220px;flex:1"><b>' + esc(REP_DRUHY[d]) + '</b><div class="csub" style="margin:0">' + (v ? esc(v.nazov_suboru) + " · " + esc(String(v.nahrane || "").slice(0, 10)) + " · " + esc(repProtokolText(v)) : "zatiaľ nenahraté") + '</div></div>' +
-      '<div style="display:flex;gap:6px">' + sablona(d) + (pis ? '<label class="aabtn" style="cursor:pointer">' + (v ? "Nahrať novší" : "Nahrať") + '<input type="file" accept="' + (d === "plan" ? ".xml" : ".xlsx,.xlsm") + '" style="display:none" onchange="repImport(\'' + d + '\', this)"></label>' : "") + '</div></div>';
+      '<div style="display:flex;gap:6px">' + sablona(d) + (pis ? '<label class="aabtn" style="cursor:pointer">' + (v ? "Nahrať novší" : "Nahrať") + '<input type="file" accept="' + (d === "plan" ? ".mpp,.xml" : ".xlsx,.xlsm") + '" style="display:none" onchange="repImport(\'' + d + '\', this)"></label>' : "") + '</div></div>';
   }).join("");
   const rz = REP.registre.zistenia, zr = rz ? rz.obsah.riadky.filter(z => z.stav !== "zrusene") : [];
   const registerHtml = '<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-top:1px solid var(--line);align-items:center;flex-wrap:wrap">' +
@@ -1577,14 +1780,14 @@ async function repImport(druh, input){
 // (volby.davka) program znova nenačítava po každom súbore a chybu vyhodí.
 async function repImportSubor(druh, f, volby){
   volby = volby || {};
-  if (druh === "plan" && /\.mpp$/i.test(f.name)) { alert("Súbor .mpp sa načítať nedá. V MS Project ho uložte cez Súbor → Uložiť ako → XML."); return { stav: "chyba", druh, text: ".mpp zatiaľ nie" }; }
   REP.pracuje = "Čítam " + f.name + "…"; repPrekresli();
   try {
     const u8 = new Uint8Array(await f.arrayBuffer());
     const sha = await b2bSha256(u8);
     let obsah, protokol, datumSuboru = null;
     if (druh === "plan") {
-      const plan = repPlanZXml(new TextDecoder("utf-8").decode(u8));
+      const plan = /\.mpp$/i.test(f.name) ? repPlanZMpp(u8, (await ensureXLSX()).CFB, f.name, f.lastModified ? new Date(f.lastModified).toISOString().slice(0, 10) : null)
+        : repPlanZXml(new TextDecoder("utf-8").decode(u8));
       const pred = repPosledny("plan") ? await repNacitajVstup(repPosledny("plan").id) : null;
       protokol = repPlanProtokol(plan, pred);
       obsah = plan; datumSuboru = plan.projekt.statusDate || plan.projekt.lastSaved || null;
@@ -3775,7 +3978,7 @@ function repProtokolProblemy(p){
 function repPripravenostProgram(){
   const P = REP.profil, pis = repMozemPisat() && REP.program.stav !== "archiv", out = [];
   const vp = repPosledny("plan"), pp = (vp && vp.protokol) || {};
-  out.push(!vp ? { kluc: "plan", nazov: "Plán", stav: "treba", text: "nenahraný — XML z MS Project", akcia: pis ? "repVyberSubor('plan')" : "" }
+  out.push(!vp ? { kluc: "plan", nazov: "Plán", stav: "treba", text: "nenahraný — .mpp alebo XML z MS Project", akcia: pis ? "repVyberSubor('plan')" : "" }
     : { kluc: "plan", nazov: "Plán", stav: pp.bezDatumu ? "pozor" : "ok", akcia: pis ? "repVyberSubor('plan')" : "",
       text: (pp.ulohy || 0) + " úloh · " + (pp.milniky || 0) + " míľnikov" + (pp.od && pp.do ? " · " + repDMR(pp.od) + " → " + repDMR(pp.do) : "") + (pp.bezDatumu ? " · " + pp.bezDatumu + " bez dátumu" : "") });
   out.push(!P ? { kluc: "profil", nazov: "Profil programu", stav: "treba", text: vp ? "nenastavený — navrhne sa z plánu" : "po nahratí plánu", akcia: vp ? "repOtvorProfil()" : "" }
@@ -3827,12 +4030,11 @@ function repPripravenostCyklusHtml(K){
 }
 
 // ── Pole na súbor: plán aj registre, viac naraz; druh rozpozná appka ─
-// Plán = .xml, .mpp zatiaľ nie (NAVRH §25.3). XLSX: hárok podľa názvu a hlavička
+// Plán = .mpp alebo .xml (NAVRH §25.3). XLSX: hárok podľa názvu a hlavička
 // podľa stĺpcov registra — vyhrá druh s najvyšším skóre nad prahom (povinné
 // stĺpce), inak súbor ostane nerozpoznaný a appka to povie.
 function repRozpoznajDruh(X, data, nazov){
-  if (/\.xml$/i.test(nazov || "")) return "plan";
-  if (/\.mpp$/i.test(nazov || "")) return "mpp";
+  if (/\.(xml|mpp)$/i.test(nazov || "")) return "plan";
   const wb = X.read(data, { type: data instanceof ArrayBuffer ? "array" : "buffer", cellDates: false });
   const meno = repNorm(nazov || ""), riadky = {};
   for (const m of wb.SheetNames.slice(0, 12)) riadky[m] = X.utils.sheet_to_json(wb.Sheets[m], { header: 1, raw: true, defval: "", blankrows: true }).slice(0, 15);
@@ -3867,8 +4069,7 @@ async function repImportSubory(files, druh){
   for (const f of zoz) {
     try {
       const d = druh || await repRozpoznajSubor(f);
-      if (d === "mpp") { vysl.push({ nazov: f.name, stav: "chyba", text: "plán .mpp zatiaľ nie — v MS Project Súbor → Uložiť ako → XML" }); continue; }
-      if (!d) { vysl.push({ nazov: f.name, stav: "chyba", text: "nerozpoznaný — plán ako XML z MS Project, registre ako XLSX (pomôže Šablóna)" }); continue; }
+      if (!d) { vysl.push({ nazov: f.name, stav: "chyba", text: "nerozpoznaný — plán ako .mpp alebo XML z MS Project, registre ako XLSX (pomôže Šablóna)" }); continue; }
       vysl.push(Object.assign({ nazov: f.name }, await repImportSubor(d, f, { davka: true })));
     } catch (e) { console.error("Reporting: import " + f.name, e); vysl.push({ nazov: f.name, stav: "chyba", text: (e && e.message) || String(e) }); }
   }
@@ -3878,7 +4079,7 @@ async function repImportSubory(files, druh){
 }
 function repDropHtml(){
   return '<div class="rep-drop" id="repDrop" ondragover="event.preventDefault();this.classList.add(\'rep-drop-na\')" ondragleave="this.classList.remove(\'rep-drop-na\')" ondrop="repDrop(event)" onclick="repVyberSubor()">' +
-    "<b>Pretiahnite sem súbory</b> alebo kliknite a vyberte — plán z MS Project (XML) aj registre (XLSX), aj viac naraz. Druh súboru appka rozpozná.</div>" +
+    "<b>Pretiahnite sem súbory</b> alebo kliknite a vyberte — plán z MS Project (.mpp alebo XML) aj registre (XLSX), aj viac naraz. Druh súboru appka rozpozná.</div>" +
     '<input type="file" id="repDropInput" multiple accept=".xml,.xlsx,.xlsm,.mpp" style="display:none" onchange="repImportSubory(this.files, REP.importDruh)">' + repImportVysledkyHtml();
 }
 function repImportVysledkyHtml(){
