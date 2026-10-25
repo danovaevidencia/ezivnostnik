@@ -30,7 +30,7 @@ window.NAVODY_SNIMKY = {
  },
  "b2b_report-reporting-3": {
   "d": {
-   "subor": "navody/b2b_report-reporting-3.d.d40018e3.webp",
+   "subor": "navody/b2b_report-reporting-3.d.d5df4a9a.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -108,7 +108,7 @@ window.NAVODY_SNIMKY = {
  },
  "b2b_report-zistenia-1": {
   "d": {
-   "subor": "navody/b2b_report-zistenia-1.d.f5b452a4.webp",
+   "subor": "navody/b2b_report-zistenia-1.d.6d45b3c7.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
