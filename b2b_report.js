@@ -1418,7 +1418,7 @@ function repVodoznak(layout){
   return layout;
 }
 
-// ── 17. Appka: záložka Reporting v B2B projekte (§10) ───────────
+// ── 17. Appka: modul Reporting v skupine B2B (§10; samostatný od č. 305) ─
 const REP = { pid: null, pohlad: "programy", programy: null, program: null, profil: null, profilVerzia: 0, profilNavrh: null,
   vstupy: [], cykly: [], cyklus: null, cyklusObsah: null, krok: "vstupy", plany: {}, registre: {}, chyba: "", pracuje: "",
   verziaSnimka: null };
@@ -1427,7 +1427,7 @@ const REP = { pid: null, pohlad: "programy", programy: null, program: null, prof
 const REP_TEXTAREA = "width:100%;box-sizing:border-box;border:1.5px solid var(--line);background:var(--bg);color:inherit;border-radius:10px;padding:10px 12px;font:inherit;font-size:14px;line-height:1.45;resize:vertical";
 function repJeUzky(){ return (window.innerWidth || 1280) < 900; }
 function repMozemPisat(){ const o = b2bMojaOsoba(); return !!(o && (o.spravca || o.rola !== "management")); }
-function repPrekresli(){ if (typeof appB2bVykaz === "function") appB2bVykaz(); }
+function repPrekresli(){ if (typeof appB2bReport === "function") appB2bReport(); }   // samostatný modul Reporting (č. 305)
 function repChyba(e, co){ console.error("Reporting " + co, e); REP.pracuje = ""; alert(co + ": " + ((e && e.message) || e)); repPrekresli(); }
 const REP_DRUHY = { plan: "Plán (MS Project XML)", issue: "Issue Log", ct: "Commitment Tracker", dep: "Dependency Log", zistenia: "Register zistení" };
 
@@ -3507,7 +3507,7 @@ function repVystupyProjektuHtml(K){
   if (!repMozemPisat()) return "";
   const V = REP.vystupyVyber = REP.vystupyVyber || { roadmapa: true, qa: true, pdf: true, xlsx: false, html: false };
   const qa = repLayout(K.view, K.tema, null, { balik: "qa" }).strany.length > 0, uz = repVystupyVerzie();
-  return '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>Uložiť do Výstupov projektu</b><div class="csub" style="margin:2px 0 6px">Vybrané súbory sa uložia ako výstupy projektu (šifrovane, s väzbou na verziu ' + esc(REP.verziaCislo || "") + ' tohto cyklu) — uvidí ich celý tím v záložke Výstupy.</div>' +
+  return '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>Uložiť do Výstupov projektu</b><div class="csub" style="margin:2px 0 6px">Vybrané súbory sa uložia ako výstupy projektu (šifrovane, s väzbou na verziu ' + esc(REP.verziaCislo || "") + ' tohto cyklu) — uvidí ich celý tím v Pracovnom výkaze v záložke Výstupy.</div>' +
     '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:6px">' + Object.keys(REP_VYSTUP_NAZVY).filter(d => d !== "qa" || qa).map(d =>
       '<label style="display:flex;gap:4px;align-items:center"><input type="checkbox"' + (V[d] ? " checked" : "") + ' onchange="REP.vystupyVyber.' + d + '=this.checked"> ' + esc(REP_VYSTUP_NAZVY[d]) + "</label>").join("") + "</div>" +
     (uz.length ? '<div class="csub" style="margin:0 0 6px">K tejto verzii už sú vo Výstupoch: ' + esc(uz.map(v => v.cislo + " " + v.nazov).join(" · ")) + "</div>" : "") +
@@ -3552,7 +3552,7 @@ async function repUlozDoVystupov(){
     REP.pracuje = "";
     alert("Uložené do Výstupov projektu: " + ulozene.join(", ") + ".");
   } catch (e) {
-    const pred = (ulozene.length ? "Uložené: " + ulozene.join(", ") + ". " : "") + (rozpracovany ? "Výstup " + rozpracovany + " je založený, ale nie je dokončený (súbor alebo väzba na verziu) — skontrolujte ho v záložke Výstupy. " : "");
+    const pred = (ulozene.length ? "Uložené: " + ulozene.join(", ") + ". " : "") + (rozpracovany ? "Výstup " + rozpracovany + " je založený, ale nie je dokončený (súbor alebo väzba na verziu) — skontrolujte ho v Pracovnom výkaze v záložke Výstupy. " : "");
     return repChyba(e, pred + "Uloženie do Výstupov sa nepodarilo");
   }
   repPrekresli();

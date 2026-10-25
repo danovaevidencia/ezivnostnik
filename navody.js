@@ -1498,28 +1498,38 @@ b2b_vykaz: {
         { nadpis: "Údaje projektu zo súboru",
           html: "<p>Pozície, miesta a činnosti sa dajú nahrať aj z JSON vo formáte eživnostníka — v záložke Projekt <b>⬆ Nahradiť z JSON</b>.</p>" },
         { nadpis: "Report o stave programu",
-          html: "<p>Keď projekt sleduje program s plánom v MS Project, report z neho zostavíte v záložke <b>Reporting</b> — [[navod:b2b_vykaz/reporting|ako zostaviť report]].</p>" },
+          html: "<p>Keď projekt sleduje program s plánom v MS Project, report z neho zostavíte v module [[app:b2b_report|Reporting]] — [[navod:b2b_report/reporting|ako zostaviť report]].</p>" },
         { nadpis: "Zmluva, zákazka a nastavenia",
           html: "<p>V záložke Projekt je časť <b>Zmluva a nastavenia projektu</b>: zmluva, objednávateľ, obdobie,cena, pravidlá výkazu, organizácie, pozície s činnosťami, zoznam expertov, oblasti a typy výstupov — pri každej časti strana a bod zmluvy. Správca ich upraví tlačidlom <b>Upraviť</b>; tam je aj <b>Číslo zákazky</b>, ktoré sa ponúkne vo Výkazoch a pri faktúre.</p>" },
       ],
     },
+  ],
+},
+// ─────────────────────────────────────────────── B2B SLUŽBY · REPORTING
+// Samostatný modul od č. 305 (predtým záložka Pracovného výkazu). Prístup
+// ako B2B — na pozvánku (nvJeB2b). Snímky sú z vymysleného programu
+// (dev/navody/scenare/reporting.js nad dev/reporting/gen_vzorka.js).
+b2b_report: {
+  vJednejVete: "Zostaviť roadmapu a QA report programu z plánu MS Project a registrov",
+  uvod: "Program je plán v MS Project s registrami — Issue Log, Commitment Tracker, Dependency Log a register zistení. Každý report je <b>cyklus</b> k stavu ku dňu: vstupy, kontrola dát, úsudok, náhľad a export. Reporting patrí projektu B2B a vidia ho jeho členovia.",
+  ulohy: [
     {
       id: "reporting",
       nazov: "Zostaviť report o stave programu",
       kedy: "Projekt sleduje program s plánom v MS Project a na pravidelný status treba roadmapu. Report sa tvorí na počítači; na mobile je len prehľad uzavretého cyklu.",
       kroky: [
-        { text: "V záložke <b>Reporting</b> napíšte názov a kód programu a ťuknite na <b>Založiť</b> — program zakladá správca projektu.", tlacidlo: "Založiť", snimka: "b2b_vykaz-reporting-1" },
-        { text: "Otvorte program, pri pláne ťuknite na <b>Nahrať</b> a vyberte plán uložený v MS Project ako XML. Skontrolujte navrhnuté fázy, oblasti a cieľový termín a ťuknite na <b>Uložiť profil</b>.", tlacidlo: "Uložiť profil", snimka: "b2b_vykaz-reporting-2" },
-        { text: "Ťuknite na <b>+ Nový cyklus</b>, potvrďte stav ku dňu a v kroku <b>Kontrola dát</b> si pozrite, čo v pláne a registroch nesedí.", tlacidlo: "+ Nový cyklus", snimka: "b2b_vykaz-reporting-3" },
-        { text: "V kroku <b>Úsudok</b> potvrďte alebo zmeňte hodnotenie RAG — farba iná než návrh z dát potrebuje dôvod — a označte kľúčové otázky z Issue Logu.", snimka: "b2b_vykaz-reporting-6" },
-        { text: "V kroku <b>Náhľad a výber</b> odznačte strany a oblasti, ktoré do reportu nepatria. V kroku <b>Export</b> stiahnite <b>⬇ Roadmapa (PPTX)</b>, QA report, PDF, HTML alebo dáta v XLSX, prípadne e-mail pre Outlook s prílohami. Keď report odišiel, ťuknite na <b>Uzavrieť cyklus</b>.", tlacidlo: "⬇ Roadmapa (PPTX)", snimka: "b2b_vykaz-reporting-5" },
+        { text: "V module <b>Reporting</b> vyberte projekt, napíšte názov a kód programu a ťuknite na <b>Založiť</b> — program zakladá správca projektu.", tlacidlo: "Založiť", snimka: "b2b_report-reporting-1" },
+        { text: "Otvorte program, pri pláne ťuknite na <b>Nahrať</b> a vyberte plán uložený v MS Project ako XML. Skontrolujte navrhnuté fázy, oblasti a cieľový termín a ťuknite na <b>Uložiť profil</b>.", tlacidlo: "Uložiť profil", snimka: "b2b_report-reporting-2" },
+        { text: "Ťuknite na <b>+ Nový cyklus</b>, potvrďte stav ku dňu a v kroku <b>Kontrola dát</b> si pozrite, čo v pláne a registroch nesedí.", tlacidlo: "+ Nový cyklus", snimka: "b2b_report-reporting-3" },
+        { text: "V kroku <b>Úsudok</b> potvrďte alebo zmeňte hodnotenie RAG — farba iná než návrh z dát potrebuje dôvod — a označte kľúčové otázky z Issue Logu.", snimka: "b2b_report-reporting-6" },
+        { text: "V kroku <b>Náhľad a výber</b> odznačte strany a oblasti, ktoré do reportu nepatria. V kroku <b>Export</b> stiahnite <b>⬇ Roadmapa (PPTX)</b>, QA report, PDF, HTML alebo dáta v XLSX, prípadne e-mail pre Outlook s prílohami. Keď report odišiel, ťuknite na <b>Uzavrieť cyklus</b>.", tlacidlo: "⬇ Roadmapa (PPTX)", snimka: "b2b_report-reporting-5" },
       ],
       tip: "Náhľad je ten istý obraz, z ktorého sa skladá PowerPoint aj PDF — čo je v náhľade odznačené, v súbore nebude. Koncept nesie na každej strane vodoznak PRACOVNÁ VERZIA.",
       podrobnosti: [
         { nadpis: "Plán z MS Project",
           html: "<p>Appka číta MS Project XML (Súbor → Uložiť ako → XML), súbor .mpp nie. Plán sa prečíta v prehliadači; na server ide len výťah — úlohy, termíny, % plnenia, väzby a vlastné polia — a pôvodný súbor, oboje šifrovane. Pri ďalšom importe appka ukáže, koľko úloh pribudlo, zmizlo alebo sa premenovalo.</p>" },
         { nadpis: "Registre z Excelu",
-          html: "<p>Issue Log, Commitment Tracker a Dependency Log sa nahrávajú z Excelu. Appka nájde hárok aj riadok hlavičky, zjednotí stavy a dátumy a v protokole ukáže, čo nesedí — duplicitné ID, dátumy bez roka alebo v americkom tvare, chýbajúce stĺpce. Excel ostáva zdrojom pravdy. Pri každom registri je <b>Šablóna</b> — prázdny Excel so zoznamami povolených hodnôt a pokynmi, ktorý appka načíta bez úprav. Register zistení sa vedie priamo v appke — [[navod:b2b_vykaz/zistenia|ako viesť register zistení]].</p><p>Stĺpec <b>Ďalšie kroky</b> (NEXT STEPS) appka číta ako denník: záznam začína dátumom, napríklad „28.5.: čaká sa na dodávateľa“. QA report z neho ukáže, ktoré problémy sa od minulého reportu pohli, ktoré stoja a ktoré nemajú záznam; Kontrola dát povie, koľko textu je bez dátumu.</p>" },
+          html: "<p>Issue Log, Commitment Tracker a Dependency Log sa nahrávajú z Excelu. Appka nájde hárok aj riadok hlavičky, zjednotí stavy a dátumy a v protokole ukáže, čo nesedí — duplicitné ID, dátumy bez roka alebo v americkom tvare, chýbajúce stĺpce. Excel ostáva zdrojom pravdy. Pri každom registri je <b>Šablóna</b> — prázdny Excel so zoznamami povolených hodnôt a pokynmi, ktorý appka načíta bez úprav. Register zistení sa vedie priamo v appke — [[navod:b2b_report/zistenia|ako viesť register zistení]].</p><p>Stĺpec <b>Ďalšie kroky</b> (NEXT STEPS) appka číta ako denník: záznam začína dátumom, napríklad „28.5.: čaká sa na dodávateľa“. QA report z neho ukáže, ktoré problémy sa od minulého reportu pohli, ktoré stoja a ktoré nemajú záznam; Kontrola dát povie, koľko textu je bez dátumu.</p>" },
         { nadpis: "Zmeny od minula a trend",
           html: "<p>Nový cyklus sa porovná s plánom predošlého cyklu — po identifikátoroch úloh a k stavu ku dňu každej snímky. Strany <b>Čo sa zmenilo od minula</b>, <b>Podstatné zmeny v projekte</b> a <b>Trend míľnikov</b> ukážu posunuté, novo oneskorené a dokončené míľniky a poklesy postupu; QA report pridá zmeny v registroch. Inú staršiu snímku plánu alebo registrov vyberiete v kroku Vstupy v časti Porovnanie a trend.</p><p>Pevný bod — <b>baseline</b> — vyberiete v profile programu ako jednu z nahratých snímok plánu. Strana <b>Sklz proti baseline</b> ukáže, o koľko sa fázové míľniky oblastí posunuli proti nej; plán v MS Projecte vlastnú baseline mať nemusí.</p>" },
         { nadpis: "Finančný report",
@@ -1527,7 +1537,7 @@ b2b_vykaz: {
         { nadpis: "Hodnotenie QA",
           html: "<p>Pri rozsahu, harmonograme a rizikách appka navrhne farbu RAG z dát a povie prečo; akceptáciu a riadenie hodnotí len QA. Zmenu návrhu aj prepis čísla na dlaždici treba zdôvodniť — výstup ich označí a vypočítanú hodnotu ukáže vedľa.</p><p>Uzavretie cyklu si zapamätá výsledné farby. Ďalší cyklus pri každej dimenzii ukáže farbu z minula a QA report pridá stranu <b>Vývoj hodnotenia RAG</b> — zhoršenie a zlepšenie proti uzavretým cyklom.</p>" },
         { nadpis: "Kontrola dát",
-          html: "<p>Krok <b>Kontrola dát</b> ukáže chyby v pláne — chýbajúcu fázu, fázy v zlom poradí, nehotový míľnik so starým rokom alebo na deň pracovného pokoja, fázu, ktorá nie je míľnikom — a súhrn registrov. Appka chyby len ukáže; opravuje ich ten, kto plán vedie. Záväzok spárovaný so zlou úlohou, problém, ktorý sa nemá rátať, alebo neznámy zápis oblasti v registri upravíte s dôvodom — [[navod:b2b_vykaz/vyhodnotenie|ako upraviť vyhodnotenie]].</p>" },
+          html: "<p>Krok <b>Kontrola dát</b> ukáže chyby v pláne — chýbajúcu fázu, fázy v zlom poradí, nehotový míľnik so starým rokom alebo na deň pracovného pokoja, fázu, ktorá nie je míľnikom — a súhrn registrov. Appka chyby len ukáže; opravuje ich ten, kto plán vedie. Záväzok spárovaný so zlou úlohou, problém, ktorý sa nemá rátať, alebo neznámy zápis oblasti v registri upravíte s dôvodom — [[navod:b2b_report/vyhodnotenie|ako upraviť vyhodnotenie]].</p>" },
         { nadpis: "Detail oblastí",
           html: "<p>Strana <b>Detail</b> ukáže za každú skupinu jej oblasti s postupom, termínmi fáz a poznámkou — v tabuľke aj s balíkmi pod oblasťou, alebo ako karty. Tvar vyberiete v kroku Náhľad a výber.</p>" },
         { nadpis: "Výstupy projektu",
@@ -1545,9 +1555,9 @@ b2b_vykaz: {
       nazov: "Upraviť vyhodnotenie registrov",
       kedy: "Problém z Issue Logu sa nemá rátať do ukazovateľov, záväzok sa nespároval so správnou úlohou plánu, alebo appka nepozná zápis oblasti v registri.",
       kroky: [
-        { text: "V kroku <b>Úsudok</b> v zozname kľúčových otázok ťuknite pri probléme na <b>Nezapočítať</b> a napíšte dôvod. Problém ostane v registri aj vo výstupe, ukazovatele ho nerátajú.", tlacidlo: "Nezapočítať", snimka: "b2b_vykaz-vyhodnotenie-1" },
-        { text: "V kroku <b>Kontrola dát</b> v časti Záväzky zadajte pri záväzku UID úlohy z MS Projectu, alebo vyberte stav a napíšte dôvod — výstup ho označí „(ručne)“.", snimka: "b2b_vykaz-vyhodnotenie-2" },
-        { text: "V časti <b>Oblasti v registroch</b> priraďte neznámy zápis k oblasti programu alebo k celému programu, prípadne ho vynechajte.", snimka: "b2b_vykaz-vyhodnotenie-3" },
+        { text: "V kroku <b>Úsudok</b> v zozname kľúčových otázok ťuknite pri probléme na <b>Nezapočítať</b> a napíšte dôvod. Problém ostane v registri aj vo výstupe, ukazovatele ho nerátajú.", tlacidlo: "Nezapočítať", snimka: "b2b_report-vyhodnotenie-1" },
+        { text: "V kroku <b>Kontrola dát</b> v časti Záväzky zadajte pri záväzku UID úlohy z MS Projectu, alebo vyberte stav a napíšte dôvod — výstup ho označí „(ručne)“.", snimka: "b2b_report-vyhodnotenie-2" },
+        { text: "V časti <b>Oblasti v registroch</b> priraďte neznámy zápis k oblasti programu alebo k celému programu, prípadne ho vynechajte.", snimka: "b2b_report-vyhodnotenie-3" },
       ],
       tip: "Úpravy patria programu, nie cyklu — platia pre každý ďalší report aj import. Keď sa ID v registri zmení, úprava sa ukáže medzi osirelými a dá sa odstrániť.",
       podrobnosti: [
@@ -1562,8 +1572,8 @@ b2b_vykaz: {
       nazov: "Viesť register zistení",
       kedy: "Dohľad kvality (QA) eviduje zistenia a odporúčania k programu. Register sa vedie v appke a QA report berie jeho aktuálny stav.",
       kroky: [
-        { text: "Otvorte program v záložke <b>Reporting</b> a pri Registri zistení ťuknite na <b>Otvoriť register</b>.", tlacidlo: "Otvoriť register", snimka: "b2b_vykaz-zistenia-1" },
-        { text: "Ťuknite na <b>+ Nové zistenie</b>, vyplňte zistenie, závažnosť, odporúčanie a termín a ťuknite na <b>Uložiť</b>. Zistenia z Excelu pridáte cez <b>Import z Excelu</b>.", tlacidlo: "+ Nové zistenie", snimka: "b2b_vykaz-zistenia-2" },
+        { text: "Otvorte program v module <b>Reporting</b> a pri Registri zistení ťuknite na <b>Otvoriť register</b>.", tlacidlo: "Otvoriť register", snimka: "b2b_report-zistenia-1" },
+        { text: "Ťuknite na <b>+ Nové zistenie</b>, vyplňte zistenie, závažnosť, odporúčanie a termín a ťuknite na <b>Uložiť</b>. Zistenia z Excelu pridáte cez <b>Import z Excelu</b>.", tlacidlo: "+ Nové zistenie", snimka: "b2b_report-zistenia-2" },
       ],
       tip: "Číslo zistenia (QA-01, QA-02…) dáva appka a po zrušení sa znova nepoužije. Import z Excelu pridá len zistenia s novým číslom — to, čo je v appke, neprepíše.",
       podrobnosti: [
