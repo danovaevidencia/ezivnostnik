@@ -1796,12 +1796,13 @@ function repCyklusHtml(){
     (!kon && repMozemPisat() ? '<button class="aabtn" onclick="repOtvorZnova()">Znova otvoriť</button>' : "") +
     (repJeUzky() ? "" : '<button class="aabtn" onclick="repOverlayOtvor()" title="Náhľad reportu cez celú obrazovku">⛶ Náhľad</button>') + '</div></div>';
   if (repJeUzky()) return hlav + repMobilPrehladHtml();
-  const kroky = '<div style="display:flex;gap:6px;flex-wrap:wrap;margin:0 2px 10px">' + (kon ? krok("vstupy", "1 Vstupy") + krok("kontrola", "2 Kontrola dát") + krok("usudok", "3 Úsudok") : "") + krok("nahlad", (kon ? "4 " : "") + "Náhľad a výber") + krok("export", (kon ? "5 " : "") + "Export") + '</div>';
+  const kroky = '<div style="display:flex;gap:6px;flex-wrap:wrap;margin:0 2px 10px">' + (kon ? krok("vstupy", "1 Vstupy") + krok("kontrola", "2 Kontrola dát") + krok("usudok", "3 Úsudok") : "") + krok("nahlad", (kon ? "4 " : "") + "Náhľad a výber") + krok("export", (kon ? "5 " : "") + "Export") +
+    (kon ? '<button class="aabtn' + (REP.pomoc ? " pri" : "") + '" style="margin-left:auto" onclick="REP.pomoc=!REP.pomoc;repPrekresli()">? Čo tu robiť</button>' : "") + '</div>';
   let K;
   try { K = repKontextCyklu(); } catch (e) { console.error(e); return hlav + '<div class="card" style="padding:12px;border-color:var(--neg)">Report sa nedá zostaviť: ' + esc(e.message) + '</div>'; }
   if (!K) return hlav + kroky + '<div class="aempty">Cyklus nemá plán alebo program nemá profil.</div>';
   const telo = REP.krok === "vstupy" ? repKrokVstupy() : REP.krok === "kontrola" ? repKrokKontrola(K) : REP.krok === "usudok" ? repKrokUsudok(K) : REP.krok === "export" ? repKrokExport(K) : repKrokNahlad(K);
-  return hlav + kroky + (kon ? repPripravenostCyklusHtml(K) : "") + telo;
+  return hlav + kroky + (kon ? repPripravenostCyklusHtml(K) + repPomocHtml() : "") + telo;
 }
 
 function repKrokVstupy(){
@@ -1869,6 +1870,7 @@ function repKrokNahlad(K){
     [["tabulka", "tabuľka s balíkmi"], ["karty", "karty oblastí"]].map(([k, t]) => '<option value="' + k + '"' + ((vy.detailTvar || "tabulka") === k ? " selected" : "") + ">" + t + "</option>").join("") + '</select></div>' +
     '<div class="mfield" style="max-width:320px;margin-top:8px"><label>Téma</label><select onchange="REP.cyklusObsah.tema=this.value;repPrekresli()">' + Object.keys(REP_TEMY).map(k => '<option value="' + k + '"' + (K.tema === k ? " selected" : "") + ">" + esc(REP_TEMY[k].nazov) + "</option>").join("") + '</select></div></div></div>' : "";
   const zahrnute = L.strany.filter(st => (manif.find(m => m.kluc === st.kluc) || {}).zahrnuta).length;
+  const kpiEd = kon && REP.profil ? repKpiEditorHtml(K) : "";
   const videne = new Set();
   const strany = L.strany.map(st => {
     const zahr = (manif.find(m => m.kluc === st.kluc) || {}).zahrnuta;
@@ -1877,7 +1879,7 @@ function repKrokNahlad(K){
       (kon && prva ? '<label style="display:flex;gap:4px;align-items:center;margin:0"><input type="checkbox"' + (zahr ? " checked" : "") + ' onchange="repVyberSnimky(\'' + esc(st.kluc) + '\', this.checked)"> do výstupu</label>' : "") + '</div>' +
       '<div style="border:1px solid var(--line);border-radius:6px;overflow:hidden">' + repSvgStrana(L, st).replace("<svg ", '<svg style="display:block;width:100%;height:auto" ') + '</div></div>';
   }).join("");
-  return vyberHtml + '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin:0 2px 8px;flex-wrap:wrap"><span class="csub" style="margin:0">Výstup: <b>' + zahrnute + '</b> strán. Náhľad je ten istý obraz, z ktorého sa skladá PowerPoint. ' + esc(repManifestText(K)) + '</span>' +
+  return vyberHtml + kpiEd + '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin:0 2px 8px;flex-wrap:wrap"><span class="csub" style="margin:0">Výstup: <b>' + zahrnute + '</b> strán. Náhľad je ten istý obraz, z ktorého sa skladá PowerPoint. ' + esc(repManifestText(K)) + '</span>' +
     '<button class="aabtn" onclick="repOverlayOtvor()">⛶ Cez celú obrazovku</button></div>' + strany;
 }
 function repVyberSnimky(kluc, zap){ const v = REP.cyklusObsah.vyber = REP.cyklusObsah.vyber || {}; v.snimky = v.snimky || {}; if (zap) delete v.snimky[kluc]; else v.snimky[kluc] = false; repPrekresli(); }
@@ -2803,7 +2805,8 @@ function repKrokUsudokQa(K){
     return '<tr style="border-top:1px solid var(--line)"><td style="padding:6px 6px 6px 0;vertical-align:top"><b>' + esc(d.nazov) + '</b><div class="csub" style="margin:2px 0 0">' +
       (d.navrh ? "návrh z dát: " + repRagCip(d.navrh.farba) + " " + esc(d.navrh.dovod) : "dáta nehovoria — len úsudok QA") + repRagMinule(Q, d.kluc) + "</div></td>" +
       '<td style="vertical-align:top;padding-top:6px"><select onchange="repRagNastav(\'' + d.kluc + '\',\'farba\',this.value)"><option value="">' + (d.navrh ? "podľa návrhu" : "—") + "</option>" +
-      Object.keys(REP_RAG).map(k => '<option value="' + k + '"' + (u.farba === k ? " selected" : "") + ">" + REP_RAG[k] + "</option>").join("") + "</select></td>" +
+      Object.keys(REP_RAG).map(k => '<option value="' + k + '"' + (u.farba === k ? " selected" : "") + ">" + REP_RAG[k] + "</option>").join("") + "</select>" +
+      (u.farba && d.navrh ? '<div><button class="aabtn" style="margin-top:4px" onclick="repRagPodlaNavrhu(\'' + d.kluc + '\')">použiť návrh</button></div>' : "") + "</td>" +
       '<td style="width:45%;vertical-align:top;padding-top:6px"><input value="' + esc(u.komentar || "") + '" placeholder="' + esc(d.navrh && !u.farba ? d.navrh.dovod : "komentár QA") + '" style="width:100%" onchange="repRagNastav(\'' + d.kluc + '\',\'komentar\',this.value)">' +
       (bezDovodu ? '<div style="color:var(--neg);font-size:12px">Farba sa líši od návrhu — napíšte dôvod.</div>' : "") +
       (u.zdrojKomentara ? '<div class="csub" style="margin:0">' + esc(REP_ZDROJ_TXT[u.zdrojKomentara] || "") + "</div>" : "") + "</td></tr>";
@@ -2811,21 +2814,12 @@ function repKrokUsudokQa(K){
   const kpi = Q.kpi.map(k => {
     const p = kp[k.kluc] || {};
     return '<tr style="border-top:1px solid var(--line)"><td style="padding:4px 6px 4px 0">' + esc(k.popis) + '</td><td style="text-align:right;padding-right:10px"><b>' + esc(String(k.vypocitane)) + "</b></td>" +
-      '<td><input style="width:80px" value="' + esc(p.hodnota || "") + '" placeholder="' + esc(String(k.vypocitane)) + '" onchange="repKpiPrepis(\'' + k.kluc + '\',\'hodnota\',this.value)"></td>' +
+      '<td><input style="width:80px" value="' + esc(p.hodnota || "") + '" placeholder="' + esc(String(k.vypocitane)) + '" onchange="repKpiPrepis(\'' + k.kluc + '\',\'hodnota\',this.value)">' +
+      (p.hodnota ? '<div><button class="aabtn" style="margin-top:4px;white-space:nowrap" onclick="repKpiVypocitane(\'' + k.kluc + '\')">použiť vypočítané</button></div>' : "") + "</td>" +
       '<td style="width:50%"><input style="width:100%" value="' + esc(p.dovod || "") + '" placeholder="dôvod prepisu" onchange="repKpiPrepis(\'' + k.kluc + '\',\'dovod\',this.value)">' +
       (p.hodnota && !p.dovod ? '<div style="color:var(--neg);font-size:12px">Prepis bez dôvodu — doplňte ho.</div>' : "") + "</td></tr>";
   }).join("");
   const auto = repQaNaratiV(Object.assign({}, Q, { model: K.model, il: K.il, ct: K.ct, dep: K.dep }), Object.fromEntries(Q.kpi.map(k => [k.kluc, k.hodnota])));
-  const hv = new Set(us.kluceOtazky || []);
-  const kandidati = Q.issue.filter(z => z.aktivny || hv.has(z.kluc));
-  // „nezapočítať“ (anotácia programu, R4): problém ostane v registri, KPI ho nerátajú
-  const pisA = repMozemPisat();
-  const otazky = kandidati.map(z => { const nz = z.anotacia && z.anotacia.nezapocitat;
-    return '<div style="display:flex;gap:6px;align-items:flex-start;justify-content:space-between;padding:3px 0;border-top:1px solid var(--line)"><label style="display:flex;gap:6px;align-items:flex-start;margin:0"><input type="checkbox"' + (hv.has(z.kluc) ? " checked" : "") +
-    ' onchange="repHviezda(\'' + esc(z.kluc) + '\', this.checked)"><span><b>' + esc(z.id) + "</b> " + esc(REP_PRIORITA_TXT[z.prioritaKluc] || z.priorita || "") + (z.aktivny ? "" : " · uzavretý") +
-    (nz ? ' · <span style="color:var(--warn,#b7791f)">nezapočítaný: ' + esc(nz.dovod || "") + "</span>" : "") +
-    ' <span class="csub" style="margin:0">' + esc(String(z.popis || "").slice(0, 160)) + "</span></span></label>" +
-    (pisA && (z.aktivny || nz) ? '<button class="aabtn" style="white-space:nowrap" onclick="repIssueNezapocitat(\'' + esc(z.kluc) + "', " + (nz ? "false" : "true") + ')">' + (nz ? "Započítať" : "Nezapočítať") + "</button>" : "") + "</div>"; }).join("");
   return '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>Hodnotenie QA (RAG)</b><div class="csub" style="margin:2px 0 6px">Návrh farby je z dát a s dôvodom; kde dáta nehovoria, rozhoduje len QA. Farba iná než návrh potrebuje komentár — vo výstupe je označená „úsudok QA“.</div>' +
     '<table style="width:100%;border-collapse:collapse">' + rag + "</table></div>" +
     '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>Celkový stav (QA)</b>' + (us.qaNaratiV && us.qaNaratiV.zdroj && us.qaNaratiV.zdroj !== "rucne" ? ' <span class="csub" style="margin:0">· ' + esc(REP_ZDROJ_TXT[us.qaNaratiV.zdroj] || "") + "</span>" : "") +
@@ -2833,9 +2827,7 @@ function repKrokUsudokQa(K){
     '<textarea rows="4" style="' + REP_TEXTAREA + '" placeholder="' + esc(auto) + '" onchange="repNastavQaNaratiV(this.value)">' + esc(us.qaNaratiV && us.qaNaratiV.text || "") + "</textarea></div>" +
     '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>KPI dohľadu kvality</b><div class="csub" style="margin:2px 0 6px">Vypočítanú hodnotu môže QA prepísať len s dôvodom; výstup ukáže prepis s hviezdičkou a vypočítanú hodnotu pod ním.</div>' +
     '<table style="width:100%;border-collapse:collapse"><tr class="csub"><th style="text-align:left">KPI</th><th>Vypočítané</th><th style="text-align:left">Prepis</th><th style="text-align:left">Dôvod</th></tr>' + kpi + "</table></div>" +
-    '<div class="card" style="padding:10px 14px"><b>Kľúčové otvorené otázky (★)</b> <span class="csub" style="margin:0">vybraných <span id="repHviezdyPocet">' + hv.size + "</span></span>" +
-    '<div class="csub" style="margin:2px 0 6px">Označené problémy z Issue Logu idú na stranu „Kľúčové otvorené otázky“. Výber sa prenáša do ďalšieho cyklu.</div>' +
-    '<div data-scroll style="max-height:360px;overflow:auto">' + (otazky || '<div class="csub">Issue Log nemá aktívne problémy.</div>') + "</div></div>";
+    repIssueTabulkaHtml(K);
 }
 
 // ═══ 26. Zmeny, trend a financie (kolo R3a; NAVRH §6.7, §6.8, §9.2) ═══
@@ -3769,7 +3761,7 @@ const REP_STYL = [
 ].join("");
 function repStyl(){
   if (typeof document === "undefined" || !document.head || REP._styl) return;
-  const s = document.createElement("style"); s.id = "repStyl"; s.textContent = REP_STYL; document.head.appendChild(s); REP._styl = true;
+  const s = document.createElement("style"); s.id = "repStyl"; s.textContent = REP_STYL + REP_STYL_R8B; document.head.appendChild(s); REP._styl = true;
 }
 
 // ── Pripravenosť: čo je hotové, čo chýba a čo má upozornenia; klik vedie na krok ─
@@ -3929,7 +3921,7 @@ function repOverlayHtml(K){
     (kon ? '<button class="aabtn' + (uprava ? " pri" : "") + '" onclick="repOverlayUprava()">✏ Upraviť výber</button>' : "") +
     '<span class="csub" style="margin:0;flex:1;min-width:200px">' + esc(repManifestText(K)) + "</span>" +
     '<button class="aabtn" onclick="repOverlayCelaObrazovka()" title="Celá obrazovka">⛶</button><button class="aabtn" onclick="repOverlayZavri()">Zavrieť (Esc)</button></div>' +
-    '<div class="rep-ov-telo">' + oblasti + telo + "</div>";
+    '<div class="rep-ov-telo">' + oblasti + (uprava && ov.balik !== "qa" && REP.profil ? repKpiEditorHtml(K) : "") + telo + "</div>";
 }
 function repOverlayOtvor(balik){ REP.ov = { balik: balik || "roadmapa", uprava: false }; repOverlayKresli(); }
 function repOverlayZavri(){
@@ -3958,4 +3950,134 @@ function repOverlayKresli(){
   if (!REP._ovKlaves && document.addEventListener) { document.addEventListener("keydown", repOverlayKlaves); REP._ovKlaves = true; }
   if (!el || !el.parentNode) { el = document.createElement("div"); el.id = "repOverlay"; el.className = "rep-ov"; document.body.appendChild(el); }
   el.innerHTML = repOverlayHtml(K);
+}
+
+// ═══ 33. Kolo R8b: KPI dlaždice, tabuľka Issue Logu, „použiť vypočítané“, pomoc ku kroku (NAVRH §25.2) ═══
+const REP_STYL_R8B = [
+  ".rep-kpi{display:inline-flex;gap:2px;align-items:center;border:1px solid var(--line);border-radius:10px;padding:2px 4px;background:var(--paper);margin:0 6px 6px 0}",
+  ".rep-kpi select{max-width:190px}.rep-kpi .rep-kpi-h{font-weight:700;margin:0 4px;white-space:nowrap}",
+  ".rep-il{width:100%;border-collapse:collapse}",
+  ".rep-il th{position:sticky;top:0;background:var(--paper);text-align:left;font-size:12px;color:var(--ink-soft);padding:4px 6px;border-bottom:1px solid var(--line);z-index:1}",
+  ".rep-il td{padding:4px 6px;border-top:1px solid var(--line);vertical-align:top;font-size:13px}",
+  ".rep-il tr.rep-il-uzav td{opacity:.6}",
+  ".rep-pill{display:inline-block;padding:1px 8px;border-radius:9px;font-size:12px;font-weight:600;white-space:nowrap}",
+  ".rep-p-critical{background:var(--sfc-neg);color:var(--ink-neg)}.rep-p-high{background:var(--sfc-warn);color:var(--ink-warn)}",
+  ".rep-p-medium{background:var(--sfc-info);color:var(--ink-info)}.rep-p-low,.rep-p-uzav{background:var(--bg-deep);color:var(--ink-soft)}.rep-p-akt{background:var(--sfc-pos);color:var(--ink-pos)}",
+  ".rep-pomoc{border-left:4px solid var(--brand)}"
+].join("");
+
+// ── KPI dlaždice strany Prehľad: výmena z katalógu, poradie, pridanie (najviac 6) ─
+// Výber patrí cyklu (vyber.kpi); bez neho platia dlaždice profilu. Katalóg =
+// metriky programu, postup každej skupiny a každej zobrazenej oblasti.
+function repKpiKluc(k){ return k.typ + (k.skupina ? ":" + k.skupina : k.oblast ? ":" + k.oblast : ""); }
+function repKpiKandidati(P){
+  const out = [{ typ: "postupProgramu" }];
+  for (const s of P.skupiny || []) out.push({ typ: "postupSkupiny", skupina: s.kluc, popis: s.nazov });
+  for (const o of (P.oblasti || []).filter(o => o.zobrazit !== false)) out.push({ typ: "postupOblasti", oblast: o.kluc, popis: o.kratky || o.nazov });
+  for (const t of ["oneskoreneOblasti", "nasadene", "dokoncene", "pomalyPostup", "pocetOblasti", "dniDoKonca", "datumKonca"]) out.push({ typ: t });
+  return out.map(k => Object.assign({ popis: k.popis || REP_KPI_KATALOG[k.typ] || k.typ }, k, { kluc: repKpiKluc(k) }));
+}
+function repKpiAktualne(){
+  const vy = REP.cyklusObsah.vyber || {}, zdroj = vy.kpi && vy.kpi.length ? vy.kpi : ((REP.profil && REP.profil.kpi) || []);
+  return zdroj.filter(k => k && k.zap !== false).slice(0, 6).map(k => Object.assign({}, k));
+}
+function repKpiUloz(zoz){ const vy = REP.cyklusObsah.vyber = REP.cyklusObsah.vyber || {}; vy.kpi = zoz.map(k => { const c = Object.assign({}, k); delete c.kluc; return c; }); repPrekresli(); }
+function repKpiPosun(i, smer){ const z = repKpiAktualne(), j = i + smer; if (j < 0 || j >= z.length) return; [z[i], z[j]] = [z[j], z[i]]; repKpiUloz(z); }
+function repKpiZmen(i, kluc){ const z = repKpiAktualne(), k = repKpiKandidati(REP.profil).find(x => x.kluc === kluc); if (!k || !z[i]) return; z[i] = k; repKpiUloz(z); }
+function repKpiOdober(i){ const z = repKpiAktualne(); if (z.length <= 1) return; z.splice(i, 1); repKpiUloz(z); }
+function repKpiPridaj(kluc){ const z = repKpiAktualne(), k = repKpiKandidati(REP.profil).find(x => x.kluc === kluc); if (!k || z.length >= 6) return repPrekresli(); z.push(k); repKpiUloz(z); }
+function repKpiZProfilu(){ const vy = REP.cyklusObsah.vyber || {}; delete vy.kpi; repPrekresli(); }
+function repKpiEditorHtml(K){
+  const P = REP.profil, z = repKpiAktualne(), kand = repKpiKandidati(P), vlastne = !!((REP.cyklusObsah.vyber || {}).kpi || []).length;
+  const opt = (kl) => kand.map(k => '<option value="' + esc(k.kluc) + '"' + (k.kluc === kl ? " selected" : "") + ">" + esc(k.popis) + "</option>").join("");
+  const chips = z.map((k, i) => {
+    const h = repKpiHodnota(k, K.model, P), kl = repKpiKluc(k);
+    return '<span class="rep-kpi" data-kpi="' + esc(kl) + '"><button class="aabtn" title="Doľava"' + (i ? "" : " disabled") + ' onclick="repKpiPosun(' + i + ',-1)">◀</button>' +
+      '<select onchange="repKpiZmen(' + i + ',this.value)">' + (kand.some(x => x.kluc === kl) ? "" : '<option selected>' + esc(h.popis) + "</option>") + opt(kl) + "</select>" +
+      '<span class="rep-kpi-h">' + esc(h.hodnota) + "</span>" +
+      '<button class="aabtn" title="Doprava"' + (i < z.length - 1 ? "" : " disabled") + ' onclick="repKpiPosun(' + i + ',1)">▶</button>' +
+      '<button class="aabtn" title="Odobrať"' + (z.length > 1 ? "" : " disabled") + ' onclick="repKpiOdober(' + i + ')">✕</button></span>';
+  }).join("");
+  return '<div class="card" style="padding:10px 14px;margin:0 auto 12px;max-width:1200px"><b>Dlaždice na strane Prehľad (najviac 6)</b><div class="csub" style="margin:2px 0 6px">Výber patrí tomuto cyklu' + (vlastne ? "" : ", dnes podľa profilu") + ". Šípky menia poradie, pole s menom vymení metriku.</div>" + chips +
+    (z.length < 6 ? '<select onchange="repKpiPridaj(this.value)"><option value="">+ pridať dlaždicu</option>' + kand.filter(k => !z.some(x => repKpiKluc(x) === k.kluc)).map(k => '<option value="' + esc(k.kluc) + '">' + esc(k.popis) + "</option>").join("") + "</select> " : "") +
+    (vlastne ? '<button class="aabtn" onclick="repKpiZProfilu()">Podľa profilu</button>' : "") + "</div>";
+}
+
+// ── Tabuľka Issue Logu v úsudku: filter, hľadanie, ★ a Nezapočítať v riadku ─
+// Jedno pravidlo viditeľnosti (repIlViditelny) pre kreslenie aj pre filter počas
+// písania — ten mení len zobrazenie riadkov (bez prekreslenia, fokus ostane).
+function repIlFilter(){ return REP.ilFilter = REP.ilFilter || { q: "", pri: "", stav: "aktivne", hv: false }; }
+function repIlViditelny(z, F, hv){
+  if (F.stav === "aktivne" && !z.aktivny && !hv.has(z.kluc)) return false;
+  if (F.stav === "uzavrete" && z.aktivny) return false;
+  if (F.pri && z.prioritaKluc !== F.pri) return false;
+  if (F.hv && !hv.has(z.kluc)) return false;
+  if (F.q) {
+    const t = repNorm([z.id, (z.oblast || []).join(" "), z.popis, z.riesitel, z.stav, z.dalsieKroky].join(" "));
+    if (repNorm(F.q).split(/\s+/).some(w => w && t.indexOf(w) < 0)) return false;
+  }
+  return true;
+}
+function repIlFiltruj(pole, hodnota){
+  const F = repIlFilter();
+  if (pole) F[pole] = hodnota;
+  const hv = new Set(((REP.cyklusObsah.usudok || {}).kluceOtazky) || []), mapa = REP._ilMapa || new Map();
+  let n = 0;
+  for (const tr of document.querySelectorAll("#repIlTab tr[data-kluc]")) {
+    const z = mapa.get(tr.getAttribute("data-kluc")), vid = !!z && repIlViditelny(z, F, hv);
+    tr.style.display = vid ? "" : "none"; if (vid) n++;
+  }
+  const p = document.getElementById("repIlPocet"); if (p) p.textContent = String(n);
+}
+function repIssueTabulkaHtml(K){
+  const Q = K.qa, us = REP.cyklusObsah.usudok || {}, hv = new Set(us.kluceOtazky || []), F = repIlFilter(), pis = repMozemPisat();
+  const pohyb = new Map((((Q.pohyb || {}).riadky) || []).map(p => [p.kluc, p]));
+  REP._ilMapa = new Map(Q.issue.map(z => [z.kluc, z]));
+  let n = 0;
+  const riadky = Q.issue.map(z => {
+    const nz = z.anotacia && z.anotacia.nezapocitat, vid = repIlViditelny(z, F, hv), p = pohyb.get(z.kluc);
+    if (vid) n++;
+    return '<tr data-kluc="' + esc(z.kluc) + '"' + (z.aktivny ? "" : ' class="rep-il-uzav"') + (vid ? "" : ' style="display:none"') + ">" +
+      '<td><input type="checkbox" title="Kľúčová otázka ★"' + (hv.has(z.kluc) ? " checked" : "") + ' onchange="repHviezda(\'' + esc(z.kluc) + '\', this.checked)"></td>' +
+      "<td><b>" + esc(z.id || "—") + "</b></td><td>" + esc((z.oblast || []).join(", ")) + "</td>" +
+      '<td><span class="rep-pill rep-p-' + esc(z.prioritaKluc || "low") + '">' + esc(REP_PRIORITA_TXT[z.prioritaKluc] || z.priorita || "—") + "</span></td>" +
+      '<td><span class="rep-pill ' + (z.aktivny ? "rep-p-akt" : "rep-p-uzav") + '">' + esc(z.stav || (z.aktivny ? "aktívny" : "uzavretý")) + "</span></td>" +
+      "<td>" + esc(repTerminTxt(z.termin, z.terminText)) + "</td>" +
+      "<td>" + (p && p.posledny ? esc(repDM(p.posledny)) + (p.dniBezPohybu >= ((Q.pohyb || {}).prah || 21) ? ' <span style="color:var(--neg)">' + p.dniBezPohybu + " d</span>" : "") : "—") + "</td>" +
+      "<td>" + esc(String(z.popis || "").slice(0, 160)) + (nz ? '<div style="color:var(--warn)">nezapočítaný: ' + esc(nz.dovod || "") + "</div>" : "") + "</td>" +
+      "<td>" + (pis && (z.aktivny || nz) ? '<button class="aabtn" style="white-space:nowrap" onclick="repIssueNezapocitat(\'' + esc(z.kluc) + "', " + (nz ? "false" : "true") + ')">' + (nz ? "Započítať" : "Nezapočítať") + "</button>" : "") + "</td></tr>";
+  }).join("");
+  const sel = (pole, moz) => '<select onchange="repIlFiltruj(\'' + pole + '\', this.value)">' + moz.map(([v, t]) => '<option value="' + v + '"' + (F[pole] === v ? " selected" : "") + ">" + t + "</option>").join("") + "</select>";
+  return '<div class="card" style="padding:10px 14px"><b>Kľúčové otvorené otázky (★)</b> <span class="csub" style="margin:0">vybraných <span id="repHviezdyPocet">' + hv.size + "</span></span>" +
+    '<div class="csub" style="margin:2px 0 6px">Issue Log: aktívne → priorita → ID. Označené ★ idú na stranu „Kľúčové otvorené otázky“ a výber sa prenáša do ďalšieho cyklu. Nezapočítaný problém ostane v registri, KPI ho nerátajú.</div>' +
+    '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px"><input type="search" placeholder="Hľadať ID, oblasť, text…" value="' + esc(F.q) + '" oninput="repIlFiltruj(\'q\', this.value)" style="flex:1;min-width:180px">' +
+    sel("pri", [["", "každá priorita"], ["critical", "Critical"], ["high", "High"], ["medium", "Medium"], ["low", "Low"]]) +
+    sel("stav", [["aktivne", "aktívne a ★"], ["vsetky", "všetky"], ["uzavrete", "uzavreté"]]) +
+    '<label style="display:flex;gap:4px;align-items:center;margin:0"><input type="checkbox"' + (F.hv ? " checked" : "") + ' onchange="repIlFiltruj(\'hv\', this.checked)"> len ★</label>' +
+    '<span class="csub" style="margin:0">zobrazené <span id="repIlPocet">' + n + "</span> z " + Q.issue.length + "</span></div>" +
+    (Q.issue.length ? '<div data-scroll style="max-height:420px;overflow:auto"><table class="rep-il" id="repIlTab"><thead><tr><th>★</th><th>ID</th><th>Oblasť</th><th>Priorita</th><th>Stav</th><th>Termín</th><th>Posledný záznam</th><th>Popis</th><th></th></tr></thead><tbody>' + riadky + "</tbody></table></div>"
+      : '<div class="csub">Issue Log nemá problémy.</div>') + "</div>";
+}
+
+// ── Použiť vypočítané / návrh: prepis sa vráti na hodnotu z dát ─
+function repKpiVypocitane(kluc){ const u = repUsudok(); if (u.kpiPrepisy) delete u.kpiPrepisy[kluc]; repPrekresli(); }
+function repRagPodlaNavrhu(kluc){ const u = repUsudok(), r = (u.rag || {})[kluc]; if (r) { delete r.farba; if (!Object.keys(r).length) delete u.rag[kluc]; } repPrekresli(); }
+
+// ── Pomoc ku kroku cyklu: čo tu urobiť a kam ďalej, bez odchodu z reportu ─
+const REP_KROKY_PORADIE = ["vstupy", "kontrola", "usudok", "nahlad", "export"];
+const REP_KROKY_NAZOV = { vstupy: "Vstupy", kontrola: "Kontrola dát", usudok: "Úsudok", nahlad: "Náhľad a výber", export: "Export" };
+const REP_POMOC = {
+  vstupy: "Vyberte importy plánu a registrov, z ktorých sa report zloží. Porovnanie a trend berú staršiu snímku plánu; nový cyklus ich prevezme z predošlého.",
+  kontrola: "Prejdite chyby v pláne a súhrn registrov. Appka chyby len ukáže — opravuje ich PMO v zdroji. Záväzky a zápisy oblastí v registroch tu spárujete ručne, s dôvodom.",
+  usudok: "Napíšte exekutívny súhrn a poznámky k oblastiam, potvrďte hodnotenie RAG (iná farba než návrh potrebuje dôvod) a v tabuľke Issue Logu označte kľúčové otázky ★.",
+  nahlad: "Odznačte strany a oblasti, ktoré do reportu nepatria, a vyberte dlaždice a tému. ⛶ Cez celú obrazovku vidíte report tak, ako odíde.",
+  export: "Stiahnite PowerPoint, PDF, HTML alebo XLSX a e-mail pre Outlook. Keď report odišiel, cyklus uzavrite — vstupy a úsudok sa zamknú do snímky."
+};
+function repPomocHtml(){
+  if (!REP.pomoc) return "";
+  const k = REP.krok || "vstupy", i = REP_KROKY_PORADIE.indexOf(k), dalsi = REP_KROKY_PORADIE[i + 1];
+  return '<div class="card rep-pomoc" style="padding:10px 14px;margin-bottom:10px"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><b>' + (i + 1) + ". " + esc(REP_KROKY_NAZOV[k] || k) + " — čo tu urobiť</b>" +
+    '<button class="aabtn" onclick="REP.pomoc=false;repPrekresli()">Zavrieť</button></div><div style="margin:4px 0 8px">' + esc(REP_POMOC[k] || "") + "</div>" +
+    '<div style="display:flex;gap:6px;flex-wrap:wrap">' + (dalsi ? '<button class="aabtn pri" onclick="REP.krok=\'' + dalsi + '\';repPrekresli()">Ďalej: ' + esc(REP_KROKY_NAZOV[dalsi]) + " →</button>" : "") +
+    '<button class="aabtn" onclick="otvorNavod(\'b2b_report\',\'reporting\')">Celý návod</button></div></div>';
 }
