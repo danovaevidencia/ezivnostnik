@@ -790,8 +790,14 @@ function bsZapnutieHtml(){
     (ja.spravca ? '<button class="aabtn pri" onclick="bsZapni()">Zapnúť BUGstation</button>' : "") + "</div>";
 }
 async function bsZapni(){
-  // Zapnutie pridá projektu modul bugstation (admin_89) — zoznam projektov a záložky sa načítajú znova.
-  try { await bsRpc("b2b_bs_zapni", { p_projekt: B2B.pid }); BS.pohlad = "nastavenia"; if (typeof b2bNacitajClenstvo === "function") await b2bNacitajClenstvo(); await bsObnov(); }
+  // Zapnutie pridá projektu modul bugstation (admin_89) a zvýši verziu projektu — bez jej
+  // prevzatia by ďalšia úprava projektu vo Výkaze hlásila konflikt. Zoznam a záložky znova.
+  try {
+    const v = await bsRpc("b2b_bs_zapni", { p_projekt: B2B.pid });
+    const P = B2B.d && B2B.d.projekt;
+    if (P && v && v.verzia != null) { P.verzia = v.verzia; P.moduly = v.moduly; }
+    BS.pohlad = "nastavenia"; if (typeof b2bNacitajClenstvo === "function") await b2bNacitajClenstvo(); await bsObnov();
+  }
   catch (e) { bsChyba(e, "BUGstation sa nepodarilo zapnúť"); }
 }
 
