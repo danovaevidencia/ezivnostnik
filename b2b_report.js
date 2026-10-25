@@ -3808,7 +3808,7 @@ function repPripravenostProgram(){
 }
 function repPripravenostHtml(pol){
   const pov = pol.filter(p => p.stav !== "volitelne");
-  return '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>Pripravenosť</b> <span class="csub" style="margin:0">' + pov.filter(p => p.stav === "ok").length + " z " + pov.length + " povinných hotových</span>" +
+  return '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>Pripravenosť</b> <span class="csub" style="margin:0">' + pov.filter(p => p.stav === "ok").length + " z " + pov.length + " v poriadku</span>" +
     '<div class="rep-prip">' + pol.map(p => '<button type="button" class="rep-prip-pol" data-kluc="' + p.kluc + '"' + (p.akcia ? ' onclick="' + p.akcia + '"' : " disabled") + ">" +
       '<span class="rep-st rep-st-' + p.stav + '">' + REP_ST_ZNAK[p.stav] + "</span><b>" + esc(p.nazov) + '</b><div class="csub" style="margin:2px 0 0">' + esc(p.text) + "</div></button>").join("") + "</div></div>";
 }
