@@ -393,9 +393,9 @@ function bsSlaReakcia(z, teraz){
 }
 // Pravidlá v nastaveniach: „4 h“, „2 d“, „90 min“; deň = 8 h v pracovnom čase, 24 h pri 24 × 7.
 function bsSlaMin(text, nonstop){
-  const s = String(text == null ? "" : text).trim().toLowerCase().replace(",", ".");
+  const s = bsNorm(text).replace(",", ".");   // bsNorm: malé písmená bez diakritiky („deň“ → „den“)
   if (!s) return null;
-  const m = s.match(/^(\d+(?:\.\d+)?)\s*(min|m|h|hod|d|dni|dní|deň|den)?$/);
+  const m = s.match(/^(\d+(?:\.\d+)?)\s*(min|m|h|hod|d|dni|den)?$/);
   if (!m) return NaN;
   const n = parseFloat(m[1]), j = m[2] || "h";
   const min = j === "min" || j === "m" ? n : j.startsWith("d") ? n * (nonstop ? 1440 : 480) : n * 60;
