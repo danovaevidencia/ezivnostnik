@@ -3191,7 +3191,7 @@ function modulPovolenyPreModul(m){
   if(modulLenSZCOSkryty(m)) return false;
   const kat=MODUL_KATEGORIA[m];
   if(!kat) return true;              // neznámy modul → nechaj (kalendár a pod.)
-  if(kat==="b2b") return b2bMaPristup();
+  if(kat==="b2b") return b2bMaPristup() && (!B2B_MODUL[m] || b2bMaModul(B2B_MODUL[m]));   // modul projektu (admin_89)
   if(modulPovoleny(kat)) return true;
   // Jednorazový doplnok odomyká LEN sprievodcu priznaním, nie celú kategóriu
   // „priznanie" — v tej je aj prognóza a podania, za ktoré zákazník nezaplatil.
@@ -26372,12 +26372,44 @@ function b2bBezServera(){ return demoMode || localMode || !sb; }
 // Brána menu (návrh §14): nie plán firmy, ale členstvo, pozvánka alebo zoznam
 // zakladateľov. Bez nich sa skupina B2B nekreslí vôbec.
 function b2bMaPristup(){ return !b2bBezServera() && (B2B.projekty.length>0 || B2B.pozvanky.length>0 || B2B.zakladatel); }
+// Moduly projektu (admin_89, BUGstation BS0, NAVRH_B2B_BUGSTATION §26): projekt môže
+// používať len výkaz, len reporting, len BUGstation alebo kombináciu a osoba má prístup
+// len k vybraným. Server to stráži v RLS (b2b_ma_modul); appka podľa toho kreslí záložky
+// a zoznamy. Chýbajúce moduly (pred admin_89, staré odpovede) = výkaz + reporting —
+// rovnako ako spätné vyplnenie v migrácii, nikto o nič nepríde.
+const B2B_MODUL={ b2b_vykaz:"vykaz", b2b_report:"reporting", b2b_bugstation:"bugstation" };
+const B2B_MODULY_PREDVOLENE=["vykaz","reporting"];
+function b2bMojeModuly(p){ return (p && p.moje_moduly) || B2B_MODULY_PREDVOLENE; }
+function b2bMaModul(m){
+  if(b2bBezServera()) return false;
+  if(B2B.projekty.some(p=>b2bMojeModuly(p).includes(m))) return true;
+  // Pozvánka a zakladateľ otvárajú výkaz ako doteraz (zoznam projektov, prijatie, nový projekt).
+  return m==="vykaz" && (B2B.pozvanky.length>0 || B2B.zakladatel);
+}
+// Osoba projektu má modul: projekt ho používa a osoba je správca alebo ho má v prístupe.
+function b2bOsobaMaModul(o, m, d){
+  const proj=((d||B2B.d||{}).projekt||{}).moduly || B2B_MODULY_PREDVOLENE;
+  return !!o && proj.includes(m) && (!!o.spravca || (o.moduly||B2B_MODULY_PREDVOLENE).includes(m));
+}
+function b2bOsobaVykaz(o, d){ return b2bOsobaMaModul(o, "vykaz", d); }
+// Prvý modul, ktorý mám (po prijatí pozvánky, v režime len B2B) — osoba len s BUGstation
+// nesmie skončiť vo výkaze, kde by nevidela nič.
+function b2bPrvyModul(pid){
+  const p=pid? B2B.projekty.find(x=>x.id===pid) : null;
+  const moje=p? b2bMojeModuly(p) : ["vykaz","reporting","bugstation"].filter(b2bMaModul);
+  return moje.includes("vykaz")? "b2b_vykaz" : moje.includes("bugstation")? "b2b_bugstation" : moje.includes("reporting")? "b2b_report" : "b2b_vykaz";
+}
 async function b2bNacitajClenstvo(){
   if(b2bBezServera()){ B2B.projekty=[]; B2B.pozvanky=[]; B2B.zakladatel=false; B2B.nacitane=true; return; }
   try{
-    const [p,z,k]=await Promise.all([sb.rpc("b2b_moje_projekty"), sb.rpc("b2b_moje_pozvanky"), sb.rpc("b2b_som_zakladatel")]);
+    const [p,z,k,m]=await Promise.all([sb.rpc("b2b_moje_projekty"), sb.rpc("b2b_moje_pozvanky"), sb.rpc("b2b_som_zakladatel"), sb.rpc("b2b_moje_moduly")]);
     const ch=p.error||z.error||k.error; if(ch) throw ch;
-    B2B.projekty=p.data||[]; B2B.pozvanky=z.data||[]; B2B.zakladatel=!!k.data; B2B.chyba=null;
+    // b2b_moje_moduly (admin_89) — bez migrácie funkcia chýba a platia predvolené moduly; iná chyba sa hlási.
+    let mm=[];
+    if(m.error){ if(!(m.error.code==="PGRST202" || m.error.code==="42883")) throw m.error; }
+    else mm=m.data||[];
+    B2B.projekty=(p.data||[]).map(x=>{ const y=mm.find(q=>q.projekt_id===x.id); return y? Object.assign({}, x, {moduly:y.moduly, moje_moduly:y.moje_moduly, bs_role:y.bs_role}) : x; });
+    B2B.pozvanky=z.data||[]; B2B.zakladatel=!!k.data; B2B.chyba=null;
   }catch(e){ console.error("B2B: členstvo sa nenačítalo", e); B2B.chyba=String((e&&e.message)||e); }
   B2B.nacitane=true;
 }
@@ -26432,8 +26464,9 @@ async function b2bSpracujPozvanku(){
     history.replaceState({}, "", location.pathname);
     await b2bPrijmiPozvanku(t);
     B2B.pozvankaBezi=false;
-    oznamPas("Ste v projekte — B2B služby → Pracovný výkaz.");
-    otvorApp("b2b_vykaz");
+    const modul=b2bPrvyModul(B2B.pid);   // osoba len s BUGstation ide do BUGstation (admin_89)
+    oznamPas("Ste v projekte — B2B služby → "+((APPS[modul]||{}).n||"Pracovný výkaz")+".");
+    otvorApp(modul);
     return true;
   }catch(e){
     B2B.pozvankaBezi=false;
@@ -26463,7 +26496,7 @@ async function b2bPrijmiZAppky(id){
 // Návrat ‹ (domov → zobrazFirmu) skončí znova tu, nie v sprievodcovi firmy.
 function b2bLenRezim(){
   ["emptyCard","dashboard","dashTitle","obView"].forEach(id=>{ const x=document.getElementById(id); if(x) x.classList.add("hidden"); });
-  otvorApp("b2b_vykaz");
+  otvorApp(b2bPrvyModul());
 }
 // ── B2B: sprievodca pri prvom otvorení projektu (č. 289, NAVRH_B2B_VYKAZ §21) ──
 // Kroky podľa roly s pohyblivou obrazovkou z tých istých snímok ako návody
@@ -26586,7 +26619,15 @@ async function b2bNacitajProjekt(){
   const ch=r.slice(0,7).find(x=>x.error); if(ch) throw ch.error;
   let hodinyDna=[], bezHodinDna=false;
   if(r[7].error){ if(b2bChybaTabulky(r[7].error)) bezHodinDna=true; else throw r[7].error; } else hodinyDna=r[7].data||[];
-  if(!r[0].data) throw new Error("Projekt sa nenašiel alebo k nemu už nemáte prístup.");
+  let projekt=r[0].data;
+  if(!projekt){
+    // Osoba len s BUGstation riadok projektu (zmluva, ceny, objednávky) nevidí — Roman
+    // 25. 10. 2026, admin_89. Hlavička zo zoznamu projektov stačí; výkazové tabuľky
+    // sú pre ňu prázdne (RLS), takže nič ďalšie sa nenačíta omylom.
+    const z=B2B.projekty.find(p=>p.id===pid);
+    if(z && b2bMojeModuly(z).includes("bugstation")) projekt={id:z.id, nazov:z.nazov, kod:z.kod, data:{}, verzia:0, moduly:z.moduly||["bugstation"], lenHlavicka:true};
+    else throw new Error("Projekt sa nenašiel alebo k nemu už nemáte prístup.");
+  }
   let verzie=[];
   if(r[5].data){ const v=await sb.from("b2b_vykazy_verzie").select("*").eq("vykaz_id",r[5].data.id).order("verzia"); if(v.error) throw v.error; verzie=v.data||[]; }
   // Výstupy (admin_75). Bez migrácie tabuľka nie je — modul ide ďalej bez nich a povie to.
@@ -26612,7 +26653,7 @@ async function b2bNacitajProjekt(){
   } else prijemAlias=(pr.data && pr.data.alias)||null;
   if(poradie!==_b2bNacitanie) return false;
   const vsetky=r[3].data||[];
-  B2B.d={pid, mesiac, projekt:r[0].data, osoby:r[1].data||[], aktivity:r[2].data||[],
+  B2B.d={pid, mesiac, projekt, osoby:r[1].data||[], aktivity:r[2].data||[],
     zaznamy:vsetky.filter(z=>z.datum>=od), zaznamyPred:vsetky.filter(z=>z.datum<od),
     mesiace:r[4].data||[], vykaz:r[5].data||null, verzie, moje:(r[6].data&&r[6].data.data)||{}, vystupy, subory, bezVystupov,
     hodinyDna:hodinyDna.filter(h=>String(h.datum)>=od), hodinyDnaPred:hodinyDna.filter(h=>String(h.datum)<od), bezHodinDna,
@@ -27391,7 +27432,7 @@ function b2bOsobaForm(o){
   return `<div class="mfield"><label>Meno vo výkaze</label><input id="b2bOMeno" value="${esc(o&&o.meno||"")}"></div>
     <div class="mfield"><label>Kontaktný e-mail</label><input id="b2bOEmail" type="email" value="${esc(o&&o.email||"")}" placeholder="meno@firma.sk" autocomplete="off"><div class="csub" style="margin:4px 0 0">Vidia ho členovia projektu; pozvánka ho vyplní sama.</div></div>
     <div class="mfield"><label>Organizácia</label><select id="b2bOOrg"><option value="">—</option>${(D.organizacie||[]).map(x=>`<option value="${esc(x.id)}"${o&&o.organizacia===x.id?" selected":""}>${esc(x.nazov)}</option>`).join("")}</select></div>
-    ${rola}<div id="b2bOMiestoBlok"${man? ' style="display:none"' : ""}>
+    ${rola}${b2bPristupFormHtml(o)}<div id="b2bOMiestoBlok"${man? ' style="display:none"' : ""}>
     <div class="mfield"><label>Miesto v Prílohe 4</label><select id="b2bOMiesto"><option value="">— zatiaľ bez miesta —</option>${b2bMiestoMoznosti(D.miesta, m.miesto)}</select></div>
     <div class="mrow2" style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div class="mfield"><label>Na mieste od</label><input id="b2bOOd" type="date" value="${esc(m.od||"")}" oninput="b2bMiestoOdPoznUkaz('b2bOOd','b2bOOdPozn')"></div>
     <div class="mfield"><label>do</label><input id="b2bODo" type="date" value="${esc(m.do||"")}"></div></div>
@@ -27404,7 +27445,8 @@ function b2bOsobaZForm(o){
   const v=x=>String((document.getElementById(x)||{}).value||"").trim();
   const rola=document.getElementById("b2bORola")? (v("b2bORola")||"clen") : null;
   const miesto=v("b2bOMiesto"), prve=miesto? [{miesto, od:v("b2bOOd")||null, do:v("b2bODo")||null}] : [];
-  return {meno:v("b2bOMeno"), email:v("b2bOEmail").toLowerCase()||null, organizacia:v("b2bOOrg")||null, miesta: rola==="management"? [] : [...prve, ...(((o&&o.miesta)||[]).slice(1))], rola};
+  const pristup=document.getElementById("b2bOPristup")? [...document.querySelectorAll("#b2bOPristup input:checked")].map(x=>x.value) : null;
+  return {meno:v("b2bOMeno"), email:v("b2bOEmail").toLowerCase()||null, organizacia:v("b2bOOrg")||null, miesta: rola==="management"? [] : [...prve, ...(((o&&o.miesta)||[]).slice(1))], rola, pristup};
 }
 // Kontrola formulára osoby pred zápisom — prázdny e-mail je v poriadku.
 function b2bOsobaChyba(x){
@@ -27412,26 +27454,60 @@ function b2bOsobaChyba(x){
   if(x.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x.email)) return "Kontaktný e-mail nie je platný.";
   return "";
 }
+// Prístup osoby k modulom projektu (admin_89, BS0) — len správca; server pustí len
+// moduly, ktoré projekt používa. Bez admin_89 výber nie je (moduly projektu chýbajú).
+const B2B_MODULY_NAZOV={vykaz:"Pracovný výkaz", reporting:"Reporting", bugstation:"BUGstation"};
+function b2bPristupFormHtml(o){
+  const proj=(B2B.d.projekt||{}).moduly;
+  if(!b2bSomSpravca() || !proj) return "";
+  const moje=(o&&o.moduly)||B2B_MODULY_PREDVOLENE;
+  return `<div class="mfield"><label>Prístup k modulom</label><div id="b2bOPristup" style="display:flex;flex-wrap:wrap;gap:10px">${proj.map(m=>`<label style="display:flex;gap:6px;align-items:center;font-size:13px;font-weight:400"><input type="checkbox" value="${m}"${moje.includes(m)? " checked" : ""}> ${esc(B2B_MODULY_NAZOV[m]||m)}</label>`).join("")}</div>
+    <div class="csub" style="margin:4px 0 0">Osoba vidí len vybrané moduly — napríklad tester len BUGstation, bez výkazu, zmluvy a cien.${o&&o.spravca? " Správca projektu má prístup ku všetkému vždy." : ""}</div></div>`;
+}
+async function b2bNastavPristup(osobaId, moduly){ const r=await sb.rpc("b2b_nastav_pristup",{p_osoba:osobaId, p_moduly:moduly}); if(r.error) throw r.error; }
+// Moduly, ktoré projekt používa (správca). Vypnutie modulu dáta nemaže — len ich skryje.
+function b2bModulyProjektuHtml(d, spravca){
+  const proj=(d.projekt||{}).moduly;
+  if(!spravca || !proj) return "";
+  return `<div class="card" style="padding:12px 14px"><b>Moduly projektu</b>
+      <div class="csub" style="margin:4px 0 8px">Projekt môže používať len niektoré moduly. Kto má prístup ku ktorému, určíte pri osobe.</div>
+      <div id="b2bModulyProj" style="display:flex;flex-wrap:wrap;gap:12px">${Object.keys(B2B_MODULY_NAZOV).map(m=>`<label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" value="${m}"${proj.includes(m)? " checked" : ""}> ${esc(B2B_MODULY_NAZOV[m])}</label>`).join("")}</div>
+      <div style="margin-top:8px"><button class="aabtn" onclick="b2bModulyProjektuUloz()">Uložiť moduly</button></div></div>`;
+}
+async function b2bModulyProjektuUloz(){
+  const moduly=[...document.querySelectorAll("#b2bModulyProj input:checked")].map(x=>x.value);
+  if(!moduly.length) return alert("Projekt musí používať aspoň jeden modul.");
+  const vypnute=((B2B.d.projekt||{}).moduly||[]).filter(m=>!moduly.includes(m));
+  if(vypnute.length && !confirm("Vypnúť "+vypnute.map(m=>B2B_MODULY_NAZOV[m]).join(", ")+"? Dáta ostanú uložené, len ich nikto neuvidí, kým modul znova nezapnete.")) return;
+  try{ const r=await sb.rpc("b2b_nastav_moduly_projektu",{p_projekt:B2B.pid, p_moduly:moduly}); if(r.error) throw r.error;
+    oznamPas("Moduly projektu uložené"); await b2bNacitajClenstvo(); b2bObnov(); }
+  catch(e){ b2bChyba(e, "Moduly projektu sa nepodarilo uložiť"); }
+}
 async function b2bNastavRolu(osobaId, rola){ const r=await sb.rpc("b2b_nastav_rolu",{p_osoba:osobaId, p_rola:rola}); if(r.error) throw r.error; }
 function b2bOsobaPridaj(){
   openModal("Pridať osobu", `<div class="csub">Osoba bez účtu — hodiny jej môže zapisovať alebo importovať ktorýkoľvek člen. Správca ju potom môže pozvať e-mailom.</div>`+b2bOsobaForm(null),
-    async ()=>{ const x=b2bOsobaZForm(null), rola=x.rola; delete x.rola; const ch=b2bOsobaChyba(x); if(ch) return b2bVOkne(ch);
+    async ()=>{ const x=b2bOsobaZForm(null), rola=x.rola, pristup=x.pristup; delete x.rola; delete x.pristup; const ch=b2bOsobaChyba(x); if(ch) return b2bVOkne(ch);
+      if(pristup && !pristup.length) return b2bVOkne("Vyberte aspoň jeden modul, ku ktorému bude mať osoba prístup.");
       let id=null;
       try{ const r=await sb.from("b2b_osoby").insert(Object.assign({projekt_id:B2B.d.pid}, x)).select("id"); if(r.error) throw r.error; id=r.data&&r.data[0]&&r.data[0].id; }
       catch(e){ b2bChyba(e, "Osobu sa nepodarilo pridať"); return; }
       try{ if(rola==="management") await b2bNastavRolu(id, "management"); }
       catch(e){ b2bChyba(e, "Osoba je pridaná ako člen tímu, rolu Management a support sa nepodarilo nastaviť"); }
+      try{ if(pristup) await b2bNastavPristup(id, pristup); }
+      catch(e){ b2bChyba(e, "Osoba je pridaná, prístup k modulom sa nepodarilo nastaviť"); }
       closeModal(); b2bObnov(); }, null, null, "Pridať");
 }
 function b2bOsobaUprav(id){
   const o=B2B.d.osoby.find(x=>x.id===id); if(!o) return;
-  openModal("Upraviť osobu", b2bOsobaForm(o), async ()=>{ const x=b2bOsobaZForm(o), rola=x.rola; delete x.rola; const ch=b2bOsobaChyba(x); if(ch) return b2bVOkne(ch);
+  openModal("Upraviť osobu", b2bOsobaForm(o), async ()=>{ const x=b2bOsobaZForm(o), rola=x.rola, pristup=x.pristup; delete x.rola; delete x.pristup; const ch=b2bOsobaChyba(x); if(ch) return b2bVOkne(ch);
+    if(pristup && !pristup.length) return b2bVOkne("Vyberte aspoň jeden modul, ku ktorému bude mať osoba prístup.");
     const zmena=rola && rola!==(o.rola||"clen");
     try{
       // Management nesmie mať miesto (server): na člena tímu najprv rola, na management najprv miesto preč.
       if(zmena && rola==="clen") await b2bNastavRolu(id, "clen");
       const r=await sb.from("b2b_osoby").update(x).eq("id",id).select("id"); if(r.error) throw r.error; if(!r.data||!r.data.length) throw new Error("nemáte právo meniť túto osobu");
       if(zmena && rola==="management") await b2bNastavRolu(id, "management");
+      if(pristup && pristup.slice().sort().join()!==(o.moduly||B2B_MODULY_PREDVOLENE).slice().sort().join()) await b2bNastavPristup(id, pristup);
       closeModal(); b2bObnov(); }catch(e){ b2bChyba(e, "Osobu sa nepodarilo uložiť"); } });
 }
 async function b2bPozvi(osobaId){
@@ -27507,7 +27583,7 @@ function b2bVystupForm(v){
   return `<div class="mfield"><label>Typ zo zmluvy</label><select id="b2bVTyp"><option value="">—</option>${(D.typy_vystupov||[]).map(t=>`<option value="${esc(t.id)}"${v&&v.typ===t.id?" selected":""}>${esc(t.nazov||t.id)}</option>`).join("")}</select></div>
     <div class="mfield"><label>Názov</label><input id="b2bVNazov" maxlength="300" value="${esc(v&&v.nazov||"")}" placeholder="napr. Zápis z riadiaceho výboru"></div>
     <div class="mfield"><label>Dátum</label><input id="b2bVDatum" type="date" value="${esc(v&&v.datum||b2bIso(new Date()))}"></div>
-    <div class="mfield"><label>Autori</label><div style="display:flex;flex-direction:column;gap:4px">${d.osoby.filter(o=>o.aktivny||aut.has(o.id)).map(o=>`<label style="display:flex;gap:6px;align-items:center;font-size:13px;font-weight:400;margin:0"><input type="checkbox" class="b2bVAut" value="${esc(o.id)}"${aut.has(o.id)?" checked":""} style="width:auto"> ${esc(o.meno)}</label>`).join("")}</div></div>
+    <div class="mfield"><label>Autori</label><div style="display:flex;flex-direction:column;gap:4px">${d.osoby.filter(o=>(o.aktivny && b2bOsobaVykaz(o, d))||aut.has(o.id)).map(o=>`<label style="display:flex;gap:6px;align-items:center;font-size:13px;font-weight:400;margin:0"><input type="checkbox" class="b2bVAut" value="${esc(o.id)}"${aut.has(o.id)?" checked":""} style="width:auto"> ${esc(o.meno)}</label>`).join("")}</div></div>
     ${v? "" : `<div class="csub" style="margin:0">ID (${esc(d.projekt.kod)}-V-…) pridelí server pri uložení a nikdy sa nepoužije znova. Súbor nahráte v zozname výstupov.</div>`}`;
 }
 function b2bVystupZForm(){
@@ -28052,7 +28128,7 @@ function b2bTimHtml(){
   // Hotovo za kohokoľvek ktorýkoľvek člen (zastupiteľnosť, č. 295 — predtým len správca
   // a Management a support, č. 285 R3). Management sám nerobí — v tíme ho niet, pokiaľ nemá hodiny z čias pred rolou.
   const man=b2bSomVTime();
-  const riadky=d.osoby.filter(o=>(o.aktivny || hod[o.id]) && (!b2bJeManagement(o) || hod[o.id])).map(o=>{
+  const riadky=d.osoby.filter(o=>(o.aktivny || hod[o.id]) && (!b2bJeManagement(o) || hod[o.id]) && (b2bOsobaVykaz(o, d) || hod[o.id])).map(o=>{
     const hot=d.mesiace.some(m=>m.osoba_id===o.id && m.stav==="hotovy"), mozem=o.aktivny && !b2bJeManagement(o) && (man || !o.user_id);
     return `<tr><td>${esc(o.meno)}${o.user_id? "" : ' <span class="apill" style="font-size:10px">bez účtu</span>'}</td><td>${esc(org[o.organizacia]||"—")}</td><td style="text-align:right">${hod[o.id]||0}</td><td>${hot? "✓ hotovo"+(mozem && man? ` · <a href="#" onclick="b2bHotovo('${o.id}',false);return false">vrátiť</a>` : "") : (mozem? `<a href="#" onclick="b2bHotovo('${o.id}',true);return false">označiť hotovo</a>` : "")}</td></tr>`;
   }).join("");
@@ -28237,6 +28313,7 @@ function b2bNastaveniaHtml(){
     ${b2bPrehladZmluvyHtml(d)}
     ${b2bPrijemHtml(d)}
     ${b2bZmluvaHtml(D, spravca)}
+    ${b2bModulyProjektuHtml(d, spravca)}
     <div class="card" style="padding:12px 14px">
       <b>Osoby</b>
       <div class="b2bscroll"><table class="b2bt b2bdet"><thead><tr><th>Meno</th><th>Organizácia</th><th>Miesto v Prílohe 4</th><th>Prístup</th><th></th></tr></thead><tbody>${osoby}</tbody></table></div>
@@ -28752,7 +28829,7 @@ function b2bPrijateJeKalendar(x){
 // Osoba projektu s týmto kontaktným e-mailom (admin_83) — odosielateľ výkazu či kalendára.
 function b2bOsobaPodlaEmailu(d, email){
   const e=String(email||"").trim().toLowerCase(); if(!e || !d) return null;
-  return (d.osoby||[]).find(o=>o.aktivny && o.email && String(o.email).toLowerCase()===e)||null;
+  return (d.osoby||[]).find(o=>o.aktivny && b2bOsobaVykaz(o, d) && o.email && String(o.email).toLowerCase()===e)||null;
 }
 // Komu smiem zapísať hodiny z kalendára: sebe a osobám bez účtu (nie Management a support).
 function b2bIcsCiele(d){
@@ -28967,7 +29044,9 @@ function b2bZoznamHtml(rep){
   const poz=B2B.pozvanky.map(p=>`<div class="card" style="padding:12px 14px;border-color:var(--brand)">
       <b>Pozvánka do projektu ${esc(p.projekt_nazov)}</b><div class="csub" style="margin:4px 0 8px">ako ${esc(p.osoba_meno)}${p.rola==="management"? " (Management a support — výkazy a objednávky tímu, hodiny nevykazujete)" : ""} · platí do ${fmtDatum(String(p.plati_do).slice(0,10))}</div>
       <button class="aabtn pri" onclick="b2bPrijmiZAppky('${p.id}')">Prijať</button></div>`).join("");
-  const proj=B2B.projekty.map(p=>`<div class="card" style="padding:12px 14px;cursor:pointer" onclick="b2bOtvorProjekt('${p.id}')">
+  // Len projekty, kde ten modul mám (admin_89): BUGstation „bs“, Reporting true, inak výkaz.
+  const modulZoznamu=rep==="bs"? "bugstation" : rep? "reporting" : "vykaz";
+  const proj=B2B.projekty.filter(p=>b2bMojeModuly(p).includes(modulZoznamu)).map(p=>`<div class="card" style="padding:12px 14px;cursor:pointer" onclick="b2bOtvorProjekt('${p.id}')">
       <b>${esc(p.nazov)}</b> <span class="apill" style="font-size:10px">${esc(p.kod)}</span>${p.spravca? ' <span class="apill" style="font-size:10px">správca</span>' : ""}${p.rola==="management"? ' <span class="apill" style="font-size:10px">management</span>' : ""}</div>`).join("");
   const chyba=B2B.chyba? `<div class="card" style="padding:12px 14px;border-color:var(--neg)"><b style="color:var(--neg)">Projekty sa nepodarilo načítať</b><div class="csub" style="margin:4px 0 0">${esc(B2B.chyba)} — prázdny zoznam preto nemusí znamenať, že projekty nemáte.</div></div>` : "";
   return `<div class="csub" style="margin:0 2px 14px">${rep==="bs"? "BUGstation patrí projektu — úlohy, defekty, incidenty a zmenové požiadavky tímu. Vyberte projekt." : rep? "Reporting programu patrí projektu — roadmapa a QA report z plánu MS Project a registrov. Vyberte projekt." : "Projekty na zmluvu: hodiny tímu z kalendára alebo ručne, mesačný pracovný výkaz pre objednávateľa. Prístup je na pozvánku."}</div>
@@ -29362,7 +29441,7 @@ async function b2bImportCitajSubor(nazov, data){
     // Pracovník z hlavičky: existujúca osoba bez účtu podľa mena, inak nová s tým menom.
     let pozn="";
     if(imp.pracovnik){
-      const kl=b2bMenoKluc(imp.pracovnik), ex=d.osoby.find(o=>o.aktivny && b2bMenoKluc(o.meno)===kl), s=document.getElementById("b2bImpOsoba"), n=document.getElementById("b2bImpNova");
+      const kl=b2bMenoKluc(imp.pracovnik), ex=d.osoby.find(o=>o.aktivny && b2bOsobaVykaz(o, d) && b2bMenoKluc(o.meno)===kl), s=document.getElementById("b2bImpOsoba"), n=document.getElementById("b2bImpNova");
       if(b2bJeManagement(ex)) pozn=`<div style="color:var(--neg)">${esc(ex.meno)} má v projekte rolu Management a support — hodiny sa mu nezapisujú.</div>`;
       else if(ex && ex.user_id) pozn=`<div style="color:var(--neg)">${esc(ex.meno)} má v projekte účet — svoje hodiny zapisuje sám, import ich neprepíše.</div>`;
       else if(ex){ if(s) s.value=ex.id; }
@@ -29405,7 +29484,7 @@ async function b2bImportUloz(){
     const mapa={}, osoby=d.osoby.slice();
     const najdiAleboZaloz=async (meno, miesto)=>{
       const kl=norm(meno); if(mapa[kl]) return mapa[kl];
-      const ex=osoby.find(o=>norm(o.meno)===kl && o.aktivny);
+      const ex=osoby.find(o=>norm(o.meno)===kl && o.aktivny && (o.moduly===undefined || b2bOsobaVykaz(o, d)));
       if(ex){ if(b2bJeManagement(ex)) throw new Error("„"+meno+"“ má v projekte rolu Management a support — hodiny sa mu nezapisujú.");
         if(ex.user_id) throw new Error("„"+meno+"“ má v projekte účet — svoje hodiny zapisuje sám, import ich neprepíše."); return (mapa[kl]=ex.id); }
       const r=await sb.from("b2b_osoby").insert({projekt_id:d.pid, meno, organizacia:org, miesta:miesto? [{miesto}] : []}).select("id");

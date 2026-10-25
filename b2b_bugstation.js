@@ -639,7 +639,12 @@ function bsJa(){
   const o = typeof b2bMojaOsoba === "function" ? b2bMojaOsoba() : null;
   return o ? { osoba: o.id, roly: o.bs_role || [], spravca: !!o.spravca } : { osoba: null, roly: [], spravca: false };
 }
-function bsOsoby(){ return ((B2B.d && B2B.d.osoby) || []).filter(o => o.aktivny); }
+// Osoby s prístupom do BUGstation (admin_89, BS0). Pred migráciou projekt moduly nemá
+// a BUGstation vidí každý aktívny člen (admin_88).
+function bsOsoby(){
+  const P = (B2B.d && B2B.d.projekt) || {};
+  return ((B2B.d && B2B.d.osoby) || []).filter(o => o.aktivny && (!P.moduly || typeof b2bOsobaMaModul !== "function" || b2bOsobaMaModul(o, "bugstation")));
+}
 function bsMeno(osobaId){
   if (!osobaId) return "";
   const o = ((B2B.d && B2B.d.osoby) || []).find(x => x.id === osobaId);
@@ -785,7 +790,8 @@ function bsZapnutieHtml(){
     (ja.spravca ? '<button class="aabtn pri" onclick="bsZapni()">Zapnúť BUGstation</button>' : "") + "</div>";
 }
 async function bsZapni(){
-  try { await bsRpc("b2b_bs_zapni", { p_projekt: B2B.pid }); BS.pohlad = "nastavenia"; await bsObnov(); }
+  // Zapnutie pridá projektu modul bugstation (admin_89) — zoznam projektov a záložky sa načítajú znova.
+  try { await bsRpc("b2b_bs_zapni", { p_projekt: B2B.pid }); BS.pohlad = "nastavenia"; if (typeof b2bNacitajClenstvo === "function") await b2bNacitajClenstvo(); await bsObnov(); }
   catch (e) { bsChyba(e, "BUGstation sa nepodarilo zapnúť"); }
 }
 
@@ -837,7 +843,8 @@ function bsShellHtml(){
     '<div class="bs-telo"><div class="bs-obsah" data-bs-scroll="obsah"><div class="bs-sirka">' + bsObsahHtml() + "</div></div>" + drawer + "</div></main></div>";
 }
 function bsMenuHtml(){
-  const riadky = (B2B.projekty || []).map(p => {
+  const sBs = (B2B.projekty || []).filter(p => typeof b2bMojeModuly !== "function" || !p.moje_moduly || b2bMojeModuly(p).includes("bugstation"));
+  const riadky = sBs.map(p => {
     const on = p.id === B2B.pid;
     return '<button type="button" class="bs-menu-p' + (on ? " on" : "") + '" onclick="bsVyberProjekt(\'' + p.id + '\')"><span class="bs-kod">' + esc(p.kod) + '</span><span style="flex:1;min-width:0"><b>' +
       esc(p.nazov) + "</b><i>" + (p.spravca ? "správca" : "člen") + '</i></span><span class="bs-tick">✓</span></button>';
