@@ -3172,6 +3172,7 @@ const MODUL_KATEGORIA={
   // B2B (spec 157): brána je členstvo používateľa, nie plán firmy — b2bMaPristup.
   b2b_vykaz:"b2b",
   b2b_report:"b2b",   // Reporting programu je samostatný modul skupiny B2B (č. 305)
+  b2b_bugstation:"b2b",   // BUGstation — úlohy, defekty, incidenty a zmeny projektu (č. 307)
   knihy:"knihy",
   // Asistent (spec 155.7, kolo A3): vlastná kategória. Od kola ST (156.10) ju
   // majú plány Neplatiteľ DPH, Platiteľ DPH a Účtovník (PLANY.moduly); Free nie
@@ -9010,6 +9011,7 @@ const APPS={
   superdash:{n:"Štatistiky",      ic:"📊",c:"var(--m-neutral)", d:"Kompletný prehľad roka — grafy, rozdelenie, počty"},
   b2b_vykaz:{n:"Pracovný výkaz",  ic:"🤝",c:"var(--m-neutral)", d:"Hodiny tímu podľa zmluvy, mesačný výkaz pre objednávateľa"},
   b2b_report:{n:"Reporting",      ic:"🧭",c:"var(--m-neutral)", d:"Roadmapa a QA report programu z plánu MS Project a registrov"},
+  b2b_bugstation:{n:"BUGstation", ic:"🐞",c:"var(--m-neutral)", d:"Úlohy, defekty, incidenty a zmenové požiadavky projektu"},
   efaktury: {n:"E-faktúry Peppol", ic:"📮",c:"var(--m-prijmy)", d:"Čo odišlo a čo prišlo sieťou Peppol"},
   navody:   {n:"Návody",          ic:"?", c:"var(--m-neutral)", d:"Ako na to — krátko, s ukážkou obrazovky"},
 };
@@ -9030,7 +9032,7 @@ const SKUPINY=[
   // zásady každému; plán Free agendu inak nemá.
   {id:"agenda",  n:"Firemná agenda",  ic:"🗂", c:"var(--m-neutral)", dd:"knihy, export, majetok, papiere", moduly:["knihy","zaloha","majetok","dokumenty","dovolenka","zdielanie"], druhotna:true},
   // B2B služby (spec 157) — len s členstvom alebo pozvánkou, inak sa skupina nekreslí.
-  {id:"b2b",     n:"B2B služby",      ic:"🤝", c:"var(--m-neutral)", dd:"projekty na zmluvu, pracovný výkaz, reporting", moduly:["b2b_vykaz","b2b_report"]},
+  {id:"b2b",     n:"B2B služby",      ic:"🤝", c:"var(--m-neutral)", dd:"projekty na zmluvu, pracovný výkaz, reporting, evidencia chýb", moduly:["b2b_vykaz","b2b_report","b2b_bugstation"]},
 ];
 // samostatné (mimo skupín): kalendar (prierezový), data (nastavenia v hlavičke)
 // Kniha jázd stojí samostatne: zapisuje sa týždenne, kým majetok a papiere
@@ -10749,6 +10751,7 @@ function renderAppModul(id){
   if(id==="vykazy") return appVykazy();
   if(id==="b2b_vykaz") return appB2bVykaz();
   if(id==="b2b_report") return appB2bReport();
+  if(id==="b2b_bugstation") return appB2bBugstation();
   if(id==="kalendar") return appKalendar();
   if(id==="dovolenka") return appDovolenka();
   if(id==="dokumenty") return appDokumenty();
@@ -26772,7 +26775,7 @@ async function b2bOtvorProjekt(pid){ B2B.pid=pid; B2B.mesiac=B2B.mesiac||b2bMesi
 function b2bSpatZoznam(){ B2B.pid=null; B2B.d=null; b2bPrekresli(); }
 // Pracovný výkaz a Reporting zdieľajú výber projektu (B2B.pid, B2B.d) — zoznam,
 // otvorenie projektu a jeho načítanie prekreslia ten modul, ktorý je na obrazovke.
-function b2bPrekresli(){ if(modulNaObrazovke()==="b2b_report") appB2bReport(); else appB2bVykaz(); }
+function b2bPrekresli(){ const m=modulNaObrazovke(); if(m==="b2b_report") appB2bReport(); else if(m==="b2b_bugstation") appB2bBugstation(); else appB2bVykaz(); }
 function b2bZmenMesiac(o){ B2B.mesiac=b2bPosunMesiac(B2B.mesiac||b2bMesiacTeraz(), o); B2B.d=null; appB2bVykaz(); }
 function b2bPohlad(p){ B2B.pohlad=p; appB2bVykaz(); }
 // Projektový reporting (dev/docs/NAVRH_B2B_REPORTING.md §13): kód je v lenivom
@@ -28967,7 +28970,7 @@ function b2bZoznamHtml(rep){
   const proj=B2B.projekty.map(p=>`<div class="card" style="padding:12px 14px;cursor:pointer" onclick="b2bOtvorProjekt('${p.id}')">
       <b>${esc(p.nazov)}</b> <span class="apill" style="font-size:10px">${esc(p.kod)}</span>${p.spravca? ' <span class="apill" style="font-size:10px">správca</span>' : ""}${p.rola==="management"? ' <span class="apill" style="font-size:10px">management</span>' : ""}</div>`).join("");
   const chyba=B2B.chyba? `<div class="card" style="padding:12px 14px;border-color:var(--neg)"><b style="color:var(--neg)">Projekty sa nepodarilo načítať</b><div class="csub" style="margin:4px 0 0">${esc(B2B.chyba)} — prázdny zoznam preto nemusí znamenať, že projekty nemáte.</div></div>` : "";
-  return `<div class="csub" style="margin:0 2px 14px">${rep? "Reporting programu patrí projektu — roadmapa a QA report z plánu MS Project a registrov. Vyberte projekt." : "Projekty na zmluvu: hodiny tímu z kalendára alebo ručne, mesačný pracovný výkaz pre objednávateľa. Prístup je na pozvánku."}</div>
+  return `<div class="csub" style="margin:0 2px 14px">${rep==="bs"? "BUGstation patrí projektu — úlohy, defekty, incidenty a zmenové požiadavky tímu. Vyberte projekt." : rep? "Reporting programu patrí projektu — roadmapa a QA report z plánu MS Project a registrov. Vyberte projekt." : "Projekty na zmluvu: hodiny tímu z kalendára alebo ručne, mesačný pracovný výkaz pre objednávateľa. Prístup je na pozvánku."}</div>
     ${b2bPozvankaStavHtml()}${chyba}${poz}${proj||(!poz? `<div class="aempty">Zatiaľ nie ste v žiadnom projekte.</div>` : "")}
     ${B2B.zakladatel && !rep? `<button class="aabtn pri" onclick="b2bNovyProjekt()" title="Založiť projekt na novú zmluvu — z CRZ, PDF zmluvy alebo JSON">＋ Nový projekt</button>` : ""}
     ${!firmaData? `<div class="csub" style="margin:18px 2px 0">Účet bez vlastnej firmy — <a href="#" onclick="spustiOnboarding();return false">založiť firmu</a> · <a href="#" onclick="doLogout();return false">odhlásiť sa</a></div>` : ""}`;
@@ -28977,6 +28980,7 @@ async function b2bNacitajAZobraz(){
   catch(e){ console.error("B2B: projekt sa nenačítal", e); B2B.chybaProjektu=String((e&&e.message)||e); B2B.d={chyba:true, pid:B2B.pid, mesiac:B2B.mesiac}; }
   if(modulNaObrazovke()==="b2b_vykaz"){ appB2bVykaz(); b2bUvodAuto(B2B.d); }   // sprievodca po prvom načítaní projektu (č. 289)
   else if(modulNaObrazovke()==="b2b_report") appB2bReport();
+  else if(modulNaObrazovke()==="b2b_bugstation") appB2bBugstation();
   // import výkazu prepnutý na mesiac súboru: okno znova s tým istým súborom
   const pok=B2B._impPokracuj; B2B._impPokracuj=null;
   if(pok && B2B.d && !B2B.d.chyba) b2bImportOsoby(pok);
@@ -28997,6 +29001,41 @@ function appB2bReport(){
   if(B2B.d.chyba){ s.innerHTML=appHlavicka("b2b_report",`<button class="aabtn" onclick="b2bSpatZoznam()">‹ Projekty</button>`)+
     `<div class="card" style="padding:12px 14px;border-color:var(--neg)"><b style="color:var(--neg)">Projekt sa nepodarilo načítať</b><div class="csub" style="margin:4px 0 8px">${esc(B2B.chybaProjektu||"")}</div><button class="aabtn" onclick="b2bObnov()">Skúsiť znova</button></div>`; return; }
   s.innerHTML=appHlavicka("b2b_report", spat)+`<div data-scroll="b2bRep"><div style="margin:0 2px 12px"><b style="font-size:15px">${esc(B2B.d.projekt.nazov)}</b></div>${b2bReportingHtml()}</div>`;
+}
+// ── B2B: BUGstation — úlohy, defekty, incidenty a zmenové požiadavky (č. 307) ──
+// Tretí modul skupiny so spoločným výberom projektu (B2B.pid, B2B.d — osoby
+// a roly bs_role). Obsah kreslí lenivý b2b_bugstation.js (dev/docs/NAVRH_B2B_BUGSTATION.md).
+let _bsNacitanie=null, _bsChybaNacitania="";
+function bsNacitajSkript(){
+  if(typeof window.bsZalozkaHtml==="function") return Promise.resolve();
+  if(_bsNacitanie) return _bsNacitanie;
+  _bsNacitanie=new Promise((ok,zle)=>{
+    const s=document.createElement("script");
+    s.src="b2b_bugstation.js?v="+encodeURIComponent(APP_VERZIA);
+    s.onload=ok; s.onerror=()=>zle(new Error("nenačítalo sa b2b_bugstation.js"));
+    document.head.appendChild(s);
+  }).catch(e=>{ _bsNacitanie=null; console.error(e); throw e; });
+  return _bsNacitanie;
+}
+function b2bBugstationHtml(){
+  if(typeof window.bsZalozkaHtml==="function") return bsZalozkaHtml();
+  if(_bsChybaNacitania) return `<div class="card" style="padding:12px 14px;border-color:var(--neg)"><b style="color:var(--neg)">BUGstation sa nenačítal</b><div class="csub">${esc(_bsChybaNacitania)}</div><button class="aabtn" onclick="_bsChybaNacitania='';appB2bBugstation()">Skúsiť znova</button></div>`;
+  bsNacitajSkript().then(()=>{ if(modulNaObrazovke()==="b2b_bugstation") appB2bBugstation(); })
+    .catch(e=>{ _bsChybaNacitania=(e&&e.message)||String(e); if(modulNaObrazovke()==="b2b_bugstation") appB2bBugstation(); });
+  return `<div class="aempty">Načítavam BUGstation…</div>`;
+}
+function appB2bBugstation(){
+  if(prekresliVRamci("b2b_bugstation")) return;
+  const s=document.getElementById("appScreen");
+  if(b2bBezServera()){ s.innerHTML=appHlavicka("b2b_bugstation")+`<div class="aempty">BUGstation funguje len s prihlásením do cloudu.</div>`; return; }
+  if(!B2B.pid){ s.innerHTML=appHlavicka("b2b_bugstation")+b2bZoznamHtml("bs"); return; }
+  B2B.mesiac=B2B.mesiac||b2bMesiacTeraz();
+  if(!B2B.d || B2B.d.pid!==B2B.pid || B2B.d.mesiac!==B2B.mesiac){
+    s.innerHTML=appHlavicka("b2b_bugstation")+`<div class="aempty">Načítavam projekt…</div>`; b2bNacitajAZobraz(); return; }
+  const spat=B2B.projekty.length>1||B2B.pozvanky.length||B2B.zakladatel? `<button class="aabtn" onclick="b2bSpatZoznam()">‹ Projekty</button>` : "";
+  if(B2B.d.chyba){ s.innerHTML=appHlavicka("b2b_bugstation",`<button class="aabtn" onclick="b2bSpatZoznam()">‹ Projekty</button>`)+
+    `<div class="card" style="padding:12px 14px;border-color:var(--neg)"><b style="color:var(--neg)">Projekt sa nepodarilo načítať</b><div class="csub" style="margin:4px 0 8px">${esc(B2B.chybaProjektu||"")}</div><button class="aabtn" onclick="b2bObnov()">Skúsiť znova</button></div>`; return; }
+  s.innerHTML=appHlavicka("b2b_bugstation", spat)+`<div data-scroll="b2bBs">${b2bBugstationHtml()}</div>`;
 }
 function appB2bVykaz(){
   if(prekresliVRamci("b2b_vykaz")) return;
