@@ -26399,14 +26399,29 @@ function b2bPrvyModul(pid){
   const moje=p? b2bMojeModuly(p) : ["vykaz","reporting","bugstation"].filter(b2bMaModul);
   return moje.includes("vykaz")? "b2b_vykaz" : moje.includes("bugstation")? "b2b_bugstation" : moje.includes("reporting")? "b2b_report" : "b2b_vykaz";
 }
+// B2B.pid je spoločný pre všetky moduly: projekt vybraný vo Výkaze nemusí mať Reporting
+// či BUGstation (alebo k nemu nemám prístup). Záložka vtedy ukáže zoznam projektov
+// s modulom a vetu prečo — B2B.pid sa nemaže, po návrate do Výkazu ostane vybraný.
+function b2bPidBezModulu(modul){
+  if(!B2B.pid) return null;
+  const p=B2B.projekty.find(x=>x.id===B2B.pid);
+  return p && !b2bMojeModuly(p).includes(modul)? p : null;
+}
+function b2bBezModuluHtml(p, modul){
+  const n=B2B_MODULY_NAZOV[modul]||modul, pouziva=Array.isArray(p.moduly) && p.moduly.includes(modul);
+  return `<div class="card" style="padding:12px 14px;border-color:var(--warn)"><b>${pouziva? `V projekte ${esc(p.nazov)} nemáte prístup do modulu ${esc(n)}` : `Projekt ${esc(p.nazov)} ${esc(n)} nepoužíva`}</b>
+    <div class="csub" style="margin:4px 0 0">${pouziva? "Prístup prideľuje správca projektu v karte Projekt → Osoby." : "Moduly projektu zapína jeho správca v karte Projekt."} Nižšie sú projekty, kde ${esc(n)} máte.</div></div>`
+    +b2bZoznamHtml(modul==="bugstation"? "bs" : modul==="reporting");
+}
 async function b2bNacitajClenstvo(){
   if(b2bBezServera()){ B2B.projekty=[]; B2B.pozvanky=[]; B2B.zakladatel=false; B2B.nacitane=true; return; }
   try{
     const [p,z,k,m]=await Promise.all([sb.rpc("b2b_moje_projekty"), sb.rpc("b2b_moje_pozvanky"), sb.rpc("b2b_som_zakladatel"), sb.rpc("b2b_moje_moduly")]);
     const ch=p.error||z.error||k.error; if(ch) throw ch;
-    // b2b_moje_moduly (admin_89) — bez migrácie funkcia chýba a platia predvolené moduly; iná chyba sa hlási.
-    let mm=[];
-    if(m.error){ if(!(m.error.code==="PGRST202" || m.error.code==="42883")) throw m.error; }
+    // b2b_moje_moduly (admin_89) — bez migrácie funkcia chýba a platia predvolené moduly.
+    // Iná chyba projekty nezahodí (ostanú s predvolenými modulmi), ale v zozname sa ukáže.
+    let mm=[]; B2B.chybaModulov=null;
+    if(m.error){ if(!(m.error.code==="PGRST202" || m.error.code==="42883")){ console.error("B2B: moduly projektov sa nenačítali", m.error); B2B.chybaModulov=String(m.error.message||m.error); } }
     else mm=m.data||[];
     B2B.projekty=(p.data||[]).map(x=>{ const y=mm.find(q=>q.projekt_id===x.id); return y? Object.assign({}, x, {moduly:y.moduly, moje_moduly:y.moje_moduly, bs_role:y.bs_role}) : x; });
     B2B.pozvanky=z.data||[]; B2B.zakladatel=!!k.data; B2B.chyba=null;
@@ -26472,7 +26487,7 @@ async function b2bSpracujPozvanku(){
     B2B.pozvankaBezi=false;
     B2B.pozvankaChyba={kod:(e&&e.kod)||null, text:(e&&e.message)||String(e)};
     console.error("B2B: pozvánka sa neprijala", e);
-    B2B.pid=null; otvorApp("b2b_vykaz");
+    B2B.pid=null; otvorApp(b2bPrvyModul());
     return false;
   }
 }
@@ -29048,7 +29063,8 @@ function b2bZoznamHtml(rep){
   const modulZoznamu=rep==="bs"? "bugstation" : rep? "reporting" : "vykaz";
   const proj=B2B.projekty.filter(p=>b2bMojeModuly(p).includes(modulZoznamu)).map(p=>`<div class="card" style="padding:12px 14px;cursor:pointer" onclick="b2bOtvorProjekt('${p.id}')">
       <b>${esc(p.nazov)}</b> <span class="apill" style="font-size:10px">${esc(p.kod)}</span>${p.spravca? ' <span class="apill" style="font-size:10px">správca</span>' : ""}${p.rola==="management"? ' <span class="apill" style="font-size:10px">management</span>' : ""}</div>`).join("");
-  const chyba=B2B.chyba? `<div class="card" style="padding:12px 14px;border-color:var(--neg)"><b style="color:var(--neg)">Projekty sa nepodarilo načítať</b><div class="csub" style="margin:4px 0 0">${esc(B2B.chyba)} — prázdny zoznam preto nemusí znamenať, že projekty nemáte.</div></div>` : "";
+  const chyba=B2B.chyba? `<div class="card" style="padding:12px 14px;border-color:var(--neg)"><b style="color:var(--neg)">Projekty sa nepodarilo načítať</b><div class="csub" style="margin:4px 0 0">${esc(B2B.chyba)} — prázdny zoznam preto nemusí znamenať, že projekty nemáte.</div></div>`
+    : B2B.chybaModulov? `<div class="card" style="padding:12px 14px;border-color:var(--warn)"><b>Moduly projektov sa nepodarilo načítať</b><div class="csub" style="margin:4px 0 0">${esc(B2B.chybaModulov)} — projekty ukazujem s Pracovným výkazom a Reportingom; BUGstation môže chýbať.</div></div>` : "";
   return `<div class="csub" style="margin:0 2px 14px">${rep==="bs"? "BUGstation patrí projektu — úlohy, defekty, incidenty a zmenové požiadavky tímu. Vyberte projekt." : rep? "Reporting programu patrí projektu — roadmapa a QA report z plánu MS Project a registrov. Vyberte projekt." : "Projekty na zmluvu: hodiny tímu z kalendára alebo ručne, mesačný pracovný výkaz pre objednávateľa. Prístup je na pozvánku."}</div>
     ${b2bPozvankaStavHtml()}${chyba}${poz}${proj||(!poz? `<div class="aempty">Zatiaľ nie ste v žiadnom projekte.</div>` : "")}
     ${B2B.zakladatel && !rep? `<button class="aabtn pri" onclick="b2bNovyProjekt()" title="Založiť projekt na novú zmluvu — z CRZ, PDF zmluvy alebo JSON">＋ Nový projekt</button>` : ""}
@@ -29073,6 +29089,8 @@ function appB2bReport(){
   const s=document.getElementById("appScreen");
   if(b2bBezServera()){ s.innerHTML=appHlavicka("b2b_report")+`<div class="aempty">Reporting funguje len s prihlásením do cloudu.</div>`; return; }
   if(!B2B.pid){ s.innerHTML=appHlavicka("b2b_report")+b2bZoznamHtml(true); return; }
+  const bezModulu=b2bPidBezModulu("reporting");
+  if(bezModulu){ s.innerHTML=appHlavicka("b2b_report")+b2bBezModuluHtml(bezModulu, "reporting"); return; }
   B2B.mesiac=B2B.mesiac||b2bMesiacTeraz();
   if(!B2B.d || B2B.d.pid!==B2B.pid || B2B.d.mesiac!==B2B.mesiac){
     s.innerHTML=appHlavicka("b2b_report")+`<div class="aempty">Načítavam projekt…</div>`; b2bNacitajAZobraz(); return; }
@@ -29108,6 +29126,8 @@ function appB2bBugstation(){
   const s=document.getElementById("appScreen");
   if(b2bBezServera()){ s.innerHTML=appHlavicka("b2b_bugstation")+`<div class="aempty">BUGstation funguje len s prihlásením do cloudu.</div>`; return; }
   if(!B2B.pid){ s.innerHTML=appHlavicka("b2b_bugstation")+b2bZoznamHtml("bs"); return; }
+  const bezModulu=b2bPidBezModulu("bugstation");
+  if(bezModulu){ s.innerHTML=appHlavicka("b2b_bugstation")+b2bBezModuluHtml(bezModulu, "bugstation"); return; }
   B2B.mesiac=B2B.mesiac||b2bMesiacTeraz();
   if(!B2B.d || B2B.d.pid!==B2B.pid || B2B.d.mesiac!==B2B.mesiac){
     s.innerHTML=appHlavicka("b2b_bugstation")+`<div class="aempty">Načítavam projekt…</div>`; b2bNacitajAZobraz(); return; }
@@ -29121,6 +29141,8 @@ function appB2bVykaz(){
   const s=document.getElementById("appScreen");
   if(b2bBezServera()){ s.innerHTML=appHlavicka("b2b_vykaz")+`<div class="aempty">B2B služby fungujú len s prihlásením do cloudu.</div>`; return; }
   if(!B2B.pid){ s.innerHTML=appHlavicka("b2b_vykaz")+b2bZoznamHtml(); return; }
+  const bezModulu=b2bPidBezModulu("vykaz");
+  if(bezModulu){ s.innerHTML=appHlavicka("b2b_vykaz")+b2bBezModuluHtml(bezModulu, "vykaz"); return; }
   B2B.mesiac=B2B.mesiac||b2bMesiacTeraz();
   if(!B2B.d || B2B.d.pid!==B2B.pid || B2B.d.mesiac!==B2B.mesiac){
     s.innerHTML=appHlavicka("b2b_vykaz")+`<div class="aempty">Načítavam projekt…</div>`; b2bNacitajAZobraz(); return; }
