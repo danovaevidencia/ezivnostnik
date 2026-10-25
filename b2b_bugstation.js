@@ -76,14 +76,14 @@ const BS_AKCIE = {
   zamietnut:  { typy: BS_TYPY_8, z: ["identifikovane"], na: "vysvetlene", roly: ["tm", "ttl"], rozlisenie: 1, komentar: 1, prijate: 1, text: "Zamietnuť" },
   prevziat:   { typy: ["defekt", "incident"], z: ["odoslane"], na: "akceptovane", roly: ["dmd", "riesitel"], pridelenyRiesitel: 1, text: "Prevziať" },
   schvalit:   { typy: ["zmena"], z: ["odoslane"], na: "akceptovane", roly: ["tm"], text: "Schváliť" },
+  na_retest:  { typy: BS_TYPY_8, z: ["akceptovane"], na: "retest", roly: ["dmd", "riesitel"], pridelenyRiesitel: 1, text: "Poslať na retest" },
+  hotfix:     { typy: ["incident"], z: ["akceptovane"], na: "prod", roly: ["dmd"], text: "Hotfix nasadený" },
   vysvetlit:  { typy: BS_TYPY_8, z: ["odoslane", "akceptovane"], na: "vysvetlene", roly: ["dmd", "tm", "ttl"], rozlisenie: 1, komentar: 1, prijateRoly: ["tm", "ttl"], text: "Vyriešiť vysvetlením" },
   prijat:     { typy: BS_TYPY_8, z: ["vysvetlene"], na: "vysvetlene", roly: ["tm", "ttl"], len: "neprijate", text: "Prijať vysvetlenie" },
   neprijat:   { typy: BS_TYPY_8, z: ["vysvetlene"], na: "odoslane", roly: ["tm", "ttl"], len: "neprijate", komentar: 1, znovu: 1, text: "Neprijať vysvetlenie" },
-  na_retest:  { typy: BS_TYPY_8, z: ["akceptovane"], na: "retest", roly: ["dmd", "riesitel"], pridelenyRiesitel: 1, text: "Poslať na retest" },
   retest_ok:  { typy: BS_TYPY_8, z: ["retest"], na: "ok_test", roly: ["tester", "ttl", "tm"], text: "Retest OK" },
   retest_nie: { typy: BS_TYPY_8, z: ["retest"], na: "akceptovane", roly: ["tester", "ttl", "tm"], komentar: 1, znovu: 1, text: "Retest neprešiel" },
   nasadene:   { typy: BS_TYPY_8, z: ["ok_test"], na: "prod", roly: ["dmd"], text: "Nasadené na PROD" },
-  hotfix:     { typy: ["incident"], z: ["akceptovane"], na: "prod", roly: ["dmd"], text: "Hotfix nasadený" },
   overene:    { typy: BS_TYPY_8, z: ["prod"], na: "ok_prod", roly: ["tester", "ttl", "tm"], text: "Overené na PROD" },
   prod_nie:   { typy: BS_TYPY_8, z: ["prod"], na: "akceptovane", roly: ["tester", "ttl", "tm"], komentar: 1, znovu: 1, text: "Na PROD neprešlo" },
   znovu:      { typy: BS_TYPY_8, z: ["ok_prod", "vysvetlene"], na: "odoslane", roly: ["tm", "ttl"], len: "uzavrete", komentar: 1, znovu: 1, text: "Znovu otvoriť" },
@@ -431,7 +431,7 @@ const BS_CSS = [
   ".bs-lista-a{display:flex;flex-wrap:wrap;align-items:center;gap:6px}",
   ".bs-hl{display:flex;align-items:center;gap:7px;padding:4px 9px;border:1px solid var(--bs-l16);border-radius:6px;background:var(--bs-main);font:400 11px/1 var(--bs-sans);color:var(--bs-t4)}",
   ".bs-hl i{width:10px;height:10px;border:1.5px solid #7c8798;border-radius:50%}",
-  ".bs-hl kbd{font:500 9.5px/1 var(--bs-mono);color:var(--bs-t4)}",
+  ".bs-hl kbd{font:500 9.5px/1 var(--bs-mono);color:var(--bs-t4);white-space:nowrap}",
   ".bs-hl input{border:none;outline:none;background:transparent;font:inherit;color:var(--bs-t1);width:130px}",
   ".bs-chipf{display:flex;align-items:center;gap:5px;padding:4px 9px;border:1px solid var(--bs-l16);border-radius:6px;background:var(--bs-panel);font:400 11.5px/1 var(--bs-sans);color:var(--bs-t4);white-space:nowrap}",
   ".bs-chipf:hover{border-color:rgba(34,48,74,.32)}",
@@ -570,6 +570,7 @@ const BS_CSS = [
   ".bs-nav button,.bs-rail.on .bs-nav button{flex:none;width:auto;justify-content:flex-start;padding:8px 10px}",
   ".bs-nav .bs-nd{display:none}",
   ".bs-lista{padding:8px 12px}",
+  ".bs-hl kbd{display:none}",
   ".bs-obsah{padding:14px 12px 24px;overflow:visible}",
   ".bs-telo{display:block}",
   ".bs-drawer{position:fixed;inset:0;width:auto;z-index:60;border-left:0;padding:14px 16px 90px}",
@@ -713,8 +714,19 @@ function bsPrekresli(){
   const pos = {};
   document.querySelectorAll("[data-bs-scroll]").forEach(el => { pos[el.getAttribute("data-bs-scroll")] = el.scrollTop; });
   appB2bBugstation();
+  bsVyska();
   document.querySelectorAll("[data-bs-scroll]").forEach(el => { const k = el.getAttribute("data-bs-scroll"); if (pos[k]) el.scrollTop = pos[k]; });
 }
+// Shell s vlastným posunom vyplní okno pod hlavičkou appky (desktop); na mobile
+// roluje celá stránka ako inde v appke (CSS pod 900 px výšku ruší).
+function bsVyska(){
+  const k = document.getElementById("bsKoren");
+  if (!k) return;
+  if (window.innerWidth < 900) { k.style.height = ""; return; }
+  const hore = k.getBoundingClientRect().top + window.scrollY;
+  k.style.height = Math.max(520, window.innerHeight - hore - 16) + "px";
+}
+if (typeof window !== "undefined") window.addEventListener("resize", () => { if (typeof modulNaObrazovke === "function" && modulNaObrazovke() === "b2b_bugstation") bsVyska(); });
 
 // RPC s odmietnutím „kto a kedy“ (b2b_bs_odmietnutie) ako čitateľnou chybou.
 async function bsRpc(fn, params){
@@ -761,6 +773,7 @@ function bsZalozkaHtml(){
   if (BS.d.bezMigracie) return '<div class="card" style="padding:12px 14px"><b>BUGstation ešte nie je v databáze</b><div class="csub">Chýba migrácia admin_88 — po jej spustení sa modul otvorí.</div></div>';
   if (BS.d.chyba) return '<div class="card" style="padding:12px 14px;border-color:var(--neg)"><b style="color:var(--neg)">BUGstation sa nenačítal</b><div class="csub" style="margin:4px 0 8px">' + esc(BS.d.chyba) + '</div><button class="aabtn" onclick="bsObnov()">Skúsiť znova</button></div>';
   if (!BS.d.projekt) return bsZapnutieHtml();
+  setTimeout(bsVyska, 0);   // prvé kreslenie ide cez renderApp, nie bsPrekresli
   return bsShellHtml();
 }
 function bsZapnutieHtml(){
@@ -811,7 +824,7 @@ function bsShellHtml(){
     '<svg class="bs-iba-on" width="11" height="11" viewBox="0 0 20 20" style="flex:none;margin-left:auto"><path d="M4.6 7.4 10 12.8l5.4-5.4-1.5-1.5L10 9.8 6.1 5.9z" fill="#b0bacb"/></svg></button>' +
     (BS.menu ? bsMenuHtml() : "") + "</div>";
   const rel = (bsNast().releasy || []).find(r => r.stav === "aktivny");
-  const pata = '<div class="bs-pata">' + (rel ? '<span class="bs-pata-h">AKTÍVNY RELEASE</span><span class="bs-pata-t">' + esc(rel.nazov) + "</span>" : "") +
+  const pata = '<div class="bs-pata bs-iba-on">' + (rel ? '<span class="bs-pata-h">AKTÍVNY RELEASE</span><span class="bs-pata-t">' + esc(rel.nazov) + "</span>" : "") +
     '<button type="button" onclick="bsObnov()">↻ Obnoviť</button></div>';
   const ikPrep = BS.rail ? "M11.6 4.4 6 10l5.6 5.6 1.4-1.4L9.4 10l3.6-4.2zM4 4h1.8v12H4z" : "M8.4 4.4 14 10l-5.6 5.6L7 14.2 10.6 10 7 5.8zM14.2 4H16v12h-1.8z";
   const rail = '<aside class="bs-rail' + on + '"><div class="bs-rh">' + BS_LOGO + '<span class="bs-rh-nazov bs-iba-on">BUG<span>station</span></span>' +
