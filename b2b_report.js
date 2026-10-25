@@ -120,7 +120,9 @@ function repPlanProtokol(plan, predosly){
     maxUroven: plan.ulohy.reduce((m, u) => Math.max(m, u.uroven), 0),
     polia: plan.polia.filter(f => f.vyplnene > 0).map(f => ({ fieldId: f.fieldId, nazov: f.nazov, alias: f.alias, vyplnene: f.vyplnene })),
     bezDatumu: plan.ulohy.filter(u => !u.start || !u.finish).length,
-    duplicitneNazvy: 0, odobrate: 0, pridane: 0, premenovane: 0 };
+    duplicitneNazvy: 0, odobrate: 0, pridane: 0, premenovane: 0,
+    od: plan.ulohy.reduce((m, u) => (u.start && (!m || String(u.start).slice(0, 10) < m) ? String(u.start).slice(0, 10) : m), null),
+    do: plan.ulohy.reduce((m, u) => (u.finish && (!m || String(u.finish).slice(0, 10) > m) ? String(u.finish).slice(0, 10) : m), null) };
   const cnt = {};
   for (const u of plan.ulohy) cnt[u.nazov] = (cnt[u.nazov] || 0) + 1;
   p.duplicitneNazvy = Object.values(cnt).filter(n => n > 1).length;
@@ -1427,12 +1429,13 @@ const REP = { pid: null, pohlad: "programy", programy: null, program: null, prof
 const REP_TEXTAREA = "width:100%;box-sizing:border-box;border:1.5px solid var(--line);background:var(--bg);color:inherit;border-radius:10px;padding:10px 12px;font:inherit;font-size:14px;line-height:1.45;resize:vertical";
 function repJeUzky(){ return (window.innerWidth || 1280) < 900; }
 function repMozemPisat(){ const o = b2bMojaOsoba(); return !!(o && (o.spravca || o.rola !== "management")); }
-function repPrekresli(){ if (typeof appB2bReport === "function") appB2bReport(); }   // samostatný modul Reporting (č. 305)
+function repPrekresli(){ if (typeof appB2bReport === "function") appB2bReport(); repOverlayKresli(); }   // samostatný modul Reporting (č. 305)
 function repChyba(e, co){ console.error("Reporting " + co, e); REP.pracuje = ""; alert(co + ": " + ((e && e.message) || e)); repPrekresli(); }
 const REP_DRUHY = { plan: "Plán (MS Project XML)", issue: "Issue Log", ct: "Commitment Tracker", dep: "Dependency Log", zistenia: "Register zistení" };
 
 function repZalozkaHtml(){
-  if (REP.pid !== B2B.pid) { Object.assign(REP, { pid: B2B.pid, pohlad: "programy", programy: null, program: null, cyklus: null, plany: {}, registre: {} }); repNacitajProgramy(); }
+  repStyl();
+  if (REP.pid !== B2B.pid) { Object.assign(REP, { pid: B2B.pid, pohlad: "programy", programy: null, program: null, cyklus: null, plany: {}, registre: {}, ov: null, importVysledky: null }); repNacitajProgramy(); }
   if (REP.programy == null) return '<div class="aempty">Načítavam programy…</div>';
   if (REP.chyba) return '<div class="card" style="padding:12px 14px;border-color:var(--neg)"><b style="color:var(--neg)">Reporting sa nepodarilo načítať</b><div class="csub">' + esc(REP.chyba) + '</div><button class="aabtn" onclick="repNacitajProgramy()">Skúsiť znova</button></div>';
   const prac = REP.pracuje ? '<div class="card" style="padding:8px 12px;margin-bottom:10px"><span class="csub" style="margin:0">⏳ ' + esc(REP.pracuje) + '</span></div>' : "";
@@ -1541,7 +1544,8 @@ function repProgramHtml(){
   const sablona = d => d === "plan" ? "" : '<button class="aabtn" title="Prázdna šablóna so zoznamami hodnôt a pokynmi" onclick="repStiahniSablonu(\'' + d + '\')">Šablóna</button>';
   const vstupy = Object.keys(REP_DRUHY).filter(d => d !== "zistenia").map(d => {
     const v = repPosledny(d);
-    return '<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-top:1px solid var(--line);align-items:center;flex-wrap:wrap">' +
+    return '<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-top:1px solid var(--line);align-items:center;flex-wrap:wrap"' +
+      (pis ? ' ondragover="event.preventDefault()" ondrop="event.preventDefault();repImportSubory(event.dataTransfer.files,\'' + d + '\')"' : "") + '>' +
       '<div style="min-width:220px;flex:1"><b>' + esc(REP_DRUHY[d]) + '</b><div class="csub" style="margin:0">' + (v ? esc(v.nazov_suboru) + " · " + esc(String(v.nahrane || "").slice(0, 10)) + " · " + esc(repProtokolText(v)) : "zatiaľ nenahraté") + '</div></div>' +
       '<div style="display:flex;gap:6px">' + sablona(d) + (pis ? '<label class="aabtn" style="cursor:pointer">' + (v ? "Nahrať novší" : "Nahrať") + '<input type="file" accept="' + (d === "plan" ? ".xml" : ".xlsx,.xlsm") + '" style="display:none" onchange="repImport(\'' + d + '\', this)"></label>' : "") + '</div></div>';
   }).join("");
@@ -1550,7 +1554,7 @@ function repProgramHtml(){
     '<div style="min-width:220px;flex:1"><b>Register zistení</b><div class="csub" style="margin:0">vedie sa v portáli · ' + zr.length + " zistení, " + zr.filter(z => z.stav === "otvorene" || z.stav === "riesi").length + " otvorených" +
     (rz && rz.verzia ? " · verzia " + rz.verzia : "") + '</div></div><div style="display:flex;gap:6px">' + sablona("zistenia") +
     '<button class="aabtn pri" onclick="REP.pohlad=\'zistenia\';repPrekresli()">Otvoriť register</button></div></div>';
-  return hlav + navod +
+  return hlav + repPripravenostHtml(repPripravenostProgram()) + navod + (pis ? repDropHtml() : "") +
     '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>Cykly reportu</b>' + (cykly || '<div class="csub">Zatiaľ žiadny cyklus.</div>') + '</div>' +
     '<div class="card" style="padding:10px 14px"><b>Vstupy</b><div class="csub" style="margin:2px 0 4px">Excel zostáva zdrojom pravdy PMO; každý import je nová snímka, staré ostávajú pre porovnanie. Šablóna má hlavičku, zoznamy povolených hodnôt a pokyny — súbor z nej sa načíta bez úprav.</div>' + vstupy + registerHtml + '</div>';
 }
@@ -1567,7 +1571,13 @@ async function repStiahniSablonu(druh){
 async function repImport(druh, input){
   const f = input.files && input.files[0]; input.value = "";
   if (!f) return;
-  if (druh === "plan" && /\.mpp$/i.test(f.name)) return alert("Súbor .mpp sa načítať nedá. V MS Project ho uložte cez Súbor → Uložiť ako → XML.");
+  return repImportSubor(druh, f);
+}
+// Vráti súhrn { stav: ok | pozor | chyba, druh, text } pre pole na súbor. V dávke
+// (volby.davka) program znova nenačítava po každom súbore a chybu vyhodí.
+async function repImportSubor(druh, f, volby){
+  volby = volby || {};
+  if (druh === "plan" && /\.mpp$/i.test(f.name)) { alert("Súbor .mpp sa načítať nedá. V MS Project ho uložte cez Súbor → Uložiť ako → XML."); return { stav: "chyba", druh, text: ".mpp zatiaľ nie" }; }
   REP.pracuje = "Čítam " + f.name + "…"; repPrekresli();
   try {
     const u8 = new Uint8Array(await f.arrayBuffer());
@@ -1581,8 +1591,8 @@ async function repImport(druh, input){
     } else {
       const X = await ensureXLSX();
       const r = repRegisterZXlsx(X, u8.buffer, druh);
-      if (r.protokol.chybajucePovinne.length && !confirm("V súbore chýbajú povinné stĺpce: " + r.protokol.chybajucePovinne.join(", ") + ".\nNahrať aj tak (neúplný import)?")) { REP.pracuje = ""; return repPrekresli(); }
-      if (druh === "zistenia") return await repZisteniaZXlsx(r);
+      if (r.protokol.chybajucePovinne.length && !confirm("V súbore " + f.name + " chýbajú povinné stĺpce: " + r.protokol.chybajucePovinne.join(", ") + ".\nNahrať aj tak (neúplný import)?")) { REP.pracuje = ""; repPrekresli(); return { stav: "chyba", druh, text: "nenahraté — chýbajú povinné stĺpce" }; }
+      if (druh === "zistenia") { await repZisteniaZXlsx(r); return { stav: "ok", druh, text: r.riadky.length + " riadkov zlúčených do registra" }; }
       protokol = r.protokol; obsah = { riadky: r.riadky, protokol: r.protokol };
       datumSuboru = f.lastModified ? new Date(f.lastModified).toISOString().slice(0, 10) : null;
     }
@@ -1591,9 +1601,11 @@ async function repImport(druh, input){
     REP.plany[d.id] = obsah;
     try { const F = await ensureFflate(); await b2bEdgeSubor({ akcia: "rep_vstup_povodny", vstup: d.id }, F.gzipSync(u8)); }
     catch (e) { console.error("Reporting: pôvodný súbor sa neuložil", e); alert("Výťah sa uložil, pôvodný súbor nie (" + ((e && e.message) || e) + "). Report sa dá zostaviť; originál nahrajte znova neskôr."); }
-    await repOtvorProgram(REP.program.id);
-    if (druh === "plan" && !REP.profil) repOtvorProfil();
-  } catch (e) { repChyba(e, "Import sa nepodaril"); }
+    const vysl = { stav: druh === "plan" ? (protokol.bezDatumu ? "pozor" : "ok") : (repProtokolProblemy(protokol) ? "pozor" : "ok"), druh, text: repProtokolText({ druh, protokol }) +
+      (druh === "plan" && protokol.od && protokol.do ? " · " + repDMR(protokol.od) + " → " + repDMR(protokol.do) : "") };
+    if (!volby.davka) { await repOtvorProgram(REP.program.id); if (druh === "plan" && !REP.profil) repOtvorProfil(); }
+    return vysl;
+  } catch (e) { if (volby.davka) { REP.pracuje = ""; throw e; } repChyba(e, "Import sa nepodaril"); return { stav: "chyba", druh, text: (e && e.message) || String(e) }; }
 }
 
 // ── Profil programu (§5) ─────────────────────────────────────
@@ -1781,14 +1793,15 @@ function repCyklusHtml(){
     '<div><button class="aabtn" onclick="REP.pohlad=\'program\';repPrekresli()">‹ ' + esc(REP.program.nazov) + '</button> <b style="margin-left:6px">' + esc(c.nazov || ("Report k " + repDMR(c.stav_ku_dnu))) + '</b> <span class="csub" style="margin:0">' +
     esc({ koncept: "koncept", uzavrety: "uzavretý", odoslany: "odoslaný" }[c.stav] || c.stav) + " · verzia " + c.verzia + '</span></div>' +
     '<div style="display:flex;gap:6px">' + (pis ? '<button class="aabtn" onclick="repUlozCyklus()">Uložiť</button>' : "") +
-    (!kon && repMozemPisat() ? '<button class="aabtn" onclick="repOtvorZnova()">Znova otvoriť</button>' : "") + '</div></div>';
+    (!kon && repMozemPisat() ? '<button class="aabtn" onclick="repOtvorZnova()">Znova otvoriť</button>' : "") +
+    (repJeUzky() ? "" : '<button class="aabtn" onclick="repOverlayOtvor()" title="Náhľad reportu cez celú obrazovku">⛶ Náhľad</button>') + '</div></div>';
   if (repJeUzky()) return hlav + repMobilPrehladHtml();
   const kroky = '<div style="display:flex;gap:6px;flex-wrap:wrap;margin:0 2px 10px">' + (kon ? krok("vstupy", "1 Vstupy") + krok("kontrola", "2 Kontrola dát") + krok("usudok", "3 Úsudok") : "") + krok("nahlad", (kon ? "4 " : "") + "Náhľad a výber") + krok("export", (kon ? "5 " : "") + "Export") + '</div>';
   let K;
   try { K = repKontextCyklu(); } catch (e) { console.error(e); return hlav + '<div class="card" style="padding:12px;border-color:var(--neg)">Report sa nedá zostaviť: ' + esc(e.message) + '</div>'; }
   if (!K) return hlav + kroky + '<div class="aempty">Cyklus nemá plán alebo program nemá profil.</div>';
   const telo = REP.krok === "vstupy" ? repKrokVstupy() : REP.krok === "kontrola" ? repKrokKontrola(K) : REP.krok === "usudok" ? repKrokUsudok(K) : REP.krok === "export" ? repKrokExport(K) : repKrokNahlad(K);
-  return hlav + kroky + telo;
+  return hlav + kroky + (kon ? repPripravenostCyklusHtml(K) : "") + telo;
 }
 
 function repKrokVstupy(){
@@ -1856,12 +1869,16 @@ function repKrokNahlad(K){
     [["tabulka", "tabuľka s balíkmi"], ["karty", "karty oblastí"]].map(([k, t]) => '<option value="' + k + '"' + ((vy.detailTvar || "tabulka") === k ? " selected" : "") + ">" + t + "</option>").join("") + '</select></div>' +
     '<div class="mfield" style="max-width:320px;margin-top:8px"><label>Téma</label><select onchange="REP.cyklusObsah.tema=this.value;repPrekresli()">' + Object.keys(REP_TEMY).map(k => '<option value="' + k + '"' + (K.tema === k ? " selected" : "") + ">" + esc(REP_TEMY[k].nazov) + "</option>").join("") + '</select></div></div></div>' : "";
   const zahrnute = L.strany.filter(st => (manif.find(m => m.kluc === st.kluc) || {}).zahrnuta).length;
+  const videne = new Set();
   const strany = L.strany.map(st => {
     const zahr = (manif.find(m => m.kluc === st.kluc) || {}).zahrnuta;
-    return '<div style="margin:0 0 12px;opacity:' + (zahr ? 1 : 0.35) + '"><div class="csub" style="margin:0 0 4px">' + esc(st.nadpis || st.kluc) + (zahr ? "" : " — nejde do výstupu") + '</div>' +
+    const prva = !videne.has(st.kluc); videne.add(st.kluc);
+    return '<div style="margin:0 0 12px;opacity:' + (zahr ? 1 : 0.35) + '"><div class="csub" style="margin:0 0 4px;display:flex;justify-content:space-between;gap:8px">' + esc(st.nadpis || st.kluc) + (zahr ? "" : " — nejde do výstupu") +
+      (kon && prva ? '<label style="display:flex;gap:4px;align-items:center;margin:0"><input type="checkbox"' + (zahr ? " checked" : "") + ' onchange="repVyberSnimky(\'' + esc(st.kluc) + '\', this.checked)"> do výstupu</label>' : "") + '</div>' +
       '<div style="border:1px solid var(--line);border-radius:6px;overflow:hidden">' + repSvgStrana(L, st).replace("<svg ", '<svg style="display:block;width:100%;height:auto" ') + '</div></div>';
   }).join("");
-  return vyberHtml + '<div class="csub" style="margin:0 2px 8px">Výstup: <b>' + zahrnute + '</b> strán. Náhľad je ten istý obraz, z ktorého sa skladá PowerPoint.</div>' + strany;
+  return vyberHtml + '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin:0 2px 8px;flex-wrap:wrap"><span class="csub" style="margin:0">Výstup: <b>' + zahrnute + '</b> strán. Náhľad je ten istý obraz, z ktorého sa skladá PowerPoint. ' + esc(repManifestText(K)) + '</span>' +
+    '<button class="aabtn" onclick="repOverlayOtvor()">⛶ Cez celú obrazovku</button></div>' + strany;
 }
 function repVyberSnimky(kluc, zap){ const v = REP.cyklusObsah.vyber = REP.cyklusObsah.vyber || {}; v.snimky = v.snimky || {}; if (zap) delete v.snimky[kluc]; else v.snimky[kluc] = false; repPrekresli(); }
 function repSkryOblast(kluc, skryt){ const v = REP.cyklusObsah.vyber = REP.cyklusObsah.vyber || {}; const s = new Set(v.skryteOblasti || []); if (skryt) s.add(kluc); else s.delete(kluc); v.skryteOblasti = [...s]; repPrekresli(); }
@@ -3726,4 +3743,219 @@ function repPohybSnimka(P, vybrane){
       { popis: "Bez záznamu v denníku", hodnota: String(P.bezZaznamu), akcent: P.bezZaznamu ? "amber" : "green" },
       { popis: "Medián veku otvorených", hodnota: P.medianVeku == null ? "—" : P.medianVeku + " d", akcent: "textSec" }],
     tabulka: repTabPohyb(P) };
+}
+
+// ═══ 32. Kolo R8a: Pripravenosť, pole na súbor, náhľad cez celú obrazovku (NAVRH §25.2) ═══
+// Vzor je Generátor 4.0 (karta Pripravenosť, drop zóna, náhľad ako overlay s výberom
+// na snímke). Štýly tu, nie v appke — patria len reportingu a načítajú sa s ním.
+const REP_STYL = [
+  ".rep-prip{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;margin-top:6px}",
+  ".rep-prip-pol{border:1px solid var(--line);border-radius:10px;padding:7px 10px;background:var(--paper);text-align:left;font:inherit;color:inherit;cursor:pointer}",
+  ".rep-prip-pol:hover{border-color:var(--brand)}.rep-prip-pol[disabled]{cursor:default}",
+  ".rep-st{font-weight:700;margin-right:6px}",
+  ".rep-st-ok{color:var(--pos)}.rep-st-pozor{color:var(--warn)}.rep-st-chyba{color:var(--neg)}.rep-st-treba{color:var(--brand)}.rep-st-volitelne{color:var(--ink-soft)}",
+  ".rep-cipy{display:flex;gap:6px;flex-wrap:wrap;margin:0 2px 10px}",
+  ".rep-cip{border:1px solid var(--line);border-radius:999px;padding:3px 10px;background:var(--paper);font:inherit;font-size:13px;color:inherit;cursor:pointer}",
+  ".rep-drop{border:2px dashed var(--line);border-radius:12px;padding:14px;text-align:center;cursor:pointer;color:var(--ink-soft);margin-bottom:10px}",
+  ".rep-drop.rep-drop-na{border-color:var(--brand);background:var(--brand-lite);color:var(--ink)}",
+  ".rep-ov{position:fixed;inset:0;z-index:9000;background:var(--bg);display:flex;flex-direction:column}",
+  ".rep-ov-lista{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid var(--line);background:var(--paper)}",
+  ".rep-ov-telo{flex:1;overflow:auto;padding:12px}",
+  ".rep-ov-stlpce{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start}",
+  "@media (max-width:860px){.rep-ov-stlpce{grid-template-columns:1fr}}",
+  ".rep-snimka{max-width:1200px;margin:0 auto 12px}.rep-snimka.rep-vyp{opacity:.35}",
+  ".rep-snimka-hl{display:flex;justify-content:space-between;gap:8px;align-items:center;margin:0 0 4px;font-size:13px}",
+  ".rep-snimka-ram{border:1px solid var(--line);border-radius:6px;overflow:hidden}"
+].join("");
+function repStyl(){
+  if (typeof document === "undefined" || !document.head || REP._styl) return;
+  const s = document.createElement("style"); s.id = "repStyl"; s.textContent = REP_STYL; document.head.appendChild(s); REP._styl = true;
+}
+
+// ── Pripravenosť: čo je hotové, čo chýba a čo má upozornenia; klik vedie na krok ─
+// Stavy: ok ✓, pozor ⚠ (dá sa pokračovať), chyba ✗, treba ○ (ďalší povinný krok),
+// volitelne – (nepovinné). Počet „hotových“ ráta len povinné položky.
+const REP_ST_ZNAK = { ok: "✓", pozor: "⚠", chyba: "✗", treba: "○", volitelne: "–" };
+function repProtokolProblemy(p){
+  p = p || {}; const dt = p.datumy || {};
+  return (p.duplicitneId || []).length + (p.chybajucePovinne || []).length + (dt.americke || 0) + (dt.bezRoka || 0) + (dt.neplatne || 0) + (p.prazdnyStav || 0);
+}
+function repPripravenostProgram(){
+  const P = REP.profil, pis = repMozemPisat() && REP.program.stav !== "archiv", out = [];
+  const vp = repPosledny("plan"), pp = (vp && vp.protokol) || {};
+  out.push(!vp ? { kluc: "plan", nazov: "Plán", stav: "treba", text: "nenahraný — XML z MS Project", akcia: pis ? "repVyberSubor('plan')" : "" }
+    : { kluc: "plan", nazov: "Plán", stav: pp.bezDatumu ? "pozor" : "ok", akcia: pis ? "repVyberSubor('plan')" : "",
+      text: (pp.ulohy || 0) + " úloh · " + (pp.milniky || 0) + " míľnikov" + (pp.od && pp.do ? " · " + repDMR(pp.od) + " → " + repDMR(pp.do) : "") + (pp.bezDatumu ? " · " + pp.bezDatumu + " bez dátumu" : "") });
+  out.push(!P ? { kluc: "profil", nazov: "Profil programu", stav: "treba", text: vp ? "nenastavený — navrhne sa z plánu" : "po nahratí plánu", akcia: vp ? "repOtvorProfil()" : "" }
+    : { kluc: "profil", nazov: "Profil programu", stav: P.cielovyTermin ? "ok" : "pozor", akcia: "repOtvorProfil()",
+      text: (P.oblasti || []).filter(o => o.zobrazit !== false).length + " oblastí · " + (P.fazy || []).length + " fáz" + (P.cielovyTermin ? " · cieľ " + repDMR(P.cielovyTermin) : " · bez cieľového termínu") });
+  for (const d of ["issue", "ct", "dep"]) {
+    const v = repPosledny(d);
+    out.push(!v ? { kluc: d, nazov: REP_DRUHY[d], stav: "volitelne", text: "nenahraný (nepovinné)", akcia: pis ? "repVyberSubor('" + d + "')" : "" }
+      : { kluc: d, nazov: REP_DRUHY[d], stav: repProtokolProblemy(v.protokol) ? "pozor" : "ok", text: repProtokolText(v), akcia: pis ? "repVyberSubor('" + d + "')" : "" });
+  }
+  const rz = REP.registre && REP.registre.zistenia, zr = rz && rz.obsah ? rz.obsah.riadky.filter(z => z.stav !== "zrusene") : [];
+  out.push({ kluc: "zistenia", nazov: "Register zistení", stav: zr.length ? "ok" : "volitelne", akcia: "REP.pohlad='zistenia';repPrekresli()",
+    text: zr.length ? zr.length + " zistení, " + zr.filter(z => z.stav === "otvorene" || z.stav === "riesi").length + " otvorených" : "prázdny (nepovinné)" });
+  out.push(P && P.baseline ? { kluc: "baseline", nazov: "Baseline", stav: "ok", text: (P.baseline.popis || "plán") + " k " + repDMR(P.baseline.stavKuDnu), akcia: "repOtvorProfil()" }
+    : { kluc: "baseline", nazov: "Baseline", stav: "volitelne", text: "nie je nastavená (v profile)", akcia: P ? "repOtvorProfil()" : "" });
+  const c = (REP.cykly || [])[0];
+  if (!c) out.push({ kluc: "cyklus", nazov: "Cyklus reportu", stav: vp && P ? "treba" : "volitelne", text: vp && P ? "zatiaľ žiadny — založte prvý" : "po pláne a profile", akcia: pis && vp && P ? "repNovyCyklus()" : "" });
+  else if (c.stav === "koncept") out.push({ kluc: "cyklus", nazov: "Cyklus reportu", stav: "pozor", text: "rozpracovaný k " + repDMR(c.stav_ku_dnu), akcia: "repOtvorCyklus('" + c.id + "')" });
+  else if (vp && repStavVstupu(vp) > c.stav_ku_dnu) out.push({ kluc: "cyklus", nazov: "Cyklus reportu", stav: "treba", text: "nový plán k " + repDMR(repStavVstupu(vp)) + " — založte cyklus", akcia: pis && P ? "repNovyCyklus()" : "" });
+  else out.push({ kluc: "cyklus", nazov: "Cyklus reportu", stav: "ok", text: "uzavretý k " + repDMR(c.stav_ku_dnu), akcia: "repOtvorCyklus('" + c.id + "')" });
+  return out;
+}
+function repPripravenostHtml(pol){
+  const pov = pol.filter(p => p.stav !== "volitelne");
+  return '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>Pripravenosť</b> <span class="csub" style="margin:0">' + pov.filter(p => p.stav === "ok").length + " z " + pov.length + " povinných hotových</span>" +
+    '<div class="rep-prip">' + pol.map(p => '<button type="button" class="rep-prip-pol" data-kluc="' + p.kluc + '"' + (p.akcia ? ' onclick="' + p.akcia + '"' : " disabled") + ">" +
+      '<span class="rep-st rep-st-' + p.stav + '">' + REP_ST_ZNAK[p.stav] + "</span><b>" + esc(p.nazov) + '</b><div class="csub" style="margin:2px 0 0">' + esc(p.text) + "</div></button>").join("") + "</div></div>";
+}
+// Cyklus: rad čipov nad krokmi (koncept); čip otvorí krok.
+function repPripravenostCyklus(K){
+  const O = REP.cyklusObsah, V = O.vstupy || {}, us = O.usudok || {}, Q = K.qa, out = [];
+  const nReg = ["issue", "ct", "dep"].filter(d => V[d]).length;
+  out.push({ kluc: "vstupy", nazov: "Vstupy", stav: V.plan ? "ok" : "treba", text: V.plan ? "plán + " + nReg + " z 3 registrov" : "chýba plán", krok: "vstupy" });
+  const ch = K.kontroly.filter(k => k.uroven === "chyba").length, up = K.kontroly.filter(k => k.uroven === "upozornenie").length;
+  out.push({ kluc: "kontrola", nazov: "Kontrola dát", stav: ch ? "chyba" : up ? "pozor" : "ok", text: ch ? ch + " chýb" : up ? up + " upozornení" : "bez nálezov", krok: "kontrola" });
+  const ragBez = Q ? Q.rag.filter(d => d.prebite && !((us.rag || {})[d.kluc] || {}).komentar).length : 0;
+  const kpiBez = Object.values(us.kpiPrepisy || {}).filter(p => p && p.hodnota && !p.dovod).length;
+  const usT = [ragBez ? ragBez + "× RAG bez dôvodu" : "", kpiBez ? kpiBez + "× KPI bez dôvodu" : "", us.prenesene ? "prenesené — overte" : ""].filter(Boolean);
+  out.push({ kluc: "usudok", nazov: "Úsudok", stav: usT.length ? "pozor" : "ok", text: usT.length ? usT.join(", ") : "bez otvorených bodov", krok: "usudok" });
+  out.push({ kluc: "porovnanie", nazov: "Porovnanie", stav: K.zmeny ? "ok" : "volitelne", text: K.zmeny ? "proti " + repDMR(K.zmeny.pred.stavKuDnu) : "bez porovnania", krok: "vstupy" });
+  const L = repLayout(K.view, K.tema);
+  out.push({ kluc: "nahlad", nazov: "Náhľad", stav: L.problemy.length ? "chyba" : "ok", text: L.problemy.length ? L.problemy.length + " problémov rozloženia" : L.strany.length + " strán", krok: "nahlad" });
+  out.push({ kluc: "uzavretie", nazov: "Uzavretie", stav: "treba", text: "po kontrole uzavrite", krok: "export" });
+  return out;
+}
+function repPripravenostCyklusHtml(K){
+  return '<div class="rep-cipy">' + repPripravenostCyklus(K).map(p => '<button type="button" class="rep-cip" data-kluc="' + p.kluc + '" title="' + esc(p.text) + '" onclick="REP.krok=\'' + p.krok + '\';repPrekresli()">' +
+    '<span class="rep-st rep-st-' + p.stav + '">' + REP_ST_ZNAK[p.stav] + "</span>" + esc(p.nazov) + ' <span class="csub" style="margin:0">' + esc(p.text) + "</span></button>").join("") + "</div>";
+}
+
+// ── Pole na súbor: plán aj registre, viac naraz; druh rozpozná appka ─
+// Plán = .xml, .mpp zatiaľ nie (NAVRH §25.3). XLSX: hárok podľa názvu a hlavička
+// podľa stĺpcov registra — vyhrá druh s najvyšším skóre nad prahom (povinné
+// stĺpce), inak súbor ostane nerozpoznaný a appka to povie.
+function repRozpoznajDruh(X, data, nazov){
+  if (/\.xml$/i.test(nazov || "")) return "plan";
+  if (/\.mpp$/i.test(nazov || "")) return "mpp";
+  const wb = X.read(data, { type: data instanceof ArrayBuffer ? "array" : "buffer", cellDates: false });
+  const meno = repNorm(nazov || ""), riadky = {};
+  for (const m of wb.SheetNames.slice(0, 12)) riadky[m] = X.utils.sheet_to_json(wb.Sheets[m], { header: 1, raw: true, defval: "", blankrows: true }).slice(0, 15);
+  let naj = null;
+  for (const d of ["issue", "ct", "dep", "zistenia"]) {
+    const def = REP_REGISTRE[d], povinne = def.stlpce.filter(s => s.povinny).length;
+    for (const m of Object.keys(riadky)) {
+      let hl = 0;
+      for (const r of riadky[m]) { const mp = repMapujHlavicku(r.map(String), def); hl = Math.max(hl, Object.keys(mp).length + def.stlpce.filter(s => s.povinny && mp[s.kluc] != null).length); }
+      const skore = hl + (def.harok.some(h => repNorm(m) === h) ? 3 : def.harok.some(h => repNorm(m).indexOf(h) >= 0) ? 2 : 0) + (def.harok.some(h => meno.indexOf(h) >= 0) ? 1 : 0);
+      if (hl >= povinne * 2 + 1 && (!naj || skore > naj.skore)) naj = { druh: d, harok: m, skore };
+    }
+  }
+  return naj ? naj.druh : null;
+}
+async function repRozpoznajSubor(f){
+  if (/\.(xml|mpp)$/i.test(f.name)) return repRozpoznajDruh(null, null, f.name);
+  if (!/\.xls[xm]$/i.test(f.name)) return null;
+  const X = await ensureXLSX();
+  return repRozpoznajDruh(X, await f.arrayBuffer(), f.name);
+}
+function repVyberSubor(druh){ REP.importDruh = druh || null; const i = document.getElementById("repDropInput"); if (i) { i.value = ""; i.click(); } }
+function repDrop(e){
+  e.preventDefault();
+  if (e.currentTarget && e.currentTarget.classList) e.currentTarget.classList.remove("rep-drop-na");
+  return repImportSubory(e.dataTransfer && e.dataTransfer.files, null);
+}
+async function repImportSubory(files, druh){
+  const zoz = [...(files || [])]; REP.importDruh = null;
+  if (!zoz.length) return;
+  const vysl = [];
+  for (const f of zoz) {
+    try {
+      const d = druh || await repRozpoznajSubor(f);
+      if (d === "mpp") { vysl.push({ nazov: f.name, stav: "chyba", text: "plán .mpp zatiaľ nie — v MS Project Súbor → Uložiť ako → XML" }); continue; }
+      if (!d) { vysl.push({ nazov: f.name, stav: "chyba", text: "nerozpoznaný — plán ako XML z MS Project, registre ako XLSX (pomôže Šablóna)" }); continue; }
+      vysl.push(Object.assign({ nazov: f.name }, await repImportSubor(d, f, { davka: true })));
+    } catch (e) { console.error("Reporting: import " + f.name, e); vysl.push({ nazov: f.name, stav: "chyba", text: (e && e.message) || String(e) }); }
+  }
+  REP.importVysledky = vysl;
+  await repOtvorProgram(REP.program.id);
+  if (vysl.some(v => v.druh === "plan" && v.stav !== "chyba") && !REP.profil) repOtvorProfil();
+}
+function repDropHtml(){
+  return '<div class="rep-drop" id="repDrop" ondragover="event.preventDefault();this.classList.add(\'rep-drop-na\')" ondragleave="this.classList.remove(\'rep-drop-na\')" ondrop="repDrop(event)" onclick="repVyberSubor()">' +
+    "<b>Pretiahnite sem súbory</b> alebo kliknite a vyberte — plán z MS Project (XML) aj registre (XLSX), aj viac naraz. Druh súboru appka rozpozná.</div>" +
+    '<input type="file" id="repDropInput" multiple accept=".xml,.xlsx,.xlsm,.mpp" style="display:none" onchange="repImportSubory(this.files, REP.importDruh)">' + repImportVysledkyHtml();
+}
+function repImportVysledkyHtml(){
+  const V = REP.importVysledky;
+  if (!V || !V.length) return "";
+  return '<div class="card" style="padding:8px 12px;margin-bottom:10px"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><b>Posledný import</b>' +
+    '<button class="aabtn" onclick="REP.importVysledky=null;repPrekresli()">Zavrieť</button></div>' +
+    V.map(v => '<div style="padding:3px 0;border-top:1px solid var(--line)"><span class="rep-st rep-st-' + (v.stav === "chyba" ? "chyba" : v.stav === "pozor" ? "pozor" : "ok") + '">' +
+      REP_ST_ZNAK[v.stav === "chyba" ? "chyba" : v.stav === "pozor" ? "pozor" : "ok"] + "</span><b>" + esc(v.nazov) + "</b> " + (v.druh ? "→ " + esc(REP_DRUHY[v.druh]) + " · " : "") + '<span class="csub" style="margin:0">' + esc(v.text || "") + "</span></div>").join("") + "</div>";
+}
+
+// ── Náhľad cez celú obrazovku (overlay) s výberom priamo na snímke ─
+// REP.ov = { balik: "roadmapa" | "qa" | "oba", uprava } — mimo úpravy len to, čo
+// pôjde do výstupu; v úprave aj vypnuté strany, stlmené, so zaškrtnutím.
+function repManifestText(K){
+  const vsetky = K.view.manifest, mimo = vsetky.filter(m => !m.zahrnuta);
+  const Lr = repLayout(K.view, K.tema, null, { balik: "roadmapa" }), Lq = repLayout(K.view, K.tema, null, { balik: "qa" });
+  return "Výstup: roadmapa " + Lr.strany.length + " strán" + (Lq.strany.length ? " · QA " + Lq.strany.length + " strán" : "") +
+    (mimo.length ? " · mimo výstupu: " + mimo.map(m => m.nazov).join(", ") : "");
+}
+function repSnimkyHtml(K, balik, uprava){
+  const L = repLayout(K.view, K.tema, null, { lenZahrnute: !uprava, balik });
+  const manif = K.view.manifest, videne = new Set();
+  return L.strany.map(st => {
+    const m = manif.find(x => x.kluc === st.kluc) || {}, prva = !videne.has(st.kluc); videne.add(st.kluc);
+    return '<div class="rep-snimka' + (m.zahrnuta === false ? " rep-vyp" : "") + '" data-kluc="' + esc(st.kluc) + '"><div class="rep-snimka-hl"><span class="csub" style="margin:0">' + esc(st.nadpis || st.kluc) + "</span>" +
+      (uprava && prva ? '<label style="display:flex;gap:4px;align-items:center;margin:0"><input type="checkbox"' + (m.zahrnuta !== false ? " checked" : "") + ' onchange="repVyberSnimky(\'' + esc(st.kluc) + '\', this.checked)"> do výstupu</label>' : "") + "</div>" +
+      '<div class="rep-snimka-ram">' + repSvgStrana(L, st).replace("<svg ", '<svg style="display:block;width:100%;height:auto" ') + "</div></div>";
+  }).join("") || '<div class="aempty">Balík nemá strany.</div>';
+}
+function repOverlayHtml(K){
+  const ov = REP.ov, kon = REP.cyklus.stav === "koncept" && !REP.verziaSnimka && repMozemPisat();
+  const uprava = !!(ov.uprava && kon), maQa = K.view.manifest.some(m => m.balik === "qa");
+  const seg = (b, n) => '<button class="aabtn' + (ov.balik === b ? " pri" : "") + '" onclick="repOverlayBalik(\'' + b + '\')">' + n + "</button>";
+  const oblasti = uprava && ov.balik !== "qa" ? '<div class="card" style="padding:8px 12px;margin:0 auto 12px;max-width:1200px"><span class="csub" style="margin:0">Oblasti v Gantte a v detailoch: </span>' +
+    K.model.drahy.filter(d => !d.chyba).map(d => '<label style="display:inline-flex;gap:4px;align-items:center;margin:0 10px 0 0"><input type="checkbox"' + (((REP.cyklusObsah.vyber || {}).skryteOblasti || []).includes(d.kluc) ? "" : " checked") + ' onchange="repSkryOblast(\'' + esc(d.kluc) + '\', !this.checked)"> ' + esc(d.kratky) + "</label>").join("") + "</div>" : "";
+  const telo = ov.balik === "oba" ? '<div class="rep-ov-stlpce"><div><b>Roadmapa</b>' + repSnimkyHtml(K, "roadmapa", uprava) + "</div><div><b>QA report</b>" + repSnimkyHtml(K, "qa", uprava) + "</div></div>"
+    : repSnimkyHtml(K, ov.balik, uprava);
+  return '<div class="rep-ov-lista"><b>Náhľad reportu</b><div style="display:flex;gap:4px">' + seg("roadmapa", "Roadmapa") + (maQa ? seg("qa", "QA") + seg("oba", "Vedľa seba") : "") + "</div>" +
+    (kon ? '<button class="aabtn' + (uprava ? " pri" : "") + '" onclick="repOverlayUprava()">✏ Upraviť výber</button>' : "") +
+    '<span class="csub" style="margin:0;flex:1;min-width:200px">' + esc(repManifestText(K)) + "</span>" +
+    '<button class="aabtn" onclick="repOverlayCelaObrazovka()" title="Celá obrazovka">⛶</button><button class="aabtn" onclick="repOverlayZavri()">Zavrieť (Esc)</button></div>' +
+    '<div class="rep-ov-telo">' + oblasti + telo + "</div>";
+}
+function repOverlayOtvor(balik){ REP.ov = { balik: balik || "roadmapa", uprava: false }; repOverlayKresli(); }
+function repOverlayZavri(){
+  REP.ov = null;
+  try { if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen(); } catch (_) { /* celá obrazovka je doplnok */ }
+  repOverlayKresli();
+}
+function repOverlayBalik(b){ if (REP.ov) { REP.ov.balik = b; repOverlayKresli(); } }
+function repOverlayUprava(){ if (REP.ov) { REP.ov.uprava = !REP.ov.uprava; repOverlayKresli(); } }
+function repOverlayCelaObrazovka(){
+  const el = document.getElementById("repOverlay");
+  try {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else if (el && el.requestFullscreen) el.requestFullscreen().catch(e => console.error("Reporting: celá obrazovka", e));
+  } catch (e) { console.error("Reporting: celá obrazovka", e); }
+}
+function repOverlayKlaves(e){ if (e.key === "Escape" && REP.ov) repOverlayZavri(); }
+// Overlay žije na <body>; kreslí sa pri každom prekreslení reportingu, kým je
+// otvorený cyklus. Mimo cyklu (iný pohľad, iný projekt) sa zatvorí sám.
+function repOverlayKresli(){
+  if (typeof document === "undefined") return;
+  let el = document.getElementById("repOverlay");
+  const K = REP.ov && REP.pohlad === "cyklus" && REP.cyklus ? (() => { try { return repKontextCyklu(); } catch (e) { console.error(e); return null; } })() : null;
+  if (!K) { REP.ov = null; if (el && el.parentNode) el.parentNode.removeChild(el); return; }
+  repStyl();
+  if (!REP._ovKlaves && document.addEventListener) { document.addEventListener("keydown", repOverlayKlaves); REP._ovKlaves = true; }
+  if (!el || !el.parentNode) { el = document.createElement("div"); el.id = "repOverlay"; el.className = "rep-ov"; document.body.appendChild(el); }
+  el.innerHTML = repOverlayHtml(K);
 }
