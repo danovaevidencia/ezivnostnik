@@ -26468,9 +26468,30 @@ async function b2bPrijmiPozvanku(token, id){
 // Kým sa pozvánka prijíma (beží súbežne s načítaním firmy), účet bez firmy nesmie
 // skončiť v sprievodcovi firmy; neúspech (iný e-mail, po platnosti…) ukáže karta
 // v module B2B, nie alert nad sprievodcom firmy (č. 289, návrh §21.6).
+// Odkaz z e-mailu BUGstation ?b2b_bs=<kľúč> (BS1b, edge b2b-upozornenia): kľúč nesie
+// kód projektu (PAY-B12). Projekt sa vyberie z mojich projektov s modulom BUGstation,
+// záznam otvorí b2b_bugstation.js po načítaní dát (bsOtvorCiel). Do zariadenia sa
+// nič neukladá — parameter sa prečíta pri štarte stránky a spracuje raz.
+let _b2bBsCiel=null, _b2bOdkazBsHotovo=false;
+let _b2bOdkazBs=(()=>{ try{ return new URLSearchParams(location.search).get("b2b_bs"); }catch(e){ return null; } })();
+async function b2bSpracujOdkazBs(){
+  if(_b2bOdkazBsHotovo || !_b2bOdkazBs || b2bBezServera()) return false;
+  _b2bOdkazBsHotovo=true;
+  const k=String(_b2bOdkazBs).trim().toUpperCase(), m=k.match(/^([A-Z0-9]{2,10})-[UBIC]\d{1,7}$/);
+  history.replaceState({}, "", location.pathname);
+  if(!m) return false;
+  if(!B2B.nacitane) await b2bNacitajClenstvo();
+  const p=B2B.projekty.find(x=>x.kod===m[1] && b2bMojeModuly(x).includes("bugstation"));
+  if(!p){ oznamPas("Záznam "+k+" nie je v projekte, kde máte BUGstation."); return false; }
+  _b2bBsCiel={pid:p.id, kluc:k};
+  if(!B2B.d || B2B.d.pid!==p.id || B2B.d.chyba) B2B.d=null;   // ten istý projekt sa znova nenačítava
+  B2B.pid=p.id; B2B.mesiac=B2B.mesiac||b2bMesiacTeraz();
+  otvorApp("b2b_bugstation");
+  return true;
+}
 async function b2bSpracujPozvanku(){
   if(b2bBezServera()) return false;
-  const t=gpsCitaj(PROJEKT_POZVANKA_KLUC); if(!t) return false;
+  const t=gpsCitaj(PROJEKT_POZVANKA_KLUC); if(!t) return b2bSpracujOdkazBs();
   B2B.pozvankaBezi=true; B2B.pozvankaChyba=null;   // synchrónne — pred prvým await
   try{
     const { data:{ user } } = await sb.auth.getUser(); if(!user){ B2B.pozvankaBezi=false; return false; }

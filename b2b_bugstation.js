@@ -341,6 +341,7 @@ function bsFilter(zaznamy, f, ja, teraz){
       if (z.riesitel_osoba !== kto) return false;
     }
     if (ff.cakaNaMna && !bsCakaNaMna(z, ja)) return false;
+    if (ff.poSla) { const s = bsSla(z, t); if (!s || !s.po || s.druh === "koniec") return false; }
     if (ff.vekDniMin != null) {
       const od = new Date(z.identifikovane || z.vytvorene).getTime();
       if (t - od < ff.vekDniMin * BS_DEN) return false;
@@ -348,6 +349,62 @@ function bsFilter(zaznamy, f, ja, teraz){
     if (text && !bsNorm(z.kluc + " " + z.nazov).includes(text)) return false;
     return true;
   });
+}
+
+// ── SLA (§10, BS1b) ─────────────────────────────────────────────
+// Termíny počíta server (trigger b2b_bs_sla nad históriou a pracovným časom
+// po–pi 8–16 bez sviatkov) — platforma je neutrálna, termín, o ktorom sa môžu
+// strany sporiť, nepočíta klient jednej z nich. Appka ich len číta a ukáže.
+// „Blízko termínu“ = server už poslal upozornenie (sla_upozornene), nie odhad
+// appky: pracovný čas do termínu by inak počítali dve kópie pravidla.
+const BS_SLA_BEH = ["odoslane", "akceptovane"];
+function bsMinText(m){
+  const x = Math.max(0, Math.round(m)), d = Math.floor(x / 1440), h = Math.floor((x % 1440) / 60), mi = x % 60;
+  return d ? d + " d" + (h ? " " + h + " h" : "") : h ? h + " h" + (mi ? " " + mi + " min" : "") : mi + " min";
+}
+function bsTerminText(ts){ const d = new Date(ts); return isNaN(d) ? "" : bsDM(ts) + " " + bsDva(d.getHours()) + ":" + bsDva(d.getMinutes()); }
+function bsSla(z, teraz){
+  const t = teraz != null ? teraz : Date.now();
+  if (!z || z.typ === "uloha" || z.zmazane) return null;
+  if (z.stav === "identifikovane" && z.sla_triaz_do) {
+    const ms = new Date(z.sla_triaz_do).getTime() - t;
+    return { druh: "triaz", po: ms < 0, blizko: false, termin: z.sla_triaz_do,
+      text: ms < 0 ? "triáž po termíne " + bsMinText(-ms / 60000) : "triáž do " + bsTerminText(z.sla_triaz_do) };
+  }
+  if (BS_SLA_BEH.includes(z.stav) && z.sla_vyriesenie_do) {
+    const ms = new Date(z.sla_vyriesenie_do).getTime() - t;
+    return { druh: "bezi", po: ms < 0, blizko: ms >= 0 && (z.sla_upozornene || []).includes("blizko"), termin: z.sla_vyriesenie_do,
+      text: ms < 0 ? "po termíne " + bsMinText(-ms / 60000) : "termín " + bsTerminText(z.sla_vyriesenie_do) + " · zostáva " + bsMinText(ms / 60000) };
+  }
+  if (z.sla_zostava_min != null) {
+    const m = +z.sla_zostava_min;
+    if (!bsOtvoreny(z)) return { druh: "koniec", po: m < 0, blizko: false, termin: null, text: m < 0 ? "vyriešené po termíne SLA" : "vyriešené v termíne SLA" };
+    // Pauza: loptička u zákazníka (retest, OK na TEST, PROD, neprijaté vysvetlenie).
+    return { druh: "pauza", po: m < 0, blizko: false, termin: null,
+      text: "pozastavené · " + (m < 0 ? "po termíne " + bsMinText(-m) : "zostáva " + bsMinText(m)) + " prac. času" };
+  }
+  return null;
+}
+function bsSlaReakcia(z, teraz){
+  if (!z || !z.sla_reakcia_do) return "";
+  const t = teraz != null ? teraz : Date.now(), d = new Date(z.sla_reakcia_do).getTime();
+  if (z.sla_reakcia_kedy) return new Date(z.sla_reakcia_kedy).getTime() <= d ? "v termíne" : "po termíne";
+  return t > d ? "po termíne (" + bsTerminText(z.sla_reakcia_do) + ")" : "do " + bsTerminText(z.sla_reakcia_do);
+}
+// Pravidlá v nastaveniach: „4 h“, „2 d“, „90 min“; deň = 8 h v pracovnom čase, 24 h pri 24 × 7.
+function bsSlaMin(text, nonstop){
+  const s = String(text == null ? "" : text).trim().toLowerCase().replace(",", ".");
+  if (!s) return null;
+  const m = s.match(/^(\d+(?:\.\d+)?)\s*(min|m|h|hod|d|dni|dní|deň|den)?$/);
+  if (!m) return NaN;
+  const n = parseFloat(m[1]), j = m[2] || "h";
+  const min = j === "min" || j === "m" ? n : j.startsWith("d") ? n * (nonstop ? 1440 : 480) : n * 60;
+  return Math.round(min) >= 1 && Math.round(min) <= 525600 ? Math.round(min) : NaN;
+}
+function bsSlaZMin(min, nonstop){
+  if (min == null || min === "") return "";
+  const den = nonstop ? 1440 : 480;
+  return min % den === 0 ? (min / den) + " d" : min % 60 === 0 ? (min / 60) + " h" : min + " min";
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -458,6 +515,11 @@ const BS_CSS = [
   ".bs-kpi-d.neg{color:oklch(0.5 0.13 32)}",
   "[data-tema=\"tmavy\"] .bs-kpi-d.pos{color:oklch(0.78 0.1 162)}",
   "[data-tema=\"tmavy\"] .bs-kpi-d.neg{color:oklch(0.78 0.11 32)}",
+  ".bs-num.neg{color:oklch(0.5 0.13 32);font-weight:600}",
+  "[data-tema=\"tmavy\"] .bs-num.neg{color:oklch(0.78 0.11 32)}",
+  ".bs-chip.sla{margin-left:4px}",
+  ".bs-zmienka{font:400 12px/1.3 var(--bs-sans);padding:5px 8px;border:1px solid var(--bs-l13);border-radius:7px;background:var(--bs-panel);color:var(--bs-t2)}",
+  ".bs-sla-m{width:72px}",
   ".bs-dva{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:14px;align-items:start}",
   ".bs-panel{background:var(--bs-panel);border:1px solid var(--bs-l13);border-radius:10px;overflow:hidden;min-width:0}",
   ".bs-ph{display:flex;align-items:center;flex-wrap:wrap;gap:10px;padding:12px 16px;border-bottom:1px solid var(--bs-l08)}",
@@ -633,7 +695,8 @@ const BS = { pid: null, d: null, nacitavam: false, pohlad: "prehlad", split: nul
 let _bsPoradie = 0;
 const BS_STLPCE = "id,projekt_id,typ,cislo,kluc,nazov,uroven,stav,rozlisenie,duplikat,is_id,modul_id,prostredie_id,release_id," +
   "scenar,pripad,poziadavka_id,identifikovane,termin,suvisi,riesitel_osoba,riesitel_tim,ziadatel,data,nahlasil," +
-  "vysvetlenie_prijal,vysvetlenie_prijate,verzia,vytvoril,vytvorene,upravil,upravene,zmazane";
+  "vysvetlenie_prijal,vysvetlenie_prijate,verzia,vytvoril,vytvorene,upravil,upravene,zmazane," +
+  "sla_rezim,sla_reakcia_min,sla_vyriesenie_min,sla_triaz_do,sla_reakcia_do,sla_reakcia_kedy,sla_vyriesenie_do,sla_zostava_min,sla_upozornene";
 
 function bsJa(){
   const o = typeof b2bMojaOsoba === "function" ? b2bMojaOsoba() : null;
@@ -672,13 +735,16 @@ async function bsNacitajData(){
       sb.from("b2b_bs_projekty").select("*").eq("projekt_id", pid).maybeSingle(),
       vsetky(() => sb.from("b2b_bs_zaznamy").select(BS_STLPCE).eq("projekt_id", pid).order("typ").order("cislo")),
       vsetky(() => sb.from("b2b_bs_historia").select("id,zaznam_id,kto,kedy,udalost,akcia,z,na,data").eq("projekt_id", pid).order("kedy").order("id")),
-      sb.from("b2b_bs_poziadavky").select("*").eq("projekt_id", pid).order("kod")
+      sb.from("b2b_bs_poziadavky").select("*").eq("projekt_id", pid).order("kod"),
+      sb.from("b2b_bs_moje").select("upozornenia").eq("projekt_id", pid).maybeSingle()   // admin_90 (BS1b)
     ]);
     if (poradie !== _bsPoradie) return;
     const e = r.map(x => x.error).find(Boolean);
     if (e && b2bChybaTabulky(e)) BS.d = { pid, bezMigracie: true };
     else if (e) throw e;
-    else BS.d = { pid, projekt: r[0].data, zaznamy: r[1].data || [], historia: r[2].data || [], poziadavky: r[3].data || [] };
+    else BS.d = { pid, projekt: r[0].data, zaznamy: r[1].data || [], historia: r[2].data || [], poziadavky: r[3].data || [],
+      upozornenia: (r[4].data || {}).upozornenia || "okamzite" };
+    bsOtvorCiel();
   } catch (e) {
     if (poradie !== _bsPoradie) return;
     console.error("BUGstation: načítanie projektu", e);
@@ -700,12 +766,14 @@ async function bsNacitajDetail(id){
       sb.from("b2b_bs_zaznamy").select("popis").eq("id", id).maybeSingle(),
       sb.from("b2b_bs_komentare").select("id,kto,osoba_id,text,kedy,stiahnute").eq("zaznam_id", id).order("kedy"),
       sb.from("b2b_bs_prilohy").select("id,nazov,typ,velkost,nahral,nahrane,zmazane").eq("zaznam_id", id).order("nahrane"),
-      sb.from("b2b_bs_historia").select("id,kto,kedy,udalost,akcia,z,na,dovod,data").eq("zaznam_id", id).order("kedy").order("id")
+      sb.from("b2b_bs_historia").select("id,kto,kedy,udalost,akcia,z,na,dovod,data").eq("zaznam_id", id).order("kedy").order("id"),
+      sb.from("b2b_bs_sledovatelia").select("osoba_id,zdroj").eq("zaznam_id", id)
     ]);
     const e = r.map(x => x.error).find(Boolean);
     if (e) throw e;
     if (BS.detail !== id) return;
-    BS.det = { id, popis: (r[0].data || {}).popis || "", komentare: r[1].data || [], prilohy: (r[2].data || []).filter(p => !p.zmazane), historia: r[3].data || [] };
+    BS.det = { id, popis: (r[0].data || {}).popis || "", komentare: r[1].data || [], prilohy: (r[2].data || []).filter(p => !p.zmazane), historia: r[3].data || [],
+      sledovatelia: r[4].data || [] };
   } catch (e) {
     console.error("BUGstation: detail", e);
     BS.det = { id, chyba: (e && e.message) || String(e) };
@@ -778,6 +846,8 @@ function bsZalozkaHtml(){
   if (BS.d.bezMigracie) return '<div class="card" style="padding:12px 14px"><b>BUGstation ešte nie je v databáze</b><div class="csub">Chýba migrácia admin_88 — po jej spustení sa modul otvorí.</div></div>';
   if (BS.d.chyba) return '<div class="card" style="padding:12px 14px;border-color:var(--neg)"><b style="color:var(--neg)">BUGstation sa nenačítal</b><div class="csub" style="margin:4px 0 8px">' + esc(BS.d.chyba) + '</div><button class="aabtn" onclick="bsObnov()">Skúsiť znova</button></div>';
   if (!BS.d.projekt) return bsZapnutieHtml();
+  // Odkaz z e-mailu pri už načítanom projekte (bez nového načítania): záznam a detail hneď.
+  if (typeof _b2bBsCiel !== "undefined" && _b2bBsCiel && _b2bBsCiel.pid === BS.d.pid) { bsOtvorCiel(); if (BS.detail) setTimeout(() => bsNacitajDetail(BS.detail), 0); }
   setTimeout(bsVyska, 0);   // prvé kreslenie ide cez renderApp, nie bsPrekresli
   return bsShellHtml();
 }
@@ -813,7 +883,8 @@ function bsNavPolozky(){
     ["incident", "Incidenty", String(otv("incident"))],
     ["zmena", "Zmenové požiadavky", String(otv("zmena"))]
   ];
-  if (bsMaRolu(ja, ["tm"])) p.push(["nastavenia", "Nastavenia", ""]);
+  // Nastavenia projektu len TM a správca; ostatní tu majú len Moje upozornenia (BS1b).
+  p.push(["nastavenia", bsMaRolu(ja, ["tm"]) ? "Nastavenia" : "Moje upozornenia", ""]);
   return p;
 }
 const BS_IKONA_NAST = "M10 6.6a3.4 3.4 0 1 0 0 6.8 3.4 3.4 0 0 0 0-6.8m0 1.8a1.6 1.6 0 1 1 0 3.2 1.6 1.6 0 0 1 0-3.2M8.6 2h2.8l.4 2.1 1.5.8 2-.8 1.4 2.4-1.6 1.4v1.8l1.6 1.4-1.4 2.4-2-.8-1.5.8-.4 2.1H8.6l-.4-2.1-1.5-.8-2 .8-1.4-2.4 1.6-1.4V8.3L3.3 6.9l1.4-2.4 2 .8 1.5-.8z";
@@ -881,6 +952,7 @@ function bsListaAkcieHtml(){
     chipy += '<button type="button" class="bs-chipf' + (f.stav === "otvorene" ? " on" : "") + '" onclick="bsFilterStav()">Stav <b>' + st + "</b></button>";
     chipy += '<button type="button" class="bs-chipf' + (f.ja ? " on" : "") + '" onclick="bsFilterMoje()">Riešiteľ <b>' + (f.ja ? "Ja" : "Všetci") + "</b></button>";
     if (reg) chipy += '<button type="button" class="bs-chipf' + (f.uroven ? " on" : "") + '" onclick="bsFilterUroven()">' + esc(BS_TYPY[v].os) + " <b>" + esc(f.uroven ? bsUrovenNazov(bsNast(), v, f.uroven) : "Všetky") + "</b></button>";
+    if (v !== "uloha") chipy += '<button type="button" class="bs-chipf' + (f.poSla ? " on" : "") + '" onclick="bsFilterSla()">SLA <b>' + (f.poSla ? "Po termíne" : "Všetky") + "</b></button>";
   }
   const split = reg ? '<button type="button" class="bs-btn mal bs-splitb' + (BS.split ? " on" : "") + '" onclick="bsSplit()">' + (BS.split ? "Zrušiť rozdelenie" : "Rozdeliť zobrazenie") + "</button>" : "";
   const smie = bsMaRolu(ja, BS_PRACOVNICI);
@@ -924,6 +996,7 @@ if (typeof document !== "undefined") document.addEventListener("keydown", (e) =>
 });
 function bsFilterStav(){ const v = BS.pohlad, f = BS.filtre[v] = BS.filtre[v] || {}; f.stav = f.stav === "otvorene" ? "" : "otvorene"; bsPrekresli(); }
 function bsFilterMoje(){ const v = BS.pohlad, f = BS.filtre[v] = BS.filtre[v] || {}; f.ja = !f.ja; bsPrekresli(); }
+function bsFilterSla(){ const v = BS.pohlad, f = BS.filtre[v] = BS.filtre[v] || {}; f.poSla = !f.poSla; bsPrekresli(); }
 function bsFilterUroven(){
   const v = BS.pohlad, f = BS.filtre[v] = BS.filtre[v] || {};
   const u = bsUrovneTypu(bsNast(), v), i = u.indexOf(f.uroven);
@@ -959,9 +1032,11 @@ function bsPrehladHtml(){
     const n = O.urovne[u - 1], f = BS_UROVNE_FARBY[u];
     return '<div class="bs-riadok"><span>' + esc(bsUrovenNazov(nast, "defekt", u)) + '</span><div class="bs-bar"><i style="--h:' + f[0] + ";--c:" + f[1] + ";width:" + Math.round(n / max * 100) + '%"></i></div><span class="bs-num">' + n + "</span></div>";
   }).join("");
+  const poSla = (typ) => zz.filter(z => z.typ === typ && bsOtvoreny(z) && (bsSla(z) || {}).po).length;
   const typy = BS_TYPY_PORADIE.map(typ => {
-    const x = O.poTypoch[typ];
-    return '<div class="bs-riadok" style="grid-template-columns:150px 1fr 1fr"><span>' + esc(BS_TYPY[typ].mnozne) + '</span><span class="bs-num" style="text-align:left">' + x.otvorene + ' otvorených</span><span class="bs-num" style="text-align:left">' + x.uZakaznika + " u zákazníka</span></div>";
+    const x = O.poTypoch[typ], ps = typ === "uloha" ? 0 : poSla(typ);
+    return '<div class="bs-riadok" style="grid-template-columns:150px 1fr 1fr 1fr"><span>' + esc(BS_TYPY[typ].mnozne) + '</span><span class="bs-num" style="text-align:left">' + x.otvorene + ' otvorených</span><span class="bs-num" style="text-align:left">' + x.uZakaznika + " u zákazníka</span>" +
+      '<span class="bs-num' + (ps ? " neg" : "") + '" style="text-align:left">' + (typ === "uloha" ? "" : ps + " po SLA") + "</span></div>";
   }).join("");
   const akt = (BS.d.historia || []).slice(-6).reverse().map(h => {
     const z = bsNajdi(h.zaznam_id); if (!z) return "";
@@ -973,7 +1048,7 @@ function bsPrehladHtml(){
     return '<div><span class="bs-pipe-s"><i style="--h:' + s[2] + ";--c:" + s[3] + '"></i>' + esc(s[1]) + '</span><span class="bs-pipe-n">' + n + '</span><span class="bs-pipe-b" style="--h:' + s[2] + ";--c:" + s[3] + ";width:" + Math.round(n / pmax * 100) + '%"></span></div>'; }).join("");
   const ulohy = O.ulohy.map(([k, n]) => esc(bsStav(k)[1]) + " " + n).join(" · ");
   return '<div class="bs-stlp"><div class="bs-kpi">' + kpi + "</div>" +
-    '<div class="bs-dva"><div class="bs-panel"><div class="bs-ph"><h3>Otvorené podľa typu</h3><small>kto má loptičku</small></div>' + typy + "</div>" +
+    '<div class="bs-dva"><div class="bs-panel"><div class="bs-ph"><h3>Otvorené podľa typu</h3><small>kto má loptičku · termín SLA</small></div>' + typy + "</div>" +
     '<div class="bs-panel"><div class="bs-ph"><h3>Otvorené defekty podľa závažnosti</h3></div>' + urov +
     '<div class="bs-mini"><div><span class="bs-kpi-l">PRIEM. ČAS OPRAVY</span><b>' + (O.casOpravy == null ? "—" : String(O.casOpravy).replace(".", ",") + " " + (O.casOpravy === 1 ? "deň" : "dňa")) + '</b></div><div><span class="bs-kpi-l">REOPEN RATE</span><b>' +
     (O.reopen == null ? "—" : String(O.reopen).replace(".", ",") + " %") + "</b></div></div></div></div>" +
@@ -996,7 +1071,7 @@ function bsHistText(z, h){
 // ── Čaká na mňa ────────────────────────────────────────────────
 function bsCakaHtml(){
   const ja = bsJa(), f = BS.filtre.caka || {};
-  const zz = bsFilter(bsZaznamy(), { cakaNaMna: true, text: BS.hladat, stav: f.stav, riesitel: f.ja ? "ja" : null }, ja);
+  const zz = bsFilter(bsZaznamy(), { cakaNaMna: true, text: BS.hladat, stav: f.stav, riesitel: f.ja ? "ja" : null, poSla: !!f.poSla }, ja);
   if (!(ja.roly || []).length && !ja.spravca) return '<div class="bs-panel"><div class="bs-prazdne">Nemáte rolu v BUGstation — ste čitateľ. Rolu prideľuje správca projektu alebo Test manager.</div></div>';
   return bsTabulkaHtml(zz, "caka", false);
 }
@@ -1014,7 +1089,7 @@ function bsPanelHtml(typ, slot, panely){
     return '<button type="button" class="bs-tab' + (on ? " on" : "") + (zab ? " zab" : "") + '"' + (zab || on ? "" : ' onclick="bsSplitTab(' + slot + ",'" + t + "')\"") + ">" + esc(BS_TYPY[t].mnozne) + " <small>" + n + "</small></button>";
   }).join("");
   const f = BS.filtre[typ] || {};
-  const riadky = bsFilter(zz, { typy: [typ], text: BS.hladat, stav: f.stav, riesitel: f.ja ? "ja" : null, urovne: f.uroven ? [f.uroven] : null }, ja);
+  const riadky = bsFilter(zz, { typy: [typ], text: BS.hladat, stav: f.stav, riesitel: f.ja ? "ja" : null, urovne: f.uroven ? [f.uroven] : null, poSla: !!f.poSla }, ja);
   return '<div><div class="bs-tabs">' + tabs + '<span class="bs-tabs-p">' + esc(bsPocet(riadky.length, "záznam", "záznamy", "záznamov")) +
     (panely.length > 1 ? ' <button type="button" class="bs-x" onclick="bsSplitZavri(' + slot + ')" title="Zavrieť panel">×</button>' : "") + "</span></div>" +
     bsTabulkaHtml(riadky, typ, panely.length > 1) + "</div>";
@@ -1040,13 +1115,43 @@ function bsTabulkaHtml(riadky, druh, uzky){
       : z.typ === "zmena" ? (z.ziadatel || "") : bsCiselnikNazov(nast, "moduly", z.modul_id);
     const datum = z.typ === "uloha" && druh !== "caka" ? (z.termin ? bsDM(z.termin + "T00:00:00") : "") : bsDM(z.identifikovane || z.vytvorene);
     return '<tr class="r' + (BS.detail === z.id ? " on" : "") + (bsUzavrety(z) ? " uz" : "") + '" onclick="bsOtvor(\'' + z.id + '\')"><td class="id">' + esc(z.kluc) + '</td><td class="ti">' + esc(z.nazov) +
-      '</td><td class="uzke">' + esc(b) + "</td><td>" + bsUrovenChip(nast, z) + "</td><td>" + bsStavChip(z) + '</td><td class="uzke">' + esc(bsRiesitelText(z)) + '</td><td class="da">' + esc(datum) + "</td></tr>";
+      '</td><td class="uzke">' + esc(b) + "</td><td>" + bsUrovenChip(nast, z) + "</td><td>" + bsStavChip(z) + bsSlaZnacka(z) + '</td><td class="uzke">' + esc(bsRiesitelText(z)) + '</td><td class="da">' + esc(datum) + "</td></tr>";
   }).join("");
   return '<div class="bs-tw"><table class="bs-t"><thead><tr>' + th + "</tr></thead><tbody>" + tr + "</tbody></table></div>";
 }
 
 // ── detail (drawer) ────────────────────────────────────────────
 function bsOtvor(id){ BS.detail = id; BS.det = null; bsPrekresli(); bsNacitajDetail(id); }
+// Odkaz z e-mailu (?b2b_bs=<kľúč>, BS1b): ezivnostnik.html vyberie projekt podľa kódu
+// (_b2bBsCiel), tu sa po načítaní dát nastaví záznam — detail dotiahne bsNacitajData.
+function bsOtvorCiel(){
+  const c = typeof _b2bBsCiel !== "undefined" ? _b2bBsCiel : null;
+  if (!c || !BS.d || c.pid !== BS.d.pid) return;
+  _b2bBsCiel = null;
+  const z = (BS.d.zaznamy || []).find(x => x.kluc === c.kluc && !x.zmazane);
+  if (!z) { if (typeof oznamPas === "function") oznamPas("Záznam " + c.kluc + " sa v projekte nenašiel — mohol byť zmazaný."); return; }
+  BS.pohlad = z.typ; BS.split = null; BS.detail = z.id; BS.det = null;
+}
+function bsSlaZnacka(z){
+  const s = bsSla(z);
+  if (!s || s.druh === "koniec") return "";
+  if (s.po) return " " + bsChipHtml(s.druh === "triaz" ? "triáž po termíne" : "po SLA", 32, 0.14, "sla");
+  if (s.blizko) return " " + bsChipHtml("SLA o chvíľu", 78, 0.13, "sla");
+  return "";
+}
+async function bsSleduj(sledovat){
+  try { await bsRpc("b2b_bs_sleduj", { p_zaznam: BS.detail, p_sledovat: !!sledovat }); bsNacitajDetail(BS.detail); }
+  catch (e) { bsChyba(e, "Sledovanie sa nepodarilo zmeniť"); }
+}
+// @zmienka: meno vloží do komentára; server (trigger nad komentármi) z neho spraví
+// upozornenie a sledovanie — v texte musí ostať presne „@Meno“.
+function bsZmienka(sel){
+  const o = bsOsoby().find(x => x.id === sel.value), el = document.getElementById("bsKomentar");
+  sel.value = "";
+  if (!o || !el) return;
+  const pred = el.value && !/\s$/.test(el.value) ? " " : "";
+  el.value += pred + "@" + o.meno + " "; el.focus();
+}
 function bsZavriDetail(){ BS.detail = null; BS.det = null; bsPrekresli(); }
 function bsDetailHtml(z){
   const ja = bsJa(), nast = bsNast(), det = BS.det && BS.det.id === z.id ? BS.det : null;
@@ -1057,8 +1162,12 @@ function bsDetailHtml(z){
   const pole = (k, v) => v ? '<div><span class="k">' + esc(k) + '</span><span class="v">' + esc(v) + "</span></div>" : "";
   const T = BS_TYPY[z.typ];
   const pz = (BS.d.poziadavky || []).find(q => q.id === z.poziadavka_id);
+  const sla = bsSla(z), slaHtml = sla ? '<div><span class="k">SLA</span><span class="v">' + (sla.po ? bsChipHtml(sla.text, 32, 0.14, "sla")
+    : sla.blizko ? bsChipHtml(sla.text, 78, 0.13, "sla") : esc(sla.text)) + "</span></div>" : "";
   const polia = [
     pole("Stav", bsStav(z.stav)[1] + (z.stav === "vysvetlene" ? (z.vysvetlenie_prijate ? " · prijaté " + bsDMR(z.vysvetlenie_prijate) : " · čaká na prijatie") : "")),
+    slaHtml,
+    pole("Reakcia SLA", bsSlaReakcia(z)),
     pole(T.os, bsUrovenNazov(nast, z.typ, +z.uroven)),
     pole("Riešiteľ", bsRiesitelText(z) || "—"),
     pole("Nahlásil", bsMeno(z.nahlasil)),
@@ -1086,11 +1195,20 @@ function bsDetailHtml(z){
       ? '<span class="bs-sek">Kroky na zopakovanie</span><p class="bs-opis">' + esc(dataTyp.kroky || "") + "</p>" +
         (dataTyp.ocakavane ? '<span class="bs-sek">Očakávaný výsledok</span><p class="bs-opis">' + esc(dataTyp.ocakavane) + "</p>" : "") +
         (dataTyp.skutocne ? '<span class="bs-sek">Skutočný výsledok</span><p class="bs-opis">' + esc(dataTyp.skutocne) + "</p>" : "") : "";
+    const sled = det.sledovatelia || [], sledujem = !!ja.osoba && sled.some(s => s.osoba_id === ja.osoba);
+    const sledMena = sled.map(s => bsMeno(s.osoba_id)).filter(Boolean).join(", ");
+    const sledTl = ja.osoba ? '<button type="button" class="bs-btn mal" onclick="bsSleduj(' + (sledujem ? "false" : "true") + ')" title="Zmeny sledovaných záznamov prídu v dennom súhrne">' +
+      (sledujem ? "✓ Sledujete" : "Sledovať") + "</button>" : "";
+    const zmienky = bsOsoby().filter(o => o.user_id && o.id !== ja.osoba);
+    const zmienkaSel = zmienky.length ? '<select class="bs-zmienka" onchange="bsZmienka(this)" title="Spomenúť osobu — dostane upozornenie"><option value="">@ Spomenúť…</option>' +
+      zmienky.map(o => '<option value="' + o.id + '">' + esc(o.meno) + "</option>").join("") + "</select>" : "";
     telo = '<span class="bs-sek">Opis</span><p class="bs-opis">' + (det.popis ? esc(det.popis) : "—") + "</p>" + kroky +
       '<span class="bs-sek">Prílohy</span><div class="bs-pril">' + (pril || '<span class="bs-podobne">Bez príloh.</span>') + pridaj + "</div>" +
+      '<span class="bs-sek">Sledujú</span><div class="bs-pril"><span class="bs-podobne">' + (sledMena ? esc(sledMena) : "nikto") + "</span>" + sledTl + "</div>" +
       '<span class="bs-sek">História</span><div class="bs-hist">' + hist + "</div>" +
       '<span class="bs-sek">Komentáre</span>' + kom +
-      '<textarea id="bsKomentar" placeholder="Komentár k záznamu"></textarea><div style="margin-top:6px"><button type="button" class="bs-btn" onclick="bsKomentuj()">Pridať komentár</button></div>';
+      '<textarea id="bsKomentar" placeholder="Komentár k záznamu — @Meno spomenie osobu"></textarea><div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">' +
+      '<button type="button" class="bs-btn" onclick="bsKomentuj()">Pridať komentár</button>' + zmienkaSel + "</div>";
   }
   return '<div class="bs-dh"><span class="id">' + esc(z.kluc) + "</span>" + bsUrovenChip(nast, z) + '<button type="button" class="bs-x" onclick="bsZavriDetail()" title="Zavrieť">×</button></div>' +
     '<h3 class="bs-dt">' + esc(z.nazov) + "</h3>" + '<div class="bs-da">' + tl + upravit + oprava + "</div>" + '<div class="bs-pol">' + polia + "</div>" + telo;
@@ -1317,9 +1435,84 @@ async function bsPrilohaStiahni(id){
 //  povinné polia, triáž, požiadavky
 // ═══════════════════════════════════════════════════════════════
 const BS_CISELNIKY = [["is", "Informačné systémy (IS)"], ["moduly", "Moduly"], ["prostredia", "Prostredia"], ["releasy", "Releasy"], ["timy", "Tímy riešiteľov"]];
+const BS_UPOZORNENIA = [["okamzite", "Okamžite aj denný súhrn", "pridelenie, čaká na vás, najvyššia úroveň, @zmienka a termín SLA hneď; ráno v pracovný deň súhrn"],
+  ["suhrn", "Len denný súhrn", "ráno v pracovný deň: čo čaká na vás, zmeny sledovaných záznamov, po termíne SLA"],
+  ["nic", "Nič", "e-maily z BUGstation tohto projektu nechodia"]];
+function bsMojeUpozorneniaHtml(){
+  const akt = (BS.d && BS.d.upozornenia) || "okamzite";
+  return '<div class="bs-panel"><div class="bs-ph"><h3>Moje upozornenia e-mailom</h3><small>len pre vás, v tomto projekte</small></div><div class="in">' +
+    BS_UPOZORNENIA.map(([k, n, p]) => '<label style="display:flex;gap:8px;align-items:flex-start;font:400 12px/1.4 var(--bs-sans);margin:0 0 8px"><input type="radio" name="bsUpoz" value="' + k + '"' +
+      (akt === k ? " checked" : "") + ' onchange="bsUpozorneniaUloz(this.value)"> <span><b>' + esc(n) + "</b><br><span class=\"bs-podobne\">" + esc(p) + "</span></span></label>").join("") +
+    '<div class="bs-podobne">Upozornenia chodia na e-mail vášho účtu; prázdny súhrn sa neposiela.</div></div></div>';
+}
+async function bsUpozorneniaUloz(v){
+  try { await bsRpc("b2b_bs_moje_uloz", { p_projekt: B2B.pid, p_upozornenia: v }); BS.d.upozornenia = v; oznamPas("Upozornenia uložené"); }
+  catch (e) { bsChyba(e, "Nastavenie upozornení sa nepodarilo uložiť"); bsPrekresli(); }
+}
+// Pravidlá SLA (§10): typ × úroveň → reakcia a vyriešenie; deň = 8 h pracovného
+// času (po–pi 8–16 bez sviatkov), pri 24 × 7 deň = 24 h. Prázdne = bez SLA.
+function bsSlaPravidlaHtml(n){
+  const sla = n.sla || {};
+  const riadky = BS_TYPY_8.map(typ => bsUrovneTypu(n, typ).map(u => {
+    const p = ((sla[typ] || {})[u]) || {}, ns = !!p.nonstop;
+    return "<tr><td>" + esc(BS_TYPY[typ].nazov) + " · " + esc(bsUrovenNazov(n, typ, u)) + '</td>' +
+      '<td><input type="text" class="bs-sla-m" value="' + esc(bsSlaZMin(p.reakcia, ns)) + '" placeholder="—" onchange="bsSlaUprav(\'' + typ + "'," + u + ',\'reakcia\',this.value)"></td>' +
+      '<td><input type="text" class="bs-sla-m" value="' + esc(bsSlaZMin(p.vyriesenie, ns)) + '" placeholder="—" onchange="bsSlaUprav(\'' + typ + "'," + u + ',\'vyriesenie\',this.value)"></td>' +
+      '<td><input type="checkbox"' + (ns ? " checked" : "") + ' onchange="bsSlaUprav(\'' + typ + "'," + u + ',\'nonstop\',this.checked)"></td></tr>';
+  }).join("")).join("");
+  const tr = n.triaz_min == null ? 480 : n.triaz_min;
+  return '<div class="bs-panel"><div class="bs-ph"><h3>SLA</h3><small>termíny počíta server</small></div><div class="in" style="overflow-x:auto">' +
+    '<table class="bs-mriezka"><thead><tr><th>Typ · úroveň</th><th>Reakcia</th><th>Vyriešenie</th><th>24 × 7</th></tr></thead><tbody>' + riadky + "</tbody></table>" +
+    '<div class="bs-podobne">Napr. „4 h“, „2 d“, „90 min“. Deň = 8 h pracovného času (po–pi 8:00–16:00 bez sviatkov), pri 24 × 7 deň = 24 h. ' +
+    "Hodiny bežia, kým je záznam u riešiteľa (Odoslané, Akceptované); v retestovaní a pri neprijatom vysvetlení stoja. Zmena platí pre nové odoslania.</div>" +
+    '<label style="display:flex;gap:8px;align-items:center;font:400 12px/1.4 var(--bs-sans);margin-top:8px">Limit triáže <input type="text" class="bs-sla-m" value="' + esc(bsSlaZMin(tr, false)) +
+    '" onchange="bsTriazUprav(this.value)"></label></div></div>';
+}
+function bsSlaUprav(typ, u, k, v){
+  const sla = (BS.nastavenia.sla = BS.nastavenia.sla || {}), t = (sla[typ] = sla[typ] || {}), p = (t[u] = t[u] || {});
+  if (k === "nonstop") { p.nonstop = !!v; bsPrekresli(); return; }
+  const min = bsSlaMin(v, !!p.nonstop);
+  if (Number.isNaN(min)) { alert("Zadajte napr. „4 h“, „2 d“ alebo „90 min“ (najviac rok)."); bsPrekresli(); return; }
+  if (min == null) delete p[k]; else p[k] = min;
+  if (p.reakcia == null && p.vyriesenie == null) delete t[u];
+}
+function bsTriazUprav(v){
+  const min = bsSlaMin(v, false);
+  if (Number.isNaN(min) || min == null) { alert("Limit triáže zadajte napr. „1 d“ alebo „4 h“."); bsPrekresli(); return; }
+  BS.nastavenia.triaz_min = min;
+}
+// Pozvanie do BUGstation (D19): správca aj Test manager. Osoba dostane len modul
+// BUGstation a vybrané roly — výkaz, zmluvu ani ceny projektu nevidí.
+function bsPozvat(){
+  const roly = Object.keys(BS_ROLY);
+  const html = '<div class="bs-ok"><div class="bs-form">' +
+    '<label>Meno a priezvisko<input type="text" id="bsPzMeno"></label>' +
+    '<label>E-mail<input type="email" id="bsPzEmail" placeholder="na túto adresu príde pozvánka"></label>' +
+    '<label>Organizácia (voliteľné)<input type="text" id="bsPzOrg"></label>' +
+    '<div class="bs-podobne" style="margin:4px 0">Roly v BUGstation</div><div style="display:flex;flex-wrap:wrap;gap:10px">' +
+    roly.map(r => '<label style="display:flex;gap:6px;align-items:center;font:400 12px var(--bs-sans)"><input type="checkbox" value="' + r + '" class="bsPzRola"' + (r === "tester" ? " checked" : "") + "> " + esc(BS_ROLY[r]) + "</label>").join("") +
+    '</div><div class="bs-podobne" style="margin-top:8px">Osoba uvidí len BUGstation tohto projektu — nie Pracovný výkaz, zmluvu, ceny ani Reporting. Pozvánka platí 14 dní a prijať ju môže len účet s touto adresou.</div>' +
+    "</div></div>";
+  openModal("Pozvať do BUGstation", html, async () => {
+    const v = id => (document.getElementById(id) || {}).value || "";
+    const meno = v("bsPzMeno").trim(), email = v("bsPzEmail").trim(), org = v("bsPzOrg").trim();
+    const role = [...document.querySelectorAll(".bsPzRola:checked")].map(x => x.value);
+    if (!meno) return b2bVOkne("Zadajte meno.");
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return b2bVOkne("Zadajte platný e-mail.");
+    let osoba;
+    try { osoba = await bsRpc("b2b_bs_osoba_zaloz", { p_projekt: B2B.pid, p_meno: meno, p_email: email, p_organizacia: org || null, p_role: role }); }
+    catch (e) { return b2bVOkne(String((e && e.message) || e).replace(/^.*?ERROR:\s*/, "")); }
+    let token, mail = true;
+    try { const r = await sb.rpc("b2b_pozvi", { p_osoba: osoba, p_email: email }); if (r.error) throw r.error; token = r.data; }
+    catch (e) { bsChyba(e, "Osoba je založená, ale pozvánku sa nepodarilo vytvoriť"); if (typeof b2bObnov === "function") b2bObnov(); return; }
+    try { await b2bEdge("pozvanka", { token }); } catch (e) { mail = false; console.error("BUGstation: e-mail pozvánky", e); }
+    oznamPas(mail ? "Pozvánka odišla na " + email : "Pozvánka vytvorená, e-mail sa neodoslal — odkaz pošle správca z Tímu");
+    if (typeof b2bObnov === "function") b2bObnov();
+  }, null, null, "Pozvať");
+}
 function bsNastaveniaHtml(){
   const ja = bsJa();
-  if (!bsMaRolu(ja, ["tm"])) return '<div class="bs-panel"><div class="bs-prazdne">Nastavenia mení správca projektu alebo Test manager.</div></div>';
+  if (!bsMaRolu(ja, ["tm"])) return '<div class="bs-nast">' + bsMojeUpozorneniaHtml() + "</div>";
   const n = BS.nastavenia || (BS.nastavenia = JSON.parse(JSON.stringify(bsNast())));
   const osoby = bsOsoby().filter(o => o.user_id);
   const roly = Object.keys(BS_ROLY);
@@ -1337,11 +1530,13 @@ function bsNastaveniaHtml(){
     "<tr><td>" + esc(BS_POLIA[k].nazov) + '</td><td><select onchange="bsPovinneUprav(\'' + typ + "','" + k + '\',this.value)">' +
     [["volitelne", "voliteľné"], ["povinne", "povinné"], ["skryte", "skryté"]].map(s => '<option value="' + s[0] + '"' + ((((n.povinne || {})[typ] || {})[k] || "volitelne") === s[0] ? " selected" : "") + ">" + s[1] + "</option>").join("") + "</select></td></tr>").join("")).join("");
   const poz = (BS.d.poziadavky || []).map(q => "<tr><td class=\"mono\">" + esc(q.kod) + "</td><td>" + esc(q.nazov) + "</td></tr>").join("");
-  return '<div class="bs-nast">' +
+  return '<div class="bs-nast">' + bsMojeUpozorneniaHtml() +
     '<div class="bs-panel"><div class="bs-ph"><h3>Ľudia a roly v BUGstation</h3><small>ukladá sa hneď</small></div><div class="in" style="overflow-x:auto">' + tabRol +
-      '<div class="bs-podobne">Člen bez roly je čitateľ. Nových ľudí do projektu pozýva správca v Pracovnom výkaze → Tím.</div></div></div>' +
+      '<div class="bs-podobne">Člen bez roly je čitateľ. Testerov a riešiteľov len do BUGstation pozvete sami; prístup k výkazu a ďalším modulom prideľuje správca v karte Projekt → Osoby.</div>' +
+      '<div style="margin-top:8px"><button type="button" class="bs-btn" onclick="bsPozvat()">+ Pozvať do BUGstation</button></div></div></div>' +
     '<div class="bs-panel"><div class="bs-ph"><h3>Triáž</h3></div><div class="in"><label style="display:flex;gap:8px;align-items:center;font:400 12px/1.4 var(--bs-sans)"><input type="checkbox"' + (n.triaz !== false ? " checked" : "") +
       ' onchange="BS.nastavenia.triaz=this.checked"> Nový defekt, incident a zmena čakajú v Identifikované na triáž Test managera alebo Test team leadera</label></div></div>' +
+    bsSlaPravidlaHtml(n) +
     cis +
     '<div class="bs-panel"><div class="bs-ph"><h3>Názvy úrovní</h3><small>podľa zmluvy, napr. Kategória A / B / C</small></div><div class="in" style="overflow-x:auto"><table class="bs-mriezka"><thead><tr><th>Typ</th><th>1 · najvážnejšia</th><th>2</th><th>3</th><th>4</th></tr></thead><tbody>' + urov + "</tbody></table></div></div>" +
     '<div class="bs-panel"><div class="bs-ph"><h3>Povinné polia formulára</h3></div><div class="in" style="overflow-x:auto"><table class="bs-mriezka"><tbody>' + povTyp + "</tbody></table></div></div>" +
@@ -1383,7 +1578,8 @@ async function bsNastaveniaUloz(){
   if (BS_TYPY_PORADIE.some(typ => !bsUrovneTypu(n, typ).length)) return alert("Každý typ musí mať aspoň jednu úroveň.");
   try {
     await bsRpc("b2b_bs_nastavenia_uloz", { p_projekt: B2B.pid, p_verzia: g.verzia,
-      p_nastavenia: { triaz: n.triaz !== false, is: n.is || [], moduly: n.moduly || [], prostredia: n.prostredia || [], releasy: n.releasy || [], timy: n.timy || [], urovne: n.urovne || {}, povinne: n.povinne || {} } });
+      p_nastavenia: { triaz: n.triaz !== false, is: n.is || [], moduly: n.moduly || [], prostredia: n.prostredia || [], releasy: n.releasy || [], timy: n.timy || [], urovne: n.urovne || {}, povinne: n.povinne || {},
+        sla: n.sla || {}, triaz_min: n.triaz_min == null ? 480 : n.triaz_min } });
     oznamPas("Nastavenia BUGstation uložené"); BS.nastavenia = null; bsNacitajData();
   } catch (e) { bsChyba(e, "Nastavenia sa nepodarilo uložiť"); }
 }
