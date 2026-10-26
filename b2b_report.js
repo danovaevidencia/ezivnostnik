@@ -1185,6 +1185,11 @@ function repView(model, kontext){
   // QA report (R2): snímky dohľadu kvality idú do vlastného balíka (QA PPTX/PDF)
   if (kontext.qa) for (const s of repQaSnimky(kontext.qa, vybrane)) { s.balik = "qa"; snimky.push(s); }
   if (kontext.qa && kontext.zmenyRegistrov) snimky.push(Object.assign(repQaZmenyRegistrovSnimka(kontext.zmenyRegistrov, vybrane), { balik: "qa" }));
+  // Diagnostika (R12): experimentálna — do výstupu len vtedy, keď ju QA zapne
+  if (kontext.qa) {
+    const D = repDiagnostika(model, p, { qa: kontext.qa, zmeny: kontext.zmeny, trend: kontext.trend, skryte: vy.skryteOblasti });
+    for (const s of repDiagSnimky(D, k => !!(vy.snimky && vy.snimky[k] === true))) { s.balik = "qa"; snimky.push(s); }
+  }
   return { nazov: p.nazov || "", kod: p.kod || "", stavKuDnu: model.stavKuDnu, cielovyTermin: model.cielovyTermin, pocetUloh: model.pocty.ulohy,
     farby: (p.metriky && p.metriky.farby) || null, snimky,
     manifest: snimky.map(s => ({ kluc: s.kluc, nazov: s.nazov, zahrnuta: s.zahrnuta, balik: s.balik })) };
@@ -2103,7 +2108,14 @@ function repKrokNahlad(K){
   return vyberHtml + kpiEd + '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin:0 2px 8px;flex-wrap:wrap"><span class="csub" style="margin:0">Výstup: <b>' + zahrnute + '</b> strán. Náhľad je ten istý obraz, z ktorého sa skladá PowerPoint. ' + esc(repManifestText(K)) + '</span>' +
     '<button class="aabtn" onclick="repOverlayOtvor()">⛶ Cez celú obrazovku</button></div>' + strany;
 }
-function repVyberSnimky(kluc, zap){ const v = REP.cyklusObsah.vyber = REP.cyklusObsah.vyber || {}; v.snimky = v.snimky || {}; if (zap) delete v.snimky[kluc]; else v.snimky[kluc] = false; repPrekresli(); }
+// Bežná snímka je predvolene zapnutá (ukladá sa len vypnutie), voliteľná (diagnostika R12) naopak.
+function repVyberSnimky(kluc, zap){
+  const v = REP.cyklusObsah.vyber = REP.cyklusObsah.vyber || {};
+  v.snimky = v.snimky || {};
+  if (repSnimkaVolitelna(kluc)) { if (zap) v.snimky[kluc] = true; else delete v.snimky[kluc]; }
+  else if (zap) delete v.snimky[kluc]; else v.snimky[kluc] = false;
+  repPrekresli();
+}
 function repSkryOblast(kluc, skryt){ const v = REP.cyklusObsah.vyber = REP.cyklusObsah.vyber || {}; const s = new Set(v.skryteOblasti || []); if (skryt) s.add(kluc); else s.delete(kluc); v.skryteOblasti = [...s]; repPrekresli(); }
 
 // Výstupy (§9.5): všetky z toho istého view-modelu; PPTX, PDF a HTML z toho
@@ -2315,7 +2327,7 @@ function repQa(vstup){
   const kv = Object.fromEntries(kpi.map(k => [k.kluc, k.hodnota]));
   return { kpi, rag, naratiV: us.qaNaratiV && us.qaNaratiV.text ? us.qaNaratiV.text : repQaNaratiV(Q, kv), naratiVZdroj: us.qaNaratiV && us.qaNaratiV.text ? "rucne" : "auto",
     kluceOtazky, issue, pohyb, zistenia: zist, ct, dep, il, model,
-    postup: model.drahy.filter(d => !d.chyba).map(d => ({ kratky: d.kratky, skupina: ((profil.skupiny || []).find(s => s.kluc === d.skupina) || {}).nazov || "",
+    postup: model.drahy.filter(d => !d.chyba).map(d => ({ kluc: d.kluc, kratky: d.kratky, skupina: ((profil.skupiny || []).find(s => s.kluc === d.skupina) || {}).nazov || "",
       pct: d.pct, fazy: profil.fazy.map(f => ({ kluc: f.kluc, r: d.fazy[f.kluc] })), oneskorena: d.oneskorena,
       problemy: ilRiadky && oblastIssue ? repProblemyOblasti(ilRiadky, oblastIssue, d.kluc) : null })) };
 }
@@ -2638,6 +2650,10 @@ function repXlsxBalik(X, K){
     pridaj("Zmeny v registroch", repXlsxHarok(X, ["Register", "ID", "Zmena", "Predtým", "Teraz", "Popis"],
       K.zmenyRegistrov.zmeny.map(z => [nm[z.reg], z.id, z.zmena, z.predtym, z.teraz, z.popis]), [12, 14, 22, 14, 14, 70]));
   }
+  // diagnostika (R12) len zapnutá — tie isté tabuľky ako na stranách, čísla ako čísla
+  for (const s of (view.snimky || []).filter(x => repSnimkaVolitelna(x.kluc) && x.zahrnuta))
+    pridaj(s.kluc === "qa-diag-dovera" ? "Diagnostika — dôvera" : "Diagnostika — signály", repXlsxHarok(X, s.tabulka.stlpce.map(c => c.n),
+      s.tabulka.riadky.map(r => r.b.map(v => (/^-?\d+$/.test(v) ? +v : v))), s.tabulka.stlpce.map(c => Math.max(8, Math.round(c.w * 140)))));
   if (Q) for (const h of repOpzHarky(X, K)) { if (h.overenia) (wb.repOverenia = wb.repOverenia || [])[wb.SheetNames.length] = h.overenia; pridaj(h.meno, h.ws); }
   pridaj("Na opravu pre PMO", repXlsxHarok(X, ["Zdroj", "Kód", "Popis"], repNaOpravu(K, protokoly), [16, 18, 100]));
   return wb;
@@ -3055,7 +3071,7 @@ function repKrokUsudokQa(K){
     '<textarea rows="4" style="' + REP_TEXTAREA + '" placeholder="' + esc(auto) + '" onchange="repNastavQaNaratiV(this.value)">' + esc(us.qaNaratiV && us.qaNaratiV.text || "") + "</textarea></div>" +
     '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>KPI dohľadu kvality</b><div class="csub" style="margin:2px 0 6px">Vypočítanú hodnotu môže QA prepísať len s dôvodom; výstup ukáže prepis s hviezdičkou a vypočítanú hodnotu pod ním.</div>' +
     '<table style="width:100%;border-collapse:collapse"><tr class="csub"><th style="text-align:left">KPI</th><th>Vypočítané</th><th style="text-align:left">Prepis</th><th style="text-align:left">Dôvod</th></tr>' + kpi + "</table></div>" +
-    repIssueTabulkaHtml(K);
+    repDiagKartaHtml(K) + repIssueTabulkaHtml(K);
 }
 
 // ═══ 26. Zmeny, trend a financie (kolo R3a; NAVRH §6.7, §6.8, §9.2) ═══
@@ -4697,5 +4713,185 @@ function repVyberPodsekciu(drahaKluc, uid, zap){
   if (zap) a.delete(uid); else a.add(uid);
   if (a.size) sk[drahaKluc] = [...a]; else delete sk[drahaKluc];
   if (!Object.keys(sk).length) delete vy.skrytePodsekcie;
+  repPrekresli();
+}
+
+// ═══ 37. Diagnostika (R12, NAVRH §26, č. 315) ═════════════════════════
+// Prenos „Diagnostického pohľadu“ Generátora 4.0 (G:1674): ktorým termínom sa
+// dá veriť a prečo. Skóre dôvery oblastí, anomálie konzistencie plánu,
+// projekcia z tempa dokĺzania (body trendu) a QA signály z registrov a zmien.
+// Experimentálne — interpretácia dát, nie hodnotenie: dve strany v QA balíku,
+// do výstupu idú, len keď ich QA zapne (repSnimkaVolitelna).
+const REP_DIAG = {
+  body: { anomalia: 8, sklzMax: 30, poTermine: 20, qaMax: 24, qaAktivny: 4, qaKriticky: 6 },
+  pasma: { vysoke: 75, stredne: 45 },
+  anomalie: { vysokyPct: 85, dalekoDni: 90, nizkyPct: 40, blizkoDni: 30, okruhleDni: ["01", "15", "30", "31"] },
+  klaster: { minAktivnych: 4, podiel: 0.4 } };
+const REP_DIAG_SNIMKY = ["qa-diag-dovera", "qa-diag-signaly"];
+const REP_DIAG_DRUHY = { "pct-termin": "% vs. termín", "nizky-postup": "nízky postup", "milnik-po-konci": "míľnik po konci", "chyba-faza": "chýba fáza",
+  "okruhly-datum": "okrúhly dátum", "stoji": "stojí", "qa-kriticke": "kritické problémy", "qa-eskalovane": "eskalácie", "qa-klaster": "sústredenie",
+  "ct-posun": "záväzok posunutý", "ct-po-termine": "záväzok po termíne", "ct-plan-neskor": "plán neskôr", "ct-chyba": "chýba v pláne",
+  "ct-caka": "čaká na termín", "ct-bez-zavazku": "bez záväzku", "pohyb-oneskorene": "nové oneskorenie", "pohyb-regresia": "regresia" };
+const REP_DIAG_ZAV = { 3: "vysoká", 2: "stredná", 1: "nízka" };
+const REP_DIAG_FARBA = { vysoke: "green", stredne: "amber", nizke: "red" };
+function repSnimkaVolitelna(kluc){ return REP_DIAG_SNIMKY.includes(kluc); }
+// Tri tvary ako sklon() v appke (1 záväzok, 2–4 záväzky, 5+ záväzkov); b2b_report.js beží aj bez appky.
+function repSklon(n, jeden, dva, viac){ return n === 1 ? jeden : n >= 2 && n <= 4 ? dva : viac; }
+function repOkruhlyDatum(d){ return !!d && REP_DIAG.anomalie.okruhleDni.includes(String(d).slice(8, 10)); }
+function repDiagPasmo(s){ return s == null ? null : s >= REP_DIAG.pasma.vysoke ? "vysoke" : s >= REP_DIAG.pasma.stredne ? "stredne" : "nizke"; }
+
+// kontext: { qa, zmeny, trend, skryte } — všetko voliteľné; anomáliám stačí jeden plán.
+function repDiagnostika(model, profil, kontext){
+  const C = REP_DIAG, k = kontext || {}, fazy = profil.fazy || [], prva = fazy[0], posl = fazy[fazy.length - 1], stav = model.stavKuDnu;
+  const skryte = new Set(k.skryte || []);
+  const drahy = model.drahy.filter(d => !d.chyba && !skryte.has(d.kluc));
+  const posledna = d => (posl && d.fazy[posl.kluc]) || null;
+  const anomalie = [], signaly = [];
+  const pridajA = (d, druh, zav, text) => anomalie.push({ kluc: d.kluc, oblast: d.kratky, druh, zav, text });
+  const pridajS = (zdroj, druh, zav, text) => signaly.push({ zdroj, druh, zav, text });
+  // 1) projekcia: priemerný krok poslednej fázy medzi bodmi trendu, o jeden cyklus dopredu
+  const projekcia = {};
+  if (k.trend && posl) for (const r of k.trend.riadky) {
+    if (r.faza !== posl.kluc || r.hotove || !r.seria[r.seria.length - 1]) continue;
+    const s = r.seria.filter(Boolean);
+    if (s.length < 2) continue;
+    const kroky = s.slice(1).map((v, i) => repDni(s[i], v));
+    const tempo = Math.round(kroky.reduce((a, b) => a + b, 0) / kroky.length);
+    const plan = s[s.length - 1];
+    projekcia[r.kluc] = { plan, projekcia: tempo ? repPlusDni(plan, tempo) : plan, tempo, krokov: kroky.length };
+  }
+  // 2) anomálie konzistencie plánu; hotová posledná fáza termín neohrozuje (generátor ju nevynechával)
+  for (const d of drahy) {
+    const r = posledna(d), pd = r && r.datum;
+    if (pd && !r.hotove) {
+      const dni = repDni(stav, pd);
+      if (d.pct >= C.anomalie.vysokyPct && dni > C.anomalie.dalekoDni) pridajA(d, "pct-termin", 3, "Postup " + d.pct + " %, ale " + posl.kluc + " až o " + dni + " dní (" + repDMR(pd) + ") — postup a termín si odporujú.");
+      if (d.pct < C.anomalie.nizkyPct && dni >= 0 && dni < C.anomalie.blizkoDni)
+        pridajA(d, "nizky-postup", 3, "Len " + d.pct + " % a " + posl.kluc + " " + (dni ? "o " + dni + " " + repSklon(dni, "deň", "dni", "dní") : "dnes") + " — termín je ohrozený.");
+      if (repOkruhlyDatum(pd)) pridajA(d, "okruhly-datum", 1, posl.kluc + " má „okrúhly“ dátum " + repDMR(pd) + " — môže byť zástupný, nie naplánovaný termín.");
+    }
+    if (pd && d.finish && pd > d.finish) pridajA(d, "milnik-po-konci", 2, posl.kluc + " (" + repDMR(pd) + ") je po konci oblasti (" + repDMR(d.finish) + ").");
+    if (fazy.length >= 2 && pd && !(d.fazy[prva.kluc] && d.fazy[prva.kluc].datum)) pridajA(d, "chyba-faza", 2, "Má " + posl.kluc + " bez míľnika " + prva.kluc + " — chýba nadväznosť fáz.");
+    if (d.pct === 0 && d.start && d.start < stav) pridajA(d, "stoji", 2, "Oblasť mala začať " + repDMR(d.start) + ", postup je 0 % — sklz alebo neaktualizovaný plán.");
+  }
+  // 3) QA signály — nezávislá vrstva: plán môže vyzerať dobre a registre hovoria inak.
+  //    Oblasť problému určuje číselník oblastí (Q.postup), nie podreťazec názvu (N2).
+  const Q = k.qa, qaOblasti = {};
+  if (Q) {
+    for (const p of Q.postup || []) if (p.kluc && p.problemy) qaOblasti[p.kluc] = p.problemy;
+    if (Q.il) {
+      const kr = Q.il.kriticke, es = Q.il.eskalovane;
+      if (kr) pridajS("Issue Log", "qa-kriticke", 3, kr + " " + repSklon(kr, "kritický aktívny problém", "kritické aktívne problémy", "kritických aktívnych problémov") + " — riziko, ktoré harmonogram neukazuje.");
+      if (es) pridajS("Issue Log", "qa-eskalovane", 2, es + " " + repSklon(es, "eskalovaný problém potrebuje", "eskalované problémy potrebujú", "eskalovaných problémov potrebuje") + " rozhodnutie nad rámec tímu.");
+      const akt = (Q.issue || []).filter(z => z.aktivny && !(z.anotacia && z.anotacia.nezapocitat)), kat = new Map();
+      for (const z of akt) { const t = String(z.kategoria || "").trim(); if (t) kat.set(t, (kat.get(t) || 0) + 1); }
+      const top = [...kat].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
+      if (top && akt.length >= C.klaster.minAktivnych && top[1] >= Math.ceil(akt.length * C.klaster.podiel))
+        pridajS("Issue Log", "qa-klaster", 2, "Problémy sa sústreďujú v kategórii „" + top[0] + "“ (" + top[1] + " z " + akt.length + ") — systémový, nie ojedinelý problém.");
+    }
+    const ct = Q.ct;
+    if (ct) {
+      // posun oproti baseline len pri nesplnených — splnený sľub už riziko nenesie
+      const sB = ct.zavazky.filter(z => z.baseline && z.hlavny !== "SPLNENE"), pos = sB.filter(z => z.posunOprotiBaseline > 0).length;
+      if (pos) pridajS("záväzky", "ct-posun", 3, pos + " z " + sB.length + " nesplnených záväzkov s baseline má termín po baseline — sľub sa už posunul.");
+      const n = ct.pocty || {}, bez = (ct.planBezZavazku || []).length;
+      if (n.PO_TERMINE) pridajS("záväzky", "ct-po-termine", 3, n.PO_TERMINE + " " + repSklon(n.PO_TERMINE, "záväzok je po termíne a nesplnený", "záväzky sú po termíne a nesplnené", "záväzkov je po termíne a nesplnených") + ".");
+      if (n.PLAN_NESKOR) pridajS("záväzky", "ct-plan-neskor", 2, n.PLAN_NESKOR + " " + repSklon(n.PLAN_NESKOR, "míľnik má", "míľniky majú", "míľnikov má") + " v pláne termín neskôr než záväzok — plán nepodporuje sľub.");
+      if (n.CHYBA_V_PLANE) pridajS("záväzky", "ct-chyba", 2, n.CHYBA_V_PLANE + " " + repSklon(n.CHYBA_V_PLANE, "záväzok nemá", "záväzky nemajú", "záväzkov nemá") + " míľnik v pláne — mimo master plánu.");
+      if (n.CAKA_NA_TERMIN) pridajS("záväzky", "ct-caka", 1, n.CAKA_NA_TERMIN + " " + repSklon(n.CAKA_NA_TERMIN, "záväzok čaká", "záväzky čakajú", "záväzkov čaká") + " na termín dodávateľa.");
+      if (bez) pridajS("záväzky", "ct-bez-zavazku", 1, bez + " " + repSklon(bez, "kód záväzku v pláne nemá", "kódy záväzku v pláne nemajú", "kódov záväzku v pláne nemá") + " záznam v trackeri — chýba zodpovednosť za termín.");
+    }
+  }
+  // 4) pohyb od porovnávaného plánu (project log generátora): dokončené mínus zhoršené
+  let pohyb = null;
+  const Z = k.zmeny;
+  if (Z) {
+    pohyb = { od: Z.pred.stavKuDnu, dokoncene: Z.dokoncene.length, novoOneskorene: Z.novoOneskorene.length, regresie: Z.regresie.length,
+      neskor: Z.sumar.posunute, skor: Z.sumar.uvolnene, saldo: Z.dokoncene.length - Z.novoOneskorene.length - Z.regresie.length };
+    const no = Z.novoOneskorene.length, re = Z.regresie.length;
+    if (no) pridajS("zmeny plánu", "pohyb-oneskorene", 3, no + " " + repSklon(no, "míľnik prešiel", "míľniky prešli", "míľnikov prešlo") + " do oneskorenia od " + repDMR(Z.pred.stavKuDnu) + " — situácia sa zhoršuje.");
+    if (re) pridajS("zmeny plánu", "pohyb-regresia", 2, re + " " + repSklon(re, "položka klesla", "položky klesli", "položiek kleslo") + " v postupe od " + repDMR(Z.pred.stavKuDnu) + " — práca sa vracia.");
+  }
+  // 5) skóre dôvery: 100 bodov mínus zrážky; každá zrážka má viditeľný dôvod
+  const B = C.body, anomPodla = new Map();
+  for (const a of anomalie) anomPodla.set(a.kluc, (anomPodla.get(a.kluc) || []).concat([a]));
+  const oblasti = drahy.map(d => {
+    let skore = 100; const dovody = [];
+    const zraz = (b, t) => { skore -= b; dovody.push("−" + b + " " + t); };
+    for (const a of anomPodla.get(d.kluc) || []) zraz(a.zav * B.anomalia, REP_DIAG_DRUHY[a.druh]);
+    const pj = projekcia[d.kluc];
+    if (pj && pj.tempo > 0) zraz(Math.min(B.sklzMax, pj.tempo), "sklz " + pj.tempo + " d/cyklus");
+    const r = posledna(d);
+    if (r && r.oneskorene) zraz(B.poTermine, posl.kluc + " po termíne");
+    const q = qaOblasti[d.kluc];
+    if (q && q.spolu) zraz(Math.min(B.qaMax, q.spolu * B.qaAktivny + q.krit * B.qaKriticky), "QA: " + q.spolu + " " + repSklon(q.spolu, "aktívny", "aktívne", "aktívnych") + (q.krit ? " (" + q.krit + " krit.)" : ""));
+    skore = Math.max(0, Math.min(100, Math.round(skore)));
+    return { kluc: d.kluc, kratky: d.kratky, pct: d.pct, posledna: r ? r.datum : null, poslednaHotova: !!(r && r.hotove), projekcia: pj || null,
+      qa: q || null, skore, pasmo: repDiagPasmo(skore), dovody };
+  }).sort((a, b) => a.skore - b.skore || a.kratky.localeCompare(b.kratky));
+  anomalie.sort((a, b) => b.zav - a.zav || a.oblast.localeCompare(b.oblast));
+  signaly.sort((a, b) => b.zav - a.zav);                      // stabilné: poradie zdrojov ostáva
+  const priemer = oblasti.length ? Math.round(oblasti.reduce((s, o) => s + o.skore, 0) / oblasti.length) : null;
+  return { faza: posl ? posl.kluc : "", maTrend: !!k.trend, maQa: !!Q, oblasti, anomalie, signaly, projekcia, pohyb,
+    sumar: { oblasti: oblasti.length, priemer, nizke: oblasti.filter(o => o.pasmo === "nizke").length, anomalie: anomalie.length,
+      zavazne: anomalie.filter(a => a.zav >= 3).length, sklzy: oblasti.filter(o => o.projekcia && o.projekcia.tempo > 0).length,
+      signaly: signaly.length, zavazneSignaly: signaly.filter(s => s.zav >= 3).length, saldo: pohyb ? pohyb.saldo : null } };
+}
+
+// Dve strany QA balíka v tvare qaTabulka (dlaždice + tabuľka): náhľad, PPTX,
+// PDF aj HTML ich kreslia tým istým rozložením ako ostatné QA strany.
+function repDiagSnimky(D, vybrane){
+  const S = D.sumar, F = REP_DIAG_FARBA, kicker = "Diagnostika — experimentálne", zn = n => (n > 0 ? "+" : n < 0 ? "−" : "") + Math.abs(n);
+  const ak = (z, vsetky) => (z ? "red" : vsetky ? "amber" : "green");
+  const zav = n => "závažné: " + n;
+  const dlazdice = [
+    { popis: "Priemerné skóre", hodnota: S.priemer == null ? "—" : String(S.priemer), sub: S.oblasti + " " + repSklon(S.oblasti, "oblasť", "oblasti", "oblastí"), akcent: F[repDiagPasmo(S.priemer)] || "textSec" },
+    { popis: "Nízka dôvera", hodnota: String(S.nizke), sub: "pod " + REP_DIAG.pasma.stredne + " bodov", akcent: S.nizke ? "red" : "green" },
+    { popis: "Anomálie plánu", hodnota: String(S.anomalie), sub: zav(S.zavazne), akcent: ak(S.zavazne, S.anomalie) },
+    D.maTrend ? { popis: "Smeruje neskôr", hodnota: String(S.sklzy), sub: "projekcia z bodov trendu", akcent: S.sklzy ? "amber" : "green" }
+      : { popis: "Projekcia", hodnota: "—", sub: "bez bodov trendu", akcent: "textSec" } ];
+  if (D.pohyb) dlazdice.push({ popis: "Pohyb od " + repDM(D.pohyb.od), hodnota: zn(D.pohyb.saldo),
+    sub: "dokončené " + D.pohyb.dokoncene + " · horšie " + (D.pohyb.novoOneskorene + D.pohyb.regresie), akcent: D.pohyb.saldo > 0 ? "green" : D.pohyb.saldo < 0 ? "red" : "amber" });
+  const proj = o => (!o.projekcia || !o.projekcia.tempo ? "—" : repDMR(o.projekcia.projekcia) + " (" + zn(o.projekcia.tempo) + " d)");
+  const dovera = { kluc: "qa-diag-dovera", typ: "qaTabulka", nazov: "QA: diagnostika — skóre dôvery", zahrnuta: vybrane("qa-diag-dovera"),
+    kicker, nadpis: "Skóre dôvery oblastí", sumar: dlazdice,
+    diag: { sumar: S, maTrend: D.maTrend, najnizsie: D.oblasti.slice(0, 3).map(o => ({ kratky: o.kratky, skore: o.skore })) },
+    tabulka: { stlpce: [{ n: "Oblasť", w: 0.15 }, { n: "Skóre", w: 0.07 }, { n: "%", w: 0.07 }, { n: D.faza || "Posledná fáza", w: 0.11 }, { n: "Projekcia", w: 0.15 }, { n: "Dôvody zrážok", w: 0.45 }],
+      riadky: D.oblasti.map(o => ({ b: [o.kratky, String(o.skore), o.pct + " %", o.posledna ? (o.poslednaHotova ? "✓ " : "") + repDMR(o.posledna) : "—", proj(o), o.dovody.join(" · ") || "bez zrážok"],
+        farby: { 1: F[o.pasmo], 4: o.projekcia && o.projekcia.tempo > 0 ? "red" : o.projekcia && o.projekcia.tempo < 0 ? "green" : null } })),
+      prazdne: "Žiadna oblasť na hodnotenie." } };
+  const vsetky = D.anomalie.map(a => ({ zdroj: "plán", zav: a.zav, druh: a.druh, oblast: a.oblast, text: a.text }))
+    .concat(D.signaly.map(s => ({ zdroj: s.zdroj, zav: s.zav, druh: s.druh, oblast: "", text: s.text }))).sort((a, b) => b.zav - a.zav);
+  const zdroje = ["plán"].concat([...new Set(D.signaly.map(s => s.zdroj))]);
+  const signaly = { kluc: "qa-diag-signaly", typ: "qaTabulka", nazov: "QA: diagnostika — anomálie a signály", zahrnuta: vybrane("qa-diag-signaly"),
+    kicker, nadpis: "Anomálie plánu a QA signály",
+    sumar: [{ popis: "Anomálie plánu", hodnota: String(S.anomalie), sub: zav(S.zavazne), akcent: ak(S.zavazne, S.anomalie) },
+      { popis: "QA signály", hodnota: String(S.signaly), sub: zav(S.zavazneSignaly), akcent: ak(S.zavazneSignaly, S.signaly) },
+      { popis: "Zdroje", hodnota: String(zdroje.length), sub: zdroje.join(", "), akcent: "blue" }],
+    tabulka: { stlpce: [{ n: "Zdroj", w: 0.1 }, { n: "Závažnosť", w: 0.09 }, { n: "Druh", w: 0.14 }, { n: "Oblasť", w: 0.12 }, { n: "Popis", w: 0.55 }],
+      riadky: vsetky.map(x => ({ b: [x.zdroj, REP_DIAG_ZAV[x.zav], REP_DIAG_DRUHY[x.druh] || x.druh, x.oblast || "—", x.text], farby: { 1: x.zav >= 3 ? "red" : x.zav === 2 ? "amber" : null } })),
+      prazdne: "Žiadna anomália ani signál — plán a registre sú v súlade." } };
+  return [dovera, signaly];
+}
+
+// Karta v kroku Úsudok QA: súhrn a jedno zapnutie oboch strán.
+function repDiagKartaHtml(K){
+  const s = ((K.view && K.view.snimky) || []).find(x => x.kluc === "qa-diag-dovera");
+  if (!s || !s.diag) return "";
+  const S = s.diag.sumar, zap = K.view.snimky.some(x => repSnimkaVolitelna(x.kluc) && x.zahrnuta);
+  const kon = REP.cyklus && REP.cyklus.stav === "koncept" && !REP.verziaSnimka;
+  return '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>🔬 Diagnostika (experimentálne)</b><div class="csub" style="margin:2px 0 6px">Ktorým termínom sa dá veriť a prečo. ' +
+    "Skóre dôvery oblasti je 100 bodov mínus zrážky za anomálie plánu, sklz z bodov trendu, oneskorenú poslednú fázu a aktívne problémy z Issue Logu — každá zrážka má v tabuľke dôvod. " +
+    "Je to interpretácia dát, nie hodnotenie: dve strany idú do QA reportu, len keď ich zapnete.</div>" +
+    "<div>Priemerné skóre <b>" + (S.priemer == null ? "—" : S.priemer) + "</b> · nízka dôvera <b>" + S.nizke + "</b> · anomálie plánu <b>" + S.anomalie + "</b> · QA signály <b>" + S.signaly + "</b>" +
+    (s.diag.najnizsie.length ? " · najnižšie: " + s.diag.najnizsie.map(o => esc(o.kratky) + " " + o.skore).join(", ") : "") +
+    (s.diag.maTrend ? "" : ' <span class="csub" style="margin:0">(projekcia potrebuje body trendu)</span>') + "</div>" +
+    '<label style="display:flex;gap:6px;align-items:center;margin-top:6px"><input type="checkbox"' + (zap ? " checked" : "") + (kon ? "" : " disabled") +
+    ' onchange="repDiagZapni(this.checked)"> Pridať diagnostiku do QA reportu</label></div>';
+}
+function repDiagZapni(zap){
+  const v = REP.cyklusObsah.vyber = REP.cyklusObsah.vyber || {};
+  v.snimky = v.snimky || {};
+  for (const k of REP_DIAG_SNIMKY) { if (zap) v.snimky[k] = true; else delete v.snimky[k]; }
   repPrekresli();
 }
