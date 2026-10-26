@@ -618,6 +618,102 @@ const BS_CSS = [
   ".bs-form summary small{font-weight:400;color:var(--bs-t4);margin-left:6px}",
   ".bs-chyba{padding:8px 10px;border-radius:8px;background:oklch(0.96 0.03 38);border:1px solid oklch(0.87 0.05 38);color:oklch(0.4 0.12 38);font:400 11.5px/1.4 var(--bs-sans)}",
   ".bs-podobne{font:400 11px/1.4 var(--bs-sans);color:var(--bs-t4)}",
+  // BS2: testovací plán (C), scenáre (D), vykonanie, Prehľad s plánom
+  ".bs-stat{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}",
+  ".bs-stat>div{background:var(--bs-panel);border:1px solid var(--bs-l13);border-radius:9px;padding:13px 14px 12px;min-width:0}",
+  ".bs-stat-v{font:500 21px/1.15 var(--bs-mono);letter-spacing:-.5px;color:var(--bs-t1);margin:6px 0 4px}",
+  ".bs-bod9{width:9px;height:9px;border-radius:50%;flex:none;background:oklch(0.62 max(var(--c),.04) var(--h))}",
+  ".bs-ph h3 small{font:400 10.5px/1 var(--bs-mono);color:var(--bs-t4);margin-left:8px}",
+  ".bs-ph-tl{display:flex;flex-wrap:wrap;gap:6px;margin-left:auto}",
+  ".bs-fp{display:flex;align-items:center;gap:8px}",
+  ".bs-bar6,.bs-bar5{display:block;width:210px;height:6px;border-radius:4px;background:var(--bs-l08);overflow:hidden}",
+  ".bs-bar5{width:84px;height:5px}",
+  ".bs-bar6>i,.bs-bar5>i{display:block;height:100%;border-radius:4px;background:var(--bs-ak)}",
+  ".bs-pr{display:grid;grid-template-columns:1fr 220px 140px;align-items:center;gap:10px;padding:9px 16px;border-top:1px solid var(--bs-l08)}",
+  ".bs-pr.s{grid-template-columns:1fr 220px 140px 26px}",
+  ".bs-pr-n{border:none;background:none;padding:0;text-align:left;font:400 12px/1.35 var(--bs-sans);color:var(--bs-t1);cursor:pointer;min-width:0}",
+  ".bs-pr-n:hover{text-decoration:underline}",
+  ".bs-pr-t{color:var(--bs-t4)}",
+  ".bs-kodm{font:500 10.5px/1 var(--bs-mono);color:var(--bs-t4)}",
+  ".bs-pocty{display:flex;gap:10px;font:500 10.5px/1 var(--bs-mono);white-space:nowrap}",
+  ".bs-pocty b{font-weight:500}",
+  ".bs-pocty .presiel{color:oklch(0.48 0.1 162)}.bs-pocty .nepresiel{color:oklch(0.5 0.13 32)}.bs-pocty .blokovany{color:oklch(0.5 0.11 78)}.bs-pocty .caka{color:var(--bs-t4)}",
+  "[data-tema=\"tmavy\"] .bs-pocty .presiel{color:oklch(0.78 0.1 162)}[data-tema=\"tmavy\"] .bs-pocty .nepresiel{color:oklch(0.78 0.11 32)}[data-tema=\"tmavy\"] .bs-pocty .blokovany{color:oklch(0.8 0.1 78)}",
+  ".bs-krit{border-top:1px solid var(--bs-l08);padding:10px 16px}",
+  ".bs-krit summary{cursor:pointer;font:500 11.5px/1.3 var(--bs-sans);color:var(--bs-t2)}",
+  ".bs-krit summary small{font:400 10.5px/1 var(--bs-mono);color:var(--bs-t4);margin-left:6px}",
+  ".bs-krit-r{display:flex;align-items:flex-start;gap:9px;padding:7px 0;font:400 11.5px/1.4 var(--bs-sans);color:var(--bs-t2)}",
+  ".bs-krit-r>span:nth-child(2){flex:1}.bs-krit-r small{display:block;color:var(--bs-t4)}",
+  ".bs-krit-r .ok{color:oklch(0.48 0.1 162);font-weight:600}.bs-krit-r .nie{color:oklch(0.5 0.13 32);font-weight:600}",
+  ".bs-sc{display:grid;grid-template-columns:repeat(auto-fit,minmax(440px,1fr));gap:14px;align-items:start}",
+  ".bs-sr{display:flex;align-items:center;gap:10px;width:100%;padding:11px 16px;border:none;border-top:1px solid var(--bs-l08);background:none;text-align:left;cursor:pointer}",
+  ".bs-sr:hover{background:var(--bs-hover)}",
+  ".bs-sr.on{background:var(--bs-vyb);box-shadow:inset 2px 0 0 var(--bs-ak)}",
+  ".bs-sr-n{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;font:400 12px/1.35 var(--bs-sans);color:var(--bs-t1)}",
+  ".bs-sr-v{display:flex;flex-direction:column;align-items:flex-end;gap:4px}",
+  ".bs-sr-v small{font:400 10px/1 var(--bs-mono);color:var(--bs-t4)}",
+  ".bs-scd{padding:16px 18px 18px}",
+  ".bs-scd-h{display:flex;align-items:center;flex-wrap:wrap;gap:8px}",
+  ".bs-scd h2{margin:8px 0 12px;font:600 15px/1.25 var(--bs-sans);color:var(--bs-t1)}",
+  ".bs-scd-m{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px 14px;margin-bottom:12px}",
+  ".bs-scd-m .k{display:block;font:500 10px/1.2 var(--bs-mono);letter-spacing:.5px;color:var(--bs-t4);margin-bottom:3px}",
+  ".bs-scd-m .v{font:400 11.5px/1.35 var(--bs-sans);color:var(--bs-t2)}",
+  ".bs-scd-p{margin:0 0 12px;font:400 11.5px/1.5 var(--bs-sans);color:var(--bs-t3);white-space:pre-wrap}",
+  ".bs-callout{display:flex;gap:9px;margin:0 0 12px;padding:10px 12px;border-radius:8px;background:oklch(0.96 0.03 38);border:1px solid oklch(0.87 0.05 38)}",
+  ".bs-callout>i{width:7px;height:7px;border-radius:50%;flex:none;margin-top:5px;background:oklch(0.55 0.14 38)}",
+  ".bs-callout b{font:500 11.5px/1.3 var(--bs-sans);color:oklch(0.4 0.12 38)}",
+  ".bs-callout p{margin:3px 0 0;font:400 11px/1.5 var(--bs-sans);color:oklch(0.43 0.07 38)}",
+  ".bs-callout button{border:none;background:none;padding:0;font:500 11px/1 var(--bs-mono);color:oklch(0.4 0.12 38);text-decoration:underline;cursor:pointer}",
+  "[data-tema=\"tmavy\"] .bs-callout{background:oklch(0.3 0.05 38);border-color:oklch(0.42 0.07 38)}[data-tema=\"tmavy\"] .bs-callout b,[data-tema=\"tmavy\"] .bs-callout p,[data-tema=\"tmavy\"] .bs-callout button{color:oklch(0.88 0.06 38)}",
+  ".bs-kroky-h{font:500 10px/1 var(--bs-mono);letter-spacing:.5px;color:var(--bs-t4);margin:4px 0 2px}",
+  ".bs-krok{display:grid;grid-template-columns:22px minmax(120px,1fr) minmax(120px,1fr) 74px;gap:10px 12px;padding:11px 0;border-top:1px solid var(--bs-l09);align-items:start}",
+  ".bs-kn{font:500 10.5px/1.5 var(--bs-mono);color:var(--bs-t4)}",
+  ".bs-ka{font:400 11.5px/1.5 var(--bs-sans);color:var(--bs-t2);min-width:0}",
+  ".bs-ka em{display:block;font-style:normal;color:var(--bs-t3);white-space:pre-wrap;margin-top:2px}",
+  ".bs-ko{font:400 11.5px/1.5 var(--bs-sans);color:var(--bs-t4);white-space:pre-wrap;min-width:0}",
+  ".bs-krok-tl{display:flex;gap:3px;margin-top:6px}",
+  ".bs-krok-tl button{width:22px;height:22px;border:1px solid var(--bs-l16);border-radius:5px;background:var(--bs-panel);color:var(--bs-t4);font:400 11px/1 var(--bs-sans);cursor:pointer;padding:0}",
+  ".bs-krok-tl button[disabled]{opacity:.35;cursor:default}",
+  ".bs-beh{display:flex;flex-direction:column;gap:12px}",
+  ".bs-beh-p{font:400 11px/1.3 var(--bs-sans);color:var(--bs-t4);display:flex;flex-wrap:wrap;gap:8px;align-items:center}",
+  ".bs-beh-h{font:400 13px/1.4 var(--bs-sans);color:var(--bs-t1)}",
+  ".bs-beh-s p{margin:4px 0 0;font:400 12px/1.5 var(--bs-sans);color:var(--bs-t2);white-space:pre-wrap}",
+  ".bs-beh-tl{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}",
+  ".bs-v{min-height:46px;border-radius:9px;border:1px solid var(--bs-l16);background:var(--bs-panel);font:600 13px/1.2 var(--bs-sans);cursor:pointer}",
+  ".bs-v.presiel{color:oklch(0.42 0.1 162);border-color:oklch(0.8 0.08 162);background:oklch(0.97 0.03 162)}",
+  ".bs-v.nepresiel{color:oklch(0.45 0.13 32);border-color:oklch(0.84 0.07 32);background:oklch(0.97 0.025 32)}",
+  ".bs-v.blokovany{color:oklch(0.45 0.1 78);border-color:oklch(0.84 0.07 78);background:oklch(0.97 0.03 78)}",
+  "[data-tema=\"tmavy\"] .bs-v{background:var(--bs-main)}[data-tema=\"tmavy\"] .bs-v.presiel{color:oklch(0.82 0.1 162)}[data-tema=\"tmavy\"] .bs-v.nepresiel{color:oklch(0.82 0.11 32)}[data-tema=\"tmavy\"] .bs-v.blokovany{color:oklch(0.85 0.1 78)}",
+  ".bs-beh-def{display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding:10px 12px;border:1px solid var(--bs-l16);border-radius:8px;font:400 11.5px/1.4 var(--bs-sans);color:var(--bs-t2)}",
+  ".bs-beh-nav{display:flex;justify-content:space-between;gap:8px}",
+  ".bs-chk{display:flex!important;flex-direction:row!important;align-items:center;gap:8px;font:400 12px/1.4 var(--bs-sans)!important;text-transform:none!important;letter-spacing:0!important;color:var(--bs-t2)!important}",
+  ".bs-chk input[type=checkbox]{width:auto;flex:none}",
+  ".bs-pp{display:flex;flex-direction:column;gap:4px;max-height:42vh;overflow:auto;border:1px solid var(--bs-l13);border-radius:8px;padding:8px 10px}",
+  ".bs-pp label[hidden]{display:none!important}",
+  ".bs-odkaz{border:none;background:none;padding:0;font:500 11.5px/1.4 var(--bs-mono);color:var(--bs-ak);text-decoration:underline;cursor:pointer}",
+  ".bs-pata-p{display:flex;align-items:center;gap:8px}",
+  ".bs-pata-p>span{flex:1;height:4px;border-radius:3px;background:rgba(255,255,255,.14);overflow:hidden}",
+  ".bs-pata-p>span>i{display:block;height:100%;background:#57a396}",
+  ".bs-pata-p b{font:500 10px/1 var(--bs-mono);color:#dfe5ee}",
+  ".bs-pata-d{font:400 10.5px/1 var(--bs-sans);color:#b0bacb}",
+  ".bs-legw{display:flex;flex-wrap:wrap;gap:10px;margin-left:auto}",
+  ".bs-leg{display:flex;align-items:center;gap:5px;font:400 10.5px/1 var(--bs-sans);color:var(--bs-t4)}",
+  ".bs-leg i,.bs-stack i{display:block;background:var(--bs-l14)}",
+  ".bs-leg i{width:8px;height:8px;border-radius:2px}",
+  ".bs-leg i.presiel,.bs-stack i.presiel{background:oklch(0.62 0.1 162)}.bs-leg i.nepresiel,.bs-stack i.nepresiel{background:oklch(0.62 0.14 32)}.bs-leg i.blokovany,.bs-stack i.blokovany{background:oklch(0.62 0.12 78)}",
+  ".bs-prog{display:grid;grid-template-columns:150px 1fr 56px;align-items:center;gap:12px;width:100%;padding:11px 16px;border:none;border-bottom:1px solid var(--bs-l08);background:none;text-align:left;cursor:pointer}",
+  ".bs-prog:hover{background:var(--bs-hover)}",
+  ".bs-prog-n{display:flex;flex-direction:column;gap:3px;min-width:0}",
+  ".bs-prog-n b{font:500 12px/1.3 var(--bs-sans);color:var(--bs-t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
+  ".bs-prog-n small{font:400 10px/1.2 var(--bs-mono);color:var(--bs-t4);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
+  ".bs-stack{display:flex;height:9px;border-radius:5px;background:var(--bs-l14);overflow:hidden}",
+  ".bs-ms{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr))}",
+  ".bs-ms>div{display:flex;flex-direction:column;gap:7px;padding:14px 16px;border-right:1px solid var(--bs-l09);min-width:0}",
+  ".bs-ms>div:last-child{border-right:none}",
+  ".bs-ms-n{display:flex;align-items:center;gap:7px;font:500 11.5px/1.3 var(--bs-sans);color:var(--bs-t2)}",
+  ".bs-ms-n i{width:7px;height:7px;border-radius:50%;flex:none;background:oklch(0.62 0.11 var(--h))}",
+  ".bs-ms-v{font:500 20px/1 var(--bs-mono);color:var(--bs-t1)}",
+  ".bs-ms-p{font:400 10.5px/1.35 var(--bs-sans);color:var(--bs-t5)}",
   // úzke okno: split len od 1100 px, mobil pod 900 px (§4.4)
   "@media (max-width:1099px){.bs-split.dva{display:flex}.bs-splitb{display:none!important}}",
   "@media (max-width:899px){",
@@ -648,6 +744,21 @@ const BS_CSS = [
   ".bs-t td:last-child{text-align:left}",
   ".bs-t .uzke{display:block}",
   ".bs-form .dva,.bs-pol{grid-template-columns:1fr}",
+  // BS2 na mobile: riadky plánu pod seba, kroky ako karty, veľké tlačidlá vykonania
+  ".bs-sc{grid-template-columns:1fr}",
+  ".bs-pr{grid-template-columns:1fr auto;gap:6px 10px}",
+  ".bs-pr.s{grid-template-columns:1fr auto auto}",
+  ".bs-ph h3 small{display:block;margin:3px 0 0}",
+  ".bs-pr .bs-pr-n{grid-column:1/-1}",
+  ".bs-bar6{width:90px}",
+  ".bs-ph-tl{width:100%;margin-left:0}",
+  ".bs-krok{grid-template-columns:22px 1fr auto}",
+  ".bs-krok .bs-ko{grid-column:2/-1}",
+  ".bs-krok>span:last-child{grid-column:3;grid-row:1}",
+  ".bs-beh-tl{grid-template-columns:1fr}",
+  ".bs-v{min-height:52px;font-size:15px}",
+  ".bs-prog{grid-template-columns:1fr 46px}",
+  ".bs-prog .bs-stack{grid-column:1/-1;order:3}",
   "}"
 ].join("\n");
 const BS_LOGO = '<svg width="26" height="20" viewBox="0 0 82 64" role="img" aria-label="BUGstation" style="flex:none"><path d="M14 14H2v36h12v-6H8V20h6z" fill="#fff"/><path d="M68 14h12v36H68v-6h6V20h-6z" fill="#fff"/><rect x="19" y="30.7" width="44" height="2.6" rx="1.3" fill="#5d708d"/><circle cx="20.5" cy="32" r="4.4" fill="#a9b6c9"/><circle cx="41" cy="32" r="8.4" fill="#e2a94f"/><circle cx="41" cy="32" r="3" fill="#22304a"/><circle cx="61.5" cy="32" r="4.4" fill="#57a396"/></svg>';
@@ -731,6 +842,7 @@ async function bsNacitajData(){
   BS.nacitavam = true;
   try {
     const vsetky = (q) => b2bVsetky(q).then(data => ({ data }), error => ({ error }));
+    const planP = bsNacitajPlan(pid).catch(e => ({ plan: null, planChyba: (e && e.message) || String(e) }));   // BS2 (admin_91)
     const r = await Promise.all([
       sb.from("b2b_bs_projekty").select("*").eq("projekt_id", pid).maybeSingle(),
       vsetky(() => sb.from("b2b_bs_zaznamy").select(BS_STLPCE).eq("projekt_id", pid).order("typ").order("cislo")),
@@ -738,12 +850,14 @@ async function bsNacitajData(){
       sb.from("b2b_bs_poziadavky").select("*").eq("projekt_id", pid).order("kod"),
       sb.from("b2b_bs_moje").select("upozornenia").eq("projekt_id", pid).maybeSingle()   // admin_90 (BS1b)
     ]);
+    const rp = await planP;
     if (poradie !== _bsPoradie) return;
     const e = r.map(x => x.error).find(Boolean);
     if (e && b2bChybaTabulky(e)) BS.d = { pid, bezMigracie: true };
     else if (e) throw e;
     else BS.d = { pid, projekt: r[0].data, zaznamy: r[1].data || [], historia: r[2].data || [], poziadavky: r[3].data || [],
-      upozornenia: (r[4].data || {}).upozornenia || "okamzite" };
+      upozornenia: (r[4].data || {}).upozornenia || "okamzite", plan: rp.plan, planChyba: rp.planChyba || null };
+    bsPlanZmenene();
     bsOtvorCiel();
   } catch (e) {
     if (poradie !== _bsPoradie) return;
@@ -873,16 +987,18 @@ async function bsZapni(){
 
 const BS_REGISTRE = ["uloha", "defekt", "incident", "zmena"];
 function bsNavPolozky(){
-  const ja = bsJa(), zz = bsZaznamy();
+  const ja = bsJa(), zz = bsZaznamy(), O = bsPlanO();
   const otv = typ => zz.filter(z => z.typ === typ && bsOtvoreny(z)).length;
   const p = [
     ["prehlad", "Prehľad & progres", ""],
-    ["caka", "Čaká na mňa", String(zz.filter(z => bsCakaNaMna(z, ja)).length)],
+    ["caka", "Čaká na mňa", String(zz.filter(z => bsCakaNaMna(z, ja)).length + bsMojeScenare(O, ja).length)],
     ["uloha", "Úlohy", String(otv("uloha"))],
     ["defekt", "Defekty", String(otv("defekt"))],
     ["incident", "Incidenty", String(otv("incident"))],
     ["zmena", "Zmenové požiadavky", String(otv("zmena"))]
   ];
+  // BS2: plán a scenáre, keď server tabuľky má (admin_91) alebo treba ukázať chybu.
+  if (O || (BS.d && BS.d.planChyba)) p.push(["plan", "Testovací plán", ""], ["scenare", "Testovacie scenáre", O ? String(O.scenare.length) : ""]);
   // Nastavenia projektu len TM a správca; ostatní tu majú len Moje upozornenia (BS1b).
   p.push(["nastavenia", bsMaRolu(ja, ["tm"]) ? "Nastavenia" : "Moje upozornenia", ""]);
   return p;
@@ -907,7 +1023,10 @@ function bsShellHtml(){
     '<svg class="bs-iba-on" width="11" height="11" viewBox="0 0 20 20" style="flex:none;margin-left:auto"><path d="M4.6 7.4 10 12.8l5.4-5.4-1.5-1.5L10 9.8 6.1 5.9z" fill="#b0bacb"/></svg></button>' +
     (BS.menu ? bsMenuHtml() : "") + "</div>";
   const rel = (bsNast().releasy || []).find(r => r.stav === "aktivny");
-  const pata = '<div class="bs-pata bs-iba-on">' + (rel ? '<span class="bs-pata-h">AKTÍVNY RELEASE</span><span class="bs-pata-t">' + esc(rel.nazov) + "</span>" : "") +
+  const PO = bsPlanO(), af = PO && PO.maPlan && PO.aktivna;
+  const pata = '<div class="bs-pata bs-iba-on">' + (af ? '<span class="bs-pata-h">AKTÍVNA FÁZA</span><span class="bs-pata-t">' + esc(af.f.nazov + (rel ? " · " + rel.nazov : "")) + "</span>" +
+      '<span class="bs-pata-p"><span><i style="width:' + af.pct + '%"></i></span><b>' + af.pct + " %</b></span>" + (af.f.do ? '<span class="bs-pata-d">do ' + esc(bsDMR(af.f.do)) + "</span>" : "")
+    : rel ? '<span class="bs-pata-h">AKTÍVNY RELEASE</span><span class="bs-pata-t">' + esc(rel.nazov) + "</span>" : "") +
     '<button type="button" onclick="bsObnov()">↻ Obnoviť</button></div>';
   const ikPrep = BS.rail ? "M11.6 4.4 6 10l5.6 5.6 1.4-1.4L9.4 10l3.6-4.2zM4 4h1.8v12H4z" : "M8.4 4.4 14 10l-5.6 5.6L7 14.2 10.6 10 7 5.8zM14.2 4H16v12h-1.8z";
   const rail = '<aside class="bs-rail' + on + '"><div class="bs-rh">' + BS_LOGO + '<span class="bs-rh-nazov bs-iba-on">BUG<span>station</span></span>' +
@@ -935,6 +1054,12 @@ function bsTitulok(){
   if (v === "prehlad") return ["Prehľad & progres review", (P.nazov || "") + " · " + bsPocet(zz.filter(bsOtvoreny).length, "otvorený záznam", "otvorené záznamy", "otvorených záznamov")];
   if (v === "caka") return ["Čaká na mňa", bsPocet(zz.filter(z => bsCakaNaMna(z, ja)).length, "záznam čaká", "záznamy čakajú", "záznamov čaká") + " na vašu akciu"];
   if (v === "nastavenia") return ["Nastavenia BUGstation", "číselníky, názvy úrovní, povinné polia a roly v projekte"];
+  if (v === "plan" || v === "scenare") {
+    const O = bsPlanO();
+    if (!O) return [v === "plan" ? "Testovací plán" : "Testovacie scenáre", ""];
+    if (v === "plan") return ["Testovací plán", (O.aktivna ? "prebieha " + O.aktivna.f.nazov + " · " : "") + bsPocet(O.fazy.length, "fáza", "fázy", "fáz") + " · " + O.vykonane + " z " + O.celkom + " prípadov vykonaných"];
+    return ["Testovacie scenáre", bsPocet(O.scenare.length, "scenár", "scenáre", "scenárov") + " · " + bsPocet(O.scenare.reduce((a, x) => a + x.pripady.length, 0), "prípad", "prípady", "prípadov") + " v knižnici"];
+  }
   if (BS_TYPY[v]) {
     const vs = zz.filter(z => z.typ === v), o = vs.filter(bsOtvoreny);
     const tit = { uloha: "Úlohy", defekt: "Evidencia defektov", incident: "Evidencia incidentov", zmena: "Požiadavky na zmenu" }[v];
@@ -956,6 +1081,9 @@ function bsListaAkcieHtml(){
   }
   const split = reg ? '<button type="button" class="bs-btn mal bs-splitb' + (BS.split ? " on" : "") + '" onclick="bsSplit()">' + (BS.split ? "Zrušiť rozdelenie" : "Rozdeliť zobrazenie") + "</button>" : "";
   const smie = bsMaRolu(ja, BS_PRACOVNICI);
+  // BS2: v Pláne a Scenároch hlavná akcia TM/TTL namiesto záznamu.
+  if ((v === "plan" || v === "scenare") && bsPlan() && bsMaRolu(ja, BS_PLAN_ROLY))
+    return hl + (v === "plan" ? '<button type="button" class="bs-btn pri" onclick="bsFazaFormular()">+ Nová fáza</button>' : '<button type="button" class="bs-btn pri" onclick="bsScenarFormular()">+ Nový scenár</button>');
   const novy = smie ? '<button type="button" class="bs-btn pri" onclick="bsNovy()">+ Nový záznam</button>' : "";
   return hl + chipy + split + novy;
 }
@@ -1012,6 +1140,8 @@ function bsObsahHtml(){
   if (v === "prehlad") return bsPrehladHtml();
   if (v === "caka") return bsCakaHtml();
   if (v === "nastavenia") return bsNastaveniaHtml();
+  if (v === "plan") return bsPlanHtml();
+  if (v === "scenare") return bsScenareHtml();
   if (BS_TYPY[v]) return bsEvidencieHtml();
   return "";
 }
@@ -1020,7 +1150,8 @@ function bsObsahHtml(){
 function bsPrehladHtml(){
   const zz = bsZaznamy(), O = bsOdvod(zz, BS.d.historia || []), nast = bsNast();
   const delta = O.deltaDefektov;
-  const kpi = [
+  const PO = bsPlanO(), sPlanom = !!(PO && PO.maPlan);
+  const kpi = sPlanom ? bsPrehladKpiPlan(PO, O, zz) : [
     ["OTVORENÉ DEFEKTY", O.poTypoch.defekt.otvorene, delta === 0 ? "bez zmeny za týždeň" : (delta > 0 ? "+" : "−") + Math.abs(delta) + " za týždeň", delta > 0 ? "neg" : delta < 0 ? "pos" : ""],
     ["BLOKUJÚCE", O.blokujuce, O.blokujuce ? bsPocet(O.blokujuce, "kritický defekt", "kritické defekty", "kritických defektov") + (O.blokujuceNad48 ? " · " + O.blokujuceNad48 + " nad 48 h" : "") : "žiadne blokujúce", O.blokujuce ? "neg" : "pos"],
     ["OTVORENÉ INCIDENTY", O.poTypoch.incident.otvorene, O.poTypoch.incident.uZakaznika + " u zákazníka", ""],
@@ -1048,13 +1179,14 @@ function bsPrehladHtml(){
     return '<div><span class="bs-pipe-s"><i style="--h:' + s[2] + ";--c:" + s[3] + '"></i>' + esc(s[1]) + '</span><span class="bs-pipe-n">' + n + '</span><span class="bs-pipe-b" style="--h:' + s[2] + ";--c:" + s[3] + ";width:" + Math.round(n / pmax * 100) + '%"></span></div>'; }).join("");
   const ulohy = O.ulohy.map(([k, n]) => esc(bsStav(k)[1]) + " " + n).join(" · ");
   return '<div class="bs-stlp"><div class="bs-kpi">' + kpi + "</div>" +
-    '<div class="bs-dva"><div class="bs-panel"><div class="bs-ph"><h3>Otvorené podľa typu</h3><small>kto má loptičku · termín SLA</small></div>' + typy + "</div>" +
+    '<div class="bs-dva">' + (sPlanom ? bsPrehladProgresHtml(PO) : "") + '<div class="bs-panel"><div class="bs-ph"><h3>Otvorené podľa typu</h3><small>kto má loptičku · termín SLA</small></div>' + typy + "</div>" +
     '<div class="bs-panel"><div class="bs-ph"><h3>Otvorené defekty podľa závažnosti</h3></div>' + urov +
     '<div class="bs-mini"><div><span class="bs-kpi-l">PRIEM. ČAS OPRAVY</span><b>' + (O.casOpravy == null ? "—" : String(O.casOpravy).replace(".", ",") + " " + (O.casOpravy === 1 ? "deň" : "dňa")) + '</b></div><div><span class="bs-kpi-l">REOPEN RATE</span><b>' +
     (O.reopen == null ? "—" : String(O.reopen).replace(".", ",") + " %") + "</b></div></div></div></div>" +
     '<div class="bs-panel"><div class="bs-ph"><h3>Posledná aktivita</h3></div><div class="bs-akt">' + akt + "</div></div>" +
     '<div class="bs-panel"><div class="bs-ph"><h3>Priebeh stavov · všetky záznamy</h3><small>' + esc(bsPocet(O.otvorene, "záznam", "záznamy", "záznamov")) + ' v obehu</small></div><div class="bs-pipe">' + priebeh + "</div>" +
-    '<div class="bs-mini"><div><span class="bs-kpi-l">ÚLOHY</span><b style="font-size:12px">' + ulohy + "</b></div></div></div></div>";
+    '<div class="bs-mini"><div><span class="bs-kpi-l">ÚLOHY</span><b style="font-size:12px">' + ulohy + "</b></div></div></div>" +
+    (sPlanom ? bsPrehladMilnikyHtml(PO) : "") + "</div>";
 }
 function bsHistText(z, h){
   const kl = z.kluc + " · ";
@@ -1073,7 +1205,12 @@ function bsCakaHtml(){
   const ja = bsJa(), f = BS.filtre.caka || {};
   const zz = bsFilter(bsZaznamy(), { cakaNaMna: true, text: BS.hladat, stav: f.stav, riesitel: f.ja ? "ja" : null, poSla: !!f.poSla }, ja);
   if (!(ja.roly || []).length && !ja.spravca) return '<div class="bs-panel"><div class="bs-prazdne">Nemáte rolu v BUGstation — ste čitateľ. Rolu prideľuje správca projektu alebo Test manager.</div></div>';
-  return bsTabulkaHtml(zz, "caka", false);
+  // BS2: scenáre pridelené mne v prebiehajúcej fáze, ktoré majú čakajúce prípady.
+  const moje = bsMojeScenare(bsPlanO(), ja);
+  const sc = moje.length ? '<div class="bs-panel" style="margin-bottom:14px"><div class="bs-ph"><h3>Moje scenáre na vykonanie</h3><small>' + esc(bsPocet(moje.length, "scenár", "scenáre", "scenárov")) + "</small></div>" +
+    moje.map(({ faza, rr }) => '<div class="bs-pr"><button type="button" class="bs-pr-n" onclick="bsChodScenar(\'' + rr.s.id + '\')"><small class="bs-kodm">' + esc(rr.s.kod) + "</small> " + esc(rr.s.nazov) + '<small class="bs-pr-t"> · ' + esc(faza.f.nazov) + "</small></button>" +
+      bsPocty(rr.pocty) + '<button type="button" class="bs-btn pri" onclick="bsSpustit(\'' + rr.r.id + '\')">' + (rr.pocty.caka === rr.celkom ? "Spustiť" : "Pokračovať") + "</button></div>").join("") + "</div>" : "";
+  return sc + bsTabulkaHtml(zz, "caka", false);
 }
 
 // ── B. Evidencie (taby, tabuľka, split) ────────────────────────
@@ -1174,7 +1311,10 @@ function bsDetailHtml(z){
     pole("IS", bsCiselnikNazov(nast, "is", z.is_id)),
     pole("Modul", bsCiselnikNazov(nast, "moduly", z.modul_id)),
     pole("Prostredie", bsCiselnikNazov(nast, "prostredia", z.prostredie_id)),
-    pole("Scenár / prípad", [z.scenar, z.pripad].filter(Boolean).join(" / ")),
+    // BS2: kód scenára sa nemení ani nepoužije znova — odkaz do Testovacích scenárov.
+    z.scenar && bsPlan() && (bsPlan().scenare || []).some(s => s.kod === z.scenar && !s.zmazane)
+      ? '<div><span class="k">Scenár / prípad</span><span class="v"><button type="button" class="bs-odkaz" onclick="bsChodScenarKod(\'' + esc(z.scenar) + '\')">' + esc([z.scenar, z.pripad].filter(Boolean).join(" / ")) + "</button></span></div>"
+      : pole("Scenár / prípad", [z.scenar, z.pripad].filter(Boolean).join(" / ")),
     pole("Biznis požiadavka", pz ? pz.kod + " " + pz.nazov : ""),
     pole("Identifikované", z.identifikovane ? bsDMR(z.identifikovane) + ", " + bsDva(new Date(z.identifikovane).getHours()) + ":" + bsDva(new Date(z.identifikovane).getMinutes()) : ""),
     pole("Požadovaný termín", z.termin ? bsDMR(z.termin) : ""),
@@ -1284,14 +1424,17 @@ function bsPosledne(){ return _bsPosledne; }
 function bsZapamataj(p){ _bsPosledne = { is_id: p.is_id, prostredie_id: p.prostredie_id, release_id: p.release_id, modul_id: p.modul_id }; }
 function bsNovy(){ bsFormular(null, BS_TYPY[BS.pohlad] ? BS.pohlad : "defekt"); }
 function bsUpravit(){ const z = bsNajdi(BS.detail); if (z) bsFormular(z, z.typ); }
-function bsFormular(z, typ){
+// opts (BS2, defekt z vykonania): pred = predvyplnené polia, lenTyp = bez
+// výberu typu, ostan = po založení ostať v pohľade, poUlozeni(r) = napojenie.
+function bsFormular(z, typ, opts){
   const ja = bsJa(), nast = bsNast(), pov = ((nast.povinne || {})[typ]) || {}, pos = bsPosledne();
   const typy = BS_TYPY_PORADIE.filter(t => z ? t === typ : (t === "zmena" ? bsMaRolu(ja, ["tm", "ttl", "dmd"]) : bsMaRolu(ja, BS_PRACOVNICI)));
   const ak = (nast.releasy || []).find(r => r.stav === "aktivny");
-  const h = z ? Object.assign({}, z, { popis: (BS.det && BS.det.id === z.id ? BS.det.popis : "") }) : {
+  const h = z ? Object.assign({}, z, { popis: (BS.det && BS.det.id === z.id ? BS.det.popis : "") }) : Object.assign({
     typ, uroven: typ === "defekt" ? 3 : bsUrovneTypu(nast, typ)[1] || bsUrovneTypu(nast, typ)[0],
     is_id: (nast.is || []).length === 1 ? nast.is[0].id : pos.is_id, prostredie_id: pos.prostredie_id, modul_id: pos.modul_id,
-    release_id: ak ? ak.id : pos.release_id, identifikovane: new Date().toISOString() };
+    release_id: ak ? ak.id : pos.release_id, identifikovane: new Date().toISOString() },
+    Object.fromEntries(Object.entries((opts && opts.pred) || {}).filter(([, v]) => v != null && v !== "")));
   _bsPrilohy = [];
   const vis = k => BS_POLIA[k].typy.includes(typ) && pov[k] !== "skryte";
   const hv = k => pov[k] === "povinne" ? " *" : "";
@@ -1321,7 +1464,7 @@ function bsFormular(z, typ){
     sel("release_id", "releasy"), riesSel, txt("ziadatel", "útvar / meno")
   ].filter(Boolean).join("");
   const html = '<div class="bs-ok" data-scroll="bsForm"><div class="bs-form">' +
-    (z ? "" : '<label>Typ<select id="bsF_typ" onchange="bsFormularTyp(this.value)">' + typy.map(t => '<option value="' + t + '"' + (t === typ ? " selected" : "") + ">" + esc(BS_TYPY[t].nazov) + "</option>").join("") + "</select></label>") +
+    (z || (opts && opts.lenTyp) ? "" : '<label>Typ<select id="bsF_typ" onchange="bsFormularTyp(this.value)">' + typy.map(t => '<option value="' + t + '"' + (t === typ ? " selected" : "") + ">" + esc(BS_TYPY[t].nazov) + "</option>").join("") + "</select></label>") +
     '<label>Názov *<input type="text" id="bsF_nazov" maxlength="200" value="' + esc(h.nazov || "") + '" oninput="bsPodobne(this.value)"></label><div id="bsPodobne" class="bs-podobne"></div>' +
     '<label>' + esc(BS_TYPY[typ].os) + ' *<select id="bsF_uroven">' + urov + "</select></label>" +
     (vis("popis") ? '<label>Opis' + hv("popis") + '<textarea id="bsF_popis" placeholder="Čo sa stalo, kde a ako to zopakovať">' + esc(h.popis || "") + "</textarea></label>" : "") +
@@ -1332,7 +1475,7 @@ function bsFormular(z, typ){
       '<div id="bsFPril" class="bs-podobne">Snímku obrazovky vložíte aj cez Ctrl+V do tohto okna.</div>') +
     (suvislosti ? '<details open><summary>Súvislosti <small>' + esc(bsSuhrnSuvislosti(h, nast)) + "</small></summary><div class=\"bs-form\" style=\"margin-top:8px\">" + suvislosti + "</div></details>" : "") +
     "</div></div>";
-  openModal(z ? "Upraviť · " + z.kluc : "Nový záznam", html, () => bsFormularUloz(z, typ), null, null, z ? "Uložiť" : "Založiť");
+  openModal(z ? "Upraviť · " + z.kluc : opts && opts.pred ? "Nový defekt z testu · " + (opts.pred.pripad || "") : "Nový záznam", html, () => bsFormularUloz(z, typ, opts), null, null, z ? "Uložiť" : "Založiť");
   if (!z) document.getElementById("modalBody").onpaste = (e) => {
     const f = [...((e.clipboardData && e.clipboardData.files) || [])];
     if (f.length) { e.preventDefault(); bsFormularSubory(f); }
@@ -1373,7 +1516,7 @@ function bsFormularHodnoty(typ){
   }
   return p;
 }
-async function bsFormularUloz(z, typ){
+async function bsFormularUloz(z, typ, opts){
   const t = z ? typ : ((document.getElementById("bsF_typ") || {}).value || typ);
   const p = bsFormularHodnoty(t);
   const chyba = bsChybajucePovinne(t, z ? Object.assign({}, z, p) : p, bsNast());
@@ -1398,7 +1541,8 @@ async function bsFormularUloz(z, typ){
       for (const f of _bsPrilohy) { try { await bsPrilohaNahraj(r.id, f); } catch (e) { bsChyba(e, "Príloha " + (f.name || "") + " sa nenahrala"); } }
       _bsPrilohy = [];
       oznamPas("Založené · " + r.kluc);
-      BS.pohlad = t; BS.detail = r.id;
+      if (opts && opts.poUlozeni) { try { await opts.poUlozeni(r); } catch (e) { bsChyba(e, "Defekt " + r.kluc + " je založený, ale vykonanie sa nezapísalo"); } }
+      if (!(opts && opts.ostan)) { BS.pohlad = t; BS.detail = r.id; }
     }
   } catch (e) { return b2bVOkne(String((e && e.message) || e).replace(/^.*?ERROR:\s*/, "")); }
   bsNacitajData();
@@ -1595,4 +1739,585 @@ async function bsPoziadavkyUloz(){
   if (!riadky.length) return alert("Nevidím žiadne riadky s kódom a názvom (stĺpce oddelené tabulátorom — skopírujte ich z Excelu).");
   try { const r = await bsRpc("b2b_bs_poziadavky_uloz", { p_projekt: B2B.pid, p_riadky: riadky }); oznamPas("Uložené požiadavky: " + r.pocet); bsNacitajData(); }
   catch (e) { bsChyba(e, "Požiadavky sa nepodarilo uložiť"); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  BS2 — testovací plán a scenáre (NAVRH §14, kontrakt §29, admin_91)
+//  Server ukladá fázy, scenáre, prípady, plán a vykonania; každé číslo
+//  (výsledok prípadu, scenára a fázy, pass rate, pokrytie, exit kritériá)
+//  počíta jedno odvodenie bsPlanOdvod — z neho kreslí Plán, Scenáre, KPI,
+//  míľniky, päta railu aj „Čaká na mňa“.
+// ═══════════════════════════════════════════════════════════════
+const BS_VYSLEDKY = {
+  presiel:   ["Prešiel", 162, 0.11, "✓"],
+  nepresiel: ["Neprešiel", 32, 0.14, "✕"],
+  blokovany: ["Blokovaný", 78, 0.12, "⊘"],
+  caka:      ["Čaká", 255, 0.06, "·"]
+};
+const BS_VYSLEDKY_PORADIE = ["presiel", "nepresiel", "blokovany", "caka"];
+const BS_FAZA_STAVY = { naplanovana: ["Naplánovaná", 255, 0.06], prebieha: ["Prebieha", 78, 0.12], ukoncena: ["Ukončená", 162, 0.11] };
+const BS_PRIPADY_DEN = 16;            // odhad dní v štatistikách plánu (balíček C)
+const BS_PLAN_ROLY = ["tm", "ttl"];   // plán, scenáre a prípady (§5.3)
+const BS_VYKON_ROLY = ["tm", "ttl", "tester"];
+const BS_KRITERIA_AUTO = [
+  ["otvorene_u1", "Žiadny otvorený defekt najvyššej úrovne"],
+  ["pass_rate", "Pass rate fázy aspoň {x} %"],
+  ["p1_vykonane", "Vykonané všetky prípady scenárov priority 1"],
+  ["incidenty_sla", "Žiadny otvorený incident po termíne SLA"]
+];
+
+function bsDenStr(t){ const d = new Date(t); return d.getFullYear() + "-" + bsDva(d.getMonth() + 1) + "-" + bsDva(d.getDate()); }
+function bsFazaStav(f, teraz){
+  if (f.uzavreta) return "ukoncena";
+  return f.od && bsDenStr(teraz != null ? teraz : Date.now()) < String(f.od).slice(0, 10) ? "naplanovana" : "prebieha";
+}
+// Výsledok scenára z výsledkov jeho prípadov (§14): Neprešiel, ak neprešiel
+// niektorý; inak Blokovaný; inak Čaká, ak niektorý čaká (alebo nemá prípady);
+// inak Prešiel.
+function bsVysledokScenara(c){
+  if (c.nepresiel) return "nepresiel";
+  if (c.blokovany) return "blokovany";
+  if (c.caka || !c.presiel) return "caka";
+  return "presiel";
+}
+function bsPassRate(presiel, vykonane){ return vykonane ? Math.round(presiel / vykonane * 1000) / 10 : null; }
+function bsPct(a, b){ return b ? Math.round(a / b * 100) : 0; }
+function bsDes(x){ return String(x).replace(".", ","); }
+// Otvorené incidenty po termíne SLA — to isté číslo pre KPI aj exit kritérium.
+function bsIncidentyPoSla(zaznamy, t){
+  return (zaznamy || []).filter(z => !z.zmazane && z.typ === "incident" && bsOtvoreny(z) && (bsSla(z, t) || {}).po).length;
+}
+
+// P = { fazy, scenare, pripady, plan, vykonania }; doCasu = stav k času T
+// (delta pass rate za týždeň). Nič sa neukladá.
+function bsPlanOdvod(P, zaznamy, teraz, poziadavky, doCasu){
+  if (!P) return null;
+  const t = teraz != null ? teraz : Date.now(), hranica = doCasu != null ? doCasu : Infinity;
+  const scen = (P.scenare || []).filter(s => !s.zmazane), sMap = {};
+  scen.forEach(s => { sMap[s.id] = s; });
+  const prip = {};
+  (P.pripady || []).filter(p => !p.zmazane && sMap[p.scenar_id]).forEach(p => { (prip[p.scenar_id] = prip[p.scenar_id] || []).push(p); });
+  Object.keys(prip).forEach(k => prip[k].sort((x, y) => (x.poradie - y.poradie) || (x.cislo - y.cislo)));
+  const vyk = {};
+  (P.vykonania || []).filter(v => new Date(v.kedy).getTime() <= hranica).forEach(v => {
+    const k = v.plan_id + "|" + v.pripad_id; (vyk[k] = vyk[k] || []).push(v);
+  });
+  Object.keys(vyk).forEach(k => vyk[k].sort((x, y) => (new Date(x.kedy) - new Date(y.kedy)) || String(x.id).localeCompare(String(y.id))));
+  const nula = () => ({ presiel: 0, nepresiel: 0, blokovany: 0, caka: 0 });
+  const pripocitaj = (a, b) => { BS_VYSLEDKY_PORADIE.forEach(k => { a[k] += b[k]; }); return a; };
+  const fazy = (P.fazy || []).filter(f => !f.zmazane)
+    .sort((a, b) => ((a.poradie || 0) - (b.poradie || 0)) || String(a.od || "").localeCompare(String(b.od || ""))).map(f => {
+      const riadky = (P.plan || []).filter(r => r.faza_id === f.id && !r.odobrate && sMap[r.scenar_id])
+        .sort((a, b) => ((a.poradie || 0) - (b.poradie || 0)) || (sMap[a.scenar_id].cislo - sMap[b.scenar_id].cislo)).map(r => {
+          const pocty = nula(); let posledne = null;
+          const pripady = (prip[r.scenar_id] || []).map(p => {
+            const vv = vyk[r.id + "|" + p.id] || [], v = vv[vv.length - 1] || null;
+            pocty[v ? v.vysledok : "caka"]++;
+            if (v && (!posledne || new Date(v.kedy) > new Date(posledne.kedy))) posledne = v;
+            return { p, vykonania: vv, posledne: v, vysledok: v ? v.vysledok : "caka" };
+          });
+          const celkom = pripady.length, vykonane = celkom - pocty.caka;
+          return { r, s: sMap[r.scenar_id], pripady, pocty, celkom, vykonane, pct: bsPct(vykonane, celkom), vysledok: bsVysledokScenara(pocty), posledne };
+        });
+      const pocty = riadky.reduce((a, x) => pripocitaj(a, x.pocty), nula());
+      const celkom = riadky.reduce((a, x) => a + x.celkom, 0), vykonane = celkom - pocty.caka;
+      return { f, stav: bsFazaStav(f, t), riadky, pocty, celkom, vykonane, pct: bsPct(vykonane, celkom), passRate: bsPassRate(pocty.presiel, vykonane) };
+    });
+  const pocty = fazy.reduce((a, x) => pripocitaj(a, x.pocty), nula());
+  const celkom = fazy.reduce((a, x) => a + x.celkom, 0), vykonane = celkom - pocty.caka;
+  const aktivna = fazy.find(x => x.stav === "prebieha") || null;
+  // Scenár v D: riadok aktívnej fázy, inak poslednej fázy, v ktorej je.
+  const vPlane = {};
+  fazy.forEach(x => x.riadky.forEach(rr => { vPlane[rr.s.id] = { faza: x, riadok: rr }; }));
+  if (aktivna) aktivna.riadky.forEach(rr => { vPlane[rr.s.id] = { faza: aktivna, riadok: rr }; });
+  const scenare = scen.slice().sort((a, b) => a.cislo - b.cislo).map(s => ({ s, pripady: prip[s.id] || [], v: vPlane[s.id] || null }));
+  const akt = (poziadavky || []).filter(q => q.aktivna !== false), kryte = new Set();
+  Object.keys(prip).forEach(k => prip[k].forEach(p => { if (p.poziadavka_id) kryte.add(p.poziadavka_id); }));
+  const pokryte = akt.filter(q => kryte.has(q.id)).length;
+  const O = {
+    fazy, scenare, pocty, celkom, vykonane, zostava: celkom - vykonane, pct: bsPct(vykonane, celkom),
+    passRate: bsPassRate(pocty.presiel, vykonane), dni: Math.round((celkom - vykonane) / BS_PRIPADY_DEN * 10) / 10,
+    aktivna, pocetScenarov: Object.keys(vPlane).length,
+    pokrytie: akt.length ? { pokryte, vsetky: akt.length, pct: bsPct(pokryte, akt.length), bez: akt.length - pokryte } : null,
+    // Bez fázy so scenárom sa nič testové nekreslí (§9).
+    maPlan: celkom > 0
+  };
+  fazy.forEach(x => { x.kriteria = bsKriteria(x, zaznamy, t); });
+  return O;
+}
+// Exit kritériá fázy (§29.4): automatické z tých istých čísel ako Prehľad.
+function bsKriteria(x, zaznamy, t){
+  const K = x.f.kriteria || {}, A = K.auto || {}, out = [];
+  if (A.otvorene_u1) {
+    const n = bsOdvod(zaznamy, [], t).blokujuce;
+    out.push({ id: "otvorene_u1", auto: true, text: BS_KRITERIA_AUTO[0][1], splnene: n === 0,
+      detail: n ? bsPocet(n, "otvorený defekt", "otvorené defekty", "otvorených defektov") + " najvyššej úrovne" : "" });
+  }
+  if (A.pass_rate != null && A.pass_rate !== false && A.pass_rate !== "") {
+    const prah = +A.pass_rate;
+    out.push({ id: "pass_rate", auto: true, text: BS_KRITERIA_AUTO[1][1].replace("{x}", bsDes(prah)), splnene: x.passRate != null && x.passRate >= prah,
+      detail: x.passRate == null ? "zatiaľ nič vykonané" : "teraz " + bsDes(x.passRate) + " %" });
+  }
+  if (A.p1_vykonane) {
+    const zost = x.riadky.filter(rr => +rr.s.priorita === 1).reduce((a, rr) => a + rr.pocty.caka, 0);
+    out.push({ id: "p1_vykonane", auto: true, text: BS_KRITERIA_AUTO[2][1], splnene: zost === 0,
+      detail: zost ? bsPocet(zost, "prípad priority 1 čaká", "prípady priority 1 čakajú", "prípadov priority 1 čaká") : "" });
+  }
+  if (A.incidenty_sla) {
+    const n = bsIncidentyPoSla(zaznamy, t);
+    out.push({ id: "incidenty_sla", auto: true, text: BS_KRITERIA_AUTO[3][1], splnene: n === 0,
+      detail: n ? bsPocet(n, "incident po termíne", "incidenty po termíne", "incidentov po termíne") : "" });
+  }
+  (K.rucne || []).forEach(k => out.push({ id: k.id, auto: false, text: k.text, splnene: !!k.splnene,
+    detail: k.splnene && k.kedy ? "potvrdil(a) " + (bsMenoUctu(k.kto) || "Test manager") + " " + bsDMR(k.kedy) : "" }));
+  return { polozky: out, splnene: out.filter(k => k.splnene).length, vsetky: out.length };
+}
+
+// ── stav plánu v appke ──────────────────────────────────────────
+let _bsPlanCache = null;
+function bsPlan(){ return (BS.d && BS.d.plan) || null; }
+function bsPlanO(){
+  const P = bsPlan(); if (!P) return null;
+  const min = Math.floor(Date.now() / 60000);
+  if (_bsPlanCache && _bsPlanCache.P === P && _bsPlanCache.min === min && _bsPlanCache.n === (P.vykonania || []).length && _bsPlanCache.z === BS.d.zaznamy) return _bsPlanCache.O;
+  const O = bsPlanOdvod(P, bsZaznamy(), Date.now(), BS.d.poziadavky);
+  _bsPlanCache = { P, min, n: (P.vykonania || []).length, z: BS.d.zaznamy, O };
+  return O;
+}
+function bsPlanZmenene(){ _bsPlanCache = null; }
+// Načítanie plánu je samostatné: pred admin_91 tabuľky nie sú a BUGstation
+// beží ďalej bez plánu (plan = null), chyba servera sa ukáže v Pláne.
+async function bsNacitajPlan(pid){
+  const vsetky = (q) => b2bVsetky(q).then(data => ({ data }), error => ({ error }));
+  const r = await Promise.all([
+    vsetky(() => sb.from("b2b_bs_fazy").select("*").eq("projekt_id", pid).order("poradie")),
+    vsetky(() => sb.from("b2b_bs_scenare").select("*").eq("projekt_id", pid).order("cislo")),
+    vsetky(() => sb.from("b2b_bs_pripady").select("*").eq("projekt_id", pid).order("poradie")),
+    vsetky(() => sb.from("b2b_bs_plan").select("*").eq("projekt_id", pid).order("poradie")),
+    vsetky(() => sb.from("b2b_bs_vykonania").select("id,plan_id,pripad_id,pripad_verzia,vysledok,skutocny,prostredie_id,defekty,tester_osoba,kto,kedy").eq("projekt_id", pid).order("kedy"))
+  ]);
+  const e = r.map(x => x.error).find(Boolean);
+  if (e && b2bChybaTabulky(e)) return { plan: null };
+  if (e) { console.error("BUGstation: načítanie plánu", e); return { plan: null, planChyba: (e && e.message) || String(e) }; }
+  return { plan: { fazy: r[0].data || [], scenare: r[1].data || [], pripady: r[2].data || [], plan: r[3].data || [], vykonania: r[4].data || [] } };
+}
+
+function bsVysledokChip(k){ const v = BS_VYSLEDKY[k] || BS_VYSLEDKY.caka; return bsChipHtml(v[0], v[1], v[2], "st"); }
+function bsFazaChip(stav){ const s = BS_FAZA_STAVY[stav]; return bsChipHtml(s[0], s[1], s[2], "st"); }
+function bsFazaOkno(f){ return (f.od ? bsDMR(f.od) : "") + (f.do ? " – " + bsDMR(f.do) : ""); }
+function bsPocty(c){
+  return '<span class="bs-pocty">' + BS_VYSLEDKY_PORADIE.map(k => '<b class="' + k + '">' + BS_VYSLEDKY[k][3] + " " + c[k] + "</b>").join("") + "</span>";
+}
+function bsNajdiRiadok(O, planId){
+  for (const x of (O ? O.fazy : [])) { const rr = x.riadky.find(y => y.r.id === planId); if (rr) return { faza: x, rr }; }
+  return null;
+}
+// Moje scenáre na vykonanie: pridelené mne v prebiehajúcej fáze s čakajúcim prípadom.
+function bsMojeScenare(O, ja){
+  if (!O || !ja || !ja.osoba) return [];
+  const out = [];
+  O.fazy.filter(x => x.stav === "prebieha").forEach(x => x.riadky.forEach(rr => {
+    if (rr.r.tester_osoba === ja.osoba && rr.pocty.caka) out.push({ faza: x, rr });
+  }));
+  return out;
+}
+
+// ── C. Testovací plán ───────────────────────────────────────────
+function bsPlanBezHtml(){
+  if (BS.d.planChyba) return '<div class="bs-panel"><div class="bs-prazdne">Testovací plán sa nenačítal: ' + esc(BS.d.planChyba) + ' <button type="button" class="bs-btn mal" onclick="bsObnov()">Skúsiť znova</button></div></div>';
+  return '<div class="bs-panel"><div class="bs-prazdne">Testovací plán v tomto projekte zatiaľ nie je k dispozícii.</div></div>';
+}
+function bsStatKarty(karty){
+  return '<div class="bs-stat">' + karty.map(([l, v, d]) => '<div><div class="bs-kpi-l">' + l + '</div><div class="bs-stat-v">' + esc(String(v)) + '</div><div class="bs-kpi-d">' + esc(d) + "</div></div>").join("") + "</div>";
+}
+function bsDniText(d){ return Number.isInteger(d) ? bsPocet(d, "deň", "dni", "dní") : bsDes(d) + " dňa"; }
+function bsPlanHtml(){
+  const P = bsPlan(); if (!P) return bsPlanBezHtml();
+  const O = bsPlanO(), ja = bsJa(), smie = bsMaRolu(ja, BS_PLAN_ROLY), tm = bsMaRolu(ja, ["tm"]);
+  if (!O.fazy.length) return '<div class="bs-panel"><div class="bs-prazdne">Plán zatiaľ nemá žiadnu fázu (SIT, UAT…).' +
+    (smie ? ' <button type="button" class="bs-btn pri" onclick="bsFazaFormular()">Založiť fázu</button>' : " Fázy zakladá Test manager alebo Test team leader.") + "</div></div>";
+  const st = bsStatKarty([
+    ["ROZSAH PLÁNU", O.celkom, bsPocet(O.fazy.length, "fáza", "fázy", "fáz") + " · " + bsPocet(O.pocetScenarov, "scenár", "scenáre", "scenárov")],
+    ["VYKONANÉ", O.vykonane, O.pct + " % rozsahu"],
+    ["ZOSTÁVA", O.zostava, O.zostava ? "≈ " + bsDniText(O.dni) + " pri " + BS_PRIPADY_DEN + " prípadoch denne" : "všetko vykonané"],
+    ["POKRYTIE POŽIADAVIEK", O.pokrytie ? O.pokrytie.pct + " %" : "—", O.pokrytie ? (O.pokrytie.bez ? bsPocet(O.pokrytie.bez, "požiadavka bez prípadu", "požiadavky bez prípadu", "požiadaviek bez prípadu") : "každá požiadavka má prípad") : "bez registra požiadaviek"]
+  ]);
+  const fazy = O.fazy.map(x => {
+    const s = BS_FAZA_STAVY[x.stav], f = x.f;
+    const tl = smie ? '<span class="bs-ph-tl"><button type="button" class="bs-btn mal" onclick="bsPlanPridaj(\'' + f.id + '\')">+ Scenáre</button>' +
+      '<button type="button" class="bs-btn mal" onclick="bsKriteriaFormular(\'' + f.id + '\')">Kritériá</button>' +
+      '<button type="button" class="bs-btn mal" onclick="bsFazaFormular(\'' + f.id + '\')">Upraviť</button>' +
+      (tm ? '<button type="button" class="bs-btn mal" onclick="bsFazaUzavri(\'' + f.id + '\',' + (f.uzavreta ? "false" : "true") + ')">' + (f.uzavreta ? "Znovu otvoriť" : "Uzavrieť") + "</button>" : "") + "</span>" : "";
+    const hl = '<div class="bs-ph"><i class="bs-bod9" style="--h:' + s[1] + ";--c:" + s[2] + '"></i><h3>' + esc(f.nazov) + ' <small>' + esc(bsFazaOkno(f)) + "</small></h3>" + bsFazaChip(x.stav) +
+      '<span class="bs-fp"><span class="bs-bar6"><i style="width:' + x.pct + '%"></i></span><span class="bs-num">' + x.pct + " %</span></span>" + tl + "</div>";
+    const riadky = x.riadky.map(rr => {
+      const tester = bsMeno(rr.r.tester_osoba);
+      return '<div class="bs-pr' + (smie ? " s" : "") + '"><button type="button" class="bs-pr-n" onclick="bsChodScenar(\'' + rr.s.id + '\')"><small class="bs-kodm">' + esc(rr.s.kod) + "</small> " + esc(rr.s.nazov) +
+        (tester ? '<small class="bs-pr-t"> · ' + esc(tester) + "</small>" : "") + "</button>" + bsPocty(rr.pocty) +
+        '<span class="bs-fp"><span class="bs-bar5"><i style="width:' + rr.pct + '%"></i></span><span class="bs-num">' + rr.pct + " %</span></span>" +
+        (smie ? '<button type="button" class="bs-x" onclick="bsPlanRiadok(\'' + rr.r.id + '\')" title="Tester, poradie, odobratie">⋯</button>' : "") + "</div>";
+    }).join("") || '<div class="bs-prazdne">Fáza zatiaľ nemá scenáre.' + (smie ? " Pridajte ich tlačidlom „+ Scenáre“." : "") + "</div>";
+    const K = x.kriteria;
+    const krit = K.vsetky ? '<details class="bs-krit"><summary>Exit kritériá <small>' + K.splnene + " z " + K.vsetky + "</small></summary>" + K.polozky.map(k =>
+      '<div class="bs-krit-r"><span class="' + (k.splnene ? "ok" : "nie") + '">' + (k.splnene ? "✓" : "✕") + "</span><span>" + esc(k.text) + (k.detail ? "<small>" + esc(k.detail) + "</small>" : "") + "</span>" +
+      (!k.auto && tm && !f.uzavreta ? '<button type="button" class="bs-btn mal" onclick="bsKriteriumPotvrd(\'' + f.id + "','" + esc(k.id) + "'," + (k.splnene ? "false" : "true") + ')">' + (k.splnene ? "Zrušiť" : "Potvrdiť") + "</button>" : "") + "</div>").join("") + "</details>" : "";
+    return '<div class="bs-panel">' + hl + riadky + krit + "</div>";
+  }).join("");
+  return '<div class="bs-stlp">' + st + fazy + "</div>";
+}
+
+// ── D. Testovacie scenáre ───────────────────────────────────────
+function bsChodScenar(sid){ BS.scenar = sid; bsChod("scenare"); BS.scenar = sid; bsPrekresli(); }
+function bsChodScenarKod(kod){
+  const P = bsPlan(), s = P && (P.scenare || []).find(x => x.kod === kod && !x.zmazane);
+  if (!s) return alert("Scenár " + kod + " v pláne projektu nie je.");
+  BS.detail = null; bsChodScenar(s.id);
+}
+function bsVyberScenar(sid){ BS.scenar = sid; bsPrekresli(); }
+function bsScenareHtml(){
+  const P = bsPlan(); if (!P) return bsPlanBezHtml();
+  const O = bsPlanO(), ja = bsJa(), smie = bsMaRolu(ja, BS_PLAN_ROLY), nast = bsNast();
+  if (!O.scenare.length) return '<div class="bs-panel"><div class="bs-prazdne">Knižnica scenárov je prázdna. Scenár je súhrn prípadov jedného biznis toku (napr. „Žiadosť o dávku“).' +
+    (smie ? ' <button type="button" class="bs-btn pri" onclick="bsScenarFormular()">Založiť scenár</button>' : "") + "</div></div>";
+  const x = O.scenare.find(y => y.s.id === BS.scenar) || O.scenare[0]; BS.scenar = x.s.id;
+  const zoznam = O.scenare.map(y => {
+    const vys = y.v ? bsVysledokChip(y.v.riadok.vysledok) : bsChipHtml("Mimo plánu", 255, 0.02, "st");
+    return '<button type="button" class="bs-sr' + (y === x ? " on" : "") + '" onclick="bsVyberScenar(\'' + y.s.id + '\')"><span class="bs-sr-n"><small class="bs-kodm">' + esc(y.s.kod) + "</small><span>" + esc(y.s.nazov) + "</span></span>" +
+      '<span class="bs-sr-v">' + vys + "<small>" + bsPocet(y.pripady.length, "krok", "kroky", "krokov") + "</small></span></button>";
+  }).join("");
+  const rr = x.v && x.v.riadok, faza = x.v && x.v.faza;
+  const vysP = {}; (rr ? rr.pripady : []).forEach(q => { vysP[q.p.id] = q; });
+  const pos = rr && rr.posledne;
+  const meta = [
+    ["MODUL", bsCiselnikNazov(nast, "moduly", x.s.modul_id) || "—"], ["IS", bsCiselnikNazov(nast, "is", x.s.is_id) || "—"],
+    ["PRIORITA", "P" + (x.s.priorita || 2)], ["FÁZA", faza ? faza.f.nazov : "mimo plánu"],
+    ["TESTER", rr ? (bsMeno(rr.r.tester_osoba) || "nepridelený") : "—"],
+    ["POSLEDNÉ VYKONANIE", pos ? bsKedy(pos.kedy) + (bsMeno(pos.tester_osoba) ? " · " + bsMeno(pos.tester_osoba) : "") : "—"],
+    ["PROSTREDIE", pos ? (bsCiselnikNazov(nast, "prostredia", pos.prostredie_id) || "—") : "—"]
+  ].map(([k, v]) => '<div><span class="k">' + k + '</span><span class="v">' + esc(v) + "</span></div>").join("");
+  const mozeSpustit = rr && faza.stav !== "ukoncena" && rr.celkom && bsMaRolu(ja, BS_VYKON_ROLY);
+  const tl = (mozeSpustit ? '<button type="button" class="bs-btn pri" onclick="bsSpustit(\'' + rr.r.id + '\')">' + (rr.pocty.caka === rr.celkom ? "Spustiť" : rr.pocty.caka ? "Pokračovať" : "Spustiť znova") + "</button>" : "") +
+    (smie ? '<button type="button" class="bs-btn" onclick="bsPripadFormular(\'' + x.s.id + '\')">+ Prípad</button><button type="button" class="bs-btn" onclick="bsScenarFormular(\'' + x.s.id + '\')">Upraviť</button>' : "");
+  const kroky = x.pripady.map((p, i) => {
+    const q = vysP[p.id], vys = q ? q.vysledok : null;
+    const nastroje = smie ? '<span class="bs-krok-tl"><button type="button" title="Vyššie" onclick="bsPripadPosun(\'' + p.id + '\',-1)"' + (i ? "" : " disabled") + '>↑</button><button type="button" title="Nižšie" onclick="bsPripadPosun(\'' + p.id + '\',1)"' + (i < x.pripady.length - 1 ? "" : " disabled") + '>↓</button>' +
+      '<button type="button" title="Upraviť" onclick="bsPripadFormular(\'' + x.s.id + "','" + p.id + '\')">✎</button><button type="button" title="Presunúť do iného scenára" onclick="bsPripadPresun(\'' + p.id + '\')">⇄</button></span>' : "";
+    return '<div class="bs-krok"><span class="bs-kn">' + (i + 1) + '</span><span class="bs-ka"><small class="bs-kodm">' + esc(p.kod) + "</small> " + esc(p.nazov) +
+      (p.postup ? "<em>" + esc(p.postup) + "</em>" : "") + nastroje + '</span><span class="bs-ko">' + esc(p.ocakavane || "") + "</span><span>" + (vys ? bsVysledokChip(vys) : "") + "</span></div>";
+  }).join("") || '<div class="bs-prazdne">Scenár zatiaľ nemá prípady.' + (smie ? " Pridajte ich tlačidlom „+ Prípad“." : "") + "</div>";
+  let callout = "";
+  if (rr && (rr.vysledok === "nepresiel" || rr.vysledok === "blokovany")) {
+    const ids = [];
+    rr.pripady.filter(q => q.vysledok === "nepresiel" || q.vysledok === "blokovany").forEach(q => (q.posledne.defekty || []).forEach(d => { if (!ids.includes(d)) ids.push(d); }));
+    const def = ids.map(bsNajdi).filter(Boolean);
+    callout = '<div class="bs-callout"><i></i><div><b>' + (def.length ? "Napojený defekt" : "Neprešlo bez napojeného defektu") + "</b><p>" +
+      (def.length ? def.map(z => '<button type="button" onclick="bsOtvor(\'' + z.id + '\')">' + esc(z.kluc) + "</button> " + esc(z.nazov) + " · " + esc(bsStav(z.stav)[1])).join("<br>")
+        : "Pri ďalšom vykonaní ho appka ponúkne založiť s vyplneným scenárom a prípadom.") + "</p></div></div>";
+  }
+  const detail = '<div class="bs-panel bs-scd"><div class="bs-scd-h"><small class="bs-kodm">' + esc(x.s.kod) + "</small>" + (rr ? bsVysledokChip(rr.vysledok) : "") + '<span class="bs-ph-tl">' + tl + "</span></div>" +
+    "<h2>" + esc(x.s.nazov) + '</h2><div class="bs-scd-m">' + meta + "</div>" + (x.s.predpoklady ? '<p class="bs-scd-p">' + esc(x.s.predpoklady) + "</p>" : "") + callout +
+    '<div class="bs-kroky-h">KROKY</div><div class="bs-kroky">' + kroky + "</div></div>";
+  return '<div class="bs-sc"><div class="bs-panel"><div class="bs-ph"><h3>Scenáre</h3><small>' + O.scenare.length + " v knižnici · " + O.pocetScenarov + " v pláne</small></div>" + zoznam + "</div>" + detail + "</div>";
+}
+
+// ── Prehľad s plánom (balíček A, §9) ────────────────────────────
+// KPI pás z balíčka; pass rate „za týždeň“ = rovnaké odvodenie k času pred 7 dňami.
+function bsPrehladKpiPlan(PO, O, zz){
+  const t = Date.now(), pred = bsPlanOdvod(bsPlan(), zz, t, BS.d.poziadavky, t - 7 * BS_DEN);
+  const dp = PO.passRate != null && pred && pred.passRate != null ? Math.round((PO.passRate - pred.passRate) * 10) / 10 : null;
+  const ips = bsIncidentyPoSla(zz, t);
+  return [
+    ["TESTOVACIE PRÍPADY", PO.celkom, PO.vykonane + " vykonaných · " + PO.pct + " %", ""],
+    ["PASS RATE", PO.passRate == null ? "—" : bsDes(PO.passRate) + " %", dp == null ? "zatiaľ bez porovnania" : dp === 0 ? "bez zmeny za týždeň" : (dp > 0 ? "+" : "−") + bsDes(Math.abs(dp)) + " b. za týždeň", dp > 0 ? "pos" : dp < 0 ? "neg" : ""],
+    ["OTVORENÉ DEFEKTY", O.poTypoch.defekt.otvorene, O.deltaDefektov === 0 ? "bez zmeny za týždeň" : (O.deltaDefektov > 0 ? "+" : "−") + Math.abs(O.deltaDefektov) + " za týždeň", O.deltaDefektov > 0 ? "neg" : O.deltaDefektov < 0 ? "pos" : ""],
+    ["BLOKUJÚCE", O.blokujuce, O.blokujuce ? bsPocet(O.blokujuce, "kritický defekt", "kritické defekty", "kritických defektov") + (O.blokujuceNad48 ? " · " + O.blokujuceNad48 + " nad 48 h" : "") : "žiadne blokujúce", O.blokujuce ? "neg" : "pos"],
+    ["INCIDENTY MIMO SLA", ips, O.poTypoch.incident.otvorene + " otvorených incidentov", ips ? "neg" : ""]
+  ].map(([l, v, d, c]) => '<div><div class="bs-kpi-l">' + l + '</div><div class="bs-kpi-v">' + esc(String(v)) + '</div><div class="bs-kpi-d ' + c + '">' + esc(d) + "</div></div>").join("");
+}
+// Progres vykonávania podľa scenára: aktívna fáza, inak všetky fázy.
+function bsPrehladProgresHtml(PO){
+  const zdroj = PO.aktivna ? [PO.aktivna] : PO.fazy;
+  const leg = BS_VYSLEDKY_PORADIE.map(k => '<span class="bs-leg"><i class="' + k + '"></i>' + (k === "caka" ? "Nevykonané" : k === "presiel" ? "Prešlo" : k === "nepresiel" ? "Neprešlo" : "Blokované") + "</span>").join("");
+  const riadky = zdroj.flatMap(x => x.riadky.map(rr => {
+    const c = rr.pocty, w = k => rr.celkom ? (c[k] / rr.celkom * 100).toFixed(2) : 0;
+    return '<button type="button" class="bs-prog" onclick="bsChodScenar(\'' + rr.s.id + '\')"><span class="bs-prog-n"><b>' + esc(rr.s.nazov) + "</b><small>" + esc(rr.s.kod + " · " + bsPocet(rr.celkom, "prípad", "prípady", "prípadov") + " · " + x.f.nazov) + "</small></span>" +
+      '<span class="bs-stack"><i class="presiel" style="width:' + w("presiel") + '%"></i><i class="nepresiel" style="width:' + w("nepresiel") + '%"></i><i class="blokovany" style="width:' + w("blokovany") + '%"></i></span>' +
+      '<span class="bs-num">' + rr.pct + " %</span></button>";
+  })).join("") || '<div class="bs-prazdne">Fáza zatiaľ nemá scenáre.</div>';
+  return '<div class="bs-panel"><div class="bs-ph"><h3>Progres vykonávania podľa scenára</h3><span class="bs-legw">' + leg + "</span></div>" + riadky + "</div>";
+}
+function bsPrehladMilnikyHtml(PO){
+  const sc = PO.scenare.filter(x => x.v), prip = sc.filter(x => x.pripady.length).length;
+  const ms = [["Príprava testov", bsPct(prip, sc.length) + " %", bsPocet(PO.celkom, "prípad pripravený", "prípady pripravené", "prípadov pripravených"), prip === sc.length ? 162 : 78]]
+    .concat(PO.fazy.map(x => [x.f.nazov, x.pct + " %", x.stav === "naplanovana" ? "Naplánovaná · od " + bsDMR(x.f.od) : x.vykonane + " z " + x.celkom + " vykonaných",
+      x.stav === "ukoncena" || x.pct === 100 ? 162 : x.pct > 0 ? 78 : 255]));
+  const K = PO.aktivna ? PO.aktivna.kriteria : null;
+  if (K && K.vsetky) {
+    const prve = K.polozky.find(k => !k.splnene);
+    ms.push(["Exit kritériá", K.splnene + " z " + K.vsetky, prve ? (prve.detail || prve.text) : "všetky splnené", prve ? 32 : 162]);
+  }
+  return '<div class="bs-panel"><div class="bs-ph"><h3>Progres review · míľniky</h3></div><div class="bs-ms">' + ms.map(([n, v, p, h]) =>
+    '<div><span class="bs-ms-n"><i style="--h:' + h + '"></i>' + esc(n) + '</span><span class="bs-ms-v">' + esc(v) + '</span><span class="bs-ms-p">' + esc(p) + "</span></div>").join("") + "</div></div>";
+}
+
+// ── vykonanie prípad po prípade (§14) ───────────────────────────
+let _bsBeh = null;
+function bsSpustit(planId){
+  const n = bsNajdiRiadok(bsPlanO(), planId); if (!n) return;
+  const i = n.rr.pripady.findIndex(q => q.vysledok === "caka");
+  // Všetko vykonané = beh znova od prvého prípadu po poradí; inak len čakajúce.
+  _bsBeh = { planId, i: i < 0 ? 0 : i, znova: i < 0, prostredie: (bsPosledne() || {}).prostredie_id || "" };
+  bsBehOtvor();
+}
+function bsBehOtvor(){
+  const n = _bsBeh && bsNajdiRiadok(bsPlanO(), _bsBeh.planId); if (!n) return;
+  openModal("Vykonanie · " + n.rr.s.kod + " " + n.rr.s.nazov, bsBehHtml(), null, null, "siroky");
+  const zr = document.getElementById("modalZrusit"); if (zr) zr.textContent = "Zavrieť";
+}
+function bsBehHtml(){
+  const n = bsNajdiRiadok(bsPlanO(), _bsBeh.planId); if (!n) return "";
+  const rr = n.rr, i = Math.max(0, Math.min(_bsBeh.i, rr.pripady.length - 1)), q = rr.pripady[i], p = q.p, nast = bsNast();
+  const prost = (nast.prostredia || []).length ? '<label>Prostredie<select id="bsB_prost"><option value=""></option>' + nast.prostredia.map(x => '<option value="' + esc(x.id) + '"' + (_bsBeh.prostredie === x.id ? " selected" : "") + ">" + esc(x.nazov) + "</option>").join("") + "</select></label>" : "";
+  const sekcia = (k, v) => v ? '<div class="bs-beh-s"><span class="bs-kpi-l">' + k + "</span><p>" + esc(v) + "</p></div>" : "";
+  return '<div class="bs-ok bs-beh"><div class="bs-beh-p">Prípad ' + (i + 1) + " z " + rr.celkom + " · " + bsPocty(rr.pocty) + "</div>" +
+    '<div class="bs-beh-h"><small class="bs-kodm">' + esc(p.kod) + "</small> <b>" + esc(p.nazov) + "</b> " + bsVysledokChip(q.vysledok) + "</div>" +
+    sekcia("POSTUP", p.postup) + sekcia("VSTUPNÉ DÁTA", p.vstup) + sekcia("OČAKÁVANÝ VÝSLEDOK", p.ocakavane) +
+    '<div class="bs-form"><label>Skutočný výsledok<textarea id="bsB_skut" placeholder="Čo sa naozaj stalo (pri ✕ a ⊘ ide aj do defektu)"></textarea></label>' + prost + "</div>" +
+    '<div class="bs-beh-tl"><button type="button" class="bs-v presiel" onclick="bsBehVysledok(\'presiel\')">✓ Prešiel</button><button type="button" class="bs-v nepresiel" onclick="bsBehVysledok(\'nepresiel\')">✕ Neprešiel</button>' +
+    '<button type="button" class="bs-v blokovany" onclick="bsBehVysledok(\'blokovany\')">⊘ Blokovaný</button></div><div id="bsBehDef"></div>' +
+    '<div class="bs-beh-nav"><button type="button" class="bs-btn mal" onclick="bsBehKrok(-1)"' + (i ? "" : " disabled") + '>‹ Predošlý</button><button type="button" class="bs-btn mal" onclick="bsBehKrok(1)"' + (i < rr.celkom - 1 ? "" : " disabled") + ">Preskočiť ›</button></div></div>";
+}
+function bsBehKrok(d){ _bsBeh.i += d; document.getElementById("modalBody").innerHTML = bsBehHtml(); }
+function bsBehVstup(){
+  const s = document.getElementById("bsB_skut"), pr = document.getElementById("bsB_prost");
+  return { skut: s ? s.value.trim() : "", prost: pr ? pr.value : (_bsBeh.prostredie || "") };
+}
+// ✕ a ⊘ najprv ukážu výber defektu: ⊘ bez otvoreného defektu nejde (callout
+// „Napojený defekt“ je tak vždy pravdivý), ✕ ho ponúkne, ale nežiada.
+function bsBehVysledok(k){
+  const n = bsNajdiRiadok(bsPlanO(), _bsBeh.planId); if (!n) return;
+  if (k === "presiel") return bsBehZapis(k, "");
+  const q = n.rr.pripady[_bsBeh.i];
+  const otv = bsZaznamy().filter(z => z.typ === "defekt" && bsOtvoreny(z))
+    .sort((a, b) => ((b.pripad === q.p.kod) - (a.pripad === q.p.kod)) || (b.cislo - a.cislo));
+  const el = document.getElementById("bsBehDef"); if (!el) return;
+  el.innerHTML = '<div class="bs-beh-def"><b>' + (k === "blokovany" ? "Blokované — napojte otvorený defekt, ktorý test blokuje" : "Neprešlo — napojiť defekt?") + "</b>" +
+    '<select id="bsB_def"><option value="novy">Založiť nový defekt (vyplnený z prípadu)</option>' + (k === "nepresiel" ? '<option value="">Bez defektu</option>' : "") +
+    otv.map(z => '<option value="' + z.id + '">' + esc(z.kluc + " · " + z.nazov) + "</option>").join("") + "</select>" +
+    '<button type="button" class="bs-btn pri" onclick="bsBehZapis(\'' + k + '\',document.getElementById(\'bsB_def\').value)">Zapísať ' + BS_VYSLEDKY[k][3] + "</button></div>";
+}
+function bsPredvyplnDefekt(rr, q, prost, skut){
+  return {
+    nazov: q.p.nazov + " — " + (skut ? skut.split(/\r?\n/)[0].slice(0, 120) : "neprešlo"),
+    popis: skut || ("Prípad " + q.p.kod + " scenára " + rr.s.kod + " neprešiel."),
+    scenar: rr.s.kod, pripad: q.p.kod, is_id: rr.s.is_id || null, modul_id: rr.s.modul_id || null,
+    poziadavka_id: q.p.poziadavka_id || null, prostredie_id: prost || null, identifikovane: new Date().toISOString(),
+    data: { kroky: q.p.postup || "", ocakavane: q.p.ocakavane || "", skutocne: skut || "" }
+  };
+}
+async function bsBehZapis(k, def){
+  const n = bsNajdiRiadok(bsPlanO(), _bsBeh.planId); if (!n) return false;
+  const q = n.rr.pripady[_bsBeh.i], { skut, prost } = bsBehVstup();
+  _bsBeh.prostredie = prost;
+  if (k === "blokovany" && !def) return b2bVOkne("Blokovaný prípad potrebuje napojený otvorený defekt — vyberte ho alebo založte nový.");
+  if (def === "novy") {
+    const beh = Object.assign({}, _bsBeh);
+    bsFormular(null, "defekt", { pred: bsPredvyplnDefekt(n.rr, q, prost, skut), lenTyp: true, ostan: true,
+      poUlozeni: async (r) => {
+        await bsVykonaj(n.rr, q, k, skut, prost, [r.id]);
+        _bsBeh = beh; setTimeout(() => bsBehDalsi(), 0);
+      } });
+    return true;
+  }
+  try { await bsVykonaj(n.rr, q, k, skut, prost, def ? [def] : []); }
+  catch (e) { return b2bVOkne(String((e && e.message) || e).replace(/^.*?ERROR:\s*/, "")); }
+  bsBehDalsi();
+  return true;
+}
+async function bsVykonaj(rr, q, k, skut, prost, defekty){
+  const r = await bsRpc("b2b_bs_vykonaj", { p_plan: rr.r.id, p_pripad: q.p.id, p_vysledok: k, p_skutocny: skut || null, p_prostredie: prost || null, p_defekty: defekty || [] });
+  const P = bsPlan(), ja = bsJa();
+  // Hneď do zoznamu (čísla a ďalší krok bez čakania na načítanie).
+  if (P) P.vykonania.push({ id: (r && r.id) || ("lok-" + Date.now()), plan_id: rr.r.id, pripad_id: q.p.id, pripad_verzia: q.p.verzia, vysledok: k, skutocny: skut || null,
+    prostredie_id: prost || null, defekty: defekty || [], tester_osoba: ja.osoba, kto: null, kedy: new Date().toISOString() });
+  bsPlanZmenene();
+  if (prost) bsZapamataj(Object.assign({}, bsPosledne(), { prostredie_id: prost }));
+  return r;
+}
+function bsBehDalsi(){
+  const n = bsNajdiRiadok(bsPlanO(), _bsBeh.planId); if (!n) return;
+  let dalsi = _bsBeh.znova ? (_bsBeh.i < n.rr.celkom - 1 ? _bsBeh.i + 1 : -1)
+    : n.rr.pripady.findIndex((q, j) => j > _bsBeh.i && q.vysledok === "caka");
+  if (dalsi < 0 && !_bsBeh.znova) dalsi = n.rr.pripady.findIndex(q => q.vysledok === "caka");
+  if (dalsi < 0) {
+    if (document.getElementById("modal") && document.getElementById("modal").classList.contains("on")) closeModal();
+    oznamPas("Scenár " + n.rr.s.kod + ": ✓ " + n.rr.pocty.presiel + " ✕ " + n.rr.pocty.nepresiel + " ⊘ " + n.rr.pocty.blokovany + (n.rr.pocty.caka ? " · čaká " + n.rr.pocty.caka : ""));
+    _bsBeh = null; bsNacitajData(); return;
+  }
+  _bsBeh.i = dalsi;
+  const mb = document.getElementById("modalBody"), on = document.getElementById("modal") && document.getElementById("modal").classList.contains("on");
+  if (on && mb && mb.querySelector(".bs-beh")) mb.innerHTML = bsBehHtml(); else bsBehOtvor();
+  bsPrekresli();
+}
+
+// ── správa plánu (TM, TTL) ──────────────────────────────────────
+function bsRpcChyba(e){ return b2bVOkne(String((e && e.message) || e).replace(/^.*?ERROR:\s*/, "")); }
+function bsFazaFormular(id){
+  const P = bsPlan(), f = id ? (P.fazy || []).find(x => x.id === id) : null, ja = bsJa();
+  const html = '<div class="bs-ok"><div class="bs-form"><label>Názov fázy *<input type="text" id="bsFz_n" maxlength="120" placeholder="napr. SIT, UAT, Regresia" value="' + esc(f ? f.nazov : "") + '"></label>' +
+    '<div class="dva"><label>Od *<input type="date" id="bsFz_od" value="' + esc(f ? String(f.od).slice(0, 10) : bsDenStr(Date.now())) + '"></label><label>Do *<input type="date" id="bsFz_do" value="' + esc(f && f.do ? String(f.do).slice(0, 10) : "") + '"></label></div></div></div>';
+  const zmaz = f && bsMaRolu(ja, ["tm"]) ? async () => {
+    const d = prompt("Fáza sa nevymaže, len skryje (vykonania ostanú v histórii). Dôvod:"); if (!d || d.trim().length < 3) return false;
+    try { await bsRpc("b2b_bs_faza_zmaz", { p_id: f.id, p_dovod: d.trim() }); } catch (e) { return bsRpcChyba(e); }
+    oznamPas("Fáza skrytá · " + f.nazov); bsNacitajData(); return true;
+  } : null;
+  openModal(f ? "Upraviť fázu" : "Nová fáza", html, async () => {
+    const nazov = document.getElementById("bsFz_n").value.trim(), od = document.getElementById("bsFz_od").value, d = document.getElementById("bsFz_do").value;
+    if (!nazov || !od || !d) return b2bVOkne("Vyplňte názov, začiatok aj koniec fázy.");
+    if (d < od) return b2bVOkne("Koniec fázy je skôr než začiatok.");
+    const polia = { nazov, od, do: d };
+    if (!f) polia.poradie = ((P.fazy || []).reduce((m, x) => Math.max(m, x.poradie || 0), 0)) + 1;
+    try { await bsRpc("b2b_bs_faza_uloz", { p_projekt: B2B.pid, p_id: f ? f.id : null, p_verzia: f ? f.verzia : null, p_polia: polia }); } catch (e) { return bsRpcChyba(e); }
+    oznamPas(f ? "Fáza uložená" : "Fáza založená · " + nazov); bsNacitajData(); return true;
+  }, zmaz, null, f ? "Uložiť" : "Založiť");
+}
+async function bsFazaUzavri(id, uzavriet){
+  const f = (bsPlan().fazy || []).find(x => x.id === id); if (!f) return;
+  const x = bsPlanO().fazy.find(y => y.f.id === id), K = x && x.kriteria;
+  if (uzavriet && !confirm("Uzavrieť fázu „" + f.nazov + "“? Po uzavretí sa v nej už nedá vykonávať." + (K && K.vsetky && K.splnene < K.vsetky ? "\n\nSplnené exit kritériá: " + K.splnene + " z " + K.vsetky + "." : ""))) return;
+  try { await bsRpc("b2b_bs_faza_uzavri", { p_id: id, p_uzavriet: !!uzavriet }); oznamPas((uzavriet ? "Fáza uzavretá · " : "Fáza znovu otvorená · ") + f.nazov); bsNacitajData(); }
+  catch (e) { bsChyba(e, "Fázu sa nepodarilo " + (uzavriet ? "uzavrieť" : "otvoriť")); }
+}
+function bsKriteriaFormular(id){
+  const f = (bsPlan().fazy || []).find(x => x.id === id); if (!f) return;
+  const K = f.kriteria || {}, A = K.auto || {};
+  const auto = BS_KRITERIA_AUTO.map(([k, t]) => k === "pass_rate"
+    ? '<label class="bs-chk"><input type="checkbox" id="bsKr_pass_rate"' + (A.pass_rate != null && A.pass_rate !== false && A.pass_rate !== "" ? " checked" : "") + '> Pass rate fázy aspoň <input type="text" id="bsKr_prah" inputmode="decimal" style="width:64px" value="' + esc(A.pass_rate != null && A.pass_rate !== false && A.pass_rate !== "" ? bsDes(A.pass_rate) : "95") + '"> %</label>'
+    : '<label class="bs-chk"><input type="checkbox" id="bsKr_' + k + '"' + (A[k] ? " checked" : "") + "> " + esc(t) + "</label>").join("");
+  const rucne = (K.rucne || []).map(k => k.text).join("\n");
+  const html = '<div class="bs-ok"><div class="bs-form"><div class="bs-kpi-l">AUTOMATICKÉ (z čísel Prehľadu)</div>' + auto +
+    '<label>Ručné kritériá — jedno na riadok (potvrdzuje Test manager)<textarea id="bsKr_rucne" placeholder="napr. Akceptačný protokol podpísaný">' + esc(rucne) + "</textarea></label></div></div>";
+  openModal("Exit kritériá · " + f.nazov, html, async () => {
+    const auto = {}; ["otvorene_u1", "p1_vykonane", "incidenty_sla"].forEach(k => { if (document.getElementById("bsKr_" + k).checked) auto[k] = true; });
+    if (document.getElementById("bsKr_pass_rate").checked) {
+      const prah = parseFloat(document.getElementById("bsKr_prah").value.replace(",", "."));
+      if (!(prah > 0 && prah <= 100)) return b2bVOkne("Prah pass rate zadajte ako číslo od 1 do 100.");
+      auto.pass_rate = prah;
+    }
+    const stare = K.rucne || [];
+    const rucne = document.getElementById("bsKr_rucne").value.split(/\r?\n/).map(s => s.trim()).filter(Boolean).map(text => {
+      const st = stare.find(k => k.text === text); return st ? { id: st.id, text } : { id: "k" + Math.random().toString(36).slice(2, 10), text };
+    });
+    try { await bsRpc("b2b_bs_faza_uloz", { p_projekt: B2B.pid, p_id: f.id, p_verzia: f.verzia, p_polia: { kriteria: { auto, rucne } } }); } catch (e) { return bsRpcChyba(e); }
+    oznamPas("Exit kritériá uložené · " + f.nazov); bsNacitajData(); return true;
+  }, null, null, "Uložiť");
+}
+async function bsKriteriumPotvrd(fazaId, kid, splnene){
+  try { await bsRpc("b2b_bs_kriterium_potvrd", { p_faza: fazaId, p_kriterium: kid, p_splnene: !!splnene }); oznamPas(splnene ? "Kritérium potvrdené" : "Potvrdenie zrušené"); bsNacitajData(); }
+  catch (e) { bsChyba(e, "Kritérium sa nepodarilo zmeniť"); }
+}
+function bsTesteriMoznosti(vybrany){
+  return '<option value="">nepridelený</option>' + bsOsoby().filter(o => (o.bs_role || []).some(r => BS_VYKON_ROLY.includes(r)) || o.spravca)
+    .map(o => '<option value="' + o.id + '"' + (vybrany === o.id ? " selected" : "") + ">" + esc(o.meno) + "</option>").join("");
+}
+function bsPlanPridaj(fazaId){
+  const O = bsPlanO(), x = O.fazy.find(y => y.f.id === fazaId); if (!x) return;
+  const uz = new Set(x.riadky.map(rr => rr.s.id)), nast = bsNast();
+  const volne = O.scenare.filter(y => !uz.has(y.s.id));
+  if (!volne.length) return alert(O.scenare.length ? "Všetky scenáre knižnice už sú v tejto fáze." : "Knižnica scenárov je prázdna — najprv založte scenár v Testovacích scenároch.");
+  const opt = (cis) => '<option value="">všetky</option>' + (nast[cis] || []).map(c => '<option value="' + esc(c.id) + '">' + esc(c.nazov) + "</option>").join("");
+  const html = '<div class="bs-ok"><div class="bs-form"><div class="dva"><label>IS<select id="bsPp_is" onchange="bsPlanPridajFilter()">' + opt("is") + '</select></label><label>Modul<select id="bsPp_mod" onchange="bsPlanPridajFilter()">' + opt("moduly") + "</select></label></div>" +
+    '<div id="bsPp_zoz" class="bs-pp">' + volne.map(y => '<label class="bs-chk" data-is="' + esc(y.s.is_id || "") + '" data-mod="' + esc(y.s.modul_id || "") + '"><input type="checkbox" value="' + y.s.id + '" checked> <small class="bs-kodm">' + esc(y.s.kod) + "</small> " + esc(y.s.nazov) +
+      " <small>(" + bsPocet(y.pripady.length, "prípad", "prípady", "prípadov") + ")</small></label>").join("") + "</div>" +
+    '<label>Tester<select id="bsPp_tester">' + bsTesteriMoznosti(null) + "</select></label></div></div>";
+  openModal("Pridať scenáre · " + x.f.nazov, html, async () => {
+    const ids = [...document.querySelectorAll("#bsPp_zoz label:not([hidden]) input:checked")].map(i => i.value);
+    if (!ids.length) return b2bVOkne("Vyberte aspoň jeden scenár.");
+    try { const r = await bsRpc("b2b_bs_plan_pridaj", { p_faza: fazaId, p_scenare: ids, p_tester: document.getElementById("bsPp_tester").value || null });
+      oznamPas("Pridané do fázy: " + bsPocet((r && r.pocet) || ids.length, "scenár", "scenáre", "scenárov")); } catch (e) { return bsRpcChyba(e); }
+    bsNacitajData(); return true;
+  }, null, null, "Pridať");
+}
+function bsPlanPridajFilter(){
+  const is = document.getElementById("bsPp_is").value, mod = document.getElementById("bsPp_mod").value;
+  document.querySelectorAll("#bsPp_zoz label").forEach(l => { l.hidden = (is && l.dataset.is !== is) || (mod && l.dataset.mod !== mod); });
+}
+function bsPlanRiadok(planId){
+  const n = bsNajdiRiadok(bsPlanO(), planId); if (!n) return;
+  const r = n.rr.r;
+  const html = '<div class="bs-ok"><div class="bs-form"><label>Tester<select id="bsPr_tester">' + bsTesteriMoznosti(r.tester_osoba) + "</select></label>" +
+    '<label>Poradie vo fáze<input type="text" id="bsPr_por" inputmode="numeric" value="' + esc(String(r.poradie || "")) + '"></label>' +
+    '<div class="bs-podobne">Odobratím zo fázy sa vykonania nestratia — po opätovnom pridaní sa vrátia.</div></div></div>';
+  openModal(n.rr.s.kod + " · " + n.faza.f.nazov, html, async () => {
+    const por = document.getElementById("bsPr_por").value.trim();
+    try { await bsRpc("b2b_bs_plan_uprav", { p_plan: r.id, p_tester: document.getElementById("bsPr_tester").value || null, p_poradie: por ? parseInt(por, 10) : null }); } catch (e) { return bsRpcChyba(e); }
+    oznamPas("Uložené · " + n.rr.s.kod); bsNacitajData(); return true;
+  }, async () => {
+    if (!confirm("Odobrať " + n.rr.s.kod + " z fázy " + n.faza.f.nazov + "?")) return false;
+    try { await bsRpc("b2b_bs_plan_odober", { p_plan: r.id }); } catch (e) { return bsRpcChyba(e); }
+    oznamPas("Odobraté zo fázy · " + n.rr.s.kod); bsNacitajData(); return true;
+  }, null, "Uložiť");
+}
+function bsScenarFormular(id){
+  const P = bsPlan(), s = id ? (P.scenare || []).find(x => x.id === id) : null, nast = bsNast();
+  const sel = (k, cis, v) => (nast[cis] || []).length ? '<label>' + (cis === "is" ? "IS" : "Modul") + '<select id="bsSc_' + k + '"><option value=""></option>' + nast[cis].map(c => '<option value="' + esc(c.id) + '"' + (v === c.id ? " selected" : "") + ">" + esc(c.nazov) + "</option>").join("") + "</select></label>" : "";
+  const html = '<div class="bs-ok"><div class="bs-form"><label>Názov scenára *<input type="text" id="bsSc_n" maxlength="300" placeholder="napr. Žiadosť o dávku" value="' + esc(s ? s.nazov : "") + '"></label>' +
+    '<div class="dva">' + sel("is", "is", s && s.is_id) + sel("mod", "moduly", s && s.modul_id) + "</div>" +
+    '<label>Priorita<select id="bsSc_pr">' + [1, 2, 3].map(p => '<option value="' + p + '"' + ((s ? +s.priorita : 2) === p ? " selected" : "") + ">P" + p + (p === 1 ? " — kritický tok" : p === 3 ? " — doplnkový" : "") + "</option>").join("") + "</select></label>" +
+    '<label>Predpoklady<textarea id="bsSc_pp" placeholder="Čo musí platiť pred testom (rola, dáta, nastavenie)">' + esc(s ? s.predpoklady || "" : "") + "</textarea></label>" +
+    (s ? "" : '<div class="bs-podobne">Kód scenára (TS-…) pridelí server; nemení sa a znova sa nepoužije.</div>') + "</div></div>";
+  const zmaz = s ? async () => {
+    const d = prompt("Scenár sa skryje z knižnice aj z plánu (kód sa znova nepoužije). Dôvod:"); if (!d || d.trim().length < 3) return false;
+    try { await bsRpc("b2b_bs_scenar_zmaz", { p_id: s.id, p_dovod: d.trim() }); } catch (e) { return bsRpcChyba(e); }
+    oznamPas("Scenár zmazaný · " + s.kod); BS.scenar = null; bsNacitajData(); return true;
+  } : null;
+  openModal(s ? "Upraviť · " + s.kod : "Nový scenár", html, async () => {
+    const v = id => { const el = document.getElementById(id); return el ? el.value.trim() : ""; };
+    const polia = { nazov: v("bsSc_n"), is_id: v("bsSc_is") || null, modul_id: v("bsSc_mod") || null, priorita: +v("bsSc_pr") || 2, predpoklady: v("bsSc_pp") || null };
+    if (!polia.nazov) return b2bVOkne("Napíšte názov scenára.");
+    let r; try { r = await bsRpc("b2b_bs_scenar_uloz", { p_projekt: B2B.pid, p_id: s ? s.id : null, p_verzia: s ? s.verzia : null, p_polia: polia }); } catch (e) { return bsRpcChyba(e); }
+    if (r && r.id) BS.scenar = r.id;
+    oznamPas(s ? "Uložené · " + s.kod : "Založený scenár · " + ((r && r.kod) || polia.nazov)); bsNacitajData(); return true;
+  }, zmaz, null, s ? "Uložiť" : "Založiť");
+}
+function bsPripadFormular(scenarId, id){
+  const P = bsPlan(), s = (P.scenare || []).find(x => x.id === scenarId), p = id ? (P.pripady || []).find(x => x.id === id) : null; if (!s) return;
+  const pozz = (BS.d.poziadavky || []).filter(q => q.aktivna !== false);
+  const html = '<div class="bs-ok"><div class="bs-form"><label>Názov prípadu *<input type="text" id="bsPc_n" maxlength="300" placeholder="napr. Vyplnenie poľa Dátum" value="' + esc(p ? p.nazov : "") + '"></label>' +
+    '<label>Postup<textarea id="bsPc_po" placeholder="Čo tester urobí">' + esc(p ? p.postup || "" : "") + "</textarea></label>" +
+    '<label>Vstupné dáta<textarea id="bsPc_vs">' + esc(p ? p.vstup || "" : "") + "</textarea></label>" +
+    '<label>Očakávaný výsledok<textarea id="bsPc_oc">' + esc(p ? p.ocakavane || "" : "") + "</textarea></label>" +
+    (pozz.length ? '<label>Biznis požiadavka<select id="bsPc_poz"><option value=""></option>' + pozz.map(q => '<option value="' + q.id + '"' + (p && p.poziadavka_id === q.id ? " selected" : "") + ">" + esc(q.kod + " " + q.nazov) + "</option>").join("") + "</select></label>" : "") +
+    (p ? '<div class="bs-podobne">Zmena textu zvýši verziu prípadu (teraz v' + (p.verzia || 1) + "); staršie vykonania si pamätajú svoju.</div>" : "") + "</div></div>";
+  const zmaz = p ? async () => {
+    const d = prompt("Prípad " + p.kod + " sa skryje (kód sa znova nepoužije). Dôvod:"); if (!d || d.trim().length < 3) return false;
+    try { await bsRpc("b2b_bs_pripad_zmaz", { p_id: p.id, p_dovod: d.trim() }); } catch (e) { return bsRpcChyba(e); }
+    oznamPas("Prípad zmazaný · " + p.kod); bsNacitajData(); return true;
+  } : null;
+  openModal((p ? "Upraviť · " + p.kod : "Nový prípad") + " · " + s.kod, html, async () => {
+    const v = id => { const el = document.getElementById(id); return el ? el.value.trim() : ""; };
+    const polia = { nazov: v("bsPc_n"), postup: v("bsPc_po") || null, vstup: v("bsPc_vs") || null, ocakavane: v("bsPc_oc") || null, poziadavka_id: v("bsPc_poz") || null };
+    if (!polia.nazov) return b2bVOkne("Napíšte názov prípadu.");
+    let r; try { r = await bsRpc("b2b_bs_pripad_uloz", { p_scenar: s.id, p_id: p ? p.id : null, p_verzia: p ? p.verzia : null, p_polia: polia }); } catch (e) { return bsRpcChyba(e); }
+    oznamPas(p ? "Uložené · " + p.kod : "Založený prípad · " + ((r && r.kod) || polia.nazov)); bsNacitajData(); return true;
+  }, zmaz, null, p ? "Uložiť" : "Založiť");
+}
+async function bsPripadPosun(id, smer){
+  const P = bsPlan(), p = (P.pripady || []).find(x => x.id === id); if (!p) return;
+  const zoz = (P.pripady || []).filter(x => x.scenar_id === p.scenar_id && !x.zmazane).sort((a, b) => (a.poradie - b.poradie) || (a.cislo - b.cislo)).map(x => x.id);
+  const i = zoz.indexOf(id), j = i + smer; if (j < 0 || j >= zoz.length) return;
+  [zoz[i], zoz[j]] = [zoz[j], zoz[i]];
+  try { await bsRpc("b2b_bs_pripad_poradie", { p_scenar: p.scenar_id, p_ids: zoz }); bsNacitajData(); }
+  catch (e) { bsChyba(e, "Poradie sa nepodarilo uložiť"); }
+}
+function bsPripadPresun(id){
+  const P = bsPlan(), p = (P.pripady || []).find(x => x.id === id); if (!p) return;
+  const ine = (P.scenare || []).filter(s => !s.zmazane && s.id !== p.scenar_id).sort((a, b) => a.cislo - b.cislo);
+  if (!ine.length) return alert("Iný scenár v knižnici nie je.");
+  const html = '<div class="bs-ok"><div class="bs-form"><label>Cieľový scenár<select id="bsPs_c">' + ine.map(s => '<option value="' + s.id + '">' + esc(s.kod + " " + s.nazov) + "</option>").join("") + "</select></label>" +
+    '<div class="bs-podobne">Prípad dostane v cieľovom scenári nový kód; pôvodný ' + esc(p.kod) + " sa skryje s odkazom na nový.</div></div></div>";
+  openModal("Presunúť · " + p.kod, html, async () => {
+    let r; try { r = await bsRpc("b2b_bs_pripad_presun", { p_id: p.id, p_scenar: document.getElementById("bsPs_c").value }); } catch (e) { return bsRpcChyba(e); }
+    oznamPas("Presunuté · " + p.kod + (r && r.kod ? " → " + r.kod : "")); bsNacitajData(); return true;
+  }, null, null, "Presunúť");
 }
