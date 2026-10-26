@@ -891,9 +891,10 @@ function repIssueKpi(riadky, profil, stavKuDnu){
 }
 
 // ── 8. Súlad záväzkov s plánom (§6.6) ───────────────────────────
-const REP_CT_PORADIE = ["SPLNENE", "CHYBA_V_PLANE", "PO_TERMINE", "PLAN_NESKOR", "DATUM_NESULAD", "BEZ_DATUMU", "V_SULADE"];
+// „x“ v bunke dodávateľa = dodávateľ je určený, termín ešte nedal (Roman 26. 10. 2026) — záväzok nie je úplný.
+const REP_CT_PORADIE = ["SPLNENE", "CHYBA_V_PLANE", "PO_TERMINE", "PLAN_NESKOR", "DATUM_NESULAD", "CAKA_NA_TERMIN", "BEZ_DATUMU", "V_SULADE"];
 const REP_CT_POPIS = { SPLNENE: "Splnené", CHYBA_V_PLANE: "Chýba v pláne", PO_TERMINE: "Po termíne", PLAN_NESKOR: "Plán neskôr ako záväzok",
-  DATUM_NESULAD: "Nesúlad dátumov", BEZ_DATUMU: "Bez dátumu záväzku", V_SULADE: "V súlade" };
+  DATUM_NESULAD: "Nesúlad dátumov", CAKA_NA_TERMIN: "Čaká na termín dodávateľa", BEZ_DATUMU: "Bez dátumu záväzku", V_SULADE: "V súlade" };
 function repCtSulad(plan, profil, ctRiadky, stavKuDnu, anotacie){
   const pole = profil.polia && profil.polia.kodZavazku;
   const strom = repStrom(plan);
@@ -920,6 +921,8 @@ function repCtSulad(plan, profil, ctRiadky, stavKuDnu, anotacie){
     const hotove = u && u.pct >= 100;
     if (hotove || z.dodane) priz.push("SPLNENE");
     if (!u) priz.push("CHYBA_V_PLANE");
+    const cakaNa = (z.commity || []).filter(c => c.stav === "x").map(c => c.dodavatel);
+    if (cakaNa.length && !hotove && !z.dodane) priz.push("CAKA_NA_TERMIN");
     if (!z.commit) priz.push("BEZ_DATUMU");
     if (z.commit && !hotove && stavKuDnu && z.commit < stavKuDnu) priz.push("PO_TERMINE");
     if (u && z.commit && u.finish && u.finish > z.commit) priz.push("PLAN_NESKOR");
@@ -931,7 +934,7 @@ function repCtSulad(plan, profil, ctRiadky, stavKuDnu, anotacie){
     vysl.push({ kluc: z.kluc, id: z.id, kod: z.kod, brana: z.brana, dodavka: z.dodavka, oblastCt: z.oblast, sekcia: z.sekcia,
       commit: z.commit, baseline: z.baseline, posunOprotiBaseline: z.commit && z.baseline ? repDni(z.baseline, z.commit) : null,
       uloha: u ? { uid: u.uid, nazov: u.nazov, finish: u.finish, pct: u.pct } : null, draha: u ? drahaPre(u.uid) : null,
-      deltaDni: delta, priznaky: priz, hlavny, prepis: a.stav ? { stav: a.stav, dovod: a.dovod || "" } : null, rucnaVazba: a.uid != null });
+      deltaDni: delta, priznaky: priz, hlavny, cakaNa, prepis: a.stav ? { stav: a.stav, dovod: a.dovod || "" } : null, rucnaVazba: a.uid != null });
   }
   const planBezZavazku = [...podlaKodu.keys()].filter(k => !pouzite.has(k));
   const pocty = {};
@@ -2153,7 +2156,8 @@ async function repSubor(druh, K){
     { nazov: K.view.nazov, stavKuDnu: K.view.stavKuDnu, koncept: kon })], { type: REP_MIME.html }), nazov: meno + ".html" };
   if (druh === "xlsx") {
     const X = await ensureXlsxStyle(), F = await ensureFflate();
-    return { blob: new Blob([repXlsxDopln(F, new Uint8Array(X.write(repXlsxBalik(X, K), { type: "array", bookType: "xlsx" })))], { type: REP_MIME.xlsx }), nazov: meno + ".xlsx" };
+    const wb = repXlsxBalik(X, K);
+    return { blob: new Blob([repXlsxDopln(F, new Uint8Array(X.write(wb, { type: "array", bookType: "xlsx" })), wb.repOverenia)], { type: REP_MIME.xlsx }), nazov: meno + ".xlsx" };
   }
   throw new Error("neznámy výstup " + druh);
 }
@@ -2327,7 +2331,7 @@ function repQaSnimky(Q, vybrane){
   if (Q.zistenia.length) s.push({ kluc: "qa-zistenia", typ: "qaTabulka", nazov: "QA: register zistení", zahrnuta: vybrane("qa-zistenia"),
     kicker: "Dohľad kvality", nadpis: "Register zistení a odporúčaní", tabulka: repQaTabZistenia(Q.zistenia) });
   if (Q.ct) s.push({ kluc: "qa-zavazky", typ: "qaTabulka", nazov: "QA: záväzky vs. plán", zahrnuta: vybrane("qa-zavazky"),
-    kicker: "Dohľad kvality", nadpis: "Záväzky dodávateľov vs. plán", sumar: ["V_SULADE", "PLAN_NESKOR", "PO_TERMINE", "DATUM_NESULAD", "CHYBA_V_PLANE"].map(k => ({ popis: REP_CT_POPIS[k], hodnota: String(Q.ct.pocty[k] || 0), akcent: k === "V_SULADE" ? "green" : k === "PO_TERMINE" ? "red" : "amber" })),
+    kicker: "Dohľad kvality", nadpis: "Záväzky dodávateľov vs. plán", sumar: ["V_SULADE", "PLAN_NESKOR", "PO_TERMINE", "DATUM_NESULAD", "CHYBA_V_PLANE"].concat(Q.ct.pocty.CAKA_NA_TERMIN ? ["CAKA_NA_TERMIN"] : []).map(k => ({ popis: REP_CT_POPIS[k], hodnota: String(Q.ct.pocty[k] || 0), akcent: k === "V_SULADE" ? "green" : k === "PO_TERMINE" ? "red" : "amber" })),
     tabulka: repQaTabZavazky(Q.ct) });
   if (Q.dep && Q.dep.kpi.aktivne) s.push({ kluc: "qa-zavislosti", typ: "qaTabulka", nazov: "QA: závislosti", zahrnuta: vybrane("qa-zavislosti"),
     kicker: "Dohľad kvality", nadpis: "Závislosti, ktoré blokujú alebo meškajú",
@@ -2355,11 +2359,11 @@ function repQaTabZistenia(rows){
       farby: { 3: z.zavaznost === "critical" ? "red" : z.zavaznost === "high" ? "amber" : null, 7: z.sulad === "nesulad" ? "red" : z.sulad === "ciastocny" ? "amber" : null } })) };
 }
 function repQaTabZavazky(ct){
-  const rows = ct.zavazky.filter(z => ["PO_TERMINE", "PLAN_NESKOR", "DATUM_NESULAD", "CHYBA_V_PLANE"].includes(z.hlavny))
+  const rows = ct.zavazky.filter(z => ["PO_TERMINE", "PLAN_NESKOR", "DATUM_NESULAD", "CHYBA_V_PLANE", "CAKA_NA_TERMIN"].includes(z.hlavny))
     .sort((a, b) => REP_CT_PORADIE.indexOf(a.hlavny) - REP_CT_PORADIE.indexOf(b.hlavny) || String(a.kod).localeCompare(String(b.kod)));
   return { stlpce: [{ n: "Kód", w: 0.08 }, { n: "Dodávka", w: 0.2 }, { n: "Míľnik v pláne", w: 0.26 }, { n: "Záväzok", w: 0.09 }, { n: "Plán", w: 0.09 }, { n: "%", w: 0.05 }, { n: "Δ dní", w: 0.06 }, { n: "Stav", w: 0.17 }],
     riadky: rows.map(z => ({ b: [z.id, z.dodavka || z.oblastCt || "", z.uloha ? z.uloha.nazov : "—", z.commit ? repDMR(z.commit) : "—", z.uloha && z.uloha.finish ? repDMR(z.uloha.finish) : "—",
-      z.uloha ? z.uloha.pct + " %" : "", z.deltaDni == null ? "" : (z.deltaDni > 0 ? "+" : "") + z.deltaDni, REP_CT_POPIS[z.hlavny] + (z.prepis ? " (ručne)" : "")],
+      z.uloha ? z.uloha.pct + " %" : "", z.deltaDni == null ? "" : (z.deltaDni > 0 ? "+" : "") + z.deltaDni, REP_CT_POPIS[z.hlavny] + (z.hlavny === "CAKA_NA_TERMIN" && z.cakaNa.length ? ": " + z.cakaNa.join(", ") : "") + (z.prepis ? " (ručne)" : "")],
       farby: { 7: z.hlavny === "PO_TERMINE" ? "red" : "amber" } })),
     prazdne: "Žiadny záväzok nie je v nesúlade s plánom." };
 }
@@ -2634,6 +2638,7 @@ function repXlsxBalik(X, K){
     pridaj("Zmeny v registroch", repXlsxHarok(X, ["Register", "ID", "Zmena", "Predtým", "Teraz", "Popis"],
       K.zmenyRegistrov.zmeny.map(z => [nm[z.reg], z.id, z.zmena, z.predtym, z.teraz, z.popis]), [12, 14, 22, 14, 14, 70]));
   }
+  if (Q) for (const h of repOpzHarky(X, K)) { if (h.overenia) (wb.repOverenia = wb.repOverenia || [])[wb.SheetNames.length] = h.overenia; pridaj(h.meno, h.ws); }
   pridaj("Na opravu pre PMO", repXlsxHarok(X, ["Zdroj", "Kód", "Popis"], repNaOpravu(K, protokoly), [16, 18, 100]));
   return wb;
 }
@@ -4127,6 +4132,7 @@ function repSnimkyHtml(K, balik, uprava){
     const m = manif.find(x => x.kluc === st.kluc) || {}, prva = !videne.has(st.kluc); videne.add(st.kluc);
     return '<div class="rep-snimka' + (m.zahrnuta === false ? " rep-vyp" : "") + '" data-kluc="' + esc(st.kluc) + '"><div class="rep-snimka-hl"><span class="csub" style="margin:0">' + esc(st.nadpis || st.kluc) + "</span>" +
       (uprava && prva ? '<label style="display:flex;gap:4px;align-items:center;margin:0"><input type="checkbox"' + (m.zahrnuta !== false ? " checked" : "") + ' onchange="repVyberSnimky(\'' + esc(st.kluc) + '\', this.checked)"> do výstupu</label>' : "") + "</div>" +
+      (uprava && prva ? repPodsekcieHtml(K, st.kluc) : "") +
       '<div class="rep-snimka-ram">' + repSvgStrana(L, st).replace("<svg ", '<svg style="display:block;width:100%;height:auto" ') + "</div></div>";
   }).join("") || '<div class="aempty">Balík nemá strany.</div>';
 }
@@ -4184,7 +4190,7 @@ const REP_STYL_R8B = [
   ".rep-pill{display:inline-block;padding:1px 8px;border-radius:9px;font-size:12px;font-weight:600;white-space:nowrap}",
   ".rep-p-critical{background:var(--sfc-neg);color:var(--ink-neg)}.rep-p-high{background:var(--sfc-warn);color:var(--ink-warn)}",
   ".rep-p-medium{background:var(--sfc-info);color:var(--ink-info)}.rep-p-low,.rep-p-uzav{background:var(--bg-deep);color:var(--ink-soft)}.rep-p-akt{background:var(--sfc-pos);color:var(--ink-pos)}",
-  ".rep-pomoc{border-left:4px solid var(--brand)}"
+  ".rep-pomoc{border-left:4px solid var(--brand)}.rep-podsek{padding:4px 8px 6px;font-size:12px;line-height:1.9}.rep-kpi[draggable=true]{cursor:grab}"
 ].join("");
 
 // ── KPI dlaždice strany Prehľad: výmena z katalógu, poradie, pridanie (najviac 6) ─
@@ -4213,13 +4219,13 @@ function repKpiEditorHtml(K){
   const opt = (kl) => kand.map(k => '<option value="' + esc(k.kluc) + '"' + (k.kluc === kl ? " selected" : "") + ">" + esc(k.popis) + "</option>").join("");
   const chips = z.map((k, i) => {
     const h = repKpiHodnota(k, K.model, P), kl = repKpiKluc(k);
-    return '<span class="rep-kpi" data-kpi="' + esc(kl) + '"><button class="aabtn" title="Doľava"' + (i ? "" : " disabled") + ' onclick="repKpiPosun(' + i + ',-1)">◀</button>' +
+    return '<span class="rep-kpi" data-kpi="' + esc(kl) + '" draggable="true" title="Potiahnutím zmeníte poradie" ondragstart="repKpiTahZac(event,' + i + ')" ondragover="event.preventDefault()" ondrop="repKpiTahPust(event,' + i + ')"><button class="aabtn" title="Doľava"' + (i ? "" : " disabled") + ' onclick="repKpiPosun(' + i + ',-1)">◀</button>' +
       '<select onchange="repKpiZmen(' + i + ',this.value)">' + (kand.some(x => x.kluc === kl) ? "" : '<option selected>' + esc(h.popis) + "</option>") + opt(kl) + "</select>" +
       '<span class="rep-kpi-h">' + esc(h.hodnota) + "</span>" +
       '<button class="aabtn" title="Doprava"' + (i < z.length - 1 ? "" : " disabled") + ' onclick="repKpiPosun(' + i + ',1)">▶</button>' +
       '<button class="aabtn" title="Odobrať"' + (z.length > 1 ? "" : " disabled") + ' onclick="repKpiOdober(' + i + ')">✕</button></span>';
   }).join("");
-  return '<div class="card" style="padding:10px 14px;margin:0 auto 12px;max-width:1200px"><b>Dlaždice na strane Prehľad (najviac 6)</b><div class="csub" style="margin:2px 0 6px">Výber patrí tomuto cyklu' + (vlastne ? "" : ", dnes podľa profilu") + ". Šípky menia poradie, pole s menom vymení metriku.</div>" + chips +
+  return '<div class="card" style="padding:10px 14px;margin:0 auto 12px;max-width:1200px"><b>Dlaždice na strane Prehľad (najviac 6)</b><div class="csub" style="margin:2px 0 6px">Výber patrí tomuto cyklu' + (vlastne ? "" : ", dnes podľa profilu") + ". Poradie zmeníte potiahnutím alebo šípkami, pole s menom vymení metriku.</div>" + chips +
     (z.length < 6 ? '<select onchange="repKpiPridaj(this.value)"><option value="">+ pridať dlaždicu</option>' + kand.filter(k => !z.some(x => repKpiKluc(x) === k.kluc)).map(k => '<option value="' + esc(k.kluc) + '">' + esc(k.popis) + "</option>").join("") + "</select> " : "") +
     (vlastne ? '<button class="aabtn" onclick="repKpiZProfilu()">Podľa profilu</button>' : "") + "</div>";
 }
@@ -4607,4 +4613,89 @@ async function repZistObnovVerziu(){
   doc.dalsieCislo = Math.max(repZisteniaDalsieId(doc).dalsieCislo, repZisteniaDalsieId(R.obsah).dalsieCislo) - 1;
   R.obsah = doc; R.zmenene = true; REP.zistCitanie = null; REP.zistHist = null;
   await repZistUloz();
+}
+
+// ═══ 35. Hárky k bodom OPZ 5.8 / 5.9 / 5.11 (R11, ako šablóny Generátora 4.0) ═══
+// 5.11 a 5.9 sa predvyplnia z cyklu (KPI, RAG s trendom, zistenia, kľúčové otázky ★
+// s požadovaným rozhodnutím, červené hodnotenia); 5.8 je tabuľka akceptačných
+// kritérií na ručné vyplnenie s výberom Á/N/Č. Znenie bodov OPZ sa nekopíruje.
+function repOpzHarok(X, nadpis, podnadpis, hlavicka, riadky, sirky){
+  const ws = X.utils.aoa_to_sheet([[nadpis], [podnadpis], hlavicka].concat(riadky)), n = hlavicka.length;
+  if (ws.A1) ws.A1.s = { font: { bold: true, sz: 14 } };
+  if (ws.A2) ws.A2.s = { font: { italic: true, color: { rgb: "595959" } } };
+  hlavicka.forEach((_, c) => { const a = X.utils.encode_cell({ r: 2, c }); if (ws[a]) ws[a].s = REP_XLSX_HLAVA; });
+  for (let rr = 3; rr < 3 + riadky.length; rr++) for (let c = 0; c < n; c++) { const a = X.utils.encode_cell({ r: rr, c }); if (ws[a] && ws[a].t === "s") ws[a].s = { alignment: { wrapText: true, vertical: "top" } }; }
+  ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: n - 1 } }, { s: { r: 1, c: 0 }, e: { r: 1, c: n - 1 } }];
+  ws["!cols"] = sirky.map(w => ({ wch: w }));
+  ws["!margins"] = { left: 0.5, right: 0.5, top: 0.6, bottom: 0.6, header: 0.3, footer: 0.3 };
+  return ws;
+}
+function repOpzHarky(X, K){
+  const Q = K.qa, m = K.model, us = K.usudok || {}, kde = (K.view.nazov || "program") + " · stav k " + repDMR(m.stavKuDnu);
+  const zm = (K.zmenyRegistrov && K.zmenyRegistrov.zmeny) || [], zIss = d => zm.filter(z => z.reg === "issue" && z.druh === d).length;
+  const trendIss = K.zmenyRegistrov ? "+" + (zIss("nove") + zIss("znovu")) + " nových / −" + zIss("uzavrete") + " uzavretých od minula" : "";
+  const ragTr = k => { const t = Q.ragTrend && Q.ragTrend.riadky.find(x => x.kluc === k); return !t || t.zmena == null ? "" : t.zmena > 0 ? "zhoršenie" : t.zmena < 0 ? "zlepšenie" : "bez zmeny"; };
+  const out = [];
+  // 5.11 — analytický a manažérsky report o kvalite
+  const a3 = [];
+  for (const k of Q.kpi) a3.push([k.popis, k.prepis ? k.hodnota : +k.hodnota, k.kluc === "aktivne" ? trendIss : k.kluc === "oneskorene" && K.zmeny ? "+" + K.zmeny.novoOneskorene.length + " novo oneskorených" : "",
+    k.prepis ? "vypočítané " + k.vypocitane + " — upravené úsudkom QA" + (((us.kpiPrepisy || {})[k.kluc] || {}).dovod ? ": " + us.kpiPrepisy[k.kluc].dovod : "") : k.sub || "", ""]);
+  a3.push(["Postup programu", repXlsxPct(m.program.pct), "", m.program.metoda || "", ""]);
+  for (const d of Q.rag) a3.push(["Hodnotenie RAG — " + d.nazov, d.farba ? REP_RAG[d.farba] : "—", ragTr(d.kluc), d.komentar || (d.navrh ? d.navrh.dovod : ""), ""]);
+  const zis = Q.zistenia.filter(z => z.stav !== "zrusene"), uzav = zis.filter(z => z.stav === "uzavrete").length;
+  a3.push(["Zistenia QA — otvorené", zis.length - uzav, "", "otvorené alebo v riešení", ""]);
+  a3.push(["Plnenie odporúčaní QA", zis.length ? { t: "n", v: uzav / zis.length, z: "0 %" } : "", "", "uzavreté " + uzav + " z " + zis.length + " zistení", ""]);
+  if (K.ct) a3.push(["Záväzky dodávateľov v nesúlade s plánom", K.ct.vNesulade, "", K.ct.pocty.CAKA_NA_TERMIN ? K.ct.pocty.CAKA_NA_TERMIN + " čaká na termín dodávateľa" : "", ""]);
+  if (K.dep) a3.push(["Závislosti blokujúce míľnik", K.dep.kpi.blokujuce, "", "aktívnych " + K.dep.kpi.aktivne, ""]);
+  out.push({ meno: "OPZ 5.11 Analytický report", ws: repOpzHarok(X, "Analytický a manažérsky report — kvalita projektu", "Bod 5.11 OPZ · súhrn o kvalite, rizikách, nápravných opatreniach a plnení odporúčaní QA · " + kde,
+    ["Ukazovateľ / metrika", "Hodnota", "Trend", "Komentár", "Odporúčanie"], a3, [40, 12, 26, 60, 40]) });
+  // 5.9 — podklad pre riadiaci výbor: kľúčové otázky ★ a červené hodnotenia
+  const pohyb = new Map(((Q.pohyb || {}).riadky || []).map(p => [p.kluc, p]));
+  const rozh = v => { const t = String(v || "").trim(); return /^(n|nie|no|-|—)$/i.test(t) ? "" : t; };
+  const a2 = Q.kluceOtazky.map(z => { const p = pohyb.get(z.kluc);
+    return [(z.id ? z.id + " — " : "") + String(z.popis || "").slice(0, 300), [REP_PRIORITA_TXT[z.prioritaKluc] || z.priorita || "", z.stav || "", z.termin ? "termín " + repDMR(z.termin) : z.terminText || "",
+      z.eskalacia ? "eskalované na " + z.eskalacia : "", p && p.posledny ? "posledný záznam " + repDMR(p.posledny) : ""].filter(Boolean).join(" · "), "", z.riesenie || "", rozh(z.rozhodnutie)]; });
+  for (const d of Q.rag.filter(d => d.farba === "cervena")) a2.push(["Hodnotenie " + d.nazov + ": červená", d.komentar || (d.navrh ? d.navrh.dovod : ""), "", "", ""]);
+  out.push({ meno: "OPZ 5.9 Podklad RV", ws: repOpzHarok(X, "Podklad pre riadiaci výbor / manažment", "Bod 5.9 OPZ · rozhodovací podklad o stave kvality, rizikách a pripravenosti · " + kde,
+    ["Téma na rozhodnutie", "Stav / kontext", "Alternatívy", "Odporúčanie QA", "Požadované rozhodnutie"], a2, [50, 44, 30, 40, 34]) });
+  // 5.8 — akceptácia výstupu: kritériá dopĺňa QA, stĺpec „Splnené“ s výberom Á/N/Č
+  out.push({ meno: "OPZ 5.8 Akceptácia", ws: repOpzHarok(X, "Podklad pre akceptáciu výstupu — kontrola kvality (QA)", "Bod 5.8 OPZ · vyhodnotenie akceptačných kritérií a pripravenosti na prevzatie · " + kde,
+    ["Akceptačné kritérium", "Požiadavka / referencia", "Spôsob preukázania", "Splnené (Á/N/Č)", "Zistenie QA", "Odporúčanie"], [], [36, 30, 30, 12, 36, 36]),
+    overenia: ['<dataValidation type="list" allowBlank="1" showErrorMessage="1" errorTitle="Splnené" error="Vyberte Á (áno), N (nie) alebo Č (čiastočne)." sqref="D4:D200"><formula1>"Á,N,Č"</formula1></dataValidation>'] });
+  return out;
+}
+
+// ═══ 36. Ťahanie dlaždíc a pod-sekcie na snímke (R11, zvyšok GUI 4.0) ═══
+// Dlaždice Prehľadu sa ťahajú v editore (HTML5 drag & drop, len desktop — na dotyk
+// ostávajú šípky). Pod-sekcie = balíky v detaile oneskorenej oblasti; výber patrí
+// cyklu (vyber.skrytePodsekcie[oblasť] = UID balíkov mimo výstupu) a layout ho už číta.
+function repKpiTahZac(e, i){
+  REP._kpiTah = i;
+  if (e && e.dataTransfer) { e.dataTransfer.effectAllowed = "move"; try { e.dataTransfer.setData("text/plain", String(i)); } catch (_) { /* niektoré prehliadače */ } }
+}
+function repKpiTahPust(e, j){
+  if (e && e.preventDefault) e.preventDefault();
+  const i = REP._kpiTah; REP._kpiTah = null;
+  if (i == null || i === j) return;
+  const z = repKpiAktualne();
+  if (i < 0 || i >= z.length || j < 0 || j >= z.length) return;
+  const [x] = z.splice(i, 1); z.splice(j, 0, x);
+  repKpiUloz(z);
+}
+function repPodsekcieHtml(K, kluc){
+  if (String(kluc).indexOf("oneskorenie:") !== 0) return "";
+  const sn = K.view.snimky.find(x => x.kluc === kluc);
+  if (!sn || !sn.sekcie || !sn.sekcie.length) return "";
+  const dk = sn.draha.kluc.replace(/[^A-Za-z0-9_.:-]/g, "");
+  return '<div class="rep-podsek"><span class="csub" style="margin:0">Pod-sekcie: </span>' + sn.sekcie.map(x => '<label style="display:inline-flex;gap:4px;align-items:center;margin:0 10px 0 0"><input type="checkbox"' +
+    (x.zahrnuta ? " checked" : "") + ' onchange="repVyberPodsekciu(\'' + esc(dk) + "'," + (+x.uid) + ',this.checked)">' + esc(repSkratText(x.nazov, 40)) + (x.pocetPodPrahom ? ' <span class="csub" style="margin:0">(' + x.pocetPodPrahom + " pod prahom)</span>" : "") + "</label>").join("") + "</div>";
+}
+function repSkratText(t, n){ t = String(t || ""); return t.length > n ? t.slice(0, n - 1) + "…" : t; }
+function repVyberPodsekciu(drahaKluc, uid, zap){
+  const vy = REP.cyklusObsah.vyber = REP.cyklusObsah.vyber || {}, sk = vy.skrytePodsekcie = vy.skrytePodsekcie || {};
+  const a = new Set(sk[drahaKluc] || []);
+  if (zap) a.delete(uid); else a.add(uid);
+  if (a.size) sk[drahaKluc] = [...a]; else delete sk[drahaKluc];
+  if (!Object.keys(sk).length) delete vy.skrytePodsekcie;
+  repPrekresli();
 }
