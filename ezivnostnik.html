@@ -3191,7 +3191,7 @@ function modulPovolenyPreModul(m){
   if(modulLenSZCOSkryty(m)) return false;
   const kat=MODUL_KATEGORIA[m];
   if(!kat) return true;              // neznámy modul → nechaj (kalendár a pod.)
-  if(kat==="b2b") return b2bMaPristup() && (!B2B_MODUL[m] || b2bMaModul(B2B_MODUL[m]));   // modul projektu (admin_89)
+  if(kat==="b2b") return b2bMaPristup() && (!B2B_MODUL[m] || b2bMaModul(B2B_MODUL[m]) || b2bSpravcaNiektoreho());   // modul projektu (admin_89); správca vidí všetky a zapne (č. 316)
   if(modulPovoleny(kat)) return true;
   // Jednorazový doplnok odomyká LEN sprievodcu priznaním, nie celú kategóriu
   // „priznanie" — v tej je aj prognóza a podania, za ktoré zákazník nezaplatil.
@@ -26386,6 +26386,29 @@ function b2bMaModul(m){
   // Pozvánka a zakladateľ otvárajú výkaz ako doteraz (zoznam projektov, prijatie, nový projekt).
   return m==="vykaz" && (B2B.pozvanky.length>0 || B2B.zakladatel);
 }
+// Správca aspoň jedného projektu vidí v menu všetky moduly skupiny B2B: nepoužívaný
+// modul v SVOJOM projekte zapne tlačidlom (b2bZapniModul, č. 316) — inak by ho nenašiel
+// (karta Moduly projektu je vo Výkaze, ktorý projekt len s BUGstation nemá). Mení sa len
+// menu: dáta modulu stráži server (b2b_ma_modul, RLS) a zoznam aj stráž výberu projektu
+// (b2bZoznamHtml, b2bPidBezModulu) idú ďalej podľa modulov, ktoré človek naozaj má.
+function b2bSpravcaNiektoreho(){ return !b2bBezServera() && B2B.projekty.some(p=>p.spravca); }
+// Tlačidlo Zapnúť len správcovi TOHO projektu a len so známymi modulmi projektu
+// (pri chybe načítania modulov by zjednotenie vypočítané z predvolených bolo omylom).
+function b2bMozeZapnut(p, modul){ return !!p && !!p.spravca && Array.isArray(p.moduly) && !p.moduly.includes(modul); }
+function b2bZapnutHtml(p, modul){
+  return b2bMozeZapnut(p, modul)? `<button class="aabtn pri" onclick="b2bZapniModul('${p.id}','${modul}')" title="Zapnúť modul v projekte — dáta ostatných modulov sa nemenia">Zapnúť ${esc(B2B_MODULY_NAZOV[modul]||modul)}</button>` : "";
+}
+async function b2bZapniModul(pid, modul){
+  const p=B2B.projekty.find(x=>x.id===pid);
+  if(!b2bMozeZapnut(p, modul)) return;
+  try{
+    const r=await sb.rpc("b2b_nastav_moduly_projektu",{p_projekt:pid, p_moduly:p.moduly.concat([modul])}); if(r.error) throw r.error;
+    oznamPas((B2B_MODULY_NAZOV[modul]||modul)+" v projekte "+p.nazov+" je zapnutý");
+    await b2bNacitajClenstvo();   // moje_moduly aj menu hneď, bez obnovenia stránky
+    if(modul==="bugstation" && typeof BS!=="undefined") BS.d=null;
+    if(B2B.pid!==pid) b2bOtvorProjekt(pid); else b2bObnov();
+  }catch(e){ b2bChyba(e, (B2B_MODULY_NAZOV[modul]||modul)+" sa nepodarilo zapnúť"); }
+}
 // Osoba projektu má modul: projekt ho používa a osoba je správca alebo ho má v prístupe.
 function b2bOsobaMaModul(o, m, d){
   const proj=((d||B2B.d||{}).projekt||{}).moduly || B2B_MODULY_PREDVOLENE;
@@ -26410,7 +26433,8 @@ function b2bPidBezModulu(modul){
 function b2bBezModuluHtml(p, modul){
   const n=B2B_MODULY_NAZOV[modul]||modul, pouziva=Array.isArray(p.moduly) && p.moduly.includes(modul);
   return `<div class="card" style="padding:12px 14px;border-color:var(--warn)"><b>${pouziva? `V projekte ${esc(p.nazov)} nemáte prístup do modulu ${esc(n)}` : `Projekt ${esc(p.nazov)} ${esc(n)} nepoužíva`}</b>
-    <div class="csub" style="margin:4px 0 0">${pouziva? "Prístup prideľuje správca projektu v karte Projekt → Osoby." : "Moduly projektu zapína jeho správca v karte Projekt."} Nižšie sú projekty, kde ${esc(n)} máte.</div></div>`
+    <div class="csub" style="margin:4px 0 0">${pouziva? "Prístup prideľuje správca projektu v karte Projekt → Osoby." : b2bMozeZapnut(p, modul)? "Ste správca projektu — modul zapnete tu. Dáta ostatných modulov sa nemenia." : "Moduly projektu zapína jeho správca v karte Projekt."} Nižšie sú projekty, kde ${esc(n)} máte.</div>
+    ${b2bMozeZapnut(p, modul)? `<div style="margin-top:8px">${b2bZapnutHtml(p, modul)}</div>` : ""}</div>`
     +b2bZoznamHtml(modul==="bugstation"? "bs" : modul==="reporting");
 }
 async function b2bNacitajClenstvo(){
@@ -29125,10 +29149,14 @@ function b2bZoznamHtml(rep){
   const modulZoznamu=rep==="bs"? "bugstation" : rep? "reporting" : "vykaz";
   const proj=B2B.projekty.filter(p=>b2bMojeModuly(p).includes(modulZoznamu)).map(p=>`<div class="card" style="padding:12px 14px;cursor:pointer" onclick="b2bOtvorProjekt('${p.id}')">
       <b>${esc(p.nazov)}</b> <span class="apill" style="font-size:10px">${esc(p.kod)}</span>${p.spravca? ' <span class="apill" style="font-size:10px">správca</span>' : ""}${p.rola==="management"? ' <span class="apill" style="font-size:10px">management</span>' : ""}</div>`).join("");
+  // Správca vidí aj svoje projekty, ktoré modul nepoužívajú — s tlačidlom Zapnúť (č. 316).
+  const zapnut=B2B.projekty.filter(p=>b2bMozeZapnut(p, modulZoznamu)).map(p=>`<div class="card" style="padding:12px 14px;border-style:dashed">
+      <b>${esc(p.nazov)}</b> <span class="apill" style="font-size:10px">${esc(p.kod)}</span>
+      <div class="csub" style="margin:4px 0 8px">${esc(B2B_MODULY_NAZOV[modulZoznamu])} v projekte nie je zapnutý. Ste správca — zapnete ho jedným tlačidlom.</div>${b2bZapnutHtml(p, modulZoznamu)}</div>`).join("");
   const chyba=B2B.chyba? `<div class="card" style="padding:12px 14px;border-color:var(--neg)"><b style="color:var(--neg)">Projekty sa nepodarilo načítať</b><div class="csub" style="margin:4px 0 0">${esc(B2B.chyba)} — prázdny zoznam preto nemusí znamenať, že projekty nemáte.</div></div>`
     : B2B.chybaModulov? `<div class="card" style="padding:12px 14px;border-color:var(--warn)"><b>Moduly projektov sa nepodarilo načítať</b><div class="csub" style="margin:4px 0 0">${esc(B2B.chybaModulov)} — projekty ukazujem s Pracovným výkazom a Reportingom; BUGstation môže chýbať.</div></div>` : "";
   return `<div class="csub" style="margin:0 2px 14px">${rep==="bs"? "BUGstation patrí projektu — úlohy, defekty, incidenty a zmenové požiadavky tímu. Vyberte projekt." : rep? "Reporting programu patrí projektu — roadmapa a QA report z plánu MS Project a registrov. Vyberte projekt." : "Projekty na zmluvu: hodiny tímu z kalendára alebo ručne, mesačný pracovný výkaz pre objednávateľa. Prístup je na pozvánku."}</div>
-    ${b2bPozvankaStavHtml()}${chyba}${poz}${proj||(!poz? `<div class="aempty">Zatiaľ nie ste v žiadnom projekte.</div>` : "")}
+    ${b2bPozvankaStavHtml()}${chyba}${poz}${proj||(!poz && !zapnut? `<div class="aempty">Zatiaľ nie ste v žiadnom projekte.</div>` : "")}${zapnut}
     ${B2B.zakladatel && !rep? `<button class="aabtn pri" onclick="b2bNovyProjekt()" title="Založiť projekt na novú zmluvu — z CRZ, PDF zmluvy alebo JSON">＋ Nový projekt</button>` : ""}
     ${!firmaData? `<div class="csub" style="margin:18px 2px 0">Účet bez vlastnej firmy — <a href="#" onclick="spustiOnboarding();return false">založiť firmu</a> · <a href="#" onclick="doLogout();return false">odhlásiť sa</a></div>` : ""}`;
 }
