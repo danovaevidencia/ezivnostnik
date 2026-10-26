@@ -117,8 +117,10 @@ function repPlanZXml(text, Parser){
 // Číta sa v prehliadači (kontajner CFB zo SheetJS); na server ide ten istý výťah ako
 // z XML. Polohu poľa berie z mapy polí súboru (Props 131092), nie z pevných posunov —
 // tie sa medzi verziami Projectu líšia. Číta len to, čo reporting používa: úlohy,
-// termíny, % plnenia, míľnik, súhrn, WBS, vlastné textové polia a väzby. Rezerva,
-// kritickosť a baseline úloh ostanú prázdne. Výsledok musí prejsť bránou repMppBrana:
+// termíny, % plnenia, míľnik, súhrn, WBS, vlastné textové polia, väzby a celkovú
+// rezervu (R13); kritickosť sa dopočíta pravidlom MS Projectu (rezerva ≤ 0 a úloha
+// nehotová — na ostrej dvojici .mpp/XML 1090/1090). Baseline úloh ostane prázdna.
+// Výsledok musí prejsť bránou repMppBrana:
 // pochybne prečítaný súbor sa nenahrá a človek dostane radu uložiť plán ako XML.
 const REP_MPP_EPOCHA = "1983-12-31";
 const REP_MPP_MAGIC = 0xFADFADBA;
@@ -127,6 +129,9 @@ const REP_MPP_POLE = { id: 23, uid: 86, nazov: 14, wbs: 16, pct: 32, start: 37, 
 // Text1–Text10 nejdú v rade (Text6 = 66, Text7 = 67), Text11–Text30 = 317–336.
 const REP_MPP_TEXT = [51, 54, 57, 60, 63, 66, 67, 68, 69, 70].concat(Array.from({ length: 20 }, (_, i) => 317 + i));
 const REP_MPP_PROPS = { mapaUloh: 131092, titul: 37748744, minutDen: 37748765, aliasy: 71303169 };
+// Celková rezerva (TotalSlack) v desatinách minúty ako v XML — pole 439 v prvom bloku
+// pevných dát (ostrá dvojica: 1090/1090 aj všetkých 43 nenulových). Nepovinné pole.
+const REP_MPP_REZERVA = 439;
 
 function repMppCitac(u8){
   const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
@@ -221,6 +226,7 @@ function repPlanZMpp(data, CFB, nazovSuboru, ulozene){
   // Veľkosť bloku = vzdialenosť k najbližšiemu ďalšiemu posunu; krátke bloky nie sú úlohy.
   const KROK = 47, f = {};
   for (const k of ["id", "uid", "pct", "start", "finish", "uroven", "milnik", "suhrn"]) f[k] = F(k);
+  const fr = pole.get(REP_MPP_REZERVA), fRez = fr && fr.loc === 10 && fr.blok === 0 && fr.vel === 4 ? fr : null;
   const potreba = Math.max(...["id", "uid", "pct", "start", "finish", "uroven"].map(k => f[k].off + (f[k].vel === 2 ? 2 : 4)));
   const n = Math.min(rf.u32(8), Math.floor((fm.length - 16) / KROK));
   const posuny = []; for (let i = 0; i < n; i++) posuny.push(rf.u32(16 + i * KROK + 4));
@@ -241,6 +247,7 @@ function repPlanZMpp(data, CFB, nazovSuboru, ulozene){
     const u = { uid, id: cislo(b, f.id), nazov: varText(uid, P.nazov) || "", uroven: cislo(b, f.uroven), outline: "", wbs: varText(uid, P.wbs),
       start: den(b, f.start), finish: den(b, f.finish), pct: Math.max(0, Math.min(100, pct)), milnik: priznak(f.milnik), suhrn: priznak(f.suhrn),
       aktivna: true, kriticka: false, rezervaDni: null, baseline: null, polia: {}, predchodcovia: [] };
+    if (fRez && fRez.off + 4 <= dlzka.get(b)) u._rez = rd.i32(b + fRez.off);
     for (const t of REP_MPP_TEXT) { const v = varText(uid, t); if (v) u.polia[String(0x0B400000 + t)] = v; }
     ulohy.push(u);
   }
@@ -286,6 +293,19 @@ function repPlanZMpp(data, CFB, nazovSuboru, ulozene){
     lastSaved: repDatum(ulozene), statusDate: null, currentDate: null,
     start: u0 ? u0.start : ulohy.reduce((m, u) => repMin(m, u.start), null), finish: u0 ? u0.finish : ulohy.reduce((m, u) => repMax(m, u.finish), null),
     minutesPerDay: minDen >= 60 && minDen <= 1440 ? minDen : 480 };
+  // Rezerva → dni (ako z XML) a kritickosť. Hodnota mimo ±10 rokov je zle prečítané pole:
+  // pri viac než 2 % takých sa rezerva nepoužije vôbec (kritická cesta sa neukáže, Kontrola dát
+  // to povie) — import plánu tým nepadá, rezerva je nepovinná.
+  const rozsah = 3650 * projekt.minutesPerDay * 10, sR = ulohy.filter(u => u._rez != null);
+  const rezOk = sR.length > 0 && sR.filter(u => Math.abs(u._rez) > rozsah).length <= sR.length * 0.02;
+  if (sR.length && !rezOk) projekt.rezervaNespolahliva = true;
+  for (const u of ulohy) {
+    if (rezOk && u._rez != null && Math.abs(u._rez) <= rozsah) {
+      u.rezervaDni = Math.round(u._rez / 10 / projekt.minutesPerDay * 10) / 10;
+      u.kriticka = u._rez <= 0 && u.pct < 100;
+    }
+    delete u._rez;
+  }
   const pocetUid = c => { const b = najdi(c); if (!b || b.length < 24) return 0; const r = repMppCitac(b), s = new Set(); for (let i = 0, o = 24; i < r.u32(8) && o + 12 <= b.length; i++, o += 12) s.add(r.i32(o)); return s.size; };
   const pocty = { ulohy: ulohy.length, milniky: ulohy.filter(u => u.milnik).length, suhrny: ulohy.filter(u => u.suhrn).length,
     zdroje: pocetUid("/   114/TBkndRsc/VarMeta"), priradenia: pocetUid("/   114/TBkndAssn/VarMeta"), kalendare: pocetUid("/   114/TBkndCal/VarMeta"),
@@ -482,13 +502,15 @@ function repReprezentant(milniky, sposob, stavKuDnu){
   // Oneskorené (§6.4): nehotové a dátum < stav ku dňu. Okno osi sem nevstupuje (N7).
   const oneskorene = !hotove && !!stavKuDnu && rep.datum < stavKuDnu;
   return { datum: rep.datum, uid: rep.uid, pct: rep.pct, hotove, oneskorene, pocet: s.length,
-    dniPoTermine: oneskorene ? repDni(rep.datum, stavKuDnu) : 0 };
+    dniPoTermine: oneskorene ? repDni(rep.datum, stavKuDnu) : 0,
+    kriticka: !!rep.kriticka && !hotove, rezervaDni: rep.rezervaDni == null ? null : rep.rezervaDni };   // R13: z plánu, nie odhad
 }
 
 function repFazyZUloh(ulohy, profil, stavKuDnu){
   const o = {};
   for (const f of profil.fazy) {
-    const ms = ulohy.filter(u => repFazaZhoda(u, f)).map(u => ({ uid: u.uid, nazov: u.nazov, datum: u.finish, pct: u.pct, milnik: u.milnik }));
+    const ms = ulohy.filter(u => repFazaZhoda(u, f)).map(u => ({ uid: u.uid, nazov: u.nazov, datum: u.finish, pct: u.pct, milnik: u.milnik,
+      kriticka: !!u.kriticka, rezervaDni: u.rezervaDni == null ? null : u.rezervaDni }));
     o[f.kluc] = ms.length ? Object.assign(repReprezentant(ms, f.reprezentant, stavKuDnu) || {}, { milniky: ms }) : null;
   }
   return o;
@@ -504,7 +526,7 @@ function repModel(plan, profil, stavKuDnu){
     const korene = (ob.uids || []).map(uid => strom.index.get(uid)).filter(Boolean);
     const d = { kluc: ob.kluc, nazov: ob.nazov, kratky: ob.kratky || repKratky(ob.nazov), skupina: ob.skupina,
       uids: ob.uids || [], chyba: null, pct: null, pctMetoda: null, start: null, finish: null, fazy: {}, balicky: [],
-      oneskorena: false, poslednaHotova: false, poznamka: ob.poznamka || "" };
+      oneskorena: false, kriticka: false, poslednaHotova: false, poznamka: ob.poznamka || "" };
     if (!korene.length) { d.chyba = "Oblasť sa v pláne nenašla (UID " + (ob.uids || []).join(", ") + ")."; drahy.push(d); continue; }
     d.pct = korene.length === 1 ? korene[0].pct : Math.round(korene.reduce((s, u) => s + u.pct, 0) / korene.length);
     d.pctMetoda = korene.length === 1 ? "súhrnná úloha" : "priemer " + korene.length + " oblastí";
@@ -521,6 +543,7 @@ function repModel(plan, profil, stavKuDnu){
     }
     const fz = profil.fazy.map(f => d.fazy[f.kluc]).filter(Boolean);
     d.oneskorena = fz.some(r => r.oneskorene);
+    d.kriticka = fz.some(r => r.kriticka);
     const posl = profil.fazy.length ? d.fazy[profil.fazy[profil.fazy.length - 1].kluc] : null;
     d.poslednaHotova = !!(posl && posl.hotove);
     drahy.push(d);
@@ -542,7 +565,44 @@ function repModel(plan, profil, stavKuDnu){
       nasadene: platne.filter(d => d.poslednaHotova).length, oneskorene: platne.filter(d => d.oneskorena).length,
       pomale: platne.filter(d => d.pct < prah).length, prahPomaly: prah },
     dniDoKonca: profil.cielovyTermin ? repDni(stavKuDnu, profil.cielovyTermin) : null,
-    prierez: repPrierez(plan, profil) };
+    prierez: repPrierez(plan, profil), kriticka: repKritickaCesta(plan, profil, stavKuDnu) };
+}
+
+// Kritická cesta (R13, NAVRH §27): z rezervy a príznaku kritickosti, ktoré vypočítal
+// MS Project — appka cestu nepočíta sama (kalendáre, obmedzenia a vyrovnanie zdrojov
+// by sa rozišli s tým, čo PMO vidí v Projecte). Nehotové úlohy bez súhrnov: kritické
+// podľa termínu, potom blízko kritickej (rezerva do prahu) podľa rezervy.
+// Plán bez rezervy (starší import .mpp) → null: strana ani značky sa neukážu.
+const REP_KRIT = { blizkoDni: 5 };
+function repKritickaCesta(plan, profil, stavKuDnu){
+  if (!plan.ulohy.some(u => u.rezervaDni != null)) return null;
+  const m = profil.metriky || {}, prah = m.blizkoKritickejDni != null ? m.blizkoKritickejDni : REP_KRIT.blizkoDni;
+  const ob = repOblastUloh(plan, profil);
+  const polozka = u => { const o = ob.get(u.uid); return { uid: u.uid, nazov: u.nazov, oblast: o ? (o.kratky || repKratky(o.nazov)) : "", oblastKluc: o ? o.kluc : null, faza: repFazaUlohy(u, profil),
+    datum: u.finish, pct: u.pct, milnik: !!u.milnik, kriticka: !!u.kriticka, rezervaDni: u.rezervaDni, poTermine: !!(stavKuDnu && u.finish && u.finish < stavKuDnu) }; };
+  const otv = plan.ulohy.filter(u => !u.suhrn && u.pct < 100 && u.aktivna !== false && u.rezervaDni != null);
+  const podlaDatumu = (a, b) => String(a.datum).localeCompare(String(b.datum)) || a.uid - b.uid;
+  const krit = otv.filter(u => u.kriticka).map(polozka).sort(podlaDatumu);
+  const blizko = otv.filter(u => !u.kriticka && u.rezervaDni > 0 && u.rezervaDni <= prah).map(polozka).sort((a, b) => a.rezervaDni - b.rezervaDni || podlaDatumu(a, b));
+  return { prah, polozky: krit.concat(blizko), kriticke: krit.length, kritickeMilniky: krit.filter(x => x.milnik).length, blizko: blizko.length,
+    zaporne: otv.filter(u => u.rezervaDni < 0).length, najmensia: otv.length ? Math.min(...otv.map(u => u.rezervaDni)) : null };
+}
+function repRezervaTxt(r){ return r == null ? "—" : (r > 0 ? "+" : r < 0 ? "−" : "") + String(Math.abs(r)).replace(".", ","); }
+// Stav položky: záporná rezerva > po termíne (nehotové, termín pred stavom ku dňu) > kritická > blízko.
+function repKritickaStav(x){ return x.rezervaDni < 0 ? "záporná rezerva" : x.poTermine ? "po termíne" : x.kriticka ? "kritická" : "blízko"; }
+// Strana roadmapy: kritické úlohy a míľniky podľa termínu, potom blízko kritickej.
+function repKritickaSnimka(KC, polozky, vybrane){
+  const krit = polozky.filter(x => x.kriticka), bl = polozky.filter(x => !x.kriticka), zap = polozky.filter(x => x.rezervaDni < 0);
+  return { kluc: "kriticka-cesta", typ: "tabulka", nazov: "Kritická cesta a rezerva", zahrnuta: vybrane("kriticka-cesta"),
+    kicker: "Harmonogram", nadpis: "Kritická cesta a rezerva",
+    sumar: [{ popis: "Kritické míľniky", hodnota: String(krit.filter(x => x.milnik).length), akcent: krit.length ? "amber" : "green" },
+      { popis: "Kritické úlohy", hodnota: String(krit.filter(x => !x.milnik).length), akcent: krit.length ? "amber" : "green" },
+      { popis: "Záporná rezerva", hodnota: String(zap.length), akcent: zap.length ? "red" : "green" },
+      { popis: "Blízko kritickej (do " + KC.prah + " d)", hodnota: String(bl.length), akcent: "blue" }],
+    tabulka: { stlpce: [{ n: "Termín", w: 0.1 }, { n: "Oblasť", w: 0.13 }, { n: "Fáza", w: 0.07 }, { n: "Úloha", w: 0.43 }, { n: "%", w: 0.07 }, { n: "Rezerva (d)", w: 0.09 }, { n: "Stav", w: 0.11 }],
+      riadky: polozky.map(x => ({ b: [repDMR(x.datum), x.oblast || "—", x.faza || "", (x.milnik ? "◆ " : "") + x.nazov, x.pct + " %", repRezervaTxt(x.rezervaDni), repKritickaStav(x)],
+        farby: { 0: x.poTermine ? "red" : null, 5: x.rezervaDni < 0 ? "red" : x.kriticka ? "amber" : null, 6: x.rezervaDni < 0 || x.poTermine ? "red" : x.kriticka ? "amber" : "blue" } })),
+      prazdne: "Plán nemá kritické úlohy." } };
 }
 
 // Prierezový postup karty (§6.3): priemer % úloh so štítkom oblasti v poli
@@ -603,6 +663,15 @@ function repKontroly(model, plan, profil, volby){
     if (r && r.datum && r.datum > model.cielovyTermin)
       o.push({ kod: "po-cieli", uroven: "upozornenie", draha: d.kluc, text: d.kratky + ": " + posl.kluc + " " + repDMR(r.datum) + " je po cieľovom termíne programu (" + repDMR(model.cielovyTermin) + ")." });
   }
+  // Rezerva (R13): záporná = termín alebo obmedzenie v pláne sa nedá dodržať — MS Project to vypočítal sám
+  const zap = plan.ulohy.filter(u => u.rezervaDni != null && u.rezervaDni < 0 && u.pct < 100 && !u.suhrn);
+  if (zap.length) {
+    const naj = Math.min(...zap.map(u => u.rezervaDni));
+    o.push({ kod: "zaporna-rezerva", uroven: "upozornenie", draha: null, text: zap.length + " " + repSklon(zap.length, "úloha má", "úlohy majú", "úloh má") +
+      " v pláne zápornú rezervu (najviac " + repRezervaTxt(naj) + " dní) — termín alebo obmedzenie v pláne sa nedá dodržať." });
+  }
+  if (plan.projekt && plan.projekt.rezervaNespolahliva)
+    o.push({ kod: "rezerva-mpp", uroven: "info", draha: null, text: "Rezervu úloh z .mpp sa nepodarilo spoľahlivo prečítať — kritická cesta sa v reporte neukáže. Uložte plán ako XML a nahrajte ho znova." });
   return o;
 }
 
@@ -1118,7 +1187,7 @@ function repView(model, kontext){
   const drahaView = d => {
     const ruc = poznamky[d.kluc] != null && poznamky[d.kluc] !== "" ? { text: poznamky[d.kluc], zdroj: "rucne" } : d.poznamka ? { text: d.poznamka, zdroj: "profil" } : repAutoPoznamka(d, fazy);
     return { kluc: d.kluc, kratky: d.kratky, nazov: d.nazov, skupina: d.skupina, pct: d.pct, oneskorena: d.oneskorena, poznamka: ruc,
-      fazy: fazy.map(f => { const r = d.fazy[f.kluc]; return { kluc: f.kluc, znacka: f.znacka, datum: r ? r.datum : null, hotove: !!(r && r.hotove), oneskorene: !!(r && r.oneskorene) }; }) };
+      fazy: fazy.map(f => { const r = d.fazy[f.kluc]; return { kluc: f.kluc, znacka: f.znacka, datum: r ? r.datum : null, hotove: !!(r && r.hotove), oneskorene: !!(r && r.oneskorene), kriticka: !!(r && r.kriticka) }; }) };
   };
   const snimky = [];
   const vybrane = k => !(vy.snimky && vy.snimky[k] === false);
@@ -1132,7 +1201,8 @@ function repView(model, kontext){
       return { popis: k.popis || (d ? d.kratky : "?"), pct: d && !d.chyba ? d.pct : null, prierez: k.prierez && pr ? pr.pct : null, prierezPopis: (k.popis || (d ? d.kratky : "")) + " + prierez" };
     }),
     skupiny: (p.skupiny || []).map(s => ({ kluc: s.kluc, nazov: s.nazov, drahy: drahy.filter(d => d.skupina === s.kluc).map(drahaView) })).filter(s => s.drahy.length),
-    os: repOs(model, p), fazy: fazy.map(f => ({ kluc: f.kluc, legenda: f.legenda, znacka: f.znacka })) });
+    os: repOs(model, p), fazy: fazy.map(f => ({ kluc: f.kluc, legenda: f.legenda, znacka: f.znacka })),
+    maKriticke: drahy.some(d => fazy.some(f => d.fazy[f.kluc] && d.fazy[f.kluc].kriticka && !d.fazy[f.kluc].oneskorene)) });
   // 2. Exekutívny súhrn
   const pozornost = [];
   for (const d of drahy) {
@@ -1160,6 +1230,9 @@ function repView(model, kontext){
   }
   polozky.sort((a, b) => (a.datum < b.datum ? -1 : a.datum > b.datum ? 1 : a.kratky.localeCompare(b.kratky)));
   snimky.push({ kluc: "najblizsie", typ: "najblizsie", nazov: "Najbližšie míľniky (" + tyzdne + " týždňov)", zahrnuta: vybrane("najblizsie"), tyzdne, polozky });
+  // 3a. Kritická cesta a rezerva (R13) — len keď plán nesie rezervu a niečo je kritické alebo blízko
+  const KC = model.kriticka, kcPol = KC ? KC.polozky.filter(x => !skryte.has(x.oblastKluc)) : [];
+  if (kcPol.length) snimky.push(repKritickaSnimka(KC, kcPol, vybrane));
   // 3b. Finančný report (R3a, D8) — len keď ho úsudok cyklu má
   const fin = repFinancie(us.financie);
   if (fin) snimky.push({ kluc: "financie", typ: "financie", nazov: "Finančný report", zahrnuta: vybrane("financie"), fin });
@@ -1296,10 +1369,11 @@ function repZnacka(A, T, f, x, y, s){
   const tvar = f.znacka || "kruh";
   if (f.hotove) A.mark(tvar, x, y, s, { fill: T.green, line: T.green, lw: 1 });
   else if (f.oneskorene) A.mark(tvar, x, y, s, { fill: T.bg, line: T.red, lw: 1.5 });
+  else if (f.kriticka) A.mark(tvar, x, y, s, { fill: T.bg, line: T.amber, lw: 1.75 });       // R13: na kritickej ceste
   else A.mark(tvar, x, y, s, { fill: T.bg, line: T.accent2, lw: 1.25 });
 }
 
-function repLegenda(A, T, fazy, y, farby, zdroj){
+function repLegenda(A, T, fazy, y, farby, zdroj, kriticke){
   let x = REP_L;
   A.text(x, y, 0.8, 0.2, "Míľniky:", { pt: 9, bold: true, color: T.text }); x += 0.8;
   for (const f of fazy) {
@@ -1310,9 +1384,10 @@ function repLegenda(A, T, fazy, y, farby, zdroj){
   A.mark("kruh", x + 0.07, y + 0.1, 0.12, { fill: T.textSec, line: T.textSec, lw: 1 }); A.text(x + 0.2, y, 0.55, 0.2, "hotové", { pt: 9, color: T.textSec }); x += 0.8;
   A.mark("kruh", x + 0.07, y + 0.1, 0.12, { fill: T.bg, line: T.textSec, lw: 1 }); A.text(x + 0.2, y, 0.75, 0.2, "plánované", { pt: 9, color: T.textSec }); x += 1.0;
   A.mark("kruh", x + 0.07, y + 0.1, 0.12, { fill: T.bg, line: T.red, lw: 1.5 }); A.text(x + 0.2, y, 0.95, 0.2, "po termíne", { pt: 9, color: T.textSec }); x += 1.2;
+  if (kriticke) { A.mark("kruh", x + 0.07, y + 0.1, 0.12, { fill: T.bg, line: T.amber, lw: 1.75 }); A.text(x + 0.2, y, 0.95, 0.2, "kritická cesta", { pt: 9, color: T.textSec }); x += 1.25; }
   const f = farby || { zelena: 70, modra: 40, jantarova: 10 };
   for (const [c, t] of [[T.green, "≥" + f.zelena + " %"], [T.blue, f.modra + "–" + (f.zelena - 1) + " %"], [T.amber, f.jantarova + "–" + (f.modra - 1) + " %"], [T.red, "<" + f.jantarova + " %"]]) {
-    if (x > REP_W - 3.2) break;
+    if (x > REP_W - REP_L - 0.85) break;          // zdroj je o riadok nižšie — farby smú po okraj (R13: inak ich vytlačila „kritická cesta“)
     A.rect(x, y + 0.05, 0.18, 0.1, { fill: c }); A.text(x + 0.23, y, 0.6, 0.2, t, { pt: 8, color: T.textSec }); x += 0.85;
   }
   if (zdroj) A.text(REP_W - REP_L - 3, y + 0.2, 3, 0.18, zdroj, { pt: 7.5, italic: true, color: T.textTer, align: "r" });
@@ -1415,7 +1490,7 @@ const REP_LAYOUTY = {
         A.line(xc, yRad - 0.02, xc, yS, { color: T.textTer, lw: 1, dash: true });
         A.text(Math.min(x1 - 0.6, xc - 0.3), yS + 0.01, 0.6, 0.16, "KONIEC", { pt: 7, bold: true, color: T.textTer, align: "c" });
       }
-      repLegenda(A, T, s.fazy, 6.9, view.farby, zdroj);
+      repLegenda(A, T, s.fazy, 6.9, view.farby, zdroj, s.maKriticke);
       strany.push({ prvky: A.prvky, nadpis: prva ? "Prehľad a kritická cesta" : "Kritická cesta — pokračovanie" });
       i += naStranu; prva = false;
       if (strany.length > 20) break;
@@ -2601,8 +2676,11 @@ function repXlsxBalik(X, K){
   const mil = [];
   for (const d of m.drahy) if (!d.chyba) for (const f of fazy) { const x = d.fazy[f.kluc]; if (x) for (const mi of x.milniky)
     mil.push([d.kratky, f.kluc, mi.uid, mi.nazov, repXlsxDatum(mi.datum), repXlsxPct(mi.pct), mi.milnik ? "áno" : "nie", mi.pct >= 100 ? "áno" : "",
-      mi.pct < 100 && mi.datum && mi.datum < m.stavKuDnu ? repDni(mi.datum, m.stavKuDnu) : ""]); }
-  pridaj("Míľniky", repXlsxHarok(X, ["Oblasť", "Fáza", "UID", "Úloha", "Dátum", "%", "Míľnik v pláne", "Hotové", "Dní po termíne"], mil, [16, 8, 8, 50, 12, 8, 10, 8, 10]));
+      mi.pct < 100 && mi.datum && mi.datum < m.stavKuDnu ? repDni(mi.datum, m.stavKuDnu) : "", mi.kriticka && mi.pct < 100 ? "áno" : "", mi.rezervaDni == null ? "" : mi.rezervaDni]); }
+  pridaj("Míľniky", repXlsxHarok(X, ["Oblasť", "Fáza", "UID", "Úloha", "Dátum", "%", "Míľnik v pláne", "Hotové", "Dní po termíne", "Kritický", "Rezerva (dni)"], mil, [16, 8, 8, 50, 12, 8, 10, 8, 10, 9, 10]));
+  // R13: kritická cesta a blízko kritickej — celý zoznam (strana ho môže stránkovať)
+  if (m.kriticka && m.kriticka.polozky.length) pridaj("Kritická cesta", repXlsxHarok(X, ["Termín", "Oblasť", "Fáza", "UID", "Úloha", "Míľnik", "%", "Rezerva (dni)", "Stav"],
+    m.kriticka.polozky.map(x => [repXlsxDatum(x.datum), x.oblast, x.faza, x.uid, x.nazov, x.milnik ? "áno" : "", repXlsxPct(x.pct), x.rezervaDni, repKritickaStav(x)]), [12, 16, 8, 8, 50, 8, 8, 10, 16]));
   if (Q && Q.issue.length) {
     const hv = new Set(Q.kluceOtazky.map(z => z.kluc)), pohybZ = new Map(((Q.pohyb || {}).riadky || []).map(p => [p.kluc, p]));
     pridaj("Issue Log", repXlsxHarok(X, ["★", "ID", "Oblasť", "Kategória", "Popis", "Dopad", "Priorita", "Riešiteľ", "Cieľový dátum", "Cieľový dátum (text)", "Stav", "Aktívny", "Eskalované na", "Riešenie / akcia", "Ďalšie kroky", "Oblasť v profile", "Nezapočítané do KPI", "Posledný záznam denníka", "Dní bez pohybu"],
@@ -3557,8 +3635,8 @@ async function repLogExport(druh, blob){
 
 // ═══ 29. Kolo R4: detail oblastí, anotácie, číselník oblastí, výstupy ═══
 // ── Detail oblastí (§9.2): strana za skupinu — oblasť a jej balíky ─
-function repFazaBunka(r){ return !r ? "—" : r.hotove ? "✓ " + repDM(r.datum) : repDM(r.datum) + (r.oneskorene ? " !" : ""); }
-function repFazaFarba(r){ return r && r.oneskorene ? "red" : r && r.hotove ? "green" : null; }
+function repFazaBunka(r){ return !r ? "—" : r.hotove ? "✓ " + repDM(r.datum) : repDM(r.datum) + (r.oneskorene ? " !" : r.kriticka ? " ◆" : ""); }
+function repFazaFarba(r){ return r && r.oneskorene ? "red" : r && r.hotove ? "green" : r && r.kriticka ? "amber" : null; }
 function repTabDetail(drahy, fazy, poznamka){
   const n = fazy.length, wF = n ? Math.min(0.11, 0.4 / n) : 0, wP = 1 - 0.3 - 0.07 - wF * n;
   const riadky = [];
@@ -4731,7 +4809,7 @@ const REP_DIAG = {
   klaster: { minAktivnych: 4, podiel: 0.4 } };
 const REP_DIAG_SNIMKY = ["qa-diag-dovera", "qa-diag-signaly"];
 const REP_DIAG_DRUHY = { "pct-termin": "% vs. termín", "nizky-postup": "nízky postup", "milnik-po-konci": "míľnik po konci", "chyba-faza": "chýba fáza",
-  "okruhly-datum": "okrúhly dátum", "stoji": "stojí", "qa-kriticke": "kritické problémy", "qa-eskalovane": "eskalácie", "qa-klaster": "sústredenie",
+  "okruhly-datum": "okrúhly dátum", "stoji": "stojí", "zaporna-rezerva": "záporná rezerva", "qa-kriticke": "kritické problémy", "qa-eskalovane": "eskalácie", "qa-klaster": "sústredenie",
   "ct-posun": "záväzok posunutý", "ct-po-termine": "záväzok po termíne", "ct-plan-neskor": "plán neskôr", "ct-chyba": "chýba v pláne",
   "ct-caka": "čaká na termín", "ct-bez-zavazku": "bez záväzku", "pohyb-oneskorene": "nové oneskorenie", "pohyb-regresia": "regresia" };
 const REP_DIAG_ZAV = { 3: "vysoká", 2: "stredná", 1: "nízka" };
@@ -4771,6 +4849,8 @@ function repDiagnostika(model, profil, kontext){
       if (d.pct < C.anomalie.nizkyPct && dni >= 0 && dni < C.anomalie.blizkoDni)
         pridajA(d, "nizky-postup", 3, "Len " + d.pct + " % a " + posl.kluc + " " + (dni ? "o " + dni + " " + repSklon(dni, "deň", "dni", "dní") : "dnes") + " — termín je ohrozený.");
       if (repOkruhlyDatum(pd)) pridajA(d, "okruhly-datum", 1, posl.kluc + " má „okrúhly“ dátum " + repDMR(pd) + " — môže byť zástupný, nie naplánovaný termín.");
+      // R13: rezervu vypočítal MS Project — záporná znamená, že termín sa podľa plánu nedá dodržať
+      if (r.rezervaDni != null && r.rezervaDni < 0) pridajA(d, "zaporna-rezerva", 3, posl.kluc + " má v pláne zápornú rezervu " + repRezervaTxt(r.rezervaDni) + " dní — podľa MS Projectu sa termín nedá dodržať.");
     }
     if (pd && d.finish && pd > d.finish) pridajA(d, "milnik-po-konci", 2, posl.kluc + " (" + repDMR(pd) + ") je po konci oblasti (" + repDMR(d.finish) + ").");
     if (fazy.length >= 2 && pd && !(d.fazy[prva.kluc] && d.fazy[prva.kluc].datum)) pridajA(d, "chyba-faza", 2, "Má " + posl.kluc + " bez míľnika " + prva.kluc + " — chýba nadväznosť fáz.");
