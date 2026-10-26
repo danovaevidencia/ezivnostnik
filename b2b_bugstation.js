@@ -2167,7 +2167,7 @@ function bsFazaFormular(id){
   const html = '<div class="bs-ok"><div class="bs-form"><label>Názov fázy *<input type="text" id="bsFz_n" maxlength="120" placeholder="napr. SIT, UAT, Regresia" value="' + esc(f ? f.nazov : "") + '"></label>' +
     '<div class="dva"><label>Od *<input type="date" id="bsFz_od" value="' + esc(f ? String(f.od).slice(0, 10) : bsDenStr(Date.now())) + '"></label><label>Do *<input type="date" id="bsFz_do" value="' + esc(f && f.do ? String(f.do).slice(0, 10) : "") + '"></label></div></div></div>';
   const zmaz = f && bsMaRolu(ja, ["tm"]) ? async () => {
-    const d = prompt("Fáza sa nevymaže, len skryje (vykonania ostanú v histórii). Dôvod:"); if (!d || d.trim().length < 3) return false;
+    const d = prompt("Fáza sa nevymaže, len skryje (vykonania ostanú v histórii). Dôvod:"); if (!d) return false; if (d.trim().length < 5) return b2bVOkne("Dôvod napíšte aspoň piatimi znakmi.");
     try { await bsRpc("b2b_bs_faza_zmaz", { p_id: f.id, p_dovod: d.trim() }); } catch (e) { return bsRpcChyba(e); }
     oznamPas("Fáza skrytá · " + f.nazov); bsNacitajData(); return true;
   } : null;
@@ -2205,7 +2205,9 @@ function bsKriteriaFormular(id){
       auto.pass_rate = prah;
     }
     const stare = K.rucne || [];
-    const rucne = document.getElementById("bsKr_rucne").value.split(/\r?\n/).map(s => s.trim()).filter(Boolean).map(text => {
+    const texty = [...new Set(document.getElementById("bsKr_rucne").value.split(/\r?\n/).map(s => s.trim()).filter(Boolean))];
+    if (texty.length > 50 || texty.some(x => x.length > 500)) return b2bVOkne("Ručných kritérií je najviac 50, každé najviac 500 znakov.");
+    const rucne = texty.map(text => {
       const st = stare.find(k => k.text === text); return st ? { id: st.id, text } : { id: "k" + Math.random().toString(36).slice(2, 10), text };
     });
     try { await bsRpc("b2b_bs_faza_uloz", { p_projekt: B2B.pid, p_id: f.id, p_verzia: f.verzia, p_polia: { kriteria: { auto, rucne } } }); } catch (e) { return bsRpcChyba(e); }
@@ -2234,7 +2236,7 @@ function bsPlanPridaj(fazaId){
     const ids = [...document.querySelectorAll("#bsPp_zoz label:not([hidden]) input:checked")].map(i => i.value);
     if (!ids.length) return b2bVOkne("Vyberte aspoň jeden scenár.");
     try { const r = await bsRpc("b2b_bs_plan_pridaj", { p_faza: fazaId, p_scenare: ids, p_tester: document.getElementById("bsPp_tester").value || null });
-      oznamPas("Pridané do fázy: " + bsPocet((r && r.pocet) || ids.length, "scenár", "scenáre", "scenárov")); } catch (e) { return bsRpcChyba(e); }
+      oznamPas("Pridané do fázy: " + bsPocet((r && ((r.pridane || 0) + (r.obnovene || 0))) || ids.length, "scenár", "scenáre", "scenárov")); } catch (e) { return bsRpcChyba(e); }
     bsNacitajData(); return true;
   }, null, null, "Pridať");
 }
@@ -2267,7 +2269,7 @@ function bsScenarFormular(id){
     '<label>Predpoklady<textarea id="bsSc_pp" placeholder="Čo musí platiť pred testom (rola, dáta, nastavenie)">' + esc(s ? s.predpoklady || "" : "") + "</textarea></label>" +
     (s ? "" : '<div class="bs-podobne">Kód scenára (TS-…) pridelí server; nemení sa a znova sa nepoužije.</div>') + "</div></div>";
   const zmaz = s ? async () => {
-    const d = prompt("Scenár sa skryje z knižnice aj z plánu (kód sa znova nepoužije). Dôvod:"); if (!d || d.trim().length < 3) return false;
+    const d = prompt("Scenár sa skryje z knižnice aj z plánu (kód sa znova nepoužije). Dôvod:"); if (!d) return false; if (d.trim().length < 5) return b2bVOkne("Dôvod napíšte aspoň piatimi znakmi.");
     try { await bsRpc("b2b_bs_scenar_zmaz", { p_id: s.id, p_dovod: d.trim() }); } catch (e) { return bsRpcChyba(e); }
     oznamPas("Scenár zmazaný · " + s.kod); BS.scenar = null; bsNacitajData(); return true;
   } : null;
@@ -2290,7 +2292,7 @@ function bsPripadFormular(scenarId, id){
     (pozz.length ? '<label>Biznis požiadavka<select id="bsPc_poz"><option value=""></option>' + pozz.map(q => '<option value="' + q.id + '"' + (p && p.poziadavka_id === q.id ? " selected" : "") + ">" + esc(q.kod + " " + q.nazov) + "</option>").join("") + "</select></label>" : "") +
     (p ? '<div class="bs-podobne">Zmena textu zvýši verziu prípadu (teraz v' + (p.verzia || 1) + "); staršie vykonania si pamätajú svoju.</div>" : "") + "</div></div>";
   const zmaz = p ? async () => {
-    const d = prompt("Prípad " + p.kod + " sa skryje (kód sa znova nepoužije). Dôvod:"); if (!d || d.trim().length < 3) return false;
+    const d = prompt("Prípad " + p.kod + " sa skryje (kód sa znova nepoužije). Dôvod:"); if (!d) return false; if (d.trim().length < 5) return b2bVOkne("Dôvod napíšte aspoň piatimi znakmi.");
     try { await bsRpc("b2b_bs_pripad_zmaz", { p_id: p.id, p_dovod: d.trim() }); } catch (e) { return bsRpcChyba(e); }
     oznamPas("Prípad zmazaný · " + p.kod); bsNacitajData(); return true;
   } : null;
