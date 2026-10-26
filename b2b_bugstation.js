@@ -852,6 +852,7 @@ const BS_CSS = [
   ".bs-nav .bs-nd{display:none}",
   ".bs-lista{padding:8px 12px}",
   ".bs-hl kbd{display:none}",
+  ".bs-lista-a:has(.bs-ai){flex:1 1 100%}",
   ".bs-ai{flex-basis:100%;max-width:none;order:-1}",
   ".bs-obsah{padding:14px 12px 24px;overflow:visible}",
   ".bs-telo{display:block}",
