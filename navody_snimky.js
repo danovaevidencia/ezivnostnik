@@ -121,7 +121,7 @@ window.NAVODY_SNIMKY = {
  },
  "b2b_report-vyhodnotenie-2": {
   "d": {
-   "subor": "navody/b2b_report-vyhodnotenie-2.d.dc5c7e3d.webp",
+   "subor": "navody/b2b_report-vyhodnotenie-2.d.9f9baab0.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -134,7 +134,7 @@ window.NAVODY_SNIMKY = {
  },
  "b2b_report-vyhodnotenie-3": {
   "d": {
-   "subor": "navody/b2b_report-vyhodnotenie-3.d.511a0270.webp",
+   "subor": "navody/b2b_report-vyhodnotenie-3.d.e8af7142.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
