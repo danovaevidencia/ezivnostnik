@@ -318,8 +318,10 @@ function bsReopen(zaznamy, hist){
 }
 
 // ── filter (§13, §15) — ten istý pre ručné chipy aj otázku cez AI ─
-// f = { typy, stav: "vsetky"|"otvorene"|[stavy], urovne, is, moduly, prostredia,
-//       releasy, riesitel: id osoby|"ja", cakaNaMna, text, vekDniMin }
+// f = { typy, stav: "vsetky"|"otvorene"|"uzavrete"|[stavy], urovne, is, moduly, prostredia,
+//       releasy, riesitel: id osoby|"ja", riesitelia: [id] (meno z otázky viacerým osobám),
+//       nahlasil: id|"ja", nahlasili: [id], cakaNaMna, poSla, blizkoSla, text,
+//       vekDniMin, vekDniMax, bezZmenyDniMin, datumOd, datumDo (RRRR-MM-DD identifikovania) }
 function bsNorm(s){
   return String(s == null ? "" : s).normalize("NFD")
     .replace(new RegExp("[" + String.fromCharCode(0x300) + "-" + String.fromCharCode(0x36f) + "]", "g"), "")
@@ -333,6 +335,7 @@ function bsFilter(zaznamy, f, ja, teraz){
     if (z.zmazane) return false;
     if (!v(z.typ, ff.typy)) return false;
     if (ff.stav === "otvorene" && !bsOtvoreny(z)) return false;
+    if (ff.stav === "uzavrete" && !bsUzavrety(z)) return false;
     if (Array.isArray(ff.stav) && ff.stav.length && !ff.stav.includes(z.stav)) return false;
     if (!v(+z.uroven, ff.urovne)) return false;
     if (!v(z.is_id, ff.is) || !v(z.modul_id, ff.moduly) || !v(z.prostredie_id, ff.prostredia) || !v(z.release_id, ff.releasy)) return false;
@@ -340,15 +343,122 @@ function bsFilter(zaznamy, f, ja, teraz){
       const kto = ff.riesitel === "ja" ? (ja || {}).osoba : ff.riesitel;
       if (z.riesitel_osoba !== kto) return false;
     }
+    if (Array.isArray(ff.riesitelia) && !ff.riesitelia.includes(z.riesitel_osoba)) return false;
+    if (ff.nahlasil && z.nahlasil !== (ff.nahlasil === "ja" ? (ja || {}).osoba : ff.nahlasil)) return false;
+    if (Array.isArray(ff.nahlasili) && !ff.nahlasili.includes(z.nahlasil)) return false;
     if (ff.cakaNaMna && !bsCakaNaMna(z, ja)) return false;
     if (ff.poSla) { const s = bsSla(z, t); if (!s || !s.po || s.druh === "koniec") return false; }
-    if (ff.vekDniMin != null) {
+    if (ff.blizkoSla) { const s = bsSla(z, t); if (!s || !s.blizko) return false; }
+    if (ff.vekDniMin != null || ff.vekDniMax != null) {
       const od = new Date(z.identifikovane || z.vytvorene).getTime();
-      if (t - od < ff.vekDniMin * BS_DEN) return false;
+      if (ff.vekDniMin != null && t - od < ff.vekDniMin * BS_DEN) return false;
+      if (ff.vekDniMax != null && t - od > ff.vekDniMax * BS_DEN) return false;
+    }
+    if (ff.bezZmenyDniMin != null && t - new Date(z.upravene || z.vytvorene).getTime() < ff.bezZmenyDniMin * BS_DEN) return false;
+    if (ff.datumOd || ff.datumDo) {
+      const d = bsDatumDna(z.identifikovane || z.vytvorene);
+      if (ff.datumOd && d < ff.datumOd) return false;
+      if (ff.datumDo && d > ff.datumDo) return false;
     }
     if (text && !bsNorm(z.kluc + " " + z.nazov).includes(text)) return false;
     return true;
   });
+}
+
+// Dátum dňa RRRR-MM-DD v miestnom čase (dátum bez času ostane, ako je).
+function bsDatumDna(ts){
+  if (!ts) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(ts))) return String(ts);
+  const d = new Date(ts);
+  return isNaN(d) ? "" : d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+}
+
+// ── otázka v bežnej reči → filter (§15, §30, BS3a) ──────────────
+// Server (edge b2b, akcia bs_otazka) vráti filter v tvare schémy BS_OTAZKA_SCHEMA;
+// appka z neho zloží f pre bsFilter — tú istú funkciu ako ručné chipy. Mená osôb
+// z otázky dohľadá appka (modelu mená ani záznamy nejdú): meno viacerým osobám =
+// chip s výberom (kým sa nevyberie, filter platí na všetky), meno nikomu = chip
+// s varovaním a prázdny výsledok — nie tichý filter na všetkých.
+// Skloňovanie mien: slovo otázky sedí na slovo mena, keď majú spoločné aspoň
+// 3 znaky a líšia sa najviac v posledných troch (Petrovi ~ Peter, Novákovej ~ Nováková).
+function bsMenoZhoda(text, meno){
+  const t = bsNorm(text).split(/\s+/).filter(Boolean), m = bsNorm(meno).split(/\s+/).filter(Boolean);
+  const spol = (a, b) => { let i = 0; while (i < a.length && i < b.length && a[i] === b[i]) i++; return i; };
+  return t.length > 0 && t.every(x => m.some(y => { const c = spol(x, y); return c >= 3 && c >= Math.min(x.length, y.length) - 3; }));
+}
+// Presná zhoda (každé slovo otázky je celé slovo mena) má prednosť pred skloňovanou:
+// „Peter“ je Peter Novák, nie aj Petra Nováková; „Petrovi“ sedí na oboch → výber.
+function bsOsobyPodlaMena(text, osoby){
+  const t = bsNorm(text).split(/\s+/).filter(Boolean), zoz = osoby || [];
+  const presne = zoz.filter(o => { const m = bsNorm(o.meno).split(/\s+/); return t.length > 0 && t.every(x => m.includes(x)); });
+  return (presne.length ? presne : zoz.filter(o => bsMenoZhoda(text, o.meno))).map(o => o.id);
+}
+function bsOtazkaNaFilter(o, osoby){
+  const f = {}, mena = {};
+  if (!o) return { f, mena };
+  if ((o.typy || []).length) f.typy = o.typy.slice();
+  if (o.stav === "otvorene" || o.stav === "uzavrete") f.stav = o.stav;
+  else if (o.stav === "zoznam" && (o.stavy || []).length) f.stav = o.stavy.slice();
+  if ((o.urovne || []).length) f.urovne = o.urovne.slice();
+  ["is", "moduly", "prostredia", "releasy"].forEach(k => { if ((o[k] || []).length) f[k] = o[k].slice(); });
+  [["riesitel", "riesitelia", o.riesitel_text], ["nahlasil", "nahlasili", o.nahlasil_text]].forEach(([k, kk, text]) => {
+    if (o.ja === k) { f[k] = "ja"; return; }
+    if (!text) return;
+    const ids = bsOsobyPodlaMena(text, osoby);
+    mena[k] = { text, ids };
+    if (ids.length === 1) f[k] = ids[0]; else f[kk] = ids;
+  });
+  if (o.caka_na_mna) f.cakaNaMna = true;
+  if (o.sla === "po") f.poSla = true;
+  if (o.sla === "blizko") f.blizkoSla = true;
+  if (o.vek_dni_min != null) f.vekDniMin = o.vek_dni_min;
+  if (o.vek_dni_max != null) f.vekDniMax = o.vek_dni_max;
+  if (o.bez_zmeny_dni_min != null) f.bezZmenyDniMin = o.bez_zmeny_dni_min;
+  if (o.datum_od) f.datumOd = o.datum_od;
+  if (o.datum_do) f.datumDo = o.datum_do;
+  if (o.text) f.text = o.text;
+  return { f, mena };
+}
+function bsOtazkaDni(n, pred){
+  if (pred) return n + " " + (n === 1 ? "dňom" : "dňami");
+  return (n === 1 ? "posledný " : n < 5 ? "posledné " : "posledných ") + bsPocet(n, "deň", "dni", "dní");
+}
+// Chipy filtra z otázky: každý sa dá zrušiť (k = kľúč vo f).
+function bsOtazkaChipy(f, mena, nast){
+  const ch = [], typy = f.typy && f.typy.length ? f.typy : null;
+  const zoz = (k, nazov) => ch.push({ k, text: nazov + " · " + f[k].map(id => bsCiselnikNazov(nast, k, id) || id).join(", ") });
+  if (typy) ch.push({ k: "typy", text: typy.map(t => BS_TYPY[t].mnozne).join(", ") });
+  if (f.stav === "otvorene") ch.push({ k: "stav", text: "Otvorené" });
+  else if (f.stav === "uzavrete") ch.push({ k: "stav", text: "Uzavreté" });
+  else if (Array.isArray(f.stav)) ch.push({ k: "stav", text: f.stav.map(s => bsStav(s)[1]).join(", ") });
+  if (f.urovne) {
+    const t1 = typy && typy.length === 1 ? typy[0] : null;
+    const nazvy = [...new Set(f.urovne.map(u => t1 ? bsUrovenNazov(nast, t1, u) : (typy || BS_TYPY_PORADIE).map(t => bsUrovenNazov(nast, t, u)).filter(Boolean).join(" / ")))].filter(Boolean);
+    ch.push({ k: "urovne", text: (t1 ? BS_TYPY[t1].os : "Úroveň") + " · " + (nazvy.join(", ") || f.urovne.join(", ")) });
+  }
+  if (f.is) zoz("is", "IS");
+  if (f.moduly) zoz("moduly", "Modul");
+  if (f.prostredia) zoz("prostredia", "Prostredie");
+  if (f.releasy) zoz("releasy", "Release");
+  [["riesitel", "riesitelia", "Riešiteľ"], ["nahlasil", "nahlasili", "Nahlásil"]].forEach(([k, kk, lab]) => {
+    if (f[k] === "ja") ch.push({ k, text: lab + " · ja" });
+    else if (f[k]) ch.push({ k, text: lab + " · " + bsMeno(f[k]) });
+    else if (Array.isArray(f[kk])) {
+      const m = (mena || {})[k] || {};
+      if (!f[kk].length) ch.push({ k: kk, text: lab + " · „" + (m.text || "") + "“ — v projekte taká osoba nie je", varovanie: true });
+      else ch.push({ k: kk, text: lab + " · " + f[kk].map(bsMeno).join(" alebo ") + "?", vyber: f[kk], cielK: k, nazov: lab });
+    }
+  });
+  if (f.cakaNaMna) ch.push({ k: "cakaNaMna", text: "Čaká na mňa" });
+  if (f.poSla) ch.push({ k: "poSla", text: "SLA po termíne" });
+  if (f.blizkoSla) ch.push({ k: "blizkoSla", text: "SLA blízko termínu" });
+  if (f.vekDniMin != null) ch.push({ k: "vekDniMin", text: "Identifikované pred viac ako " + bsOtazkaDni(f.vekDniMin, true) });
+  if (f.vekDniMax != null) ch.push({ k: "vekDniMax", text: "Identifikované za " + bsOtazkaDni(f.vekDniMax) });
+  if (f.bezZmenyDniMin != null) ch.push({ k: "bezZmenyDniMin", text: "Bez zmeny aspoň " + bsPocet(f.bezZmenyDniMin, "deň", "dni", "dní") });
+  if (f.datumOd) ch.push({ k: "datumOd", text: "Identifikované od " + bsDMR(f.datumOd) });
+  if (f.datumDo) ch.push({ k: "datumDo", text: "Identifikované do " + bsDMR(f.datumDo) });
+  if (f.text) ch.push({ k: "text", text: "Text · „" + f.text + "“" });
+  return ch;
 }
 
 // ── SLA (§10, BS1b) ─────────────────────────────────────────────
@@ -494,6 +604,19 @@ const BS_CSS = [
   ".bs-chipf:hover{border-color:rgba(34,48,74,.32)}",
   ".bs-chipf b{font-weight:500;color:var(--bs-t3)}",
   ".bs-chipf.on{background:var(--bs-vyb);border-color:var(--bs-l30)}",
+  ".bs-ai{display:flex;align-items:center;gap:7px;padding:4px 9px;border:1px solid var(--bs-l30);border-radius:6px;background:var(--bs-vyb);font:400 11px/1 var(--bs-sans);color:var(--bs-t4);flex:1 1 220px;min-width:0;max-width:420px}",
+  ".bs-ai b{font-weight:500;color:var(--bs-t3)}",
+  ".bs-ai input{border:none;outline:none;background:transparent;font:inherit;color:var(--bs-t1);width:100%;min-width:0}",
+  ".bs-otz{padding:12px 14px;display:flex;flex-direction:column;gap:8px;margin-bottom:10px}",
+  ".bs-otz-h{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}",
+  ".bs-otz-h small{display:block;font:500 10px/1.2 var(--bs-sans);color:var(--bs-t5);text-transform:uppercase;letter-spacing:.04em}",
+  ".bs-otz-h b{font:500 13px/1.4 var(--bs-sans);color:var(--bs-t1);overflow-wrap:anywhere}",
+  ".bs-otz-ch{display:flex;flex-wrap:wrap;gap:6px}",
+  ".bs-chipq{display:inline-flex;align-items:center;gap:4px;padding:3px 4px 3px 9px;border:1px solid var(--bs-l30);border-radius:6px;background:var(--bs-vyb);font:400 11.5px/1.3 var(--bs-sans);color:var(--bs-t3);max-width:100%;overflow-wrap:anywhere}",
+  ".bs-chipq.war{border-color:var(--neg,#b4442f);color:var(--neg,#b4442f);background:transparent}",
+  ".bs-chipq select{font:inherit;color:var(--bs-t1);border:1px solid var(--bs-l16);border-radius:4px;background:var(--bs-main);max-width:180px}",
+  ".bs-otz-p{font:500 12px/1 var(--bs-sans);color:var(--bs-t2)}",
+  ".bs-otz-chyba{color:var(--neg,#b4442f)}",
   ".bs-btn{display:inline-flex;align-items:center;gap:6px;flex:none;white-space:nowrap;padding:5px 11px;border:1px solid var(--bs-l18);border-radius:7px;background:var(--bs-panel);font:500 11.5px/1 var(--bs-sans);color:var(--bs-t2)}",
   ".bs-btn.pri{border-color:transparent;background:var(--bs-ak);color:#fff}",
   "[data-tema=\"tmavy\"] .bs-btn.pri{background:#3d5680}",
@@ -729,6 +852,7 @@ const BS_CSS = [
   ".bs-nav .bs-nd{display:none}",
   ".bs-lista{padding:8px 12px}",
   ".bs-hl kbd{display:none}",
+  ".bs-ai{flex-basis:100%;max-width:none;order:-1}",
   ".bs-obsah{padding:14px 12px 24px;overflow:visible}",
   ".bs-telo{display:block}",
   ".bs-drawer{position:fixed;inset:0;width:auto;z-index:60;border-left:0;padding:14px 16px 90px}",
@@ -802,7 +926,7 @@ function bsUrovenChip(nastavenia, z){
 //  zápise, pri návrate na kartu a tlačidlom.
 // ═══════════════════════════════════════════════════════════════
 const BS = { pid: null, d: null, nacitavam: false, pohlad: "prehlad", split: null, detail: null, det: null,
-  filtre: {}, menu: false, rail: false, hladat: "", zoradit: {}, nastavenia: null };
+  filtre: {}, menu: false, rail: false, hladat: "", zoradit: {}, nastavenia: null, otazka: null };
 let _bsPoradie = 0;
 const BS_STLPCE = "id,projekt_id,typ,cislo,kluc,nazov,uroven,stav,rozlisenie,duplikat,is_id,modul_id,prostredie_id,release_id," +
   "scenar,pripad,poziadavka_id,identifikovane,termin,suvisi,riesitel_osoba,riesitel_tim,ziadatel,data,nahlasil," +
@@ -955,7 +1079,7 @@ function bsKedy(ts, teraz){
 // ═══════════════════════════════════════════════════════════════
 function bsZalozkaHtml(){
   bsStyly();
-  if (BS.pid !== B2B.pid) { BS.pid = B2B.pid; BS.d = null; BS.detail = null; BS.det = null; BS.split = null; BS.filtre = {}; BS.menu = false; BS.nastavenia = null; }
+  if (BS.pid !== B2B.pid) { BS.pid = B2B.pid; BS.d = null; BS.detail = null; BS.det = null; BS.split = null; BS.filtre = {}; BS.menu = false; BS.nastavenia = null; if (BS.pohlad === "otazka") BS.pohlad = "prehlad"; BS.otazka = null; }
   if (!BS.d) { if (!BS.nacitavam) setTimeout(bsNacitajData, 0); return '<div class="aempty">Načítavam BUGstation…</div>'; }
   if (BS.d.bezMigracie) return '<div class="card" style="padding:12px 14px"><b>BUGstation ešte nie je v databáze</b><div class="csub">Chýba migrácia admin_88 — po jej spustení sa modul otvorí.</div></div>';
   if (BS.d.chyba) return '<div class="card" style="padding:12px 14px;border-color:var(--neg)"><b style="color:var(--neg)">BUGstation sa nenačítal</b><div class="csub" style="margin:4px 0 8px">' + esc(BS.d.chyba) + '</div><button class="aabtn" onclick="bsObnov()">Skúsiť znova</button></div>';
@@ -1054,6 +1178,7 @@ function bsTitulok(){
   if (v === "prehlad") return ["Prehľad & progres review", (P.nazov || "") + " · " + bsPocet(zz.filter(bsOtvoreny).length, "otvorený záznam", "otvorené záznamy", "otvorených záznamov")];
   if (v === "caka") return ["Čaká na mňa", bsPocet(zz.filter(z => bsCakaNaMna(z, ja)).length, "záznam čaká", "záznamy čakajú", "záznamov čaká") + " na vašu akciu"];
   if (v === "nastavenia") return ["Nastavenia BUGstation", "číselníky, názvy úrovní, povinné polia a roly v projekte"];
+  if (v === "otazka") return ["Otázka", "filter z otázky v bežnej reči — podmienky sa dajú zrušiť"];
   if (v === "plan" || v === "scenare") {
     const O = bsPlanO();
     if (!O) return [v === "plan" ? "Testovací plán" : "Testovacie scenáre", ""];
@@ -1070,6 +1195,11 @@ function bsTitulok(){
 function bsListaAkcieHtml(){
   const ja = bsJa(), v = BS.pohlad, reg = BS_TYPY[v];
   const hl = '<label class="bs-hl" title="Hľadať podľa kľúča alebo textu (Ctrl+K)"><i></i><input id="bsHladat" type="text" placeholder="Hľadať" value="' + esc(BS.hladat) + '" oninput="bsHladaj(this.value)"><kbd>Ctrl K</kbd></label>';
+  // BS3a: otázka v bežnej reči, len keď ju správca v projekte zapol (súhlas, §15).
+  const ai = bsNast().ai_otazky === true && (reg || v === "caka" || v === "prehlad" || v === "otazka")
+    ? '<label class="bs-ai" title="Opýtajte sa v bežnej reči — appka z otázky nastaví filter (AI)"><b>✦</b><input id="bsOpytaj" type="text" maxlength="300" placeholder="Opýtaj sa, napr. otvorené kritické defekty" value="' +
+      esc(v === "otazka" && BS.otazka ? BS.otazka.text : "") + '" onkeydown="if(event.key===\'Enter\'){event.preventDefault();bsOpytaj(this.value)}"></label>' : "";
+  if (v === "otazka") return ai;
   let chipy = "";
   if (reg || v === "caka") {
     const f = BS.filtre[v] || {};
@@ -1085,7 +1215,7 @@ function bsListaAkcieHtml(){
   if ((v === "plan" || v === "scenare") && bsPlan() && bsMaRolu(ja, BS_PLAN_ROLY))
     return hl + (v === "plan" ? '<button type="button" class="bs-btn pri" onclick="bsFazaFormular()">+ Nová fáza</button>' : '<button type="button" class="bs-btn pri" onclick="bsScenarFormular()">+ Nový scenár</button>');
   const novy = smie ? '<button type="button" class="bs-btn pri" onclick="bsNovy()">+ Nový záznam</button>' : "";
-  return hl + chipy + split + novy;
+  return hl + ai + chipy + split + novy;
 }
 
 // ── navigácia a ovládanie ───────────────────────────────────────
@@ -1140,6 +1270,7 @@ function bsObsahHtml(){
   if (v === "prehlad") return bsPrehladHtml();
   if (v === "caka") return bsCakaHtml();
   if (v === "nastavenia") return bsNastaveniaHtml();
+  if (v === "otazka") return bsOtazkaHtml();
   if (v === "plan") return bsPlanHtml();
   if (v === "scenare") return bsScenareHtml();
   if (BS_TYPY[v]) return bsEvidencieHtml();
@@ -1214,6 +1345,46 @@ function bsCakaHtml(){
 }
 
 // ── B. Evidencie (taby, tabuľka, split) ────────────────────────
+// ── otázka v bežnej reči (BS3a): výsledok ako filter v chipoch ──
+// BS.otazka = { text, caka, chyba, f, mena, vysvetlenie, spat (pohľad pred otázkou) }
+async function bsOpytaj(text){
+  const otazka = String(text || "").replace(/\s+/g, " ").trim();
+  if (!otazka) return;
+  const spat = BS.pohlad === "otazka" ? ((BS.otazka && BS.otazka.spat) || "prehlad") : BS.pohlad;
+  const moja = BS.otazka = { text: otazka, caka: true, spat };
+  BS.pohlad = "otazka"; BS.detail = null; BS.det = null; BS.split = null; BS.menu = false;
+  bsPrekresli();
+  try {
+    const d = await b2bEdge("bs_otazka", { projekt: B2B.pid, otazka });
+    if (BS.otazka !== moja) return;            // medzitým iná otázka
+    const r = bsOtazkaNaFilter(d.filter, bsOsoby());
+    Object.assign(moja, { caka: false, f: r.f, mena: r.mena, vysvetlenie: (d.filter && d.filter.vysvetlenie) || "" });
+  } catch (e) {
+    if (BS.otazka !== moja) return;
+    console.error("BUGstation: otázka", e);
+    Object.assign(moja, { caka: false, chyba: (e && e.message) || String(e) });
+  }
+  bsPrekresli();
+}
+function bsOtazkaZrus(k){ const o = BS.otazka; if (!o || !o.f) return; delete o.f[k]; bsPrekresli(); }
+function bsOtazkaVyber(k, kk, id){ const o = BS.otazka; if (!o || !o.f || !id) return; o.f[k] = id; delete o.f[kk]; bsPrekresli(); }
+function bsOtazkaZavri(){ const spat = (BS.otazka && BS.otazka.spat) || "prehlad"; BS.otazka = null; bsChod(spat); }
+function bsOtazkaHtml(){
+  const o = BS.otazka;
+  if (!o) return '<div class="bs-panel"><div class="bs-prazdne">Napíšte otázku do poľa Opýtaj sa.</div></div>';
+  const hlav = '<div class="bs-otz-h"><div><small>Otázka</small><b>„' + esc(o.text) + '“</b></div><button type="button" class="bs-btn mal" onclick="bsOtazkaZavri()">Zavrieť</button></div>';
+  if (o.caka) return '<div class="bs-panel bs-otz">' + hlav + '<div class="bs-prazdne">Prevádzam otázku na filter…</div></div>';
+  if (o.chyba) return '<div class="bs-panel bs-otz">' + hlav + '<div class="bs-prazdne bs-otz-chyba">' + esc(o.chyba) + "</div></div>";
+  const riadky = bsFilter(bsZaznamy(), o.f, bsJa());
+  const chipy = bsOtazkaChipy(o.f, o.mena, bsNast()).map(c => '<span class="bs-chipq' + (c.varovanie ? " war" : "") + '">' + (c.vyber
+      ? esc(c.nazov) + ' · <select onchange="bsOtazkaVyber(\'' + c.cielK + "','" + c.k + '\',this.value)" title="Meno z otázky sedí na viac osôb — vyberte"><option value="">' +
+        esc(c.vyber.map(bsMeno).join(" alebo ")) + "?</option>" + c.vyber.map(id => '<option value="' + id + '">' + esc(bsMeno(id)) + "</option>").join("") + "</select>"
+      : esc(c.text)) + '<button type="button" class="bs-x" title="Zrušiť túto podmienku" onclick="bsOtazkaZrus(\'' + c.k + '\')">×</button></span>').join("");
+  return '<div class="bs-panel bs-otz">' + hlav +
+    '<div class="bs-otz-ch">' + (chipy || '<span class="bs-podobne">Bez podmienok — všetky záznamy.</span>') + "</div>" +
+    (o.vysvetlenie ? '<div class="bs-podobne bs-otz-v">' + esc(o.vysvetlenie) + "</div>" : "") +
+    '<div class="bs-otz-p">' + esc(bsPocet(riadky.length, "záznam", "záznamy", "záznamov")) + "</div></div>" + bsTabulkaHtml(riadky, "otazka");
+}
 function bsEvidencieHtml(){
   const panely = BS.split ? [BS.pohlad, BS.split] : [BS.pohlad];
   return '<div class="bs-split' + (panely.length > 1 ? " dva" : "") + '">' + panely.map((typ, i) => bsPanelHtml(typ, i, panely)).join("") + "</div>";
@@ -1240,17 +1411,19 @@ const BS_STLPCE_TYPU = {
 };
 function bsTabulkaHtml(riadky, druh, uzky){
   const nast = bsNast(), st = BS_STLPCE_TYPU[druh] || BS_STLPCE_TYPU.caka;
+  const zmes = druh === "caka" || druh === "otazka";   // záznamy rôznych typov: stĺpec Typ
   if (!riadky.length) {
-    const nic = druh === "caka" ? "Nič nečaká na vašu akciu." : "Zatiaľ žiadne záznamy" + (BS.hladat || Object.keys(BS.filtre[druh] || {}).some(k => (BS.filtre[druh] || {})[k]) ? " pre tento filter." : ". Nový založíte tlačidlom + Nový záznam.");
+    const nic = druh === "caka" ? "Nič nečaká na vašu akciu." : druh === "otazka" ? "Otázke nezodpovedá žiadny záznam. Skúste zrušiť niektorú podmienku."
+      : "Zatiaľ žiadne záznamy" + (BS.hladat || Object.keys(BS.filtre[druh] || {}).some(k => (BS.filtre[druh] || {})[k]) ? " pre tento filter." : ". Nový založíte tlačidlom + Nový záznam.");
     return '<div class="bs-tw"><div class="bs-prazdne">' + esc(nic) + "</div></div>";
   }
   const zor = riadky.slice().sort((a, b) => new Date(b.identifikovane || b.vytvorene) - new Date(a.identifikovane || a.vytvorene) || b.cislo - a.cislo);
   const th = st.map((s, i) => '<th class="' + (i === 2 || i === 5 ? "uzke" : "") + '">' + esc(s) + "</th>").join("");
   const tr = zor.map(z => {
-    const b = druh === "caka" ? BS_TYPY[z.typ].nazov
+    const b = zmes ? BS_TYPY[z.typ].nazov
       : z.typ === "incident" ? bsCiselnikNazov(nast, "prostredia", z.prostredie_id)
       : z.typ === "zmena" ? (z.ziadatel || "") : bsCiselnikNazov(nast, "moduly", z.modul_id);
-    const datum = z.typ === "uloha" && druh !== "caka" ? (z.termin ? bsDM(z.termin + "T00:00:00") : "") : bsDM(z.identifikovane || z.vytvorene);
+    const datum = z.typ === "uloha" && !zmes ? (z.termin ? bsDM(z.termin + "T00:00:00") : "") : bsDM(z.identifikovane || z.vytvorene);
     return '<tr class="r' + (BS.detail === z.id ? " on" : "") + (bsUzavrety(z) ? " uz" : "") + '" onclick="bsOtvor(\'' + z.id + '\')"><td class="id">' + esc(z.kluc) + '</td><td class="ti">' + esc(z.nazov) +
       '</td><td class="uzke">' + esc(b) + "</td><td>" + bsUrovenChip(nast, z) + "</td><td>" + bsStavChip(z) + bsSlaZnacka(z) + '</td><td class="uzke">' + esc(bsRiesitelText(z)) + '</td><td class="da">' + esc(datum) + "</td></tr>";
   }).join("");
@@ -1681,6 +1854,7 @@ function bsNastaveniaHtml(){
     '<div class="bs-panel"><div class="bs-ph"><h3>Triáž</h3></div><div class="in"><label style="display:flex;gap:8px;align-items:center;font:400 12px/1.4 var(--bs-sans)"><input type="checkbox"' + (n.triaz !== false ? " checked" : "") +
       ' onchange="BS.nastavenia.triaz=this.checked"> Nový defekt, incident a zmena čakajú v Identifikované na triáž Test managera alebo Test team leadera</label></div></div>' +
     bsSlaPravidlaHtml(n) +
+    bsAiOtazkyHtml(ja) +
     cis +
     '<div class="bs-panel"><div class="bs-ph"><h3>Názvy úrovní</h3><small>podľa zmluvy, napr. Kategória A / B / C</small></div><div class="in" style="overflow-x:auto"><table class="bs-mriezka"><thead><tr><th>Typ</th><th>1 · najvážnejšia</th><th>2</th><th>3</th><th>4</th></tr></thead><tbody>' + urov + "</tbody></table></div></div>" +
     '<div class="bs-panel"><div class="bs-ph"><h3>Povinné polia formulára</h3></div><div class="in" style="overflow-x:auto"><table class="bs-mriezka"><tbody>' + povTyp + "</tbody></table></div></div>" +
@@ -1689,6 +1863,24 @@ function bsNastaveniaHtml(){
       (poz ? '<table class="bs-mriezka"><tbody>' + poz + "</tbody></table>" : '<div class="bs-podobne">Zatiaľ žiadne.</div>') +
       '<label class="bs-podobne">Vložte zoznam z Excelu — dva stĺpce: kód a názov<textarea id="bsPozVloz" placeholder="BP-101&#9;Podanie žiadosti"></textarea></label>' +
       '<div><button type="button" class="bs-btn" onclick="bsPoziadavkyUloz()">Uložiť požiadavky</button></div></div></div></div>';
+}
+// Súhlas s otázkami cez AI (BS3a, admin_92): zapína a vypína LEN správca projektu
+// — prevádzkovateľ dát projektu (D12). Ukladá sa hneď, samostatne od ostatných
+// nastavení (server zmenu od Test managera odmietne).
+function bsAiOtazkyHtml(ja){
+  const zap = bsNast().ai_otazky === true;
+  return '<div class="bs-panel"><div class="bs-ph"><h3>Otázky cez AI</h3><small>' + (ja.spravca ? "ukladá sa hneď" : "zapína správca projektu") + '</small></div><div class="in">' +
+    '<label style="display:flex;gap:8px;align-items:flex-start;font:400 12px/1.4 var(--bs-sans)"><input type="checkbox"' + (zap ? " checked" : "") + (ja.spravca ? "" : " disabled") +
+      ' onchange="bsAiOtazkyNastav(this.checked)"> Členovia sa môžu pýtať v bežnej reči, napríklad „otvorené incidenty kategórie B staršie ako 2 týždne“, a appka z otázky nastaví filter</label>' +
+    '<div class="bs-podobne" style="margin-top:6px">Text otázky a názvy číselníkov projektu (typy, stavy, úrovne, IS, moduly, prostredia, releasy) odchádzajú spoločnosti Anthropic (model Claude), ktorá z nich vráti filter. Obsah záznamov ani mená osôb tam nejdú; meno z otázky dohľadá appka.</div></div></div>';
+}
+async function bsAiOtazkyNastav(zapnut){
+  try {
+    await bsRpc("b2b_bs_nastavenia_uloz", { p_projekt: B2B.pid, p_verzia: BS.d.projekt.verzia, p_nastavenia: { ai_otazky: !!zapnut } });
+    oznamPas(zapnut ? "Otázky cez AI zapnuté" : "Otázky cez AI vypnuté");
+    if (BS.nastavenia) BS.nastavenia.ai_otazky = !!zapnut;
+    bsNacitajData();
+  } catch (e) { bsChyba(e, "Otázky cez AI sa nepodarilo " + (zapnut ? "zapnúť" : "vypnúť")); bsPrekresli(); }
 }
 function bsIdZNazvu(k, nazov){
   const zaklad = bsNorm(nazov).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 24) || "x";
