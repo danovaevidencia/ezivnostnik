@@ -108,7 +108,7 @@ window.NAVODY_SNIMKY = {
  },
  "b2b_report-vyhodnotenie-1": {
   "d": {
-   "subor": "navody/b2b_report-vyhodnotenie-1.d.1a43248d.webp",
+   "subor": "navody/b2b_report-vyhodnotenie-1.d.c0943885.webp",
    "w": 1024,
    "h": 600,
    "ciel": {

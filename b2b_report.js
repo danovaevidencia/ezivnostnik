@@ -2478,7 +2478,9 @@ REP_LAYOUTY.qaTabulka = function(s, view, T){
   do {
     const A = repPrvky(T);
     let y = repHlavicka(A, T, s.kicker + (n ? " — pokračovanie" : ""), s.nadpis, "Stav " + repDMR(view.stavKuDnu));
-    if (n === 0 && s.sumar) { repDlazdice(A, T, s.sumar, y, 0.7, view.farby); y += 0.7 + 0.2; }
+    // dlaždica s podtextom (diagnostika R12) potrebuje vyššiu, inak sa podtext zrazí s číslom
+    const hD = s.sumar && s.sumar.some(k => k && k.sub) ? 0.86 : 0.7;
+    if (n === 0 && s.sumar) { repDlazdice(A, T, s.sumar, y, hD, view.farby); y += hD + 0.2; }
     const dalsi = repKresliTabulku(A, T, REP_L, y, REP_CW, s.tabulka, i, 7.15, 9);
     if (dalsi === i && i < s.tabulka.riadky.length) { A.text(REP_L, y + 0.5, REP_CW, 0.3, "Riadok sa nezmestí na stranu.", { pt: 10, color: T.red }); i++; }
     else i = dalsi;
