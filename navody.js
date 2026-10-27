@@ -136,6 +136,8 @@ vykazy: {
       podrobnosti: [
         { nadpis: "Človekodeň podľa hodín alebo pevná sadzba",
           html: "<p>Vo výkaze si vyberiete, či sa človekodeň počíta z hodín (napr. 8 hodín = 1 deň), alebo platí pevná denná sadzba bez ohľadu na hodiny.</p>" },
+        { nadpis: "Zmazať deň alebo činnosť dňa",
+          html: "<p>Zaškrtnite políčko na začiatku dňa (alebo <b>Vybrať všetky dni</b>) a ťuknite na <b>🗑 Zmazať vybrané</b>. Činnosť dňa odstránite odškrtnutím políčka pred ňou — ostane prečiarknutá a dá sa vrátiť. Do výkazu sa zmeny zapíšu až tlačidlom <b>Uložiť</b>.</p>" },
       ],
     },
     {
