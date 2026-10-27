@@ -628,7 +628,10 @@ const BS_CSS = [
   ".bs-btn[disabled]{opacity:.5;cursor:default}",
   ".bs-telo{flex:1;display:flex;min-height:0}",
   ".bs-obsah{flex:1;min-width:0;overflow:auto;padding:20px 22px 32px}",
-  ".bs-obsah>.bs-sirka{max-width:1180px}",
+  // Obsah v strede ako appka (okno cez celú obrazovku — Roman 27. 10. 2026: „obsah je
+  // celý vľavo“); lišta zarovnaná s ním, pod 1224 px ostáva pôvodný okraj.
+  ".bs-obsah>.bs-sirka{max-width:1180px;margin:0 auto}",
+  ".bs-lista{padding-left:max(18px,calc((100% - 1180px) / 2));padding-right:max(18px,calc((100% - 1180px) / 2))}",
   ".bs-drawer{width:376px;flex:none;overflow:auto;background:var(--bs-panel);border-left:1px solid var(--bs-l14);padding:16px 18px 28px}",
   // karty, panely, KPI
   ".bs-stlp{display:flex;flex-direction:column;gap:18px}",
@@ -1207,7 +1210,19 @@ function bsZmenaZakazky(){
   BS.filtre = {}; BS.menu = false; BS.nastavenia = null; if (BS.pohlad === "otazka") BS.pohlad = "prehlad"; BS.otazka = null;
 }
 function bsOknoNaMieste(){
-  return (typeof jeNainstalovana === "function" && jeNainstalovana()) || (typeof window !== "undefined" && window.innerWidth < 900);
+  return bsBezKariet() || (typeof window !== "undefined" && window.innerWidth < 900);
+}
+// Okno appky bez kariet prehliadača: obal z Google Play alebo PWA v samostatnom
+// okne. Nie jeNainstalovana — tá berie aj značku inštalácie v localStorage, ktorú
+// vidí aj obyčajná karta toho istého prehliadača (Roman 27. 10. 2026: na PC
+// s nainštalovanou appkou sa BUGstation otvoril v tej istej karte).
+function bsBezKariet(){
+  try {
+    if (typeof jeNativnyObal === "function" && jeNativnyObal()) return true;
+    if (typeof window !== "undefined" && window.matchMedia
+      && (window.matchMedia("(display-mode: standalone)").matches || window.matchMedia("(display-mode: minimal-ui)").matches)) return true;
+    return !!(typeof navigator !== "undefined" && navigator.standalone);   // iOS Safari
+  } catch (e) { console.error("BUGstation: režim okna", e); return false; }
 }
 function bsOknoAdresa(ppId){ return location.pathname + "?bugstation=" + encodeURIComponent(ppId); }
 function bsOknoOtvor(ppId, o){
