@@ -656,6 +656,17 @@ const BS_CSS = [
   ".bs-bar>i{display:block;height:100%;border-radius:4px;background:oklch(var(--bs-bar-l) var(--c) var(--h))}",
   ".bs-num{font:500 12px/1 var(--bs-mono);color:var(--bs-t3);text-align:right}",
   ".bs-riadok.bs-typy{grid-template-columns:minmax(0,1fr) 64px 84px 56px}",
+  // prijaté e-maily (BS3b): pruh nad obsahom a zoznam v okne
+  ".bs-prij-b{display:flex;align-items:center;flex-wrap:wrap;gap:10px;justify-content:space-between;padding:9px 14px;margin-bottom:12px;border-color:var(--bs-okr)}",
+  ".bs-prij-b span{flex:1 1 220px;font:400 12px/1.4 var(--bs-sans);color:var(--bs-t2)}",
+  ".bs-prij{display:flex;flex-direction:column;gap:10px}",
+  ".bs-prij-m{border:1px solid var(--bs-l13);border-radius:8px;padding:10px 12px;background:var(--bs-panel)}",
+  ".bs-prij-h{display:flex;flex-direction:column;gap:3px}",
+  ".bs-prij-h b{font:500 12.5px/1.3 var(--bs-sans);color:var(--bs-t1);overflow-wrap:anywhere}",
+  ".bs-prij-h small{font:400 10.5px/1.3 var(--bs-sans);color:var(--bs-t4);overflow-wrap:anywhere}",
+  ".bs-prij-t{margin:8px 0 0;font:400 11.5px/1.45 var(--bs-sans);color:var(--bs-t2);white-space:pre-wrap;overflow-wrap:anywhere;max-height:9em;overflow:auto}",
+  ".bs-prij-p{margin:6px 0 0;font:400 10.5px/1.4 var(--bs-sans);color:var(--bs-t3);overflow-wrap:anywhere}",
+  ".bs-prij-a{display:flex;flex-wrap:wrap;gap:8px;margin-top:9px}",
   ".bs-typy-h{padding-top:9px;padding-bottom:3px}",
   ".bs-typy-h span{font:500 9.5px/1.2 var(--bs-mono);letter-spacing:.5px;color:var(--bs-t5);text-align:right}",
   ".bs-mini{display:flex;gap:28px;padding:12px 16px 14px;border-top:1px solid var(--bs-l08)}",
@@ -1019,6 +1030,12 @@ async function bsNacitajData(){
       if (!pp) BS.d = { pid, projekt: null, podprojekty: zoz, clenovia: [] };
       else {
         const planP = bsNacitajPlan(pp.id).catch(e => ({ plan: null, planChyba: (e && e.message) || String(e) }));   // BS2 (admin_91)
+        // Prijaté e-maily podprojektu (BS3b, admin_96). Pred migráciou stĺpec chýba —
+        // BUGstation beží bez nich; iná chyba nezhodí zvyšok, ukáže ju pruh.
+        const prijP = sb.from("b2b_prijate").select("id,email_id,od_koho,predmet,telo,subor_nazov,subor_typ,subor_cesta,subor_bajtov,druh,stav,prijate")
+          .eq("podprojekt_id", pp.id).eq("modul", "bugstation").eq("stav", "nove").order("prijate")
+          .then(x => !x.error ? { prijate: x.data || [] } : bsBezPrijmu(x.error) ? { prijate: [] }
+            : (console.error("BUGstation: prijaté e-maily", x.error), { prijate: [], prijateChyba: x.error.message || String(x.error) }));
         const r = await Promise.all([
           vsetky(() => sb.from("b2b_bs_zaznamy").select(BS_STLPCE).eq("podprojekt_id", pp.id).order("typ").order("cislo")),
           vsetky(() => sb.from("b2b_bs_historia").select("id,zaznam_id,kto,kedy,udalost,akcia,z,na,data").eq("podprojekt_id", pp.id).order("kedy").order("id")),
@@ -1026,12 +1043,13 @@ async function bsNacitajData(){
           sb.from("b2b_bs_moje").select("upozornenia").eq("podprojekt_id", pp.id).maybeSingle(),   // admin_90 (BS1b)
           sb.from("b2b_bs_clenovia").select("osoba_id,role").eq("podprojekt_id", pp.id)
         ]);
-        const rp = await planP;
+        const rp = await planP, rpr = await prijP;
         if (poradie !== _bsPoradie) return;
         const e = r.map(x => x.error).find(Boolean);
         if (e) throw e;
         BS.d = { pid, ppId: pp.id, projekt: pp, podprojekty: zoz, zaznamy: r[0].data || [], historia: r[1].data || [], poziadavky: r[2].data || [],
-          upozornenia: (r[3].data || {}).upozornenia || "okamzite", clenovia: r[4].data || [], plan: rp.plan, planChyba: rp.planChyba || null };
+          upozornenia: (r[3].data || {}).upozornenia || "okamzite", clenovia: r[4].data || [], plan: rp.plan, planChyba: rp.planChyba || null,
+          prijate: rpr.prijate, prijateChyba: rpr.prijateChyba || null };
       }
     }
     bsPlanZmenene();
@@ -1077,7 +1095,15 @@ async function bsNacitajSpravu(){
       if (e) throw e;
       const otvorene = {};
       (r[1].data || []).forEach(z => { if (bsOtvoreny(z)) otvorene[z.podprojekt_id] = (otvorene[z.podprojekt_id] || 0) + 1; });
-      BS.sprava = { pid, podprojekty: zoz, clenovia: r[0].data || [], otvorene };
+      // Adresa projektu pre záznamy e-mailom (+kód podprojektu, admin_96) — doplnok:
+      // chyba adresy správu podprojektov nezhodí.
+      const adr = await Promise.all([sb.from("prijem_adresy").select("alias").eq("projekt_id", pid).maybeSingle(),
+        sb.from("b2b_prijem").select("token,povolene").eq("projekt_id", pid).maybeSingle()]).catch(e => [{ error: e }, {}]);
+      if (poradie !== _bsPoradieSpravy) return;
+      if (adr[0].error || adr[1].error) console.error("BUGstation: adresa projektu", adr[0].error || adr[1].error);
+      const adresa = { alias: ((adr[0] && adr[0].data) || {}).alias || null, token: ((adr[1] && adr[1].data) || {}).token || null,
+        povolene: ((adr[1] && adr[1].data) || {}).povolene !== false };
+      BS.sprava = { pid, podprojekty: zoz, clenovia: r[0].data || [], otvorene, adresa };
     }
   } catch (e) {
     if (poradie !== _bsPoradieSpravy) return;
@@ -1247,7 +1273,20 @@ function bsSpravaHtml(){
   return '<div class="bs-ok bs-sprava"><div class="csub" style="margin:0 2px 10px">Podprojekty BUGstation projektu ' + esc(P.nazov || "") + ". " +
     "BUGstation sa otvára v samostatnom okne" + (bsOknoNaMieste() ? " cez celú obrazovku" : " (nová karta prehliadača)") + "; tu sa spravujú podprojekty, ich členovia a roly.</div>" +
     S.podprojekty.map(x => bsSpravaKartaHtml(x, ja)).join("") +
-    (ja.spravca || somTm ? '<button type="button" class="aabtn" onclick="bsPodprojektFormular()">+ Založiť podprojekt</button>' : "") + "</div>";
+    (ja.spravca || somTm ? '<button type="button" class="aabtn" onclick="bsPodprojektFormular()">+ Založiť podprojekt</button>' : "") +
+    '<details class="csub" style="margin:12px 2px 0"><summary>Záznamy e-mailom</summary><div style="margin-top:6px">' +
+      (bsAdresaProjektu("") ? "Člen podprojektu s rolou, ktorá smie zakladať záznamy, pošle e-mail na adresu podprojektu (pri karte). Predmet „Defekt: …“, „Incident: …“, „Úloha: …“ alebo „Zmena: …“ určí typ; " +
+        "adresa projektu bez kódu s takým predmetom ide do predvoleného podprojektu. E-mail čaká v BUGstation, kým ho niekto prevezme ako záznam alebo odmietne — sám sa nezaloží." +
+        (S.adresa && !S.adresa.povolene ? " <b>Príjem e-mailov projektu je teraz vypnutý.</b>" : "")
+      : "Projekt zatiaľ nemá prijímaciu adresu — vytvorí ju správca v Pracovnom výkaze → Projekt.") + "</div></details></div>";
+}
+// Adresa projektu s podadresou kódu podprojektu (alias@posta…, inak stará b2b-…@doklady…).
+function bsAdresaProjektu(kod){
+  const a = BS.sprava && BS.sprava.adresa, k = kod ? "+" + bsNorm(kod) : "";
+  if (!a) return "";
+  if (a.alias && typeof POSTA_DOMENA !== "undefined") return a.alias + k + "@" + POSTA_DOMENA;
+  if (a.token && typeof DOKLADY_DOMENA !== "undefined") return a.token + k + "@" + DOKLADY_DOMENA;
+  return "";
 }
 function bsSpravaKartaHtml(x, ja){
   const roly = bsRolyV(x.id, ja.osoba), smie = ja.spravca || (roly || []).includes("tm"), otv = !!(BS.spravaOtvorene || {})[x.id];
@@ -1258,6 +1297,8 @@ function bsSpravaKartaHtml(x, ja){
       (x.predvoleny ? ' <small class="csub">predvolený</small>' : "") + (x.archivovane ? ' <small class="csub">archivovaný — len na čítanie</small>' : "") +
       '<span class="csub" style="margin-left:auto">' + esc(bsPocet(n, "otvorený záznam", "otvorené záznamy", "otvorených záznamov")) + "</span></div>" +
     (moje ? '<div class="csub" style="margin:4px 0 0">Vaše roly: ' + esc(moje) + "</div>" : "") +
+    (!x.archivovane && bsAdresaProjektu(x.kod) ? '<div class="csub" style="margin:4px 0 0">Záznamy e-mailom: <span style="font-family:ui-monospace,monospace;word-break:break-all">' +
+      esc(bsAdresaProjektu(x.kod)) + "</span>" + (x.predvoleny ? ' <small>(aj <span style="font-family:ui-monospace,monospace;word-break:break-all">' + esc(bsAdresaProjektu("")) + "</span> s predmetom „Defekt: …“)</small>" : "") + "</div>" : "") +
     '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">' +
       '<button type="button" class="aabtn pri" onclick="bsOknoOtvor(\'' + x.id + '\',{novaKarta:true})">Otvoriť BUGstation</button>' +
       (smie ? '<button type="button" class="aabtn" onclick="bsSpravaRozbal(\'' + x.id + '\')">' + (otv ? "Skryť členov" : "Členovia a roly (" + pocetCl + ")") + "</button>" : "") +
@@ -1372,7 +1413,7 @@ function bsShellHtml(){
   const drawer = BS.detail && bsNajdi(BS.detail) ? '<aside class="bs-drawer" data-bs-scroll="detail">' + bsDetailHtml(bsNajdi(BS.detail)) + "</aside>" : "";
   const arch = P.archivovane ? '<div class="bs-panel" style="padding:8px 12px;margin-bottom:10px;border-color:#d8b26a"><b>Podprojekt je archivovaný</b> — záznamy sa dajú čítať, zapisovať nie. Obnoví ho správca projektu v Nastaveniach.</div>' : "";
   return '<div class="bs' + (BS.komfortna ? " komf" : "") + '" id="bsKoren">' + rail + '<main class="bs-main">' + lista +
-    '<div class="bs-telo"><div class="bs-obsah" data-bs-scroll="obsah"><div class="bs-sirka">' + arch + bsObsahHtml() + "</div></div>" + drawer + "</div></main></div>";
+    '<div class="bs-telo"><div class="bs-obsah" data-bs-scroll="obsah"><div class="bs-sirka">' + arch + bsPrijateBannerHtml() + bsObsahHtml() + "</div></div>" + drawer + "</div></main></div>";
 }
 // Odznak s kódom podprojektu (2–10 znakov, admin_95). Do štvorca sa zmestia 4 znaky;
 // dlhší kód je pilulka a v zbalenom raile štvorec s kódom na dva riadky (CSS .bs-kod.dlhy).
@@ -1830,8 +1871,11 @@ function bsNovy(){ bsFormular(null, BS_TYPY[BS.pohlad] ? BS.pohlad : "defekt"); 
 function bsUpravit(){ const z = bsNajdi(BS.detail); if (z) bsFormular(z, z.typ); }
 // opts (BS2, defekt z vykonania): pred = predvyplnené polia, lenTyp = bez
 // výberu typu, ostan = po založení ostať v pohľade, poUlozeni(r) = napojenie.
+let _bsFormOpts = null;   // voľby otvoreného formulára nového záznamu (mail pri zmene typu)
 function bsFormular(z, typ, opts){
+  if (!z) _bsFormOpts = opts || null;
   const ja = bsJa(), nast = bsNast(), pov = ((nast.povinne || {})[typ]) || {}, pos = bsPosledne();
+  const em = !z && opts && opts.email;
   const typy = BS_TYPY_PORADIE.filter(t => z ? t === typ : (t === "zmena" ? bsMaRolu(ja, ["tm", "ttl", "dmd"]) : bsMaRolu(ja, BS_PRACOVNICI)));
   const ak = (nast.releasy || []).find(r => r.stav === "aktivny");
   const h = z ? Object.assign({}, z, { popis: (BS.det && BS.det.id === z.id ? BS.det.popis : "") }) : Object.assign({
@@ -1868,6 +1912,7 @@ function bsFormular(z, typ, opts){
     sel("release_id", "releasy"), riesSel, txt("ziadatel", "útvar / meno")
   ].filter(Boolean).join("");
   const html = '<div class="bs-ok" data-scroll="bsForm"><div class="bs-form">' +
+    (em ? '<div class="bs-podobne">E-mail od ' + esc(em.od || "(neznámy)") + " · " + esc(bsKedy(em.prijate)) + "</div>" : "") +
     (z || (opts && opts.lenTyp) ? "" : '<label>Typ<select id="bsF_typ" onchange="bsFormularTyp(this.value)">' + typy.map(t => '<option value="' + t + '"' + (t === typ ? " selected" : "") + ">" + esc(BS_TYPY[t].nazov) + "</option>").join("") + "</select></label>") +
     '<label>Názov *<input type="text" id="bsF_nazov" maxlength="200" value="' + esc(h.nazov || "") + '" oninput="bsPodobne(this.value)"></label><div id="bsPodobne" class="bs-podobne"></div>' +
     '<label>' + esc(BS_TYPY[typ].os) + ' *<select id="bsF_uroven">' + urov + "</select></label>" +
@@ -1877,9 +1922,11 @@ function bsFormular(z, typ, opts){
       '<label>Skutočný výsledok<textarea id="bsF_skutocne">' + esc(D.skutocne || "") + "</textarea></label></div></details>" : "") +
     (z ? "" : '<label>' + esc(BS_POLIA.priloha.nazov) + hv("priloha") + '<input type="file" id="bsF_subory" multiple accept="image/*,application/pdf,text/plain,.log,.zip" onchange="bsFormularSubory(this.files)"></label>' +
       '<div id="bsFPril" class="bs-podobne">Snímku obrazovky vložíte aj cez Ctrl+V do tohto okna.</div>') +
+    (em && em.prilohy.length ? '<div class="bs-podobne">Prílohy z e-mailu do záznamu: ' + em.prilohy.map(x =>
+      '<label class="bs-chk"><input type="checkbox" id="bsFEm_' + esc(x.id) + '" checked> ' + esc(x.subor_nazov) + "</label>").join(" ") + "</div>" : "") +
     (suvislosti ? '<details open><summary>Súvislosti <small>' + esc(bsSuhrnSuvislosti(h, nast)) + "</small></summary><div class=\"bs-form\" style=\"margin-top:8px\">" + suvislosti + "</div></details>" : "") +
     "</div></div>";
-  openModal(z ? "Upraviť · " + z.kluc : opts && opts.pred ? "Nový defekt z testu · " + (opts.pred.pripad || "") : "Nový záznam", html, () => bsFormularUloz(z, typ, opts), null, null, z ? "Uložiť" : "Založiť");
+  openModal(z ? "Upraviť · " + z.kluc : em ? "Záznam z e-mailu" : opts && opts.pred ? "Nový defekt z testu · " + (opts.pred.pripad || "") : "Nový záznam", html, () => bsFormularUloz(z, typ, opts), null, null, z ? "Uložiť" : "Založiť");
   if (!z) document.getElementById("modalBody").onpaste = (e) => {
     const f = [...((e.clipboardData && e.clipboardData.files) || [])];
     if (f.length) { e.preventDefault(); bsFormularSubory(f); }
@@ -1888,7 +1935,14 @@ function bsFormular(z, typ, opts){
 function bsSuhrnSuvislosti(h, nast){
   return [bsCiselnikNazov(nast, "prostredia", h.prostredie_id), [h.scenar, h.pripad].filter(Boolean).join(" / "), bsCiselnikNazov(nast, "releasy", h.release_id)].filter(Boolean).join(" · ");
 }
-function bsFormularTyp(typ){ bsFormular(null, typ); }
+// Zmena typu: ručný formulár sa otvorí nanovo ako doteraz; formulár z e-mailu
+// si mail aj rozpísaný názov a opis ponechá.
+function bsFormularTyp(typ){
+  const o = _bsFormOpts && _bsFormOpts.email ? _bsFormOpts : null;
+  if (!o) return bsFormular(null, typ);
+  const v = id => (document.getElementById("bsF_" + id) || {}).value;
+  bsFormular(null, typ, Object.assign({}, o, { pred: Object.assign({}, o.pred, { nazov: v("nazov"), popis: v("popis") }) }));
+}
 function bsFormularSubory(files){
   const max = 10 * 1024 * 1024;
   [...files].forEach(f => { if (f.size > max) alert("Súbor " + f.name + " má viac ako 10 MB — príloha má strop 10 MB."); else _bsPrilohy.push(f); });
@@ -1940,10 +1994,15 @@ async function bsFormularUloz(z, typ, opts){
       await bsRpc("b2b_bs_uprav", { p_id: z.id, p_verzia: z.verzia, p_polia: zmeny });
       oznamPas("Uložené · " + z.kluc);
     } else {
-      const r = await bsRpc("b2b_bs_zaloz", { p_podprojekt: BS.pp, p_typ: t, p_polia: p });
+      // Z e-mailu: záznam a spracovaný mail jedným krokom (admin_96), prílohy mailu podľa výberu.
+      const em = opts && opts.email;
+      const zMailu = em ? em.prilohy.filter(x => { const el = document.getElementById("bsFEm_" + x.id); return !el || el.checked; }) : [];
+      const r = em ? await bsRpc("b2b_bs_zaloz_z_emailu", { p_prijate: em.id, p_typ: t, p_polia: p })
+        : await bsRpc("b2b_bs_zaloz", { p_podprojekt: BS.pp, p_typ: t, p_polia: p });
       bsZapamataj(p);
       for (const f of _bsPrilohy) { try { await bsPrilohaNahraj(r.id, f); } catch (e) { bsChyba(e, "Príloha " + (f.name || "") + " sa nenahrala"); } }
       _bsPrilohy = [];
+      if (zMailu.length) await bsPrijatePrilohyPreniest(r.id, zMailu);
       oznamPas("Založené · " + r.kluc);
       if (opts && opts.poUlozeni) { try { await opts.poUlozeni(r); } catch (e) { bsChyba(e, "Defekt " + r.kluc + " je založený, ale vykonanie sa nezapísalo"); } }
       if (!(opts && opts.ostan)) { BS.pohlad = t; BS.detail = r.id; }
@@ -1951,6 +2010,92 @@ async function bsFormularUloz(z, typ, opts){
   } catch (e) { return b2bVOkne(String((e && e.message) || e).replace(/^.*?ERROR:\s*/, "")); }
   bsNacitajData();
   return true;
+}
+// ── E-mail → záznam (BS3b, admin_96, NAVRH §16 a §31 O5) ────────
+// Mail na adresu projektu +KOD (alebo bez kódu s predmetom „Defekt: …“) od člena
+// podprojektu s rolou na založenie čaká v b2b_prijate (modul bugstation,
+// podprojekt_id). Nič sa nezaloží samo: človek ho prevezme ako záznam alebo odmietne.
+// Predmet → typ a názov. Kópia edge doklady-mailom (bsZaznamZPredmetu) — zhodu stráži test_bs_email_ui.
+const BS_PREDMET = /^\s*(?:(?:fwd?|pd|tr)\s*:\s*)*(incident|defekt|chyba|[uú]loha|zmena)\s*:\s*([\s\S]*)$/i;
+const BS_PREDMET_TYP = { incident: "incident", defekt: "defekt", chyba: "defekt", uloha: "uloha", "úloha": "uloha", zmena: "zmena" };
+function bsZaznamZPredmetu(predmet){
+  const m = String(predmet == null ? "" : predmet).match(BS_PREDMET);
+  if (!m) return null;
+  return { typ: BS_PREDMET_TYP[bsNorm(m[1])], nazov: m[2].trim().slice(0, 200) };   // bsNorm („Úloha“ → uloha) = toLowerCase v edge nad tou istou tabuľkou
+}
+// Chyba „stĺpec chýba“ = admin_96 ešte nebeží (PostgREST 42703 / PGRST204).
+function bsBezPrijmu(e){
+  return !!e && (e.code === "42703" || e.code === "PGRST204" || /column .*(modul|podprojekt_id).* does not exist/i.test(e.message || ""));
+}
+// Riadky mailu (telo + prílohy) spolu; id = riadok tela, ten berie b2b_bs_zaloz_z_emailu.
+function bsPrijateMaily(){
+  const m = new Map();
+  ((BS.d && BS.d.prijate) || []).forEach(x => {
+    const g = m.get(x.email_id) || { email_id: x.email_id, id: null, od: x.od_koho || "", predmet: x.predmet || "", telo: "", prijate: x.prijate, prilohy: [] };
+    if (x.subor_nazov) g.prilohy.push(x); else { g.id = x.id; g.telo = x.telo || ""; }
+    if (String(x.prijate) < String(g.prijate)) g.prijate = x.prijate;
+    m.set(x.email_id, g);
+  });
+  return [...m.values()].sort((a, b) => String(a.prijate).localeCompare(String(b.prijate)));
+}
+// Prevziať smie ten, kto smie zakladať (roly b2b_bs_roly_zalozenia), v aktívnom podprojekte.
+function bsSmiePrevziat(){
+  return !((BS.d && BS.d.projekt) || {}).archivovane && bsMaRolu(bsJa(), BS_PRACOVNICI);
+}
+function bsPrijateBannerHtml(){
+  if (!BS.d || !["prehlad", "caka"].concat(Object.keys(BS_TYPY)).includes(BS.pohlad)) return "";
+  if (BS.d.prijateChyba) return '<div class="bs-panel bs-prij-b"><span><b>Prijaté e-maily sa nenačítali</b> — ' + esc(BS.d.prijateChyba) + "</span></div>";
+  const n = bsPrijateMaily().length;
+  if (!n || !bsSmiePrevziat()) return "";
+  return '<div class="bs-panel bs-prij-b"><span><b>Prijaté e-maily (' + n + ")</b> — čakajú, kým ich niekto prevezme ako záznam alebo odmietne.</span>" +
+    '<button type="button" class="bs-btn pri" onclick="bsPrijateOtvor()">Pozrieť</button></div>';
+}
+function bsPrijateOtvor(){
+  const maily = bsPrijateMaily(), P = (BS.d && BS.d.projekt) || {};
+  const kb = b => b >= 1048576 ? (b / 1048576).toFixed(1).replace(".", ",") + " MB" : Math.max(1, Math.round((b || 0) / 1024)) + " kB";
+  const html = '<div class="bs-ok" data-scroll="bsPrijate"><div class="bs-prij">' + (maily.map(m => {
+    const pr = bsZaznamZPredmetu(m.predmet), tl = m.telo.trim();
+    return '<div class="bs-prij-m"><div class="bs-prij-h"><b>' + esc(m.predmet || "(bez predmetu)") + "</b><small>" + esc(m.od) + " · " + esc(bsKedy(m.prijate)) +
+      (pr ? " · " + esc(BS_TYPY[pr.typ].nazov) : "") + "</small></div>" +
+      (tl ? '<p class="bs-prij-t">' + esc(tl.length > 600 ? tl.slice(0, 600) + "…" : tl) + "</p>" : "") +
+      (m.prilohy.length ? '<p class="bs-prij-p">Prílohy: ' + m.prilohy.map(x => esc(x.subor_nazov) + " (" + kb(x.subor_bajtov) + ")").join(", ") + "</p>" : "") +
+      '<div class="bs-prij-a"><button type="button" class="bs-btn pri"' + (m.id ? "" : " disabled") + ' onclick="bsPrijatePrevziat(\'' + esc(m.email_id) + '\')">Prevziať ako záznam</button>' +
+      '<button type="button" class="bs-btn" onclick="bsPrijateOdmietnut(\'' + esc(m.email_id) + '\')">Odmietnuť</button></div></div>';
+  }).join("") || '<div class="bs-prazdne">Žiadny e-mail nečaká.</div>') + "</div></div>";
+  openModal("Prijaté e-maily · " + (P.kod || ""), html, null, null, "siroky");
+}
+function bsPrijatePrevziat(emailId){
+  const m = bsPrijateMaily().find(x => x.email_id === emailId);
+  if (!m || !m.id) return;
+  const ja = bsJa(), pr = bsZaznamZPredmetu(m.predmet);
+  const typy = BS_TYPY_PORADIE.filter(t => t === "zmena" ? bsMaRolu(ja, ["tm", "ttl", "dmd"]) : bsMaRolu(ja, BS_PRACOVNICI));
+  const typ = pr && typy.includes(pr.typ) ? pr.typ : typy.includes("defekt") ? "defekt" : typy[0];
+  if (!typ) return;
+  bsFormular(null, typ, { email: m, pred: { nazov: (pr ? pr.nazov : m.predmet).slice(0, 200), popis: m.telo.trim() } });
+}
+async function bsPrijateOdmietnut(emailId){
+  const m = bsPrijateMaily().find(x => x.email_id === emailId);
+  if (!m) return;
+  const dovod = prompt("Odmietnuť e-mail „" + (m.predmet || "bez predmetu") + "“? Ostane v histórii prijatých. Dôvod (nepovinný):", "");
+  if (dovod === null) return;
+  try {
+    await bsRpc("b2b_prijate_stav", { p_id: m.id || m.prilohy[0].id, p_stav: "odmietnute", p_poznamka: dovod.trim() || null });
+    oznamPas("E-mail odmietnutý");
+  } catch (e) { return bsChyba(e, "E-mail sa nepodarilo odmietnuť"); }
+  if (BS.d) BS.d.prijate = (BS.d.prijate || []).filter(x => x.email_id !== emailId);
+  if (bsPrijateMaily().length) bsPrijateOtvor(); else closeModal();
+  bsNacitajData();
+}
+// Prílohy mailu do šifrovaných príloh záznamu: stiahnuť z b2b-prijate (RLS: člen
+// podprojektu) a nahrať tou istou cestou ako ručnú prílohu (edge b2b, strop 10 MB).
+async function bsPrijatePrilohyPreniest(zaznamId, prilohy){
+  for (const x of prilohy) {
+    try {
+      const { data, error } = await sb.storage.from("b2b-prijate").download(x.subor_cesta);
+      if (error) throw error;
+      await bsPrilohaNahraj(zaznamId, new File([data], x.subor_nazov, { type: x.subor_typ || data.type || "application/octet-stream" }));
+    } catch (e) { bsChyba(e, "Príloha " + x.subor_nazov + " z e-mailu sa do záznamu nepreniesla"); }
+  }
 }
 // ── prílohy cez edge b2b (šifrované, §12) ──────────────────────
 async function bsPrilohaNahraj(zaznamId, f){
