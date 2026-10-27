@@ -26500,7 +26500,32 @@ async function b2bPrijmiPozvanku(token, id){
 // pri štarte stránky a spracuje raz.
 let _b2bBsCiel=null, _b2bOdkazBsHotovo=false;
 let _b2bOdkazBs=(()=>{ try{ return new URLSearchParams(location.search).get("b2b_bs"); }catch(e){ return null; } })();
+// Okno BUGstation ?bugstation=<podprojekt> (BS4b, NAVRH §31.2): na počítači ho
+// otvára nová karta zo správy podprojektov. Podprojekt sa hľadá v databáze (RLS —
+// len ak som jeho členom alebo správcom zákazky); zákazka a podprojekt idú do
+// _b2bBsOkno, prekrytie otvorí b2b_bugstation.js. Adresa ostane, kým okno nezavriem.
+let _b2bBsOkno=null, _b2bOknoBsHotovo=false;
+let _b2bOknoBs=(()=>{ try{ return new URLSearchParams(location.search).get("bugstation"); }catch(e){ return null; } })();
+async function b2bSpracujOknoBs(){
+  if(_b2bOknoBsHotovo || !_b2bOknoBs || b2bBezServera()) return false;
+  _b2bOknoBsHotovo=true;
+  const id=String(_b2bOknoBs).trim();
+  const zabud=()=>{ try{ history.replaceState({}, "", location.pathname); }catch(e){ console.error("BUGstation: adresa okna", e); } };
+  if(!/^[0-9a-f-]{36}$/i.test(id)){ zabud(); return false; }
+  if(!B2B.nacitane) await b2bNacitajClenstvo();
+  let x=null;
+  try{ const r=await sb.from("b2b_bs_podprojekty").select("id,projekt_id").eq("id",id).maybeSingle(); if(r.error) throw r.error; x=r.data; }
+  catch(e){ console.error("BUGstation: okno podprojektu", e); }
+  const p=x && B2B.projekty.find(q=>q.id===x.projekt_id);
+  if(!p){ zabud(); oznamPas("Podprojekt BUGstation sa nenašiel alebo k nemu nemáte prístup."); return false; }
+  _b2bBsOkno={pid:p.id, pp:x.id};
+  if(!B2B.d || B2B.d.pid!==p.id || B2B.d.chyba) B2B.d=null;
+  B2B.pid=p.id; B2B.mesiac=B2B.mesiac||b2bMesiacTeraz();
+  otvorApp("b2b_bugstation");
+  return true;
+}
 async function b2bSpracujOdkazBs(){
+  if(await b2bSpracujOknoBs()) return true;
   if(_b2bOdkazBsHotovo || !_b2bOdkazBs || b2bBezServera()) return false;
   _b2bOdkazBsHotovo=true;
   const k=String(_b2bOdkazBs).trim().toUpperCase(), m=k.match(/^([A-Z0-9]{2,10})-[UBIC]\d{1,7}$/);
@@ -29195,8 +29220,10 @@ function appB2bReport(){
   s.innerHTML=appHlavicka("b2b_report", spat)+`<div data-scroll="b2bRep"><div style="margin:0 2px 12px"><b style="font-size:15px">${esc(B2B.d.projekt.nazov)}</b></div>${b2bReportingHtml()}</div>`;
 }
 // ── B2B: BUGstation — úlohy, defekty, incidenty a zmenové požiadavky (č. 307) ──
-// Tretí modul skupiny so spoločným výberom projektu (B2B.pid, B2B.d — osoby
-// a roly bs_role). Obsah kreslí lenivý b2b_bugstation.js (dev/docs/NAVRH_B2B_BUGSTATION.md).
+// Tretí modul skupiny so spoločným výberom projektu (B2B.pid, B2B.d — osoby).
+// Záložka je správa podprojektov zákazky (členovia a roly, č. 318); samotný
+// BUGstation otvára b2b_bugstation.js v okne — nová karta ?bugstation=<podprojekt>
+// alebo prekrytie cez celú obrazovku (dev/docs/NAVRH_B2B_BUGSTATION.md §31).
 let _bsNacitanie=null, _bsChybaNacitania="";
 function bsNacitajSkript(){
   if(typeof window.bsZalozkaHtml==="function") return Promise.resolve();

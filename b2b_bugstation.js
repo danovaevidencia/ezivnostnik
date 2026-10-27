@@ -884,7 +884,20 @@ const BS_CSS = [
   ".bs-v{min-height:52px;font-size:15px}",
   ".bs-prog{grid-template-columns:1fr 46px}",
   ".bs-prog .bs-stack{grid-column:1/-1;order:3}",
-  "}"
+  "}",
+  // okno BUGstation (BS4b): prekrytie nad stránkou appky — pod modálnymi oknami (80)
+  // a hláškami (60), nad bočným menu (45); na mobile roluje prekrytie
+  ".bs-okno{position:fixed;inset:0;z-index:55;background:#eef1f6;padding:8px;overflow:hidden}",
+  "[data-tema=\"tmavy\"] .bs-okno{background:#0b1019}",
+  "html.bs-okno-on,html.bs-okno-on body{overflow:hidden}",
+  ".bs-okno .bs{height:100%;min-height:0}",
+  ".bs-spat{flex:none;display:flex;align-items:center;gap:2px;background:none;border:1px solid rgba(238,242,248,.28);color:#eef2f8;border-radius:7px;min-width:28px;height:28px;padding:0 7px;font:600 15px/1 var(--bs-sans)}",
+  ".bs-spat span{font-size:11.5px;font-weight:500}",
+  ".bs-spat:hover{background:rgba(255,255,255,.08)}",
+  "@media (max-width:899px){.bs-okno{padding:0;overflow:auto;-webkit-overflow-scrolling:touch}.bs-okno .bs{height:auto;min-height:100%}}",
+  // správa podprojektov v okne B2B
+  ".bs-pp-kod{flex:none;display:inline-flex;align-items:center;height:24px;padding:0 8px;border-radius:7px;background:#2f4260;color:#fff;font:600 11px/1 var(--bs-mono,ui-monospace,monospace);letter-spacing:.3px}",
+  ".bs-sprava .bs-mriezka input{margin:0}"
 ].join("\n");
 const BS_LOGO = '<svg width="26" height="20" viewBox="0 0 82 64" role="img" aria-label="BUGstation" style="flex:none"><path d="M14 14H2v36h12v-6H8V20h6z" fill="#fff"/><path d="M68 14h12v36H68v-6h6V20h-6z" fill="#fff"/><rect x="19" y="30.7" width="44" height="2.6" rx="1.3" fill="#5d708d"/><circle cx="20.5" cy="32" r="4.4" fill="#a9b6c9"/><circle cx="41" cy="32" r="8.4" fill="#e2a94f"/><circle cx="41" cy="32" r="3" fill="#22304a"/><circle cx="61.5" cy="32" r="4.4" fill="#57a396"/></svg>';
 // Ikony navigácie z prototypu (viewBox 0 0 20 20); „ulohy“ a „caka“ dokreslené v tom istom štýle.
@@ -928,8 +941,11 @@ function bsUrovenChip(nastavenia, z){
 // ═══════════════════════════════════════════════════════════════
 // pp = id zvoleného podprojektu (admin_95, BS4a): v zákazke ich môže byť viac,
 // modul pracuje vždy v jednom (BS.d.projekt je jeho riadok b2b_bs_podprojekty).
+// okno = BUGstation otvorený v okne (prekrytie, BS4b); sprava = podprojekty
+// zákazky pre záložku B2B (spravaOtvorene: karty s rozbalenými členmi).
 const BS = { pid: null, pp: null, d: null, nacitavam: false, pohlad: "prehlad", split: null, detail: null, det: null,
-  filtre: {}, menu: false, rail: false, hladat: "", zoradit: {}, nastavenia: null, otazka: null };
+  filtre: {}, menu: false, rail: false, hladat: "", zoradit: {}, nastavenia: null, otazka: null,
+  okno: false, sprava: null, spravaNacitavam: false, spravaOtvorene: {} };
 let _bsPoradie = 0;
 const BS_STLPCE = "id,projekt_id,typ,cislo,kluc,nazov,uroven,stav,rozlisenie,duplikat,is_id,modul_id,prostredie_id,release_id," +
   "scenar,pripad,poziadavka_id,identifikovane,termin,suvisi,riesitel_osoba,riesitel_tim,ziadatel,data,nahlasil," +
@@ -1020,10 +1036,47 @@ async function bsNacitajData(){
   bsPrekresli();
 }
 async function bsObnov(){ BS.d = null; BS.det = null; bsPrekresli(); }
-// Návrat na kartu = čerstvé dáta (iný člen tímu mohol medzitým zapisovať).
+// Návrat na kartu = čerstvé dáta (iný člen tímu mohol medzitým zapisovať):
+// v okne BUGstation záznamy podprojektu, v záložke B2B správa podprojektov.
 if (typeof document !== "undefined") document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && typeof modulNaObrazovke === "function" && modulNaObrazovke() === "b2b_bugstation" && BS.d && !BS.nacitavam) bsNacitajData();
+  if (document.visibilityState !== "visible") return;
+  if (BS.okno) { if (BS.d && !BS.nacitavam) bsNacitajData(); }
+  else if (typeof modulNaObrazovke === "function" && modulNaObrazovke() === "b2b_bugstation" && BS.sprava && !BS.spravaNacitavam) bsNacitajSpravu();
 });
+
+// Správa podprojektov zákazky (záložka BUGstation v okne B2B, BS4b): podprojekty,
+// ktoré vidím (člen svoje, správca všetky), ich členovia a počty otvorených záznamov.
+let _bsPoradieSpravy = 0;
+async function bsNacitajSpravu(){
+  const pid = B2B.pid, poradie = ++_bsPoradieSpravy;
+  BS.spravaNacitavam = true;
+  try {
+    const rpp = await sb.from("b2b_bs_podprojekty").select("*").eq("projekt_id", pid).order("kod");
+    if (poradie !== _bsPoradieSpravy) return;
+    if (rpp.error && b2bChybaTabulky(rpp.error)) BS.sprava = { pid, bezMigracie: true };
+    else if (rpp.error) throw rpp.error;
+    else {
+      const zoz = rpp.data || [], ids = zoz.map(x => x.id);
+      const vsetky = (q) => b2bVsetky(q).then(data => ({ data }), error => ({ error }));
+      const r = ids.length ? await Promise.all([
+        sb.from("b2b_bs_clenovia").select("podprojekt_id,osoba_id,role").in("podprojekt_id", ids),
+        vsetky(() => sb.from("b2b_bs_zaznamy").select("podprojekt_id,typ,stav,vysvetlenie_prijate,zmazane").eq("projekt_id", pid))
+      ]) : [{ data: [] }, { data: [] }];
+      if (poradie !== _bsPoradieSpravy) return;
+      const e = r.map(x => x.error).find(Boolean);
+      if (e) throw e;
+      const otvorene = {};
+      (r[1].data || []).forEach(z => { if (bsOtvoreny(z)) otvorene[z.podprojekt_id] = (otvorene[z.podprojekt_id] || 0) + 1; });
+      BS.sprava = { pid, podprojekty: zoz, clenovia: r[0].data || [], otvorene };
+    }
+  } catch (e) {
+    if (poradie !== _bsPoradieSpravy) return;
+    console.error("BUGstation: podprojekty", e);
+    BS.sprava = { pid, chyba: (e && e.message) || String(e) };
+  }
+  BS.spravaNacitavam = false;
+  bsPrekresli();
+}
 
 async function bsNacitajDetail(id){
   try {
@@ -1046,25 +1099,27 @@ async function bsNacitajDetail(id){
   bsPrekresli();
 }
 
-// Prekreslenie celého modulu so zachovaním posunu obsahu aj detailu.
+// Prekreslenie so zachovaním posunu obsahu aj detailu: otvorené okno BUGstation
+// (prekrytie #bsOkno), inak správa podprojektov v záložke B2B.
 function bsPrekresli(){
-  if (typeof modulNaObrazovke !== "function" || modulNaObrazovke() !== "b2b_bugstation") return;
+  const vOkne = BS.okno;
+  if (!vOkne && (typeof modulNaObrazovke !== "function" || modulNaObrazovke() !== "b2b_bugstation")) return;
   const pos = {};
   document.querySelectorAll("[data-bs-scroll]").forEach(el => { pos[el.getAttribute("data-bs-scroll")] = el.scrollTop; });
-  appB2bBugstation();
+  if (vOkne) bsOknoKresli(); else appB2bBugstation();
   bsVyska();
   document.querySelectorAll("[data-bs-scroll]").forEach(el => { const k = el.getAttribute("data-bs-scroll"); if (pos[k]) el.scrollTop = pos[k]; });
 }
-// Shell s vlastným posunom vyplní okno pod hlavičkou appky (desktop); na mobile
-// roluje celá stránka ako inde v appke (CSS pod 900 px výšku ruší).
+// Shell s vlastným posunom vyplní priestor pod hlavičkou appky (desktop); v okne
+// BUGstation výšku dáva CSS prekrytia; na mobile roluje stránka (CSS pod 900 px).
 function bsVyska(){
   const k = document.getElementById("bsKoren");
   if (!k) return;
-  if (window.innerWidth < 900) { k.style.height = ""; return; }
+  if (window.innerWidth < 900 || (k.closest && k.closest(".bs-okno"))) { k.style.height = ""; return; }
   const hore = k.getBoundingClientRect().top + window.scrollY;
   k.style.height = Math.max(520, window.innerHeight - hore - 16) + "px";
 }
-if (typeof window !== "undefined") window.addEventListener("resize", () => { if (typeof modulNaObrazovke === "function" && modulNaObrazovke() === "b2b_bugstation") bsVyska(); });
+if (typeof window !== "undefined") window.addEventListener("resize", () => { if (BS.okno || (typeof modulNaObrazovke === "function" && modulNaObrazovke() === "b2b_bugstation")) bsVyska(); });
 
 // RPC s odmietnutím „kto a kedy“ (b2b_bs_odmietnutie) ako čitateľnou chybou.
 async function bsRpc(fn, params){
@@ -1102,20 +1157,135 @@ function bsKedy(ts, teraz){
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  SHELL — rail, horná lišta, obsah, detail (README_HANDOFF „Shell“)
+//  OKNO BUGstation a SPRÁVA PODPROJEKTOV (BS4b, NAVRH §31.2, O1 a O4)
+//  Záložka BUGstation v skupine B2B je správa: podprojekty zákazky, ich
+//  členovia a roly, predvolený a archív. Samotný BUGstation beží v okne: na
+//  počítači nová karta s ?bugstation=<podprojekt>, na telefóne a v appke
+//  z Google Play to isté okno cez celú obrazovku s tlačidlom späť (nové okno
+//  by v obale stratilo prihlásenie). Okno = prekrytie #bsOkno nad stránkou
+//  appky — prihlásenie, dáta skupiny B2B aj modálne okná ostávajú.
 // ═══════════════════════════════════════════════════════════════
+function bsZmenaZakazky(){
+  if (BS.pid === B2B.pid) return;
+  BS.pid = B2B.pid; BS.pp = null; BS.d = null; BS.sprava = null; BS.spravaOtvorene = {}; BS.detail = null; BS.det = null; BS.split = null;
+  BS.filtre = {}; BS.menu = false; BS.nastavenia = null; if (BS.pohlad === "otazka") BS.pohlad = "prehlad"; BS.otazka = null;
+}
+function bsOknoNaMieste(){
+  return (typeof jeNainstalovana === "function" && jeNainstalovana()) || (typeof window !== "undefined" && window.innerWidth < 900);
+}
+function bsOknoAdresa(ppId){ return location.pathname + "?bugstation=" + encodeURIComponent(ppId); }
+function bsOknoOtvor(ppId, o){
+  o = o || {};
+  if (!ppId) return;
+  if (o.novaKarta && !bsOknoNaMieste() && typeof window !== "undefined" && typeof window.open === "function") {
+    if (window.open(bsOknoAdresa(ppId), "_blank")) return;   // zablokované okno = otvoriť na mieste
+  }
+  if (BS.pp !== ppId) { BS.pp = ppId; BS.d = null; BS.detail = null; BS.det = null; BS.split = null; BS.filtre = {}; BS.nastavenia = null; BS.otazka = null; if (BS.pohlad === "otazka") BS.pohlad = "prehlad"; }
+  const bolo = BS.okno;
+  BS.okno = true; BS.menu = false;
+  if (!o.bezHistorie) { try { (bolo ? history.replaceState : history.pushState).call(history, { bsOkno: ppId }, "", bsOknoAdresa(ppId)); } catch (e) { console.error("BUGstation: adresa okna", e); } }
+  bsPrekresli();
+}
+function bsOknoZavri(zHistorie){
+  BS.okno = false; BS.menu = false; BS.detail = null; BS.det = null;
+  if (typeof document !== "undefined" && document.body) {
+    const el = document.getElementById("bsOkno"); if (el) el.remove();
+    document.documentElement.classList.remove("bs-okno-on");
+  }
+  if (!zHistorie) { try { if (/[?&]bugstation=/.test(location.search)) history.replaceState({}, "", location.pathname); } catch (e) { console.error("BUGstation: adresa okna", e); } }
+  BS.sprava = null;   // počty a členstvo sa v okne mohli zmeniť
+  if (typeof modulNaObrazovke === "function" && modulNaObrazovke() === "b2b_bugstation") appB2bBugstation();
+  else if (typeof otvorApp === "function") otvorApp("b2b_bugstation");
+}
+// Späť v telefóne (alebo v prehliadači) zavrie okno otvorené na mieste.
+if (typeof window !== "undefined") window.addEventListener("popstate", () => {
+  if (BS.okno && !/[?&]bugstation=/.test(location.search)) bsOknoZavri(true);
+});
+function bsOknoKresli(){
+  if (typeof document === "undefined" || !document.body) return;
+  bsStyly();
+  let el = document.getElementById("bsOkno");
+  if (!el) { el = document.createElement("div"); el.id = "bsOkno"; el.className = "bs-okno"; document.body.appendChild(el); }
+  document.documentElement.classList.add("bs-okno-on");
+  el.innerHTML = bsShellObsahHtml();
+}
+
+// Záložka BUGstation v okne B2B = správa podprojektov.
 function bsZalozkaHtml(){
   bsStyly();
-  if (BS.pid !== B2B.pid) { BS.pid = B2B.pid; BS.pp = null; BS.d = null; BS.detail = null; BS.det = null; BS.split = null; BS.filtre = {}; BS.menu = false; BS.nastavenia = null; if (BS.pohlad === "otazka") BS.pohlad = "prehlad"; BS.otazka = null; }
+  bsZmenaZakazky();
+  // Okno z adresy (?bugstation=, nová karta) alebo z odkazu v e-maile (?b2b_bs=) → otvoriť ho.
+  const okno = typeof _b2bBsOkno !== "undefined" && _b2bBsOkno && _b2bBsOkno.pid === B2B.pid ? _b2bBsOkno : null;
+  const ciel = typeof _b2bBsCiel !== "undefined" && _b2bBsCiel && _b2bBsCiel.pid === B2B.pid && _b2bBsCiel.pp ? _b2bBsCiel : null;
+  if (okno) { _b2bBsOkno = null; setTimeout(() => bsOknoOtvor(okno.pp, { bezHistorie: true }), 0); }
+  else if (ciel && !ciel.otvorene) { ciel.otvorene = true; setTimeout(() => bsOknoOtvor(ciel.pp, {}), 0); }
+  if (!BS.sprava || BS.sprava.pid !== B2B.pid) { if (!BS.spravaNacitavam) setTimeout(bsNacitajSpravu, 0); return '<div class="aempty">Načítavam BUGstation…</div>'; }
+  if (BS.sprava.bezMigracie) return '<div class="card" style="padding:12px 14px"><b>BUGstation ešte nie je v databáze</b><div class="csub">Chýba migrácia admin_95 (podprojekty) — po jej spustení sa modul otvorí.</div></div>';
+  if (BS.sprava.chyba) return '<div class="card" style="padding:12px 14px;border-color:var(--neg)"><b style="color:var(--neg)">BUGstation sa nenačítal</b><div class="csub" style="margin:4px 0 8px">' + esc(BS.sprava.chyba) + '</div><button class="aabtn" onclick="BS.sprava=null;bsPrekresli()">Skúsiť znova</button></div>';
+  if (!BS.sprava.podprojekty.length) return bsZapnutieHtml();
+  return bsSpravaHtml();
+}
+function bsJaVZakazke(){ const o = typeof b2bMojaOsoba === "function" ? b2bMojaOsoba() : null; return { osoba: o ? o.id : null, spravca: !!(o && o.spravca) }; }
+// Roly osoby v podprojekte zo správy; null = nie je členom.
+function bsRolyV(ppId, osobaId){
+  const c = ((BS.sprava && BS.sprava.clenovia) || []).find(x => x.podprojekt_id === ppId && x.osoba_id === osobaId);
+  return c ? (c.role || []) : null;
+}
+function bsSpravaHtml(){
+  const S = BS.sprava, ja = bsJaVZakazke(), P = (B2B.d && B2B.d.projekt) || {};
+  const somTm = S.clenovia.some(c => c.osoba_id === ja.osoba && (c.role || []).includes("tm"));
+  return '<div class="bs-ok bs-sprava"><div class="csub" style="margin:0 2px 10px">Podprojekty BUGstation projektu ' + esc(P.nazov || "") + ". " +
+    "BUGstation sa otvára v samostatnom okne" + (bsOknoNaMieste() ? " cez celú obrazovku" : " (nová karta prehliadača)") + "; tu sa spravujú podprojekty, ich členovia a roly.</div>" +
+    S.podprojekty.map(x => bsSpravaKartaHtml(x, ja)).join("") +
+    (ja.spravca || somTm ? '<button type="button" class="aabtn" onclick="bsPodprojektFormular()">+ Založiť podprojekt</button>' : "") + "</div>";
+}
+function bsSpravaKartaHtml(x, ja){
+  const roly = bsRolyV(x.id, ja.osoba), smie = ja.spravca || (roly || []).includes("tm"), otv = !!(BS.spravaOtvorene || {})[x.id];
+  const n = (BS.sprava.otvorene || {})[x.id] || 0, pocetCl = BS.sprava.clenovia.filter(c => c.podprojekt_id === x.id).length;
+  const moje = (ja.spravca ? ["Správca projektu"] : []).concat((roly || []).map(r => BS_ROLY[r])).join(" · ") || (roly ? "Čitateľ" : "");
+  return '<div class="card bs-pp" style="padding:12px 14px;margin-bottom:10px">' +
+    '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span class="bs-pp-kod">' + esc(x.kod) + '</span><b style="font-size:15px">' + esc(x.nazov) + "</b>" +
+      (x.predvoleny ? ' <small class="csub">predvolený</small>' : "") + (x.archivovane ? ' <small class="csub">archivovaný — len na čítanie</small>' : "") +
+      '<span class="csub" style="margin-left:auto">' + esc(bsPocet(n, "otvorený záznam", "otvorené záznamy", "otvorených záznamov")) + "</span></div>" +
+    (moje ? '<div class="csub" style="margin:4px 0 0">Vaše roly: ' + esc(moje) + "</div>" : "") +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">' +
+      '<button type="button" class="aabtn pri" onclick="bsOknoOtvor(\'' + x.id + '\',{novaKarta:true})">Otvoriť BUGstation</button>' +
+      (smie ? '<button type="button" class="aabtn" onclick="bsSpravaRozbal(\'' + x.id + '\')">' + (otv ? "Skryť členov" : "Členovia a roly (" + pocetCl + ")") + "</button>" : "") +
+      (ja.spravca && !x.predvoleny && !x.archivovane ? '<button type="button" class="aabtn" onclick="bsPodprojektUprav(\'' + x.id + '\',{predvoleny:true})">Nastaviť ako predvolený</button>' : "") +
+      (ja.spravca ? '<button type="button" class="aabtn" onclick="bsPodprojektUprav(\'' + x.id + "',{archivovat:" + !x.archivovane + '})">' + (x.archivovane ? "Obnoviť" : "Archivovať") + "</button>" : "") +
+    "</div>" + (otv && smie ? bsClenoviaHtml(x) : "") + "</div>";
+}
+function bsSpravaRozbal(id){ BS.spravaOtvorene = BS.spravaOtvorene || {}; BS.spravaOtvorene[id] = !BS.spravaOtvorene[id]; bsPrekresli(); }
+// Ľudia zákazky a ich členstvo v podprojekte: členovia hore, potom ostatné aktívne
+// osoby — tých pridá zaškrtnutie Člen alebo niektorej roly. V archive len na čítanie.
+function bsClenoviaHtml(x){
+  const cl = {};
+  BS.sprava.clenovia.filter(c => c.podprojekt_id === x.id).forEach(c => { cl[c.osoba_id] = c.role || []; });
+  const osoby = ((B2B.d && B2B.d.osoby) || []).filter(o => o.aktivny)
+    .sort((a, b) => (cl[b.id] || b.spravca ? 1 : 0) - (cl[a.id] || a.spravca ? 1 : 0) || String(a.meno).localeCompare(String(b.meno), "sk"));
+  const roly = Object.keys(BS_ROLY), dis = x.archivovane ? " disabled" : "";
+  const tab = '<table class="bs-mriezka"><thead><tr><th>Osoba</th><th>Člen</th>' + roly.map(r => "<th>" + esc(BS_ROLY[r]) + "</th>").join("") + "</tr></thead><tbody>" +
+    osoby.map(o => "<tr><td>" + esc(o.meno) + (o.spravca ? " <small>(správca)</small>" : "") + (o.user_id ? "" : " <small>(bez účtu)</small>") + "</td>" +
+      (o.spravca ? '<td title="Správca projektu vidí každý podprojekt">vždy</td>' : '<td><input type="checkbox"' + (cl[o.id] ? " checked" : "") + dis + ' onchange="bsClenPrepni(\'' + o.id + "',this.checked,'" + x.id + "')\"></td>") +
+      roly.map(r => '<td><input type="checkbox"' + ((cl[o.id] || []).includes(r) ? " checked" : "") + dis +
+      ' onchange="bsRolaPrepni(\'' + o.id + "','" + r + "',this.checked,'" + x.id + "')\"></td>").join("") + "</tr>").join("") + "</tbody></table>";
+  return '<div style="overflow-x:auto;margin-top:10px">' + tab + "</div>" +
+    '<div class="csub" style="margin-top:6px">Členstvo a roly platia len v podprojekte ' + esc(x.kod) + ". Člen bez roly je čitateľ. Prístup k výkazu a ďalším modulom prideľuje správca v karte Projekt → Osoby." +
+    (x.archivovane ? " Archivovaný podprojekt sa nemení — najprv ho obnovte." : "") + "</div>" +
+    (x.archivovane ? "" : '<div style="margin-top:8px"><button type="button" class="aabtn" onclick="bsPozvat(\'' + x.id + '\')">+ Pozvať do podprojektu</button></div>');
+}
+
+// Obsah okna BUGstation (shell zvoleného podprojektu).
+function bsShellObsahHtml(){
+  bsZmenaZakazky();
   // Odkaz z e-mailu na záznam iného podprojektu tej istej zákazky = načítať ten podprojekt.
   if (BS.d && typeof _b2bBsCiel !== "undefined" && _b2bBsCiel && _b2bBsCiel.pid === BS.d.pid && _b2bBsCiel.pp && _b2bBsCiel.pp !== BS.d.ppId) { BS.d = null; BS.detail = null; BS.det = null; }
-  if (!BS.d) { if (!BS.nacitavam) setTimeout(bsNacitajData, 0); return '<div class="aempty">Načítavam BUGstation…</div>'; }
+  if (!BS.d) { if (!BS.nacitavam) setTimeout(bsNacitajData, 0); return '<div class="aempty" style="padding:24px">Načítavam BUGstation…</div>'; }
   if (BS.d.bezMigracie) return '<div class="card" style="padding:12px 14px"><b>BUGstation ešte nie je v databáze</b><div class="csub">Chýba migrácia admin_95 (podprojekty) — po jej spustení sa modul otvorí.</div></div>';
-  if (BS.d.chyba) return '<div class="card" style="padding:12px 14px;border-color:var(--neg)"><b style="color:var(--neg)">BUGstation sa nenačítal</b><div class="csub" style="margin:4px 0 8px">' + esc(BS.d.chyba) + '</div><button class="aabtn" onclick="bsObnov()">Skúsiť znova</button></div>';
-  if (!BS.d.projekt) return bsZapnutieHtml();
-  // Odkaz z e-mailu pri už načítanom projekte (bez nového načítania): záznam a detail hneď.
+  if (BS.d.chyba) return '<div class="card" style="padding:12px 14px;border-color:var(--neg)"><b style="color:var(--neg)">BUGstation sa nenačítal</b><div class="csub" style="margin:4px 0 8px">' + esc(BS.d.chyba) + '</div><button class="aabtn" onclick="bsObnov()">Skúsiť znova</button> <button class="aabtn" onclick="bsOknoZavri()">Späť do B2B</button></div>';
+  if (!BS.d.projekt) return '<div class="card" style="padding:12px 14px"><b>Podprojekt BUGstation sa nenašiel</b><div class="csub" style="margin:4px 0 8px">Nie ste jeho členom alebo bol zrušený.</div><button class="aabtn" onclick="bsOknoZavri()">Späť do B2B</button></div>';
+  // Odkaz z e-mailu pri už načítanom podprojekte (bez nového načítania): záznam a detail hneď.
   if (typeof _b2bBsCiel !== "undefined" && _b2bBsCiel && _b2bBsCiel.pid === BS.d.pid) { bsOtvorCiel(); if (BS.detail) setTimeout(() => bsNacitajDetail(BS.detail), 0); }
-  setTimeout(bsVyska, 0);   // prvé kreslenie ide cez renderApp, nie bsPrekresli
   return bsShellHtml();
 }
 function bsZapnutieHtml(){
@@ -1133,7 +1303,8 @@ async function bsZapni(){
     const v = await bsRpc("b2b_bs_zapni", { p_projekt: B2B.pid /* zákazka */ });
     const P = B2B.d && B2B.d.projekt;
     if (P && v && v.verzia != null) { P.verzia = v.verzia; P.moduly = v.moduly; }
-    BS.pohlad = "nastavenia"; if (typeof b2bNacitajClenstvo === "function") await b2bNacitajClenstvo(); await bsObnov();
+    if (typeof b2bNacitajClenstvo === "function") await b2bNacitajClenstvo();
+    BS.sprava = null; BS.d = null; bsPrekresli();   // správa ukáže prvý podprojekt (admin_95)
   }
   catch (e) { bsChyba(e, "BUGstation sa nepodarilo zapnúť"); }
 }
@@ -1182,7 +1353,8 @@ function bsShellHtml(){
     : rel ? '<span class="bs-pata-h">AKTÍVNY RELEASE</span><span class="bs-pata-t">' + esc(rel.nazov) + "</span>" : "") +
     '<button type="button" onclick="bsObnov()">↻ Obnoviť</button></div>';
   const ikPrep = BS.rail ? "M11.6 4.4 6 10l5.6 5.6 1.4-1.4L9.4 10l3.6-4.2zM4 4h1.8v12H4z" : "M8.4 4.4 14 10l-5.6 5.6L7 14.2 10.6 10 7 5.8zM14.2 4H16v12h-1.8z";
-  const rail = '<aside class="bs-rail' + on + '"><div class="bs-rh">' + BS_LOGO + '<span class="bs-rh-nazov bs-iba-on">BUG<span>station</span></span>' +
+  const spat = BS.okno ? '<button type="button" class="bs-spat" onclick="bsOknoZavri()" title="Späť do B2B — podprojekty, členovia a roly">‹<span class="bs-iba-on"> B2B</span></button>' : "";
+  const rail = '<aside class="bs-rail' + on + '"><div class="bs-rh">' + spat + BS_LOGO + '<span class="bs-rh-nazov bs-iba-on">BUG<span>station</span></span>' +
     '<button type="button" class="bs-prep" onclick="bsRail()" title="Rozbaliť / zbaliť menu"><svg width="15" height="15" viewBox="0 0 20 20"><path d="' + ikPrep + '" fill="#c6cedd"/></svg></button></div>' +
     proj + '<nav class="bs-nav">' + nav + "</nav>" + pata + "</aside>";
   const [tit, pod] = bsTitulok();
@@ -1192,22 +1364,21 @@ function bsShellHtml(){
   return '<div class="bs' + (BS.komfortna ? " komf" : "") + '" id="bsKoren">' + rail + '<main class="bs-main">' + lista +
     '<div class="bs-telo"><div class="bs-obsah" data-bs-scroll="obsah"><div class="bs-sirka">' + arch + bsObsahHtml() + "</div></div>" + drawer + "</div></main></div>";
 }
-// Menu v raile: podprojekty tejto zákazky (prepínač), pod nimi ostatné projekty B2B s BUGstation.
+// Menu v raile okna: podprojekty tejto zákazky (prepínač). Iné projekty a správa
+// podprojektov sú v okne B2B (O4) — sem vedie tlačidlo Späť do B2B.
 function bsMenuHtml(){
   const pps = bsPodprojekty().map(x => {
     const on = x.id === BS.pp;
     return '<button type="button" class="bs-menu-p' + (on ? " on" : "") + '" onclick="bsVyberPodprojekt(\'' + x.id + '\')"><span class="bs-kod">' + esc(x.kod) + '</span><span style="flex:1;min-width:0"><b>' +
       esc(x.nazov) + "</b><i>" + (x.archivovane ? "archivovaný" : x.predvoleny ? "predvolený" : "podprojekt") + '</i></span><span class="bs-tick">✓</span></button>';
   }).join("");
-  const sBs = (B2B.projekty || []).filter(p => p.id !== B2B.pid && (typeof b2bMojeModuly !== "function" || !p.moje_moduly || b2bMojeModuly(p).includes("bugstation")));
-  const riadky = sBs.map(p => '<button type="button" class="bs-menu-p" onclick="bsVyberProjekt(\'' + p.id + '\')"><span class="bs-kod">' + esc(p.kod) + '</span><span style="flex:1;min-width:0"><b>' +
-      esc(p.nazov) + "</b><i>" + (p.spravca ? "správca" : "člen") + '</i></span><span class="bs-tick">✓</span></button>').join("");
-  return '<div class="bs-menu"><div class="bs-menu-h">PODPROJEKTY</div>' + pps + (riadky ? '<div class="bs-menu-h">INÉ PROJEKTY</div>' + riadky : "") +
-    '<div class="bs-menu-f"><button type="button" onclick="bsMenu();b2bSpatZoznam()">Všetky projekty B2B</button></div></div>';
+  return '<div class="bs-menu"><div class="bs-menu-h">PODPROJEKTY</div>' + pps +
+    '<div class="bs-menu-f"><button type="button" onclick="bsOknoZavri()">Späť do B2B — podprojekty, členovia a roly</button></div></div>';
 }
 function bsVyberPodprojekt(id){
   BS.menu = false;
   if (id === BS.pp) return bsPrekresli();
+  if (BS.okno) return bsOknoOtvor(id, {});   // adresa okna nesie podprojekt
   BS.pp = id; BS.d = null; BS.detail = null; BS.det = null; BS.split = null; BS.filtre = {}; BS.nastavenia = null; BS.otazka = null;
   if (BS.pohlad === "otazka") BS.pohlad = "prehlad";
   bsPrekresli();
@@ -1840,8 +2011,8 @@ function bsTriazUprav(v){
 }
 // Pozvanie do BUGstation (D19): správca aj Test manager. Osoba dostane len modul
 // BUGstation a vybrané roly — výkaz, zmluvu ani ceny projektu nevidí.
-function bsPozvat(){
-  const roly = Object.keys(BS_ROLY);
+function bsPozvat(ppId){
+  const pp = ppId || BS.pp, roly = Object.keys(BS_ROLY);
   const html = '<div class="bs-ok"><div class="bs-form">' +
     '<label>Meno a priezvisko<input type="text" id="bsPzMeno"></label>' +
     '<label>E-mail<input type="email" id="bsPzEmail" placeholder="na túto adresu príde pozvánka"></label>' +
@@ -1857,13 +2028,14 @@ function bsPozvat(){
     if (!meno) return b2bVOkne("Zadajte meno.");
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return b2bVOkne("Zadajte platný e-mail.");
     let osoba;
-    try { osoba = await bsRpc("b2b_bs_osoba_zaloz", { p_podprojekt: BS.pp, p_meno: meno, p_email: email, p_organizacia: org || null, p_role: role }); }
+    try { osoba = await bsRpc("b2b_bs_osoba_zaloz", { p_podprojekt: pp, p_meno: meno, p_email: email, p_organizacia: org || null, p_role: role }); }
     catch (e) { return b2bVOkne(String((e && e.message) || e).replace(/^.*?ERROR:\s*/, "")); }
     let token, mail = true;
     try { const r = await sb.rpc("b2b_pozvi", { p_osoba: osoba, p_email: email }); if (r.error) throw r.error; token = r.data; }
     catch (e) { bsChyba(e, "Osoba je založená, ale pozvánku sa nepodarilo vytvoriť"); if (typeof b2bObnov === "function") b2bObnov(); return; }
     try { await b2bEdge("pozvanka", { token }); } catch (e) { mail = false; console.error("BUGstation: e-mail pozvánky", e); }
     oznamPas(mail ? "Pozvánka odišla na " + email : "Pozvánka vytvorená, e-mail sa neodoslal — odkaz pošle správca z Tímu");
+    BS.sprava = null;   // nový člen v správe podprojektov
     if (typeof b2bObnov === "function") b2bObnov();
   }, null, null, "Pozvať");
 }
@@ -1871,18 +2043,6 @@ function bsNastaveniaHtml(){
   const ja = bsJa();
   if (!bsMaRolu(ja, ["tm"])) return '<div class="bs-nast">' + bsMojeUpozorneniaHtml() + "</div>";
   const n = BS.nastavenia || (BS.nastavenia = JSON.parse(JSON.stringify(bsNast())));
-  // Ľudia zákazky a ich členstvo v tomto podprojekte (admin_95): členovia hore, potom
-  // ostatné aktívne osoby — tých pridá zaškrtnutie Člen alebo niektorej roly.
-  const cl = {};
-  ((BS.d && BS.d.clenovia) || []).forEach(c => { cl[c.osoba_id] = c.role || []; });
-  const osoby = ((B2B.d && B2B.d.osoby) || []).filter(o => o.aktivny)
-    .sort((a, b) => (cl[b.id] || b.spravca ? 1 : 0) - (cl[a.id] || a.spravca ? 1 : 0) || String(a.meno).localeCompare(String(b.meno), "sk"));
-  const roly = Object.keys(BS_ROLY);
-  const tabRol = '<table class="bs-mriezka"><thead><tr><th>Osoba</th><th>Člen</th>' + roly.map(r => "<th>" + esc(BS_ROLY[r]) + "</th>").join("") + "</tr></thead><tbody>" +
-    osoby.map(o => "<tr><td>" + esc(o.meno) + (o.spravca ? " <small>(správca)</small>" : "") + (o.user_id ? "" : " <small>(bez účtu)</small>") + "</td>" +
-      (o.spravca ? '<td title="Správca projektu vidí každý podprojekt">vždy</td>' : '<td><input type="checkbox"' + (cl[o.id] ? " checked" : "") + ' onchange="bsClenPrepni(\'' + o.id + "',this.checked)\"></td>") +
-      roly.map(r => '<td><input type="checkbox"' + ((cl[o.id] || []).includes(r) ? " checked" : "") +
-      ' onchange="bsRolaPrepni(\'' + o.id + "','" + r + "',this.checked)\"></td>").join("") + "</tr>").join("") + "</tbody></table>";
   const cis = BS_CISELNIKY.map(([k, lab]) => '<div class="bs-panel"><div class="bs-ph"><h3>' + esc(lab) + '</h3><small>' + (n[k] || []).length + '</small></div><div class="in">' +
     (n[k] || []).map((x, i) => '<div class="bs-pol-r"><input type="text" value="' + esc(x.nazov) + '" onchange="bsCisUprav(\'' + k + "'," + i + ',this.value)">' +
       (k === "releasy" ? '<select onchange="bsCisStav(' + i + ',this.value)">' + [["planovany", "plánovaný"], ["aktivny", "aktívny"], ["nasadeny", "nasadený"]].map(s => '<option value="' + s[0] + '"' + (x.stav === s[0] ? " selected" : "") + ">" + s[1] + "</option>").join("") + "</select>" : "") +
@@ -1894,10 +2054,10 @@ function bsNastaveniaHtml(){
     "<tr><td>" + esc(BS_POLIA[k].nazov) + '</td><td><select onchange="bsPovinneUprav(\'' + typ + "','" + k + '\',this.value)">' +
     [["volitelne", "voliteľné"], ["povinne", "povinné"], ["skryte", "skryté"]].map(s => '<option value="' + s[0] + '"' + ((((n.povinne || {})[typ] || {})[k] || "volitelne") === s[0] ? " selected" : "") + ">" + s[1] + "</option>").join("") + "</select></td></tr>").join("")).join("");
   const poz = (BS.d.poziadavky || []).map(q => "<tr><td class=\"mono\">" + esc(q.kod) + "</td><td>" + esc(q.nazov) + "</td></tr>").join("");
-  return '<div class="bs-nast">' + bsMojeUpozorneniaHtml() + bsPodprojektyHtml(ja) +
-    '<div class="bs-panel"><div class="bs-ph"><h3>Ľudia a roly v podprojekte ' + esc((BS.d.projekt || {}).kod || "") + '</h3><small>ukladá sa hneď</small></div><div class="in" style="overflow-x:auto">' + tabRol +
-      '<div class="bs-podobne">Členstvo a roly platia len v tomto podprojekte. Člen bez roly je čitateľ. Testerov a riešiteľov len do BUGstation pozvete sami; prístup k výkazu a ďalším modulom prideľuje správca v karte Projekt → Osoby.</div>' +
-      '<div style="margin-top:8px"><button type="button" class="bs-btn" onclick="bsPozvat()">+ Pozvať do BUGstation</button></div></div></div>' +
+  // Členov a roly spravuje správca a TM podprojektu v okne B2B (štruktúra, O4); tu sú pravidlá podprojektu.
+  return '<div class="bs-nast">' + bsMojeUpozorneniaHtml() +
+    '<div class="bs-panel"><div class="bs-ph"><h3>Ľudia a roly</h3><small>v okne B2B</small></div><div class="in"><div class="bs-podobne">Členov podprojektu ' + esc((BS.d.projekt || {}).kod || "") + ' a ich roly, pozvanie do podprojektu, predvolený podprojekt a archív spravuje správca projektu a Test manager v okne B2B (BUGstation → Členovia a roly).</div>' +
+      '<div style="margin-top:8px"><button type="button" class="bs-btn" onclick="bsOknoZavri()">Späť do B2B</button></div></div></div>' +
     '<div class="bs-panel"><div class="bs-ph"><h3>Triáž</h3></div><div class="in"><label style="display:flex;gap:8px;align-items:center;font:400 12px/1.4 var(--bs-sans)"><input type="checkbox"' + (n.triaz !== false ? " checked" : "") +
       ' onchange="BS.nastavenia.triaz=this.checked"> Nový defekt, incident a zmena čakajú v Identifikované na triáž Test managera alebo Test team leadera</label></div></div>' +
     bsSlaPravidlaHtml(n) +
@@ -1966,73 +2126,74 @@ async function bsNastaveniaUloz(){
     oznamPas("Nastavenia BUGstation uložené"); BS.nastavenia = null; bsNacitajData();
   } catch (e) { bsChyba(e, "Nastavenia sa nepodarilo uložiť"); }
 }
-// Členstvo a roly v zvolenom podprojekte (admin_95, b2b_bs_clen_nastav): rola
-// nečlenovi ho pridá, Člen bez roly = čitateľ, odškrtnutie Člen ho odoberie.
-function bsClen(osobaId){ return ((BS.d && BS.d.clenovia) || []).find(x => x.osoba_id === osobaId); }
-async function bsRolaPrepni(osobaId, rola, zapni){
-  const c = bsClen(osobaId);
-  await bsClenNastav(osobaId, ((c && c.role) || []).filter(r => r !== rola).concat(zapni ? [rola] : []));
+// Členstvo a roly v podprojekte (admin_95, b2b_bs_clen_nastav) — zo správy v okne B2B
+// (BS4b) aj z okna (bez ppId = otvorený podprojekt): rola nečlenovi ho pridá, Člen
+// bez roly = čitateľ, odškrtnutie Člen ho odoberie.
+function bsClen(osobaId, ppId){
+  const pp = ppId || BS.pp;
+  const zo = ((BS.sprava && BS.sprava.clenovia) || []).filter(c => c.podprojekt_id === pp);
+  const zd = BS.d && BS.d.ppId === pp ? (BS.d.clenovia || []) : [];
+  return zo.concat(zd).find(x => x.osoba_id === osobaId);
 }
-async function bsClenPrepni(osobaId, zapni){
-  const c = bsClen(osobaId);
+async function bsRolaPrepni(osobaId, rola, zapni, ppId){
+  const c = bsClen(osobaId, ppId);
+  await bsClenNastav(osobaId, ((c && c.role) || []).filter(r => r !== rola).concat(zapni ? [rola] : []), ppId);
+}
+async function bsClenPrepni(osobaId, zapni, ppId){
+  const c = bsClen(osobaId, ppId);
   if (!zapni && c && c.role && c.role.length && !confirm("Odobrať osobu z podprojektu? Stratí prístup k jeho záznamom aj roly v ňom.")) return bsPrekresli();
-  await bsClenNastav(osobaId, zapni ? ((c && c.role) || []) : null);
+  await bsClenNastav(osobaId, zapni ? ((c && c.role) || []) : null, ppId);
 }
-async function bsClenNastav(osobaId, role){
-  const o = ((B2B.d && B2B.d.osoby) || []).find(x => x.id === osobaId);
+async function bsClenNastav(osobaId, role, ppId){
+  const pp = ppId || BS.pp, o = ((B2B.d && B2B.d.osoby) || []).find(x => x.id === osobaId);
   try {
-    const r = await bsRpc("b2b_bs_clen_nastav", { p_podprojekt: BS.pp, p_osoba: osobaId, p_role: role });
-    const zoz = BS.d.clenovia || (BS.d.clenovia = []), i = zoz.findIndex(x => x.osoba_id === osobaId);
-    if (r.role == null) { if (i >= 0) zoz.splice(i, 1); }
-    else if (i >= 0) zoz[i].role = r.role;
-    else zoz.push({ osoba_id: osobaId, role: r.role });
+    const r = await bsRpc("b2b_bs_clen_nastav", { p_podprojekt: pp, p_osoba: osobaId, p_role: role });
+    const uprav = (zoz, sPp) => {
+      const i = zoz.findIndex(x => x.osoba_id === osobaId && (!sPp || x.podprojekt_id === pp));
+      if (r.role == null) { if (i >= 0) zoz.splice(i, 1); }
+      else if (i >= 0) zoz[i].role = r.role;
+      else zoz.push(sPp ? { podprojekt_id: pp, osoba_id: osobaId, role: r.role } : { osoba_id: osobaId, role: r.role });
+    };
+    if (BS.sprava && BS.sprava.clenovia) uprav(BS.sprava.clenovia, true);
+    if (BS.d && BS.d.ppId === pp) uprav(BS.d.clenovia || (BS.d.clenovia = []), false);
     oznamPas((r.role == null ? "Odobratá z podprojektu · " : "Roly uložené · ") + (o ? o.meno : ""));
     bsPrekresli();
   } catch (e) { bsChyba(e, "Členstvo v podprojekte sa nepodarilo zmeniť"); bsPrekresli(); }
 }
-// Podprojekty zákazky (admin_95, O7): zakladá správca aj Test manager; predvolený
-// a archív mení správca. Kód sa po založení nemení — nesie ho každý kľúč záznamu.
-function bsPodprojektyHtml(ja){
-  const zoz = bsPodprojekty(), P = (BS.d && BS.d.projekt) || {};
-  const riadky = zoz.map(x => '<tr><td class="mono">' + esc(x.kod) + "</td><td>" + esc(x.nazov) + (x.id === BS.pp ? " <small>(otvorený)</small>" : "") +
-    (x.predvoleny ? " <small>(predvolený)</small>" : "") + (x.archivovane ? " <small>(archivovaný)</small>" : "") + "</td><td style=\"white-space:nowrap\">" +
-    (x.id !== BS.pp ? '<button type="button" class="bs-btn mal" onclick="bsVyberPodprojekt(\'' + x.id + '\')">Otvoriť</button> ' : "") +
-    (ja.spravca && !x.predvoleny && !x.archivovane ? '<button type="button" class="bs-btn mal" onclick="bsPodprojektUprav(\'' + x.id + '\',{predvoleny:true})">Predvolený</button> ' : "") +
-    (ja.spravca ? '<button type="button" class="bs-btn mal" onclick="bsPodprojektUprav(\'' + x.id + "',{archivovat:" + !x.archivovane + '})">' + (x.archivovane ? "Obnoviť" : "Archivovať") + "</button>" : "") +
-    "</td></tr>").join("");
-  return '<div class="bs-panel"><div class="bs-ph"><h3>Podprojekty BUGstation</h3><small>' + zoz.length + '</small></div><div class="in" style="overflow-x:auto">' +
-    '<table class="bs-mriezka"><tbody>' + riadky + "</tbody></table>" +
-    '<div class="bs-podobne">Každý podprojekt má vlastný kód (kľúč záznamu, napr. ' + esc(P.kod || "KOD") + "-B12), nastavenia, členov a roly. " +
-    "Archivovaný sa dá čítať, zapisovať nie. Predvolený podprojekt dostane e-mail bez kódu.</div>" +
-    '<div style="margin-top:8px"><button type="button" class="bs-btn" onclick="bsPodprojektFormular()">+ Založiť podprojekt</button></div></div></div>';
-}
+// Podprojekty zákazky (admin_95, O7): zakladá správca aj Test manager niektorého
+// podprojektu; predvolený a archív mení správca. Kód sa po založení nemení — nesie
+// ho každý kľúč záznamu. Zakladá sa zo správy v okne B2B.
+function bsPodprojektyZoznam(){ return (BS.sprava && BS.sprava.podprojekty) || bsPodprojekty(); }
 function bsPodprojektFormular(){
-  const P = (BS.d && BS.d.projekt) || {};
+  const zoz = bsPodprojektyZoznam().filter(x => !x.archivovane);
   const html = '<div class="bs-ok"><div class="bs-form">' +
     '<label>Kód (kľúč záznamov, 2–10 veľkých písmen alebo číslic)<input type="text" id="bsPpKod" maxlength="10" placeholder="PORTAL" style="text-transform:uppercase"></label>' +
     '<label>Názov<input type="text" id="bsPpNazov" maxlength="300" placeholder="Klientsky portál"></label>' +
-    '<label style="display:flex;gap:8px;align-items:center;font:400 12px var(--bs-sans)"><input type="checkbox" id="bsPpVzor" checked> Prevziať nastavenia z ' + esc(P.kod || "otvoreného podprojektu") + " (číselníky, úrovne, povinné polia, SLA)</label>" +
-    '<div class="bs-podobne" style="margin-top:6px">Kód sa po založení nemení. Členov a roly pridáte v Nastaveniach nového podprojektu' + (bsJa().spravca ? "" : " — vy v ňom budete Test manager") + ".</div></div></div>";
+    '<label>Nastavenia (číselníky, úrovne, povinné polia, SLA) prevziať z<select id="bsPpVzor"><option value="">— predvolené nastavenia —</option>' +
+      zoz.map(x => '<option value="' + esc(x.id) + '"' + (x.predvoleny ? " selected" : "") + ">" + esc(x.kod + " · " + x.nazov) + "</option>").join("") + "</select></label>" +
+    '<div class="bs-podobne" style="margin-top:6px">Kód sa po založení nemení. Členov a roly pridáte v správe podprojektov' + (bsJaVZakazke().spravca ? "" : " — vy v ňom budete Test manager") + ".</div></div></div>";
   openModal("Založiť podprojekt BUGstation", html, async () => {
     const kod = String((document.getElementById("bsPpKod") || {}).value || "").trim().toUpperCase();
     const nazov = String((document.getElementById("bsPpNazov") || {}).value || "").trim();
-    const vzor = (document.getElementById("bsPpVzor") || {}).checked ? BS.pp : null;
+    const vzor = String((document.getElementById("bsPpVzor") || {}).value || "") || null;
     if (!/^[A-Z0-9]{2,10}$/.test(kod)) return b2bVOkne("Kód má 2 až 10 veľkých písmen alebo číslic — bez medzier a pomlčky.");
     if (!nazov) return b2bVOkne("Zadajte názov podprojektu.");
     let r;
     try { r = await bsRpc("b2b_bs_podprojekt_zaloz", { p_projekt: B2B.pid, p_kod: kod, p_nazov: nazov, p_vzor: vzor }); }
-    catch (e) { return b2bVOkne(String((e && e.message) || e).replace(/^.*?ERROR:\s*/, "")); }
-    oznamPas("Podprojekt " + r.kod + " založený");
-    bsVyberPodprojekt(r.id);
+    catch (e) { return b2bVOkne(String((e && e.message) || e).replace(/^.*?ERROR:s*/, "")); }
+    oznamPas("Podprojekt " + r.kod + " založený — pridajte doň členov");
+    BS.sprava = null; BS.spravaOtvorene = Object.assign({}, BS.spravaOtvorene, { [r.id]: true });
+    bsPrekresli();
   }, null, null, "Založiť");
 }
 async function bsPodprojektUprav(id, polia){
-  const x = bsPodprojekty().find(p => p.id === id); if (!x) return;
+  const x = bsPodprojektyZoznam().find(p => p.id === id); if (!x) return;
   if (polia.archivovat && !confirm("Archivovať podprojekt " + x.kod + "? Záznamy ostanú na čítanie, zapisovať sa do neho nebude dať.")) return;
   try {
     await bsRpc("b2b_bs_podprojekt_uprav", { p_id: id, p_verzia: x.verzia, p_polia: polia });
     oznamPas(polia.predvoleny ? "Predvolený podprojekt: " + x.kod : polia.archivovat ? "Podprojekt " + x.kod + " archivovaný" : "Podprojekt " + x.kod + " obnovený");
-    BS.nastavenia = null; bsNacitajData();
+    BS.nastavenia = null; BS.sprava = null;
+    if (BS.okno) bsNacitajData(); else bsPrekresli();
   } catch (e) { bsChyba(e, "Podprojekt sa nepodarilo upraviť"); }
 }
 async function bsPoziadavkyUloz(){
