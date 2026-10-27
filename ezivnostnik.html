@@ -27453,7 +27453,9 @@ function b2bMriezkaModel(d, model, zmeny, ruc, vybOrg){
   // Objednané hodiny z objednávky mesiaca — to isté pravidlo ako e-mail objednávky.
   const obj=b2bObjednavkaMesiaca(D, d.mesiac), objM=obj? b2bObjednavkaModel(obj, D) : null;
   const hNaMiesto={}; if(objM) objM.riadky.forEach(r=>r.miesta.forEach(mid=>{ hNaMiesto[mid]=r.hodinNaExperta; }));
-  const riadky=(d.osoby||[]).filter(o=>o.aktivny!==false && !b2bJeManagement(o) && (!o.organizacia || !vybOrg || vybOrg.includes(o.organizacia))).map(o=>{
+  // Management v tíme nie je (b2bTimHtml) — v mriežke len s hodinami v mesiaci (spred
+  // roly); inak by sa jeho hodiny rátali do výkazu a v tabuľke chýbali.
+  const riadky=(d.osoby||[]).filter(o=>o.aktivny!==false && (!o.organizacia || !vybOrg || vybOrg.includes(o.organizacia))).map(o=>{
     const miesta=new Set();
     const bunky=model.dni.map(x=>{
       const kl=o.id+"|"+x.datum, od=odM.get(kl), poz=b2bPozOsobyDna(D, o, x.datum), mi=b2bMiestoOsoby(o, x.datum);
@@ -27467,9 +27469,9 @@ function b2bMriezkaModel(d, model, zmeny, ruc, vybOrg){
     const spolu=bunky.reduce((a,c)=>a+(c.poz? c.novy : 0),0), mimo=bunky.reduce((a,c)=>a+(c.poz? 0 : c.novy),0);
     const objednane=objM? [...miesta].reduce((a,mid)=>a+(hNaMiesto[mid]||0),0) : null;
     const pozicie=[...new Set(bunky.map(c=>c.poz).filter(Boolean))];
-    return {osobaId:o.id, meno:o.meno, bezUctu:!o.user_id, pozicie, pozNazov:pozicie.map(p=>pozN[p]||p).join(", "), bunky, spolu, mimo,
+    return {osobaId:o.id, meno:o.meno, bezUctu:!o.user_id, man:b2bJeManagement(o), pozicie, pozNazov:pozicie.map(p=>pozN[p]||p).join(", "), bunky, spolu, mimo,
       objednane, rozdiel:objednane==null? null : spolu-objednane};
-  }).filter(r=>r.pozicie.length || r.spolu || r.mimo)
+  }).filter(r=>r.man? (r.spolu || r.mimo) : (r.pozicie.length || r.spolu || r.mimo))
     .sort((a,b)=>(poradie[a.pozicie[0]]!=null? poradie[a.pozicie[0]] : 99)-(poradie[b.pozicie[0]]!=null? poradie[b.pozicie[0]] : 99) || String(a.meno).localeCompare(String(b.meno),"sk"));
   const spoluDni=model.dni.map((x,i)=>riadky.reduce((a,r)=>a+(r.bunky[i].poz? r.bunky[i].novy : 0),0));
   // Objednávka po pozíciách: objednané (počet miest × ČH na experta) proti výkazu vrátane návrhu.
