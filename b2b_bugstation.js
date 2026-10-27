@@ -552,6 +552,9 @@ const BS_CSS = [
   ".bs-projb{display:flex;align-items:center;justify-content:center;gap:9px;width:100%;min-width:0;padding:7px 0;border:1px solid rgba(255,255,255,.14);border-radius:8px;background:rgba(255,255,255,.07);color:#fff;text-align:left}",
   ".bs-rail.on .bs-projb{justify-content:flex-start;padding:7px 9px}",
   ".bs-kod{flex:none;display:flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:7px;background:var(--bs-odznak);font:600 9px/1 var(--bs-mono);color:#fff}",
+  // dlhý kód (5–10 znakov): pilulka na celý kód; v zbalenom raile štvorec s kódom na dva riadky
+  ".bs-kod.dlhy{width:auto;min-width:26px;padding:0 6px;white-space:nowrap}",
+  ".bs-rail:not(.on) .bs-projb .bs-kod.dlhy{flex-direction:column;gap:1px;width:26px;min-width:0;padding:0;font-size:8px}",
   ".bs-projt{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1}",
   ".bs-projt b{font:500 11.5px/1.2 var(--bs-sans);color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}",
   ".bs-projt i{font:400 9.5px/1.2 var(--bs-sans);font-style:normal;color:#b0bacb;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}",
@@ -652,6 +655,9 @@ const BS_CSS = [
   ".bs-bar{height:16px;border-radius:4px;background:var(--bs-l08);overflow:hidden}",
   ".bs-bar>i{display:block;height:100%;border-radius:4px;background:oklch(var(--bs-bar-l) var(--c) var(--h))}",
   ".bs-num{font:500 12px/1 var(--bs-mono);color:var(--bs-t3);text-align:right}",
+  ".bs-riadok.bs-typy{grid-template-columns:minmax(0,1fr) 64px 84px 56px}",
+  ".bs-typy-h{padding-top:9px;padding-bottom:3px}",
+  ".bs-typy-h span{font:500 9.5px/1.2 var(--bs-mono);letter-spacing:.5px;color:var(--bs-t5);text-align:right}",
   ".bs-mini{display:flex;gap:28px;padding:12px 16px 14px;border-top:1px solid var(--bs-l08)}",
   ".bs-mini b{display:block;font:500 15px/1.2 var(--bs-mono);color:var(--bs-t1);margin-top:4px}",
   ".bs-akt{display:flex;flex-direction:column;padding:6px 16px 12px}",
@@ -843,10 +849,14 @@ const BS_CSS = [
   ".bs{flex-direction:column;height:auto;min-height:0;overflow:visible;border-radius:0;border-left:0;border-right:0}",
   ".bs-rail,.bs-rail.on{width:auto;flex-direction:column}",
   ".bs-rh,.bs-rail.on .bs-rh{flex-direction:row;padding:8px 12px}",
-  ".bs-rail .bs-iba-on{display:inline!important}",
-  ".bs-prep,.bs-pata{display:none!important}",
+  // aj s :not(.on) — inak vyhrá pravidlo zbaleného railu (vyššia špecificita) a na mobile
+  // chýbal názov podprojektu, nadpis aj popisy záložiek s počtami
+  ".bs-rail .bs-iba-on,.bs-rail:not(.on) .bs-iba-on{display:inline!important}",
+  ".bs-rail .bs-projt,.bs-rail:not(.on) .bs-projt{display:flex!important}",
+  ".bs-prep,.bs-pata,.bs-rail .bs-pata,.bs-rail:not(.on) .bs-pata{display:none!important}",
   ".bs-projw{padding:0 12px 8px}",
   ".bs-projb,.bs-rail.on .bs-projb{justify-content:flex-start;padding:7px 9px}",
+  ".bs-rail:not(.on) .bs-projb .bs-kod.dlhy{flex-direction:row;gap:0;width:auto;min-width:26px;padding:0 6px;font-size:9px}",
   ".bs-nav{flex-direction:row;overflow-x:auto;padding:0 8px 8px;gap:4px}",
   ".bs-nav button,.bs-rail.on .bs-nav button{flex:none;width:auto;justify-content:flex-start;padding:8px 10px}",
   ".bs-nav .bs-nd{display:none}",
@@ -1342,8 +1352,8 @@ function bsShellHtml(){
       '<span class="bs-nl bs-iba-on">' + esc(lab) + "</span>" + (c ? '<span class="bs-nc bs-iba-on">' + esc(c) + '</span><i class="bs-nd"></i>' : "") + "</button>";
   }).join("");
   const roly = ja.spravca ? ["Správca projektu"].concat((ja.roly || []).map(r => BS_ROLY[r])) : (ja.roly || []).map(r => BS_ROLY[r]);
-  const proj = '<div class="bs-projw"><button type="button" class="bs-projb" onclick="bsMenu()" title="Podprojekty a projekty">' +
-    '<span class="bs-kod">' + esc(P.kod || "") + '</span><span class="bs-projt bs-iba-on"><b>' + esc(P.nazov || "") + "</b><i>" + esc(roly.join(" · ") || "Čitateľ") + "</i></span>" +
+  const proj = '<div class="bs-projw"><button type="button" class="bs-projb" onclick="bsMenu()" title="' + esc((P.kod ? P.kod + " · " + (P.nazov || "") + " — " : "") + "prepnúť podprojekt") + '">' +
+    bsKodHtml(P.kod) + '<span class="bs-projt bs-iba-on"><b>' + esc(P.nazov || "") + "</b><i>" + esc(roly.join(" · ") || "Čitateľ") + "</i></span>" +
     '<svg class="bs-iba-on" width="11" height="11" viewBox="0 0 20 20" style="flex:none;margin-left:auto"><path d="M4.6 7.4 10 12.8l5.4-5.4-1.5-1.5L10 9.8 6.1 5.9z" fill="#b0bacb"/></svg></button>' +
     (BS.menu ? bsMenuHtml() : "") + "</div>";
   const rel = (bsNast().releasy || []).find(r => r.stav === "aktivny");
@@ -1364,12 +1374,20 @@ function bsShellHtml(){
   return '<div class="bs' + (BS.komfortna ? " komf" : "") + '" id="bsKoren">' + rail + '<main class="bs-main">' + lista +
     '<div class="bs-telo"><div class="bs-obsah" data-bs-scroll="obsah"><div class="bs-sirka">' + arch + bsObsahHtml() + "</div></div>" + drawer + "</div></main></div>";
 }
+// Odznak s kódom podprojektu (2–10 znakov, admin_95). Do štvorca sa zmestia 4 znaky;
+// dlhší kód je pilulka a v zbalenom raile štvorec s kódom na dva riadky (CSS .bs-kod.dlhy).
+function bsKodHtml(kod){
+  kod = String(kod || "");
+  if (kod.length <= 4) return '<span class="bs-kod">' + esc(kod) + "</span>";
+  const m = Math.ceil(kod.length / 2);
+  return '<span class="bs-kod dlhy"><span>' + esc(kod.slice(0, m)) + "</span><span>" + esc(kod.slice(m)) + "</span></span>";
+}
 // Menu v raile okna: podprojekty tejto zákazky (prepínač). Iné projekty a správa
 // podprojektov sú v okne B2B (O4) — sem vedie tlačidlo Späť do B2B.
 function bsMenuHtml(){
   const pps = bsPodprojekty().map(x => {
     const on = x.id === BS.pp;
-    return '<button type="button" class="bs-menu-p' + (on ? " on" : "") + '" onclick="bsVyberPodprojekt(\'' + x.id + '\')"><span class="bs-kod">' + esc(x.kod) + '</span><span style="flex:1;min-width:0"><b>' +
+    return '<button type="button" class="bs-menu-p' + (on ? " on" : "") + '" onclick="bsVyberPodprojekt(\'' + x.id + '\')">' + bsKodHtml(x.kod) + '<span style="flex:1;min-width:0"><b>' +
       esc(x.nazov) + "</b><i>" + (x.archivovane ? "archivovaný" : x.predvoleny ? "predvolený" : "podprojekt") + '</i></span><span class="bs-tick">✓</span></button>';
   }).join("");
   return '<div class="bs-menu"><div class="bs-menu-h">PODPROJEKTY</div>' + pps +
@@ -1506,10 +1524,12 @@ function bsPrehladHtml(){
     return '<div class="bs-riadok"><span>' + esc(bsUrovenNazov(nast, "defekt", u)) + '</span><div class="bs-bar"><i style="--h:' + f[0] + ";--c:" + f[1] + ";width:" + Math.round(n / max * 100) + '%"></i></div><span class="bs-num">' + n + "</span></div>";
   }).join("");
   const poSla = (typ) => zz.filter(z => z.typ === typ && bsOtvoreny(z) && (bsSla(z) || {}).po).length;
-  const typy = BS_TYPY_PORADIE.map(typ => {
+  // Tabuľka so stĺpcami: hlavička raz, v bunkách len čísla zarovnané doprava —
+  // text pri každom čísle („7 otvorených“) sa v úzkom paneli zalamoval a stĺpce sa rozišli.
+  const typy = '<div class="bs-riadok bs-typy bs-typy-h"><span></span><span>OTVORENÉ</span><span>U ZÁKAZNÍKA</span><span>PO SLA</span></div>' + BS_TYPY_PORADIE.map(typ => {
     const x = O.poTypoch[typ], ps = typ === "uloha" ? 0 : poSla(typ);
-    return '<div class="bs-riadok" style="grid-template-columns:150px 1fr 1fr 1fr"><span>' + esc(BS_TYPY[typ].mnozne) + '</span><span class="bs-num" style="text-align:left">' + x.otvorene + ' otvorených</span><span class="bs-num" style="text-align:left">' + x.uZakaznika + " u zákazníka</span>" +
-      '<span class="bs-num' + (ps ? " neg" : "") + '" style="text-align:left">' + (typ === "uloha" ? "" : ps + " po SLA") + "</span></div>";
+    return '<div class="bs-riadok bs-typy"><span>' + esc(BS_TYPY[typ].mnozne) + '</span><span class="bs-num">' + x.otvorene + '</span><span class="bs-num">' + x.uZakaznika + "</span>" +
+      '<span class="bs-num' + (ps ? " neg" : "") + '"' + (typ === "uloha" ? ' title="Úlohy nemajú SLA">—' : ">" + ps) + "</span></div>";
   }).join("");
   const akt = (BS.d.historia || []).slice(-6).reverse().map(h => {
     const z = bsNajdi(h.zaznam_id); if (!z) return "";
