@@ -26493,9 +26493,11 @@ async function b2bPrijmiPozvanku(token, id){
 // skončiť v sprievodcovi firmy; neúspech (iný e-mail, po platnosti…) ukáže karta
 // v module B2B, nie alert nad sprievodcom firmy (č. 289, návrh §21.6).
 // Odkaz z e-mailu BUGstation ?b2b_bs=<kľúč> (BS1b, edge b2b-upozornenia): kľúč nesie
-// kód projektu (PAY-B12). Projekt sa vyberie z mojich projektov s modulom BUGstation,
-// záznam otvorí b2b_bugstation.js po načítaní dát (bsOtvorCiel). Do zariadenia sa
-// nič neukladá — parameter sa prečíta pri štarte stránky a spracuje raz.
+// kód podprojektu (PORTAL-B12, admin_95) — ten istý kód môže mať podprojekt inej
+// zákazky, preto sa záznam hľadá v databáze (RLS: len podprojekty, kde som člen).
+// Zákazka a podprojekt idú do _b2bBsCiel, záznam otvorí b2b_bugstation.js po
+// načítaní dát (bsOtvorCiel). Do zariadenia sa nič neukladá — parameter sa prečíta
+// pri štarte stránky a spracuje raz.
 let _b2bBsCiel=null, _b2bOdkazBsHotovo=false;
 let _b2bOdkazBs=(()=>{ try{ return new URLSearchParams(location.search).get("b2b_bs"); }catch(e){ return null; } })();
 async function b2bSpracujOdkazBs(){
@@ -26505,9 +26507,12 @@ async function b2bSpracujOdkazBs(){
   history.replaceState({}, "", location.pathname);
   if(!m) return false;
   if(!B2B.nacitane) await b2bNacitajClenstvo();
-  const p=B2B.projekty.find(x=>x.kod===m[1] && b2bMojeModuly(x).includes("bugstation"));
-  if(!p){ oznamPas("Záznam "+k+" nie je v projekte, kde máte BUGstation."); return false; }
-  _b2bBsCiel={pid:p.id, kluc:k};
+  let z=null;
+  try{ const r=await sb.from("b2b_bs_zaznamy").select("projekt_id,podprojekt_id").eq("kluc",k).limit(1); if(r.error) throw r.error; z=(r.data||[])[0]||null; }
+  catch(e){ console.error("BUGstation: odkaz z e-mailu", e); }
+  const p=z && B2B.projekty.find(x=>x.id===z.projekt_id && b2bMojeModuly(x).includes("bugstation"));
+  if(!p){ oznamPas("Záznam "+k+" nie je v podprojekte, kde máte BUGstation."); return false; }
+  _b2bBsCiel={pid:p.id, pp:z.podprojekt_id, kluc:k};
   if(!B2B.d || B2B.d.pid!==p.id || B2B.d.chyba) B2B.d=null;   // ten istý projekt sa znova nenačítava
   B2B.pid=p.id; B2B.mesiac=B2B.mesiac||b2bMesiacTeraz();
   otvorApp("b2b_bugstation");
@@ -27524,7 +27529,7 @@ function b2bPristupFormHtml(o){
   const proj=B2B.d.projekt.moduly;
   const moje=(o&&o.moduly)||B2B_MODULY_PREDVOLENE;
   return `<div class="mfield"><label>Prístup k modulom</label><div id="b2bOPristup" style="display:flex;flex-wrap:wrap;gap:10px">${proj.map(m=>`<label style="display:flex;gap:6px;align-items:center;font-size:13px;font-weight:400"><input type="checkbox" value="${m}"${moje.includes(m)? " checked" : ""}> ${esc(B2B_MODULY_NAZOV[m]||m)}</label>`).join("")}</div>
-    <div class="csub" style="margin:4px 0 0">Osoba vidí len vybrané moduly — napríklad tester len BUGstation, bez výkazu, zmluvy a cien.${o&&o.spravca? " Správca projektu má prístup ku všetkému vždy." : ""}</div></div>`;
+    <div class="csub" style="margin:4px 0 0">Osoba vidí len vybrané moduly — napríklad tester len BUGstation, bez výkazu, zmluvy a cien.${o&&o.spravca? " Správca projektu má prístup ku všetkému vždy." : ""}${proj.includes("bugstation")? " BUGstation tu znamená člena predvoleného podprojektu bez roly; roly a ďalšie podprojekty sa nastavujú v BUGstation → Nastavenia, odobratie ho vyradí zo všetkých podprojektov." : ""}</div></div>`;
 }
 async function b2bNastavPristup(osobaId, moduly){ const r=await sb.rpc("b2b_nastav_pristup",{p_osoba:osobaId, p_moduly:moduly}); if(r.error) throw r.error; }
 // Moduly, ktoré projekt používa (správca). Vypnutie modulu dáta nemaže — len ich skryje.

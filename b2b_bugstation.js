@@ -926,7 +926,9 @@ function bsUrovenChip(nastavenia, z){
 //  číta modul sám. Realtime zámerne nie (spec 43.33): obnova po vlastnom
 //  zápise, pri návrate na kartu a tlačidlom.
 // ═══════════════════════════════════════════════════════════════
-const BS = { pid: null, d: null, nacitavam: false, pohlad: "prehlad", split: null, detail: null, det: null,
+// pp = id zvoleného podprojektu (admin_95, BS4a): v zákazke ich môže byť viac,
+// modul pracuje vždy v jednom (BS.d.projekt je jeho riadok b2b_bs_podprojekty).
+const BS = { pid: null, pp: null, d: null, nacitavam: false, pohlad: "prehlad", split: null, detail: null, det: null,
   filtre: {}, menu: false, rail: false, hladat: "", zoradit: {}, nastavenia: null, otazka: null };
 let _bsPoradie = 0;
 const BS_STLPCE = "id,projekt_id,typ,cislo,kluc,nazov,uroven,stav,rozlisenie,duplikat,is_id,modul_id,prostredie_id,release_id," +
@@ -934,15 +936,25 @@ const BS_STLPCE = "id,projekt_id,typ,cislo,kluc,nazov,uroven,stav,rozlisenie,dup
   "vysvetlenie_prijal,vysvetlenie_prijate,verzia,vytvoril,vytvorene,upravil,upravene,zmazane," +
   "sla_rezim,sla_reakcia_min,sla_vyriesenie_min,sla_triaz_do,sla_reakcia_do,sla_reakcia_kedy,sla_vyriesenie_do,sla_zostava_min,sla_upozornene";
 
+// Roly sú na podprojekte (admin_95, O3): b2b_bs_clenovia zvoleného podprojektu.
 function bsJa(){
   const o = typeof b2bMojaOsoba === "function" ? b2bMojaOsoba() : null;
-  return o ? { osoba: o.id, roly: o.bs_role || [], spravca: !!o.spravca } : { osoba: null, roly: [], spravca: false };
+  if (!o) return { osoba: null, roly: [], spravca: false };
+  const c = ((BS.d && BS.d.clenovia) || []).find(x => x.osoba_id === o.id);
+  return { osoba: o.id, roly: (c && c.role) || [], spravca: !!o.spravca };
 }
-// Osoby s prístupom do BUGstation (admin_89, BS0). Pred migráciou projekt moduly nemá
-// a BUGstation vidí každý aktívny člen (admin_88).
+// Osoby podprojektu: členovia a správcovia zákazky, každá s rolami podprojektu
+// v poli bs_role (riešiteľ, tester, @zmienka, tabuľka rolí).
 function bsOsoby(){
-  const P = (B2B.d && B2B.d.projekt) || {};
-  return ((B2B.d && B2B.d.osoby) || []).filter(o => o.aktivny && (!P.moduly || typeof b2bOsobaMaModul !== "function" || b2bOsobaMaModul(o, "bugstation")));
+  const roly = {};
+  ((BS.d && BS.d.clenovia) || []).forEach(c => { roly[c.osoba_id] = c.role || []; });
+  return ((B2B.d && B2B.d.osoby) || []).filter(o => o.aktivny && (o.spravca || roly[o.id]))
+    .map(o => Object.assign({}, o, { bs_role: roly[o.id] || [] }));
+}
+function bsPodprojekty(){ return (BS.d && BS.d.podprojekty) || []; }
+// Zvolený podprojekt: posledný zvolený, cieľ odkazu z e-mailu, predvolený, prvý aktívny.
+function bsVyberPodprojektZo(zoz, chcem){
+  return zoz.find(x => x.id === chcem) || zoz.find(x => x.predvoleny) || zoz.find(x => !x.archivovane) || zoz[0] || null;
 }
 function bsMeno(osobaId){
   if (!osobaId) return "";
@@ -967,21 +979,35 @@ async function bsNacitajData(){
   BS.nacitavam = true;
   try {
     const vsetky = (q) => b2bVsetky(q).then(data => ({ data }), error => ({ error }));
-    const planP = bsNacitajPlan(pid).catch(e => ({ plan: null, planChyba: (e && e.message) || String(e) }));   // BS2 (admin_91)
-    const r = await Promise.all([
-      sb.from("b2b_bs_projekty").select("*").eq("projekt_id", pid).maybeSingle(),
-      vsetky(() => sb.from("b2b_bs_zaznamy").select(BS_STLPCE).eq("projekt_id", pid).order("typ").order("cislo")),
-      vsetky(() => sb.from("b2b_bs_historia").select("id,zaznam_id,kto,kedy,udalost,akcia,z,na,data").eq("projekt_id", pid).order("kedy").order("id")),
-      sb.from("b2b_bs_poziadavky").select("*").eq("projekt_id", pid).order("kod"),
-      sb.from("b2b_bs_moje").select("upozornenia").eq("projekt_id", pid).maybeSingle()   // admin_90 (BS1b)
-    ]);
-    const rp = await planP;
+    // Podprojekty zákazky, ktoré vidím (RLS: člen svoje, správca všetky — admin_95),
+    // potom dáta zvoleného. BS.d.projekt = riadok podprojektu (nastavenia, verzia, kód).
+    const rpp = await sb.from("b2b_bs_podprojekty").select("*").eq("projekt_id", pid).order("kod");
     if (poradie !== _bsPoradie) return;
-    const e = r.map(x => x.error).find(Boolean);
-    if (e && b2bChybaTabulky(e)) BS.d = { pid, bezMigracie: true };
-    else if (e) throw e;
-    else BS.d = { pid, projekt: r[0].data, zaznamy: r[1].data || [], historia: r[2].data || [], poziadavky: r[3].data || [],
-      upozornenia: (r[4].data || {}).upozornenia || "okamzite", plan: rp.plan, planChyba: rp.planChyba || null };
+    if (rpp.error && b2bChybaTabulky(rpp.error)) BS.d = { pid, bezMigracie: true };
+    else if (rpp.error) throw rpp.error;
+    else {
+      const zoz = rpp.data || [];
+      const ciel = typeof _b2bBsCiel !== "undefined" && _b2bBsCiel && _b2bBsCiel.pid === pid ? _b2bBsCiel.pp : null;
+      const pp = bsVyberPodprojektZo(zoz, ciel || BS.pp);
+      BS.pp = pp ? pp.id : null;
+      if (!pp) BS.d = { pid, projekt: null, podprojekty: zoz, clenovia: [] };
+      else {
+        const planP = bsNacitajPlan(pp.id).catch(e => ({ plan: null, planChyba: (e && e.message) || String(e) }));   // BS2 (admin_91)
+        const r = await Promise.all([
+          vsetky(() => sb.from("b2b_bs_zaznamy").select(BS_STLPCE).eq("podprojekt_id", pp.id).order("typ").order("cislo")),
+          vsetky(() => sb.from("b2b_bs_historia").select("id,zaznam_id,kto,kedy,udalost,akcia,z,na,data").eq("podprojekt_id", pp.id).order("kedy").order("id")),
+          sb.from("b2b_bs_poziadavky").select("*").eq("podprojekt_id", pp.id).order("kod"),
+          sb.from("b2b_bs_moje").select("upozornenia").eq("podprojekt_id", pp.id).maybeSingle(),   // admin_90 (BS1b)
+          sb.from("b2b_bs_clenovia").select("osoba_id,role").eq("podprojekt_id", pp.id)
+        ]);
+        const rp = await planP;
+        if (poradie !== _bsPoradie) return;
+        const e = r.map(x => x.error).find(Boolean);
+        if (e) throw e;
+        BS.d = { pid, ppId: pp.id, projekt: pp, podprojekty: zoz, zaznamy: r[0].data || [], historia: r[1].data || [], poziadavky: r[2].data || [],
+          upozornenia: (r[3].data || {}).upozornenia || "okamzite", clenovia: r[4].data || [], plan: rp.plan, planChyba: rp.planChyba || null };
+      }
+    }
     bsPlanZmenene();
     bsOtvorCiel();
   } catch (e) {
@@ -1080,9 +1106,11 @@ function bsKedy(ts, teraz){
 // ═══════════════════════════════════════════════════════════════
 function bsZalozkaHtml(){
   bsStyly();
-  if (BS.pid !== B2B.pid) { BS.pid = B2B.pid; BS.d = null; BS.detail = null; BS.det = null; BS.split = null; BS.filtre = {}; BS.menu = false; BS.nastavenia = null; if (BS.pohlad === "otazka") BS.pohlad = "prehlad"; BS.otazka = null; }
+  if (BS.pid !== B2B.pid) { BS.pid = B2B.pid; BS.pp = null; BS.d = null; BS.detail = null; BS.det = null; BS.split = null; BS.filtre = {}; BS.menu = false; BS.nastavenia = null; if (BS.pohlad === "otazka") BS.pohlad = "prehlad"; BS.otazka = null; }
+  // Odkaz z e-mailu na záznam iného podprojektu tej istej zákazky = načítať ten podprojekt.
+  if (BS.d && typeof _b2bBsCiel !== "undefined" && _b2bBsCiel && _b2bBsCiel.pid === BS.d.pid && _b2bBsCiel.pp && _b2bBsCiel.pp !== BS.d.ppId) { BS.d = null; BS.detail = null; BS.det = null; }
   if (!BS.d) { if (!BS.nacitavam) setTimeout(bsNacitajData, 0); return '<div class="aempty">Načítavam BUGstation…</div>'; }
-  if (BS.d.bezMigracie) return '<div class="card" style="padding:12px 14px"><b>BUGstation ešte nie je v databáze</b><div class="csub">Chýba migrácia admin_88 — po jej spustení sa modul otvorí.</div></div>';
+  if (BS.d.bezMigracie) return '<div class="card" style="padding:12px 14px"><b>BUGstation ešte nie je v databáze</b><div class="csub">Chýba migrácia admin_95 (podprojekty) — po jej spustení sa modul otvorí.</div></div>';
   if (BS.d.chyba) return '<div class="card" style="padding:12px 14px;border-color:var(--neg)"><b style="color:var(--neg)">BUGstation sa nenačítal</b><div class="csub" style="margin:4px 0 8px">' + esc(BS.d.chyba) + '</div><button class="aabtn" onclick="bsObnov()">Skúsiť znova</button></div>';
   if (!BS.d.projekt) return bsZapnutieHtml();
   // Odkaz z e-mailu pri už načítanom projekte (bez nového načítania): záznam a detail hneď.
@@ -1102,7 +1130,7 @@ async function bsZapni(){
   // Zapnutie pridá projektu modul bugstation (admin_89) a zvýši verziu projektu — bez jej
   // prevzatia by ďalšia úprava projektu vo Výkaze hlásila konflikt. Zoznam a záložky znova.
   try {
-    const v = await bsRpc("b2b_bs_zapni", { p_projekt: B2B.pid });
+    const v = await bsRpc("b2b_bs_zapni", { p_projekt: B2B.pid /* zákazka */ });
     const P = B2B.d && B2B.d.projekt;
     if (P && v && v.verzia != null) { P.verzia = v.verzia; P.moduly = v.moduly; }
     BS.pohlad = "nastavenia"; if (typeof b2bNacitajClenstvo === "function") await b2bNacitajClenstvo(); await bsObnov();
@@ -1134,7 +1162,7 @@ function bsIkona(id){
   return '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="' + pth + '"/></svg>';
 }
 function bsShellHtml(){
-  const ja = bsJa(), P = (B2B.d && B2B.d.projekt) || {};
+  const ja = bsJa(), P = (BS.d && BS.d.projekt) || {};   // podprojekt (kód = kľúč záznamov)
   const on = BS.rail ? " on" : "";
   const nav = bsNavPolozky().map(([id, lab, n]) => {
     const akt = BS.pohlad === id;
@@ -1143,7 +1171,7 @@ function bsShellHtml(){
       '<span class="bs-nl bs-iba-on">' + esc(lab) + "</span>" + (c ? '<span class="bs-nc bs-iba-on">' + esc(c) + '</span><i class="bs-nd"></i>' : "") + "</button>";
   }).join("");
   const roly = ja.spravca ? ["Správca projektu"].concat((ja.roly || []).map(r => BS_ROLY[r])) : (ja.roly || []).map(r => BS_ROLY[r]);
-  const proj = '<div class="bs-projw"><button type="button" class="bs-projb" onclick="bsMenu()" title="Moje projekty">' +
+  const proj = '<div class="bs-projw"><button type="button" class="bs-projb" onclick="bsMenu()" title="Podprojekty a projekty">' +
     '<span class="bs-kod">' + esc(P.kod || "") + '</span><span class="bs-projt bs-iba-on"><b>' + esc(P.nazov || "") + "</b><i>" + esc(roly.join(" · ") || "Čitateľ") + "</i></span>" +
     '<svg class="bs-iba-on" width="11" height="11" viewBox="0 0 20 20" style="flex:none;margin-left:auto"><path d="M4.6 7.4 10 12.8l5.4-5.4-1.5-1.5L10 9.8 6.1 5.9z" fill="#b0bacb"/></svg></button>' +
     (BS.menu ? bsMenuHtml() : "") + "</div>";
@@ -1160,25 +1188,36 @@ function bsShellHtml(){
   const [tit, pod] = bsTitulok();
   const lista = '<div class="bs-lista"><div class="bs-tit"><h2>' + esc(tit) + "</h2><span>" + esc(pod) + '</span></div><div class="bs-lista-a">' + bsListaAkcieHtml() + "</div></div>";
   const drawer = BS.detail && bsNajdi(BS.detail) ? '<aside class="bs-drawer" data-bs-scroll="detail">' + bsDetailHtml(bsNajdi(BS.detail)) + "</aside>" : "";
+  const arch = P.archivovane ? '<div class="bs-panel" style="padding:8px 12px;margin-bottom:10px;border-color:#d8b26a"><b>Podprojekt je archivovaný</b> — záznamy sa dajú čítať, zapisovať nie. Obnoví ho správca projektu v Nastaveniach.</div>' : "";
   return '<div class="bs' + (BS.komfortna ? " komf" : "") + '" id="bsKoren">' + rail + '<main class="bs-main">' + lista +
-    '<div class="bs-telo"><div class="bs-obsah" data-bs-scroll="obsah"><div class="bs-sirka">' + bsObsahHtml() + "</div></div>" + drawer + "</div></main></div>";
+    '<div class="bs-telo"><div class="bs-obsah" data-bs-scroll="obsah"><div class="bs-sirka">' + arch + bsObsahHtml() + "</div></div>" + drawer + "</div></main></div>";
 }
+// Menu v raile: podprojekty tejto zákazky (prepínač), pod nimi ostatné projekty B2B s BUGstation.
 function bsMenuHtml(){
-  const sBs = (B2B.projekty || []).filter(p => typeof b2bMojeModuly !== "function" || !p.moje_moduly || b2bMojeModuly(p).includes("bugstation"));
-  const riadky = sBs.map(p => {
-    const on = p.id === B2B.pid;
-    return '<button type="button" class="bs-menu-p' + (on ? " on" : "") + '" onclick="bsVyberProjekt(\'' + p.id + '\')"><span class="bs-kod">' + esc(p.kod) + '</span><span style="flex:1;min-width:0"><b>' +
-      esc(p.nazov) + "</b><i>" + (p.spravca ? "správca" : "člen") + '</i></span><span class="bs-tick">✓</span></button>';
+  const pps = bsPodprojekty().map(x => {
+    const on = x.id === BS.pp;
+    return '<button type="button" class="bs-menu-p' + (on ? " on" : "") + '" onclick="bsVyberPodprojekt(\'' + x.id + '\')"><span class="bs-kod">' + esc(x.kod) + '</span><span style="flex:1;min-width:0"><b>' +
+      esc(x.nazov) + "</b><i>" + (x.archivovane ? "archivovaný" : x.predvoleny ? "predvolený" : "podprojekt") + '</i></span><span class="bs-tick">✓</span></button>';
   }).join("");
-  return '<div class="bs-menu"><div class="bs-menu-h">MOJE PROJEKTY</div>' + riadky +
+  const sBs = (B2B.projekty || []).filter(p => p.id !== B2B.pid && (typeof b2bMojeModuly !== "function" || !p.moje_moduly || b2bMojeModuly(p).includes("bugstation")));
+  const riadky = sBs.map(p => '<button type="button" class="bs-menu-p" onclick="bsVyberProjekt(\'' + p.id + '\')"><span class="bs-kod">' + esc(p.kod) + '</span><span style="flex:1;min-width:0"><b>' +
+      esc(p.nazov) + "</b><i>" + (p.spravca ? "správca" : "člen") + '</i></span><span class="bs-tick">✓</span></button>').join("");
+  return '<div class="bs-menu"><div class="bs-menu-h">PODPROJEKTY</div>' + pps + (riadky ? '<div class="bs-menu-h">INÉ PROJEKTY</div>' + riadky : "") +
     '<div class="bs-menu-f"><button type="button" onclick="bsMenu();b2bSpatZoznam()">Všetky projekty B2B</button></div></div>';
 }
+function bsVyberPodprojekt(id){
+  BS.menu = false;
+  if (id === BS.pp) return bsPrekresli();
+  BS.pp = id; BS.d = null; BS.detail = null; BS.det = null; BS.split = null; BS.filtre = {}; BS.nastavenia = null; BS.otazka = null;
+  if (BS.pohlad === "otazka") BS.pohlad = "prehlad";
+  bsPrekresli();
+}
 function bsTitulok(){
-  const zz = bsZaznamy(), ja = bsJa(), P = (B2B.d && B2B.d.projekt) || {};
+  const zz = bsZaznamy(), ja = bsJa(), P = (BS.d && BS.d.projekt) || {};
   const v = BS.pohlad;
   if (v === "prehlad") return ["Prehľad & progres review", (P.nazov || "") + " · " + bsPocet(zz.filter(bsOtvoreny).length, "otvorený záznam", "otvorené záznamy", "otvorených záznamov")];
   if (v === "caka") return ["Čaká na mňa", bsPocet(zz.filter(z => bsCakaNaMna(z, ja)).length, "záznam čaká", "záznamy čakajú", "záznamov čaká") + " na vašu akciu"];
-  if (v === "nastavenia") return ["Nastavenia BUGstation", "číselníky, názvy úrovní, povinné polia a roly v projekte"];
+  if (v === "nastavenia") return ["Nastavenia BUGstation", "podprojekty, číselníky, názvy úrovní, povinné polia a roly v podprojekte"];
   if (v === "otazka") return ["Otázka", "filter z otázky v bežnej reči — podmienky sa dajú zrušiť"];
   if (v === "plan" || v === "scenare") {
     const O = bsPlanO();
@@ -1356,7 +1395,7 @@ async function bsOpytaj(text){
   BS.pohlad = "otazka"; BS.detail = null; BS.det = null; BS.split = null; BS.menu = false;
   bsPrekresli();
   try {
-    const d = await b2bEdge("bs_otazka", { projekt: B2B.pid, otazka });
+    const d = await b2bEdge("bs_otazka", { podprojekt: BS.pp, otazka });
     if (BS.otazka !== moja) return;            // medzitým iná otázka
     const r = bsOtazkaNaFilter(d.filter, bsOsoby());
     Object.assign(moja, { caka: false, f: r.f, mena: r.mena, vysvetlenie: (d.filter && d.filter.vysvetlenie) || "" });
@@ -1710,7 +1749,7 @@ async function bsFormularUloz(z, typ, opts){
       await bsRpc("b2b_bs_uprav", { p_id: z.id, p_verzia: z.verzia, p_polia: zmeny });
       oznamPas("Uložené · " + z.kluc);
     } else {
-      const r = await bsRpc("b2b_bs_zaloz", { p_projekt: B2B.pid, p_typ: t, p_polia: p });
+      const r = await bsRpc("b2b_bs_zaloz", { p_podprojekt: BS.pp, p_typ: t, p_polia: p });
       bsZapamataj(p);
       for (const f of _bsPrilohy) { try { await bsPrilohaNahraj(r.id, f); } catch (e) { bsChyba(e, "Príloha " + (f.name || "") + " sa nenahrala"); } }
       _bsPrilohy = [];
@@ -1755,16 +1794,16 @@ async function bsPrilohaStiahni(id){
 const BS_CISELNIKY = [["is", "Informačné systémy (IS)"], ["moduly", "Moduly"], ["prostredia", "Prostredia"], ["releasy", "Releasy"], ["timy", "Tímy riešiteľov"]];
 const BS_UPOZORNENIA = [["okamzite", "Okamžite aj denný súhrn", "pridelenie, čaká na vás, najvyššia úroveň, @zmienka a termín SLA hneď; ráno v pracovný deň súhrn"],
   ["suhrn", "Len denný súhrn", "ráno v pracovný deň: čo čaká na vás, zmeny sledovaných záznamov, po termíne SLA"],
-  ["nic", "Nič", "e-maily z BUGstation tohto projektu nechodia"]];
+  ["nic", "Nič", "e-maily z BUGstation tohto podprojektu nechodia"]];
 function bsMojeUpozorneniaHtml(){
   const akt = (BS.d && BS.d.upozornenia) || "okamzite";
-  return '<div class="bs-panel"><div class="bs-ph"><h3>Moje upozornenia e-mailom</h3><small>len pre vás, v tomto projekte</small></div><div class="in">' +
+  return '<div class="bs-panel"><div class="bs-ph"><h3>Moje upozornenia e-mailom</h3><small>len pre vás, v tomto podprojekte</small></div><div class="in">' +
     BS_UPOZORNENIA.map(([k, n, p]) => '<label style="display:flex;gap:8px;align-items:flex-start;font:400 12px/1.4 var(--bs-sans);margin:0 0 8px"><input type="radio" name="bsUpoz" value="' + k + '"' +
       (akt === k ? " checked" : "") + ' onchange="bsUpozorneniaUloz(this.value)"> <span><b>' + esc(n) + "</b><br><span class=\"bs-podobne\">" + esc(p) + "</span></span></label>").join("") +
     '<div class="bs-podobne">Upozornenia chodia na e-mail vášho účtu; prázdny súhrn sa neposiela.</div></div></div>';
 }
 async function bsUpozorneniaUloz(v){
-  try { await bsRpc("b2b_bs_moje_uloz", { p_projekt: B2B.pid, p_upozornenia: v }); BS.d.upozornenia = v; oznamPas("Upozornenia uložené"); }
+  try { await bsRpc("b2b_bs_moje_uloz", { p_podprojekt: BS.pp, p_upozornenia: v }); BS.d.upozornenia = v; oznamPas("Upozornenia uložené"); }
   catch (e) { bsChyba(e, "Nastavenie upozornení sa nepodarilo uložiť"); bsPrekresli(); }
 }
 // Pravidlá SLA (§10): typ × úroveň → reakcia a vyriešenie; deň = 8 h pracovného
@@ -1807,9 +1846,9 @@ function bsPozvat(){
     '<label>Meno a priezvisko<input type="text" id="bsPzMeno"></label>' +
     '<label>E-mail<input type="email" id="bsPzEmail" placeholder="na túto adresu príde pozvánka"></label>' +
     '<label>Organizácia (voliteľné)<input type="text" id="bsPzOrg"></label>' +
-    '<div class="bs-podobne" style="margin:4px 0">Roly v BUGstation</div><div style="display:flex;flex-wrap:wrap;gap:10px">' +
+    '<div class="bs-podobne" style="margin:4px 0">Roly v podprojekte</div><div style="display:flex;flex-wrap:wrap;gap:10px">' +
     roly.map(r => '<label style="display:flex;gap:6px;align-items:center;font:400 12px var(--bs-sans)"><input type="checkbox" value="' + r + '" class="bsPzRola"' + (r === "tester" ? " checked" : "") + "> " + esc(BS_ROLY[r]) + "</label>").join("") +
-    '</div><div class="bs-podobne" style="margin-top:8px">Osoba uvidí len BUGstation tohto projektu — nie Pracovný výkaz, zmluvu, ceny ani Reporting. Pozvánka platí 14 dní a prijať ju môže len účet s touto adresou.</div>' +
+    '</div><div class="bs-podobne" style="margin-top:8px">Osoba uvidí len tento podprojekt BUGstation — nie Pracovný výkaz, zmluvu, ceny ani Reporting. Pozvánka platí 14 dní a prijať ju môže len účet s touto adresou.</div>' +
     "</div></div>";
   openModal("Pozvať do BUGstation", html, async () => {
     const v = id => (document.getElementById(id) || {}).value || "";
@@ -1818,7 +1857,7 @@ function bsPozvat(){
     if (!meno) return b2bVOkne("Zadajte meno.");
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return b2bVOkne("Zadajte platný e-mail.");
     let osoba;
-    try { osoba = await bsRpc("b2b_bs_osoba_zaloz", { p_projekt: B2B.pid, p_meno: meno, p_email: email, p_organizacia: org || null, p_role: role }); }
+    try { osoba = await bsRpc("b2b_bs_osoba_zaloz", { p_podprojekt: BS.pp, p_meno: meno, p_email: email, p_organizacia: org || null, p_role: role }); }
     catch (e) { return b2bVOkne(String((e && e.message) || e).replace(/^.*?ERROR:\s*/, "")); }
     let token, mail = true;
     try { const r = await sb.rpc("b2b_pozvi", { p_osoba: osoba, p_email: email }); if (r.error) throw r.error; token = r.data; }
@@ -1832,10 +1871,17 @@ function bsNastaveniaHtml(){
   const ja = bsJa();
   if (!bsMaRolu(ja, ["tm"])) return '<div class="bs-nast">' + bsMojeUpozorneniaHtml() + "</div>";
   const n = BS.nastavenia || (BS.nastavenia = JSON.parse(JSON.stringify(bsNast())));
-  const osoby = bsOsoby().filter(o => o.user_id);
+  // Ľudia zákazky a ich členstvo v tomto podprojekte (admin_95): členovia hore, potom
+  // ostatné aktívne osoby — tých pridá zaškrtnutie Člen alebo niektorej roly.
+  const cl = {};
+  ((BS.d && BS.d.clenovia) || []).forEach(c => { cl[c.osoba_id] = c.role || []; });
+  const osoby = ((B2B.d && B2B.d.osoby) || []).filter(o => o.aktivny)
+    .sort((a, b) => (cl[b.id] || b.spravca ? 1 : 0) - (cl[a.id] || a.spravca ? 1 : 0) || String(a.meno).localeCompare(String(b.meno), "sk"));
   const roly = Object.keys(BS_ROLY);
-  const tabRol = '<table class="bs-mriezka"><thead><tr><th>Osoba</th>' + roly.map(r => "<th>" + esc(BS_ROLY[r]) + "</th>").join("") + "</tr></thead><tbody>" +
-    osoby.map(o => "<tr><td>" + esc(o.meno) + (o.spravca ? " <small>(správca)</small>" : "") + "</td>" + roly.map(r => '<td><input type="checkbox"' + ((o.bs_role || []).includes(r) ? " checked" : "") +
+  const tabRol = '<table class="bs-mriezka"><thead><tr><th>Osoba</th><th>Člen</th>' + roly.map(r => "<th>" + esc(BS_ROLY[r]) + "</th>").join("") + "</tr></thead><tbody>" +
+    osoby.map(o => "<tr><td>" + esc(o.meno) + (o.spravca ? " <small>(správca)</small>" : "") + (o.user_id ? "" : " <small>(bez účtu)</small>") + "</td>" +
+      (o.spravca ? '<td title="Správca projektu vidí každý podprojekt">vždy</td>' : '<td><input type="checkbox"' + (cl[o.id] ? " checked" : "") + ' onchange="bsClenPrepni(\'' + o.id + "',this.checked)\"></td>") +
+      roly.map(r => '<td><input type="checkbox"' + ((cl[o.id] || []).includes(r) ? " checked" : "") +
       ' onchange="bsRolaPrepni(\'' + o.id + "','" + r + "',this.checked)\"></td>").join("") + "</tr>").join("") + "</tbody></table>";
   const cis = BS_CISELNIKY.map(([k, lab]) => '<div class="bs-panel"><div class="bs-ph"><h3>' + esc(lab) + '</h3><small>' + (n[k] || []).length + '</small></div><div class="in">' +
     (n[k] || []).map((x, i) => '<div class="bs-pol-r"><input type="text" value="' + esc(x.nazov) + '" onchange="bsCisUprav(\'' + k + "'," + i + ',this.value)">' +
@@ -1848,9 +1894,9 @@ function bsNastaveniaHtml(){
     "<tr><td>" + esc(BS_POLIA[k].nazov) + '</td><td><select onchange="bsPovinneUprav(\'' + typ + "','" + k + '\',this.value)">' +
     [["volitelne", "voliteľné"], ["povinne", "povinné"], ["skryte", "skryté"]].map(s => '<option value="' + s[0] + '"' + ((((n.povinne || {})[typ] || {})[k] || "volitelne") === s[0] ? " selected" : "") + ">" + s[1] + "</option>").join("") + "</select></td></tr>").join("")).join("");
   const poz = (BS.d.poziadavky || []).map(q => "<tr><td class=\"mono\">" + esc(q.kod) + "</td><td>" + esc(q.nazov) + "</td></tr>").join("");
-  return '<div class="bs-nast">' + bsMojeUpozorneniaHtml() +
-    '<div class="bs-panel"><div class="bs-ph"><h3>Ľudia a roly v BUGstation</h3><small>ukladá sa hneď</small></div><div class="in" style="overflow-x:auto">' + tabRol +
-      '<div class="bs-podobne">Člen bez roly je čitateľ. Testerov a riešiteľov len do BUGstation pozvete sami; prístup k výkazu a ďalším modulom prideľuje správca v karte Projekt → Osoby.</div>' +
+  return '<div class="bs-nast">' + bsMojeUpozorneniaHtml() + bsPodprojektyHtml(ja) +
+    '<div class="bs-panel"><div class="bs-ph"><h3>Ľudia a roly v podprojekte ' + esc((BS.d.projekt || {}).kod || "") + '</h3><small>ukladá sa hneď</small></div><div class="in" style="overflow-x:auto">' + tabRol +
+      '<div class="bs-podobne">Členstvo a roly platia len v tomto podprojekte. Člen bez roly je čitateľ. Testerov a riešiteľov len do BUGstation pozvete sami; prístup k výkazu a ďalším modulom prideľuje správca v karte Projekt → Osoby.</div>' +
       '<div style="margin-top:8px"><button type="button" class="bs-btn" onclick="bsPozvat()">+ Pozvať do BUGstation</button></div></div></div>' +
     '<div class="bs-panel"><div class="bs-ph"><h3>Triáž</h3></div><div class="in"><label style="display:flex;gap:8px;align-items:center;font:400 12px/1.4 var(--bs-sans)"><input type="checkbox"' + (n.triaz !== false ? " checked" : "") +
       ' onchange="BS.nastavenia.triaz=this.checked"> Nový defekt, incident a zmena čakajú v Identifikované na triáž Test managera alebo Test team leadera</label></div></div>' +
@@ -1877,7 +1923,7 @@ function bsAiOtazkyHtml(ja){
 }
 async function bsAiOtazkyNastav(zapnut){
   try {
-    await bsRpc("b2b_bs_nastavenia_uloz", { p_projekt: B2B.pid, p_verzia: BS.d.projekt.verzia, p_nastavenia: { ai_otazky: !!zapnut } });
+    await bsRpc("b2b_bs_nastavenia_uloz", { p_podprojekt: BS.pp, p_verzia: BS.d.projekt.verzia, p_nastavenia: { ai_otazky: !!zapnut } });
     oznamPas(zapnut ? "Otázky cez AI zapnuté" : "Otázky cez AI vypnuté");
     if (BS.nastavenia) BS.nastavenia.ai_otazky = !!zapnut;
     bsNacitajData();
@@ -1914,23 +1960,86 @@ async function bsNastaveniaUloz(){
   const n = BS.nastavenia, g = BS.d.projekt;
   if (BS_TYPY_PORADIE.some(typ => !bsUrovneTypu(n, typ).length)) return alert("Každý typ musí mať aspoň jednu úroveň.");
   try {
-    await bsRpc("b2b_bs_nastavenia_uloz", { p_projekt: B2B.pid, p_verzia: g.verzia,
+    await bsRpc("b2b_bs_nastavenia_uloz", { p_podprojekt: BS.pp, p_verzia: g.verzia,
       p_nastavenia: { triaz: n.triaz !== false, is: n.is || [], moduly: n.moduly || [], prostredia: n.prostredia || [], releasy: n.releasy || [], timy: n.timy || [], urovne: n.urovne || {}, povinne: n.povinne || {},
         sla: n.sla || {}, triaz_min: n.triaz_min == null ? 480 : n.triaz_min } });
     oznamPas("Nastavenia BUGstation uložené"); BS.nastavenia = null; bsNacitajData();
   } catch (e) { bsChyba(e, "Nastavenia sa nepodarilo uložiť"); }
 }
+// Členstvo a roly v zvolenom podprojekte (admin_95, b2b_bs_clen_nastav): rola
+// nečlenovi ho pridá, Člen bez roly = čitateľ, odškrtnutie Člen ho odoberie.
+function bsClen(osobaId){ return ((BS.d && BS.d.clenovia) || []).find(x => x.osoba_id === osobaId); }
 async function bsRolaPrepni(osobaId, rola, zapni){
-  const o = bsOsoby().find(x => x.id === osobaId); if (!o) return;
-  const role = (o.bs_role || []).filter(r => r !== rola).concat(zapni ? [rola] : []);
-  try { const r = await bsRpc("b2b_bs_role_nastav", { p_osoba: osobaId, p_role: role }); o.bs_role = r.role; oznamPas("Roly uložené · " + o.meno); bsPrekresli(); }
-  catch (e) { bsChyba(e, "Rolu sa nepodarilo zmeniť"); bsPrekresli(); }
+  const c = bsClen(osobaId);
+  await bsClenNastav(osobaId, ((c && c.role) || []).filter(r => r !== rola).concat(zapni ? [rola] : []));
+}
+async function bsClenPrepni(osobaId, zapni){
+  const c = bsClen(osobaId);
+  if (!zapni && c && c.role && c.role.length && !confirm("Odobrať osobu z podprojektu? Stratí prístup k jeho záznamom aj roly v ňom.")) return bsPrekresli();
+  await bsClenNastav(osobaId, zapni ? ((c && c.role) || []) : null);
+}
+async function bsClenNastav(osobaId, role){
+  const o = ((B2B.d && B2B.d.osoby) || []).find(x => x.id === osobaId);
+  try {
+    const r = await bsRpc("b2b_bs_clen_nastav", { p_podprojekt: BS.pp, p_osoba: osobaId, p_role: role });
+    const zoz = BS.d.clenovia || (BS.d.clenovia = []), i = zoz.findIndex(x => x.osoba_id === osobaId);
+    if (r.role == null) { if (i >= 0) zoz.splice(i, 1); }
+    else if (i >= 0) zoz[i].role = r.role;
+    else zoz.push({ osoba_id: osobaId, role: r.role });
+    oznamPas((r.role == null ? "Odobratá z podprojektu · " : "Roly uložené · ") + (o ? o.meno : ""));
+    bsPrekresli();
+  } catch (e) { bsChyba(e, "Členstvo v podprojekte sa nepodarilo zmeniť"); bsPrekresli(); }
+}
+// Podprojekty zákazky (admin_95, O7): zakladá správca aj Test manager; predvolený
+// a archív mení správca. Kód sa po založení nemení — nesie ho každý kľúč záznamu.
+function bsPodprojektyHtml(ja){
+  const zoz = bsPodprojekty(), P = (BS.d && BS.d.projekt) || {};
+  const riadky = zoz.map(x => '<tr><td class="mono">' + esc(x.kod) + "</td><td>" + esc(x.nazov) + (x.id === BS.pp ? " <small>(otvorený)</small>" : "") +
+    (x.predvoleny ? " <small>(predvolený)</small>" : "") + (x.archivovane ? " <small>(archivovaný)</small>" : "") + "</td><td style=\"white-space:nowrap\">" +
+    (x.id !== BS.pp ? '<button type="button" class="bs-btn mal" onclick="bsVyberPodprojekt(\'' + x.id + '\')">Otvoriť</button> ' : "") +
+    (ja.spravca && !x.predvoleny && !x.archivovane ? '<button type="button" class="bs-btn mal" onclick="bsPodprojektUprav(\'' + x.id + '\',{predvoleny:true})">Predvolený</button> ' : "") +
+    (ja.spravca ? '<button type="button" class="bs-btn mal" onclick="bsPodprojektUprav(\'' + x.id + "',{archivovat:" + !x.archivovane + '})">' + (x.archivovane ? "Obnoviť" : "Archivovať") + "</button>" : "") +
+    "</td></tr>").join("");
+  return '<div class="bs-panel"><div class="bs-ph"><h3>Podprojekty BUGstation</h3><small>' + zoz.length + '</small></div><div class="in" style="overflow-x:auto">' +
+    '<table class="bs-mriezka"><tbody>' + riadky + "</tbody></table>" +
+    '<div class="bs-podobne">Každý podprojekt má vlastný kód (kľúč záznamu, napr. ' + esc(P.kod || "KOD") + "-B12), nastavenia, členov a roly. " +
+    "Archivovaný sa dá čítať, zapisovať nie. Predvolený podprojekt dostane e-mail bez kódu.</div>" +
+    '<div style="margin-top:8px"><button type="button" class="bs-btn" onclick="bsPodprojektFormular()">+ Založiť podprojekt</button></div></div></div>';
+}
+function bsPodprojektFormular(){
+  const P = (BS.d && BS.d.projekt) || {};
+  const html = '<div class="bs-ok"><div class="bs-form">' +
+    '<label>Kód (kľúč záznamov, 2–10 veľkých písmen alebo číslic)<input type="text" id="bsPpKod" maxlength="10" placeholder="PORTAL" style="text-transform:uppercase"></label>' +
+    '<label>Názov<input type="text" id="bsPpNazov" maxlength="300" placeholder="Klientsky portál"></label>' +
+    '<label style="display:flex;gap:8px;align-items:center;font:400 12px var(--bs-sans)"><input type="checkbox" id="bsPpVzor" checked> Prevziať nastavenia z ' + esc(P.kod || "otvoreného podprojektu") + " (číselníky, úrovne, povinné polia, SLA)</label>" +
+    '<div class="bs-podobne" style="margin-top:6px">Kód sa po založení nemení. Členov a roly pridáte v Nastaveniach nového podprojektu' + (bsJa().spravca ? "" : " — vy v ňom budete Test manager") + ".</div></div></div>";
+  openModal("Založiť podprojekt BUGstation", html, async () => {
+    const kod = String((document.getElementById("bsPpKod") || {}).value || "").trim().toUpperCase();
+    const nazov = String((document.getElementById("bsPpNazov") || {}).value || "").trim();
+    const vzor = (document.getElementById("bsPpVzor") || {}).checked ? BS.pp : null;
+    if (!/^[A-Z0-9]{2,10}$/.test(kod)) return b2bVOkne("Kód má 2 až 10 veľkých písmen alebo číslic — bez medzier a pomlčky.");
+    if (!nazov) return b2bVOkne("Zadajte názov podprojektu.");
+    let r;
+    try { r = await bsRpc("b2b_bs_podprojekt_zaloz", { p_projekt: B2B.pid, p_kod: kod, p_nazov: nazov, p_vzor: vzor }); }
+    catch (e) { return b2bVOkne(String((e && e.message) || e).replace(/^.*?ERROR:\s*/, "")); }
+    oznamPas("Podprojekt " + r.kod + " založený");
+    bsVyberPodprojekt(r.id);
+  }, null, null, "Založiť");
+}
+async function bsPodprojektUprav(id, polia){
+  const x = bsPodprojekty().find(p => p.id === id); if (!x) return;
+  if (polia.archivovat && !confirm("Archivovať podprojekt " + x.kod + "? Záznamy ostanú na čítanie, zapisovať sa do neho nebude dať.")) return;
+  try {
+    await bsRpc("b2b_bs_podprojekt_uprav", { p_id: id, p_verzia: x.verzia, p_polia: polia });
+    oznamPas(polia.predvoleny ? "Predvolený podprojekt: " + x.kod : polia.archivovat ? "Podprojekt " + x.kod + " archivovaný" : "Podprojekt " + x.kod + " obnovený");
+    BS.nastavenia = null; bsNacitajData();
+  } catch (e) { bsChyba(e, "Podprojekt sa nepodarilo upraviť"); }
 }
 async function bsPoziadavkyUloz(){
   const el = document.getElementById("bsPozVloz"), t = el ? el.value : "";
   const riadky = t.split(/\r?\n/).map(r => r.split("\t")).filter(c => c[0] && c[0].trim() && c[1] && c[1].trim()).map(c => ({ kod: c[0].trim(), nazov: c[1].trim() }));
   if (!riadky.length) return alert("Nevidím žiadne riadky s kódom a názvom (stĺpce oddelené tabulátorom — skopírujte ich z Excelu).");
-  try { const r = await bsRpc("b2b_bs_poziadavky_uloz", { p_projekt: B2B.pid, p_riadky: riadky }); oznamPas("Uložené požiadavky: " + r.pocet); bsNacitajData(); }
+  try { const r = await bsRpc("b2b_bs_poziadavky_uloz", { p_podprojekt: BS.pp, p_riadky: riadky }); oznamPas("Uložené požiadavky: " + r.pocet); bsNacitajData(); }
   catch (e) { bsChyba(e, "Požiadavky sa nepodarilo uložiť"); }
 }
 
@@ -2080,14 +2189,14 @@ function bsPlanO(){
 function bsPlanZmenene(){ _bsPlanCache = null; }
 // Načítanie plánu je samostatné: pred admin_91 tabuľky nie sú a BUGstation
 // beží ďalej bez plánu (plan = null), chyba servera sa ukáže v Pláne.
-async function bsNacitajPlan(pid){
+async function bsNacitajPlan(ppId){
   const vsetky = (q) => b2bVsetky(q).then(data => ({ data }), error => ({ error }));
   const r = await Promise.all([
-    vsetky(() => sb.from("b2b_bs_fazy").select("*").eq("projekt_id", pid).order("poradie")),
-    vsetky(() => sb.from("b2b_bs_scenare").select("*").eq("projekt_id", pid).order("cislo")),
-    vsetky(() => sb.from("b2b_bs_pripady").select("*").eq("projekt_id", pid).order("poradie")),
-    vsetky(() => sb.from("b2b_bs_plan").select("*").eq("projekt_id", pid).order("poradie")),
-    vsetky(() => sb.from("b2b_bs_vykonania").select("id,plan_id,pripad_id,pripad_verzia,vysledok,skutocny,prostredie_id,defekty,tester_osoba,kto,kedy").eq("projekt_id", pid).order("kedy"))
+    vsetky(() => sb.from("b2b_bs_fazy").select("*").eq("podprojekt_id", ppId).order("poradie")),
+    vsetky(() => sb.from("b2b_bs_scenare").select("*").eq("podprojekt_id", ppId).order("cislo")),
+    vsetky(() => sb.from("b2b_bs_pripady").select("*").eq("podprojekt_id", ppId).order("poradie")),
+    vsetky(() => sb.from("b2b_bs_plan").select("*").eq("podprojekt_id", ppId).order("poradie")),
+    vsetky(() => sb.from("b2b_bs_vykonania").select("id,plan_id,pripad_id,pripad_verzia,vysledok,skutocny,prostredie_id,defekty,tester_osoba,kto,kedy").eq("podprojekt_id", ppId).order("kedy"))
   ]);
   const e = r.map(x => x.error).find(Boolean);
   if (e && b2bChybaTabulky(e)) return { plan: null };
@@ -2370,7 +2479,7 @@ function bsFazaFormular(id){
     if (d < od) return b2bVOkne("Koniec fázy je skôr než začiatok.");
     const polia = { nazov, od, do: d };
     if (!f) polia.poradie = ((P.fazy || []).reduce((m, x) => Math.max(m, x.poradie || 0), 0)) + 1;
-    try { await bsRpc("b2b_bs_faza_uloz", { p_projekt: B2B.pid, p_id: f ? f.id : null, p_verzia: f ? f.verzia : null, p_polia: polia }); } catch (e) { return bsRpcChyba(e); }
+    try { await bsRpc("b2b_bs_faza_uloz", { p_podprojekt: BS.pp, p_id: f ? f.id : null, p_verzia: f ? f.verzia : null, p_polia: polia }); } catch (e) { return bsRpcChyba(e); }
     oznamPas(f ? "Fáza uložená" : "Fáza založená · " + nazov); bsNacitajData(); return true;
   }, zmaz, null, f ? "Uložiť" : "Založiť");
 }
@@ -2403,7 +2512,7 @@ function bsKriteriaFormular(id){
     const rucne = texty.map(text => {
       const st = stare.find(k => k.text === text); return st ? { id: st.id, text } : { id: "k" + Math.random().toString(36).slice(2, 10), text };
     });
-    try { await bsRpc("b2b_bs_faza_uloz", { p_projekt: B2B.pid, p_id: f.id, p_verzia: f.verzia, p_polia: { kriteria: { auto, rucne } } }); } catch (e) { return bsRpcChyba(e); }
+    try { await bsRpc("b2b_bs_faza_uloz", { p_podprojekt: BS.pp, p_id: f.id, p_verzia: f.verzia, p_polia: { kriteria: { auto, rucne } } }); } catch (e) { return bsRpcChyba(e); }
     oznamPas("Exit kritériá uložené · " + f.nazov); bsNacitajData(); return true;
   }, null, null, "Uložiť");
 }
@@ -2470,7 +2579,7 @@ function bsScenarFormular(id){
     const v = id => { const el = document.getElementById(id); return el ? el.value.trim() : ""; };
     const polia = { nazov: v("bsSc_n"), is_id: v("bsSc_is") || null, modul_id: v("bsSc_mod") || null, priorita: +v("bsSc_pr") || 2, predpoklady: v("bsSc_pp") || null };
     if (!polia.nazov) return b2bVOkne("Napíšte názov scenára.");
-    let r; try { r = await bsRpc("b2b_bs_scenar_uloz", { p_projekt: B2B.pid, p_id: s ? s.id : null, p_verzia: s ? s.verzia : null, p_polia: polia }); } catch (e) { return bsRpcChyba(e); }
+    let r; try { r = await bsRpc("b2b_bs_scenar_uloz", { p_podprojekt: BS.pp, p_id: s ? s.id : null, p_verzia: s ? s.verzia : null, p_polia: polia }); } catch (e) { return bsRpcChyba(e); }
     if (r && r.id) BS.scenar = r.id;
     oznamPas(s ? "Uložené · " + s.kod : "Založený scenár · " + ((r && r.kod) || polia.nazov)); bsNacitajData(); return true;
   }, zmaz, null, s ? "Uložiť" : "Založiť");
