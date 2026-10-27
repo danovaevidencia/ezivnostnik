@@ -1730,7 +1730,7 @@ const REP_DRUHY = { plan: "Plán (MS Project .mpp alebo XML)", issue: "Issue Log
 
 function repZalozkaHtml(){
   repStyl();
-  if (REP.pid !== B2B.pid) { Object.assign(REP, { pid: B2B.pid, pohlad: "programy", programy: null, program: null, cyklus: null, plany: {}, registre: {}, ov: null, importVysledky: null, reg: null, zistHist: null, zistCitanie: null }); repNacitajProgramy(); }
+  if (REP.pid !== B2B.pid) { Object.assign(REP, { pid: B2B.pid, pohlad: "programy", programy: null, program: null, cyklus: null, plany: {}, registre: {}, ov: null, importVysledky: null, reg: null, zistHist: null, zistCitanie: null, prijate: [], prijemAdresa: null, prijateNove: {} }); repNacitajProgramy(); }
   if (REP.programy == null) return '<div class="aempty">Načítavam programy…</div>';
   if (REP.chyba) return '<div class="card" style="padding:12px 14px;border-color:var(--neg)"><b style="color:var(--neg)">Reporting sa nepodarilo načítať</b><div class="csub">' + esc(REP.chyba) + '</div><button class="aabtn" onclick="repNacitajProgramy()">Skúsiť znova</button></div>';
   const prac = REP.pracuje ? '<div class="card" style="padding:8px 12px;margin-bottom:10px"><span class="csub" style="margin:0">⏳ ' + esc(REP.pracuje) + '</span></div>' : "";
@@ -1753,6 +1753,10 @@ async function repNacitajProgramy(){
     if (ids.length) {
       const { data: cy } = await sb.from("b2b_rep_cykly").select("id, program_id, stav_ku_dnu, nazov, stav, verzia, upravene").in("program_id", ids).order("stav_ku_dnu", { ascending: false });
       for (const c of cy || []) if (!REP.posledne[c.program_id]) REP.posledne[c.program_id] = c;
+      REP.prijateNove = {};
+      const pr = await sb.from("b2b_rep_prijate").select("program_id").in("program_id", ids).eq("stav", "nove");
+      if (pr.error) { if (!repPrijemBezTabulky(pr.error)) console.error("Reporting: prijaté e-mailom", pr.error); }
+      else for (const x of pr.data || []) REP.prijateNove[x.program_id] = (REP.prijateNove[x.program_id] || 0) + 1;
     }
   } catch (e) { REP.programy = REP.programy || []; REP.chyba = (e && e.message) || String(e); console.error("Reporting programy", e); }
   repPrekresli();
@@ -1765,7 +1769,8 @@ function repProgramyHtml(){
     return '<div class="card" style="padding:10px 14px;margin-bottom:8px;display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap">' +
       '<div><b>' + esc(p.nazov) + '</b> <span class="csub" style="margin:0 0 0 4px">' + esc(p.kod) + '</span><div class="csub" style="margin:2px 0 0">' +
       (c ? "posledný cyklus " + esc(repDMR(c.stav_ku_dnu)) + " · " + esc({ koncept: "koncept", uzavrety: "uzavretý", odoslany: "odoslaný" }[c.stav] || c.stav) : "zatiaľ bez cyklu") +
-      (p.profil_verzia ? "" : " · profil nie je nastavený") + '</div></div>' +
+      (p.profil_verzia ? "" : " · profil nie je nastavený") +
+      (REP.prijateNove && REP.prijateNove[p.id] ? ' · <b>📥 ' + REP.prijateNove[p.id] + " z e-mailu čaká</b>" : "") + '</div></div>' +
       '<button class="aabtn pri" onclick="repOtvorProgram(\'' + esc(p.id) + '\')">Otvoriť</button></div>';
   }).join("");
   return '<div class="card" style="padding:12px 14px;margin-bottom:10px"><b>Projektový reporting</b><div class="csub" style="margin:4px 0 0">Z plánu MS Project a registrov (Issue Log, záväzky, závislosti, zistenia) zostaví report s rovnakými pravidlami v každom cykle. ' +
@@ -1800,6 +1805,7 @@ async function repOtvorProgram(id){
     await Promise.all(REP_REGISTRE_PROGRAMU.map(repNacitajRegisterDruh));
     REP.profil = pr.obsah || null; REP.profilVerzia = pr.verzia || 0;
     REP.vstupy = vs.data || []; REP.cykly = cy.data || [];
+    await repPrijemNacitaj(id);
     REP.pracuje = "";
   } catch (e) { return repChyba(e, "Program sa nepodarilo načítať"); }
   repPrekresli();
@@ -1852,7 +1858,7 @@ function repProgramHtml(){
     '<div style="min-width:220px;flex:1"><b>Register zistení</b><div class="csub" style="margin:0">vedie sa v portáli · ' + zr.length + " zistení, " + zr.filter(z => z.stav === "otvorene" || z.stav === "riesi").length + " otvorených" +
     (rz && rz.verzia ? " · verzia " + rz.verzia : "") + '</div></div><div style="display:flex;gap:6px">' + sablona("zistenia") +
     '<button class="aabtn pri" onclick="REP.pohlad=\'zistenia\';repPrekresli()">Otvoriť register</button></div></div>';
-  return hlav + repPripravenostHtml(repPripravenostProgram()) + navod + (pis ? repDropHtml() : "") +
+  return hlav + repPripravenostHtml(repPripravenostProgram()) + navod + (pis ? repDropHtml() : "") + repPrijemHtml() +
     '<div class="card" style="padding:10px 14px;margin-bottom:10px"><b>Cykly reportu</b>' + (cykly || '<div class="csub">Zatiaľ žiadny cyklus.</div>') + '</div>' +
     '<div class="card" style="padding:10px 14px"><b>Vstupy</b><div class="csub" style="margin:2px 0 4px">Registre vedie appka a Excel je ich vstup aj výstup: každý import aj úprava v appke je nová verzia s dátumom, staršie ostávajú v histórii a pre porovnanie. Plán sa mení len novým súborom z MS Project. Šablóna má hlavičku, zoznamy povolených hodnôt a pokyny — súbor z nej sa načíta bez úprav.</div>' + vstupy + registerHtml + '</div>';
 }
@@ -1902,7 +1908,7 @@ async function repImportSubor(druh, f, volby){
     REP.plany[d.id] = obsah;
     try { const F = await ensureFflate(); await b2bEdgeSubor({ akcia: "rep_vstup_povodny", vstup: d.id }, F.gzipSync(u8)); }
     catch (e) { console.error("Reporting: pôvodný súbor sa neuložil", e); alert("Výťah sa uložil, pôvodný súbor nie (" + ((e && e.message) || e) + "). Report sa dá zostaviť; originál nahrajte znova neskôr."); }
-    const vysl = { stav: druh === "plan" ? (protokol.bezDatumu ? "pozor" : "ok") : (repProtokolProblemy(protokol) ? "pozor" : "ok"), druh, text: repProtokolText({ druh, protokol }) +
+    const vysl = { id: d.id, stav: druh === "plan" ? (protokol.bezDatumu ? "pozor" : "ok") : (repProtokolProblemy(protokol) ? "pozor" : "ok"), druh, text: repProtokolText({ druh, protokol }) +
       (druh === "plan" && protokol.od && protokol.do ? " · " + repDMR(protokol.od) + " → " + repDMR(protokol.do) : "") };
     if (!volby.davka) { await repOtvorProgram(REP.program.id); if (druh === "plan" && !REP.profil) repOtvorProfil(); }
     return vysl;
@@ -4212,6 +4218,121 @@ function repImportVysledkyHtml(){
       REP_ST_ZNAK[v.stav === "chyba" ? "chyba" : v.stav === "pozor" ? "pozor" : "ok"] + "</span><b>" + esc(v.nazov) + "</b> " + (v.druh ? "→ " + esc(REP_DRUHY[v.druh]) + " · " : "") + '<span class="csub" style="margin:0">' + esc(v.text || "") + "</span></div>").join("") + "</div>";
 }
 
+// ── Vstupy e-mailom programu (R14, admin_94, č. 319) ─────────────
+// Adresa programu = adresa projektu s podadresou +rep-<kód>. Súbor z mailu
+// server hneď zašifroval kľúčom programu a čaká tu; načítanie ide tou istou
+// cestou ako ručný výber (rozpoznanie druhu, výťah, nový vstup) a až PO uložení
+// vstupu sa prijatý súbor vybaví (server šifru zmaže). Súbor, ktorý program
+// už má (rovnaký sha256), nový vstup nerobí.
+function repPrijemBezTabulky(e){ return !!e && (e.code === "42P01" || e.code === "PGRST205" || e.code === "PGRST202" || /does not exist|could not find/i.test(e.message || "")); }
+async function repPrijemNacitaj(id){
+  REP.prijate = []; REP.prijemAdresa = null; REP.prijemChyba = ""; REP.prijemBez = false;
+  try {
+    const [pr, ad] = await Promise.all([
+      sb.from("b2b_rep_prijate").select("id, subor_nazov, velkost, sha256, od_koho, predmet, poznamka, stav, vstup_id, spracoval, spracovane, prijate")
+        .eq("program_id", id).order("prijate", { ascending: false }).limit(60),
+      sb.rpc("b2b_rep_prijem_adresa", { p_program: id }) ]);
+    const e = pr.error || ad.error;
+    if (e && repPrijemBezTabulky(e)) { REP.prijemBez = true; return; }   // pred admin_94: karta sa nekreslí
+    if (e) throw e;
+    REP.prijate = pr.data || []; REP.prijemAdresa = ad.data || null;
+    if (REP.prijateNove) REP.prijateNove[id] = REP.prijate.filter(x => x.stav === "nove").length;
+  } catch (e) { console.error("Reporting: e-mail programu", e); REP.prijemChyba = (e && e.message) || String(e); }
+}
+function repPrijemAdresa(A){
+  if (!A || !A.token) return "";
+  return A.alias ? A.alias + "+rep-" + A.kod + "@" + POSTA_DOMENA : A.token + "+rep-" + A.kod + "@" + DOKLADY_DOMENA;
+}
+function repPrijemVelkost(n){ return n >= 1048576 ? (n / 1048576).toFixed(1).replace(".", ",") + " MB" : Math.max(1, Math.round(n / 1024)) + " kB"; }
+function repPrijataHtml(x, pis){
+  const tl = [];
+  if (x.stav === "nove") {
+    if (x.subor_nazov && pis) tl.push('<button class="aabtn pri" onclick="repPrijateNacitaj([\'' + esc(x.id) + '\'])" title="Načítať ako vstup programu — tou istou cestou ako ručne vybraný súbor">Načítať</button>');
+    if (x.subor_nazov) tl.push('<button class="aabtn" onclick="repPrijateStiahni(\'' + esc(x.id) + '\')" title="Stiahnuť prijatý súbor">⬇</button>');
+    if (pis) tl.push(x.subor_nazov ? '<button class="aabtn" onclick="repPrijateOdmietni(\'' + esc(x.id) + '\')" title="Nepatrí do programu — súbor sa zmaže">Odmietnuť</button>'
+      : '<button class="aabtn" onclick="repPrijateVybav(\'' + esc(x.id) + '\', \'spracovane\')" title="Skryť zo zoznamu na načítanie">Beriem na vedomie</button>');
+  }
+  const vybavene = x.stav === "nove" ? "" : " · " + (x.stav === "odmietnute" ? "odmietnuté" : x.vstup_id ? "načítané" : "vybavené") +
+    (repKtoMeno(x.spracoval) ? " · " + esc(repKtoMeno(x.spracoval)) : "") + (x.spracovane ? " · " + esc(repCasText(x.spracovane)) : "");
+  return '<div style="padding:6px 0;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap">' +
+    '<div style="min-width:200px;flex:1"><b>' + (x.subor_nazov ? esc(x.subor_nazov) : "✉ mail bez súboru pre reporting") + '</b>' +
+    '<div class="csub" style="margin:0">' + (x.velkost ? repPrijemVelkost(x.velkost) + " · " : "") + esc(x.predmet || "(bez predmetu)") + (x.od_koho ? " · od " + esc(x.od_koho) : "") +
+    " · " + esc(repCasText(x.prijate)) + vybavene + '</div>' +
+    (x.poznamka ? '<div class="csub" style="margin:2px 0 0;white-space:pre-wrap">' + esc(x.poznamka) + '</div>' : "") + '</div>' +
+    (tl.length ? '<div style="display:flex;gap:6px">' + tl.join("") + '</div>' : "") + '</div>';
+}
+function repPrijemHtml(){
+  if (REP.prijemBez || !REP.program) return "";
+  const pis = repMozemPisat() && REP.program.stav !== "archiv", A = REP.prijemAdresa, adr = repPrijemAdresa(A);
+  const vsetky = REP.prijate || [], nove = vsetky.filter(x => x.stav === "nove"), ine = vsetky.filter(x => x.stav !== "nove");
+  const nacitatelne = nove.filter(x => x.subor_nazov);
+  const adresa = adr ? '<div style="display:flex;gap:6px;margin-top:6px"><input id="repPrijemAdr" value="' + esc(adr) + '" readonly style="flex:1;min-width:0;font-family:ui-monospace,monospace">' +
+      '<button class="aabtn" onclick="repPrijemKopiruj()" title="Skopírovať adresu programu">Kopírovať</button></div>' +
+      (A.povolene === false ? '<div class="csub" style="margin:4px 0 0;color:var(--warn)">Príjem e-mailov projektu je vypnutý — kým nebude zapnutý, nič sem nepríde.</div>' : "")
+    : '<div class="csub" style="margin:4px 0 0">Adresa programu vznikne z e-mailu projektu — vytvorí ho správca projektu v Pracovnom výkaze → Projekt → E-mail projektu.</div>';
+  return '<div class="card" style="padding:10px 14px;margin-bottom:10px' + (nove.length ? ";border-color:var(--brand)" : "") + '">' +
+    '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap"><b>E-mail programu' + (nove.length ? " · 📥 " + nove.length + " čaká" : "") + '</b>' +
+    (pis && nacitatelne.length > 1 ? '<button class="aabtn pri" onclick="repPrijateNacitaj()">Načítať všetky (' + nacitatelne.length + ')</button>' : "") + '</div>' +
+    '<div class="csub" style="margin:2px 0 0">Prepošlite sem plán z MS Project (.mpp, XML) a registre (XLSX), aj viac naraz. Server ich hneď uloží šifrovane a počkajú tu, kým ich načítate — druh súboru appka rozpozná ako pri ručnom výbere. Text mailu sa neukladá.</div>' +
+    adresa + (REP.prijemChyba ? '<div class="csub" style="margin:4px 0 0;color:var(--warn)">Prijaté súbory sa nepodarilo načítať: ' + esc(REP.prijemChyba) + '</div>' : "") +
+    (nove.length ? '<div style="margin-top:6px">' + nove.map(x => repPrijataHtml(x, pis)).join("") + '</div>' : "") +
+    (ine.length ? '<details style="margin-top:6px"><summary class="csub" style="cursor:pointer;margin:0">Vybavené (' + ine.length + ')</summary>' + ine.map(x => repPrijataHtml(x, pis)).join("") + '</details>' : "") + '</div>';
+}
+async function repPrijemKopiruj(){
+  const e = document.getElementById("repPrijemAdr"); if (!e) return;
+  try { await navigator.clipboard.writeText(e.value); oznamPas("Adresa programu skopírovaná."); }
+  catch (_) { e.select(); document.execCommand("copy"); }
+}
+async function repPrijateNacitaj(ids){
+  const zoz = (REP.prijate || []).filter(x => x.stav === "nove" && x.subor_nazov && (!ids || ids.includes(x.id)));
+  if (!zoz.length) return;
+  const vysl = [], polozky = [];
+  REP.pracuje = "Načítavam " + (zoz.length > 1 ? zoz.length + " súbory" : zoz[0].subor_nazov) + " z e-mailu…"; repPrekresli();
+  for (const x of zoz) {
+    try {
+      const rovnaky = REP.vstupy.find(v => v.sha256 && v.sha256 === x.sha256);
+      if (rovnaky) {
+        await b2bEdge("rep_prijate_vybav", { prijate: x.id, stav: "spracovane", vstup: rovnaky.id });
+        vysl.push({ nazov: x.subor_nazov, stav: "ok", druh: rovnaky.druh, text: "rovnaký súbor už program má (" + repCasText(rovnaky.nahrane) + ") — nový vstup nevznikol" });
+        continue;
+      }
+      const { u8 } = await repEdgeGzip({ akcia: "rep_prijate_stiahni", prijate: x.id });
+      const f = new File([u8], x.subor_nazov, { lastModified: Date.parse(x.prijate) || Date.now() });
+      const druh = await repRozpoznajSubor(f);
+      if (!druh) { vysl.push({ nazov: x.subor_nazov, stav: "chyba", text: "nerozpoznaný — plán ako .mpp alebo XML z MS Project, registre ako XLSX (pomôže Šablóna); súbor čaká, môžete ho odmietnuť" }); continue; }
+      polozky.push({ x, f, druh });
+    } catch (e) { console.error("Reporting: prijatý súbor " + x.subor_nazov, e); vysl.push({ nazov: x.subor_nazov, stav: "chyba", text: (e && e.message) || String(e) }); }
+  }
+  // Plán prvý — profil a porovnanie oproti minulému stoja na ňom.
+  polozky.sort((a, b) => (a.druh === "plan" ? 0 : 1) - (b.druh === "plan" ? 0 : 1));
+  for (const { x, f, druh } of polozky) {
+    let r;
+    try { r = await repImportSubor(druh, f, { davka: true }); }
+    catch (e) { console.error("Reporting: import " + x.subor_nazov, e); vysl.push({ nazov: x.subor_nazov, stav: "chyba", text: (e && e.message) || String(e) }); continue; }
+    if (r.stav !== "chyba") {
+      try { await b2bEdge("rep_prijate_vybav", { prijate: x.id, stav: "spracovane", vstup: r.id || null }); }
+      catch (e) { console.error("Reporting: vybavenie " + x.subor_nazov, e); r = Object.assign({}, r, { stav: "pozor", text: r.text + " · v e-maile ostal ako čakajúci (" + ((e && e.message) || e) + ") — ďalšie Načítať ho spojí s týmto vstupom" }); }
+    }
+    vysl.push(Object.assign({ nazov: x.subor_nazov }, r));
+  }
+  REP.importVysledky = vysl; REP.pracuje = "";
+  await repOtvorProgram(REP.program.id);
+  if (vysl.some(v => v.druh === "plan" && v.stav !== "chyba") && !REP.profil) repOtvorProfil();
+}
+async function repPrijateStiahni(id){
+  try { const { u8, nazov } = await repEdgeGzip({ akcia: "rep_prijate_stiahni", prijate: id }); downloadBlob(new Blob([u8]), nazov); }
+  catch (e) { repChyba(e, "Súbor sa nepodarilo stiahnuť"); }
+}
+async function repPrijateVybav(id, stav){
+  try { await b2bEdge("rep_prijate_vybav", { prijate: id, stav }); await repPrijemNacitaj(REP.program.id); repPrekresli(); }
+  catch (e) { repChyba(e, "Prijatý súbor sa nepodarilo vybaviť"); }
+}
+function repPrijateOdmietni(id){
+  const x = (REP.prijate || []).find(p => p.id === id);
+  if (!x || !confirm("Odmietnuť " + x.subor_nazov + "?\n\nSúbor sa zmaže. V zozname ostane záznam, čo prišlo a kto ho odmietol.")) return;
+  return repPrijateVybav(id, "odmietnute");
+}
+
 // ── Náhľad cez celú obrazovku (overlay) s výberom priamo na snímke ─
 // REP.ov = { balik: "roadmapa" | "qa" | "oba", uprava } — mimo úpravy len to, čo
 // pôjde do výstupu; v úprave aj vypnuté strany, stlmené, so zaškrtnutím.
@@ -4658,16 +4779,20 @@ function repHistoriaHtml(druh){
     (v.povodny_velkost ? '<button class="aabtn" onclick="repStiahniPovodny(\'' + v.id + "')\">⬇ súbor</button>" : "") + "</div></div>";
   return '<details style="margin:4px 0 0"><summary class="csub" style="cursor:pointer;margin:0">História verzií (' + V.length + ")</summary>" + V.map(riadok).join("") + "</details>";
 }
+// Súbor zo servera: gzip v tele, názov a sha256 pôvodného súboru v hlavičke —
+// pôvodný súbor vstupu aj súbor prijatý e-mailom (R14).
+async function repEdgeGzip(telo){
+  const tok = await ziskajToken(); if (!tok) throw new Error(CHYBA_SESSION);
+  const res = await fetch(SUPABASE_URL + "/functions/v1/b2b", { method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + tok }, body: JSON.stringify(telo) });
+  if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.chyba || ("b2b odpovedal " + res.status)); }
+  const F = await ensureFflate(), u8 = F.gunzipSync(new Uint8Array(await res.arrayBuffer()));
+  const nazov = decodeURIComponent(res.headers.get("x-b2b-nazov") || "subor.gz").replace(/\.gz$/, "");
+  if (res.headers.get("x-b2b-sha256") && (await b2bSha256(u8)) !== res.headers.get("x-b2b-sha256")) throw new Error("súbor nesedí s odtlačkom zo servera");
+  return { u8, nazov };
+}
 async function repStiahniPovodny(id){
-  try {
-    const tok = await ziskajToken(); if (!tok) throw new Error(CHYBA_SESSION);
-    const res = await fetch(SUPABASE_URL + "/functions/v1/b2b", { method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + tok }, body: JSON.stringify({ akcia: "rep_vstup_povodny_stiahni", vstup: id }) });
-    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.chyba || ("b2b odpovedal " + res.status)); }
-    const F = await ensureFflate(), u8 = F.gunzipSync(new Uint8Array(await res.arrayBuffer()));
-    const nazov = decodeURIComponent(res.headers.get("x-b2b-nazov") || "subor.gz").replace(/\.gz$/, "");
-    if (res.headers.get("x-b2b-sha256") && (await b2bSha256(u8)) !== res.headers.get("x-b2b-sha256")) throw new Error("súbor nesedí s odtlačkom vstupu");
-    downloadBlob(new Blob([u8]), nazov);
-  } catch (e) { repChyba(e, "Súbor sa nepodarilo stiahnuť"); }
+  try { const { u8, nazov } = await repEdgeGzip({ akcia: "rep_vstup_povodny_stiahni", vstup: id }); downloadBlob(new Blob([u8]), nazov); }
+  catch (e) { repChyba(e, "Súbor sa nepodarilo stiahnuť"); }
 }
 
 // Register zistení: vymazanie v novej verzii a história verzií (server ich drží všetky).
