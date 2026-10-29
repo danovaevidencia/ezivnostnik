@@ -1334,6 +1334,8 @@ b2b_vykaz: {
           html: "<p><b>⬇ Môj výkaz</b> stiahne len vaše hodiny v tvare výkazu objednávateľa aj s hárkom Detail — na vlastnú kontrolu.</p>" },
         { nadpis: "Skutočné hodiny dňa",
           html: "<p>Záznamy a kalendár ukazujú, čo sa v ten deň robilo; odpracované hodiny dňa nastavíte pri dni — <b>Na 8 h</b> alebo <b>Upraviť hodiny dňa</b> — a pre celý mesiac či obdobie cez <b>Dni na 8 h…</b>. Nahradia súčet záznamov vo výkaze aj vo faktúre.</p>" },
+        { nadpis: "Zmazať záznamy alebo celé dni",
+          html: "<p>V Mojom mesiaci zaškrtnite políčko pri zázname, alebo pri dátume celý deň, a dole ťuknite na <b>🗑 Zmazať vybrané</b>. Celý deň zmaže záznamy aj ručne zadané hodiny dňa; deň, z ktorého vyberiete len niektoré záznamy, si ručné hodiny nechá. Jeden záznam zmažete aj v jeho okne tlačidlom <b>Zmazať</b>.</p>" },
       ],
     },
     {
@@ -1354,7 +1356,7 @@ b2b_vykaz: {
         { nadpis: "Čo sa z kalendára ukladá",
           html: "<p>Len dátum, čas a predmet označených udalostí. Účastníci ani text pozvánky do projektu nejdú a neoznačené udalosti sa neukladajú vôbec.</p>" },
         { nadpis: "Ten istý súbor dvakrát",
-          html: "<p>Udalosť, ktorá už v projekte je, ostane v zozname sivá s poznámkou „už v projekte“ — druhýkrát sa nenačíta.</p>" },
+          html: "<p>Udalosť, ktorá už v projekte je, ostane v zozname sivá s poznámkou „už v projekte“ — druhýkrát sa nenačíta. Stretnutie, ktoré ste zo svojich hodín zmazali, appka pri ďalšom importe neoznačí sama (poznámka „zmazané z vašich hodín“); keď ho predsa chcete, zaškrtnite ho.</p>" },
         { nadpis: "Kategórie z Outlooku",
           html: "<p>Ak projektovým stretnutiam dávate kategóriu, ťuknite na ňu hore v okne — označí všetky udalosti s ňou a appka si ju zapamätá.</p>" },
         { nadpis: "Úprava pred importom",
