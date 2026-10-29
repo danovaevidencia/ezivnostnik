@@ -5089,6 +5089,17 @@ function zpPlatbyZaDecember(rok){
   return r2((firmaData.vydavky||[]).filter(x=>x.kategoria==="preddavokZP" && vydavokZaRok(x)===+rok+1
     && String(x.datum||"").slice(0,7)===jan).reduce((a,x)=>a+r2(+x.spolu || +x.bez || 0),0));
 }
+// Koľko z januárového preddavku ZP `janPreddavokZP` je za december minulého
+// roka. Patrí do zúčtovania minulého roka, nie k povinnostiam roka `rok`.
+// JEDNO pravidlo pre rezervu (calcDanRow) aj ročné zúčtovanie (zpPreddavkyZaRok):
+// rezerva 2026 ho do 29. 10. 2026 odpočítavala ako zaplatené zdravotné za 2026
+// a Romanovi ukazovala o 107,25 € menej, hoci VšZP ho započítala do roku 2025.
+function zpJanuarZaDecember(rok, janPreddavokZP){
+  const p=zpPlatbyZaDecember(+rok-1);
+  // január bez výpisu: predpoklad preddavku stojí za platbu za december
+  return p>0 ? Math.min(p, +janPreddavokZP||0)
+    : ((uhradeneVMesiaci(0, +rok).zp>0 || !zpPlatilVRoku(+rok-1)) ? 0 : r2(+janPreddavokZP||0));
+}
 // Preddavky ZP ZA rok pre ročné zúčtovanie (spec 156.19, L1). `t.preddavokZP`
 // sú platby ZAPLATENÉ v roku (aj predpoklad mesiaca bez výpisu): bez januárovej
 // za december minulého roka, s januárovou budúceho roka za december tohto.
@@ -5097,13 +5108,7 @@ function zpPlatbyZaDecember(rok){
 // Základ dane sa nemení: poistné je výdavkom v roku úhrady (zpZaplatene).
 function zpPreddavkyZaRok(rok, rows, t){
   const jan=(rows||[])[0]||{};
-  let zaMinuly=0;
-  if(jan.aktivny){
-    const p=zpPlatbyZaDecember(+rok-1);
-    // január bez výpisu: predpoklad preddavku stojí za platbu za december
-    zaMinuly = p>0 ? Math.min(p, +jan.preddavokZP||0)
-      : ((uhradeneVMesiaci(0, +rok).zp>0 || !zpPlatilVRoku(+rok-1)) ? 0 : r2(+jan.preddavokZP||0));
-  }
+  const zaMinuly=jan.aktivny ? (+jan.zpZaMinulyRok||0) : 0;
   return r2((+t.preddavokZP||0) - zaMinuly + zpPlatbyZaDecember(+rok));
 }
 function danRokVyhlad(rok){
@@ -5154,9 +5159,90 @@ function danRokVyhladHtml(rok){
     + `<div style="background:var(--bg);border-radius:10px;padding:11px 14px;margin-top:10px;font-size:13px">Na vyúčtovanie odkladajte cca <b>${eur(V.naOdlozenieMes)}/mesiac</b> do ${dat(V.lehota)} — preddavky vyššie platíte popri tom v termínoch.</div>`;
   const blizko=V.prijmyOdhad > V.hranica*0.8;
   const hran = blizko ? `<div style="background:${V.nadHranicou?"var(--sfc-warn)":"var(--bg)"};border-radius:10px;padding:11px 14px;margin-top:10px;font-size:12.5px;line-height:1.5">
-      <b>Hranica ${eur(V.hranica)} príjmov:</b> odhad príjmov ${eur(V.prijmyOdhad)} je ${V.nadHranicou?"nad ňou o "+eur(V.rozdielHranica)+" → daň pásmami 19/25 %":"pod ňou, do hranice chýba "+eur(-V.rozdielHranica)+" → daň 15 %"}.
-      Daň za rok pri 15 %: <b>${eur(V.dan15)}</b> · pásmami: <b>${eur(V.danPasma)}</b>. Rozhodujú skutočné príjmy roka (zaplatené faktúry), nie odhad.</div>` : "";
+      <b>Hranica ${eur(V.hranica)} príjmov:</b> odhad príjmov ${eur(V.prijmyOdhad)} je ${V.nadHranicou?"nad ňou o "+eur(V.rozdielHranica)+" → celý základ pásmami":"pod ňou, do hranice chýba "+eur(-V.rozdielHranica)+" → daň 15 %"}.
+      Daň za rok pri 15 %: <b>${eur(V.dan15)}</b> · pásmami: <b>${eur(V.danPasma)}</b>. Rozhodujú skutočné príjmy roka (zaplatené faktúry), nie odhad.
+      ${(H=>H && (H.tesne || H.prekrocene) ? "" : `<div style="margin-top:6px;color:var(--ink-soft)">${danHranicaVysvetlenieHtml(rok, V.hranica)}</div>`)(danHranicaBezpecne(rok))}</div>` : "";   // tesne pri hranici ho už hovorí rámček nad tabuľkou (danHranicaHtml)
   return plat+vyuct+hran;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  HRANICA 100 000 € PRÍJMOV — OBE SUMY, KEĎ JE ODHAD TESNE PRI NEJ (29. 10. 2026)
+//  § 15 písm. a) body 2 a 3 ZDP: do 100 000 € príjmov (§ 6 ods. 1 a 2 —
+//  zaplatené faktúry roka bez DPH) je daň 15 % z CELÉHO základu. Nad hranicou,
+//  hoci o euro, sa 15 % nepoužije vôbec a celý základ ide pásmami 19/25/30/35 %,
+//  každé pásmo na svoju časť ZÁKLADU. Nie je to vyššia sadzba len z príjmov
+//  nad 100 000 € — tak to Roman čítal a tak to appka musí vysvetliť sama.
+//  Rezerva berie sadzbu z odhadu roka (dePrognoza: priemer × 12). Tesne pri
+//  hranici ten odhad rozhoduje o tisícoch eur a jedna suma by tvrdila istotu,
+//  ktorú appka nemá: Romanovi 2026 odhad 103 658 € dal pásma a rezervu
+//  11 937 €, hoci zaplatené príjmy smerovali k ~97 600 € a pri 15 % by stačilo
+//  8 995 €. Tesne pri hranici sa preto ukazujú obe sumy; hlavná ostáva tá,
+//  ktorú appka počíta (pri odhade nad hranicou vyššia — radšej odložiť viac).
+// ═══════════════════════════════════════════════════════════════
+const HRANICA_TESNE=0.15;   // „okolo hranice“ = odhad príjmov roka ±15 % od nej
+// Pásma roka jednou vetou — „19 % do 43 983,32 €, …, 35 % nad“ (sadzby.js).
+function danPasmaText(rok){
+  return (sadzbaRoka("danPasma", +rok)||[]).map(b=>Math.round(b.s*100)+" %"+(b.do==null?" nad":" do "+eur(b.do))).join(", ");
+}
+function danHranicaVysvetlenieHtml(rok, hranica){
+  return `Hranica sa meria na <b>príjmoch</b> — faktúrach zaplatených v roku ${rok}, bez DPH. Do ${eur0(hranica)} vrátane je daň <b>15 % z celého základu</b>.
+    Nad hranicou, hoci o 1 €, sa 15 % nepoužije vôbec a <b>celý základ</b> sa zdaní pásmami: ${danPasmaText(rok)} — každé pásmo len na svoju časť
+    základu dane, nie na príjmy nad ${eur0(hranica)}. Faktúra zaplatená až v januári patrí do príjmov budúceho roka (§ 15 písm. a) body 2 a 3 zákona o dani z príjmov).`;
+}
+// Rezerva roka pri 15 % aj pri pásmach. Líši sa len daň: tá istá ročná
+// rezerva (danTotals), v nej daň z kumulatívneho základu inou sadzbou.
+// Pri paušáli null — paušál neuplatní platiteľ DPH a neplatiteľ je pod obratom
+// na registráciu, na hranicu 100 000 € sa tak nedostane.
+function danHranicaScenare(rok){
+  const S=firmaData.settings||{};
+  if(pausalMoznyVRoku(+rok) && vydavkyRezimEfektivny(+rok)==="pausal") return null;
+  const hranica=sadzbaFirmy("danPrijemHranica", +rok, S);
+  if(!(hranica>0) || !(sadzbaRoka("danPasma", +rok)||[]).length) return null;
+  const P=dePrognoza(+rok); if(!P) return null;
+  const {t}=danTotals(+rok, S);
+  const doteraz=r2(+t.faktB||0), odhad=r2(+P.rocPrijmy||0);
+  const prekrocene=doteraz>hranica;               // hranica už padla, pásma sú isté
+  const zaklad=Math.max(0, +t.vyslZaklad||0);
+  const scenar=s=>{ const dan=danSadzbou(zaklad, s); return {sadzba:s, dan, odlozit:r2(t.odlozit-t.dan+dan)}; };
+  return {hranica, doteraz, odhad, chyba:r2(hranica-doteraz), prekrocene,
+    // uzavretý rok už nie je odhad — príjmy pod hranicou sú isté 15 %
+    tesne:!prekrocene && +rok>=new Date().getFullYear() && Math.abs(odhad-hranica)<=hranica*HRANICA_TESNE,
+    pasma:prekrocene || odhad>hranica,             // ktorou sadzbou počíta rezerva
+    s15:scenar(sadzbaFirmy("danPrijem", +rok, S)),
+    sPasma:scenar(danZoZakladu(Math.max(0, P.zaklad), +rok, Infinity, S).sadzba)};
+}
+function danHranicaBezpecne(rok){
+  try{ return danHranicaScenare(rok); }catch(e){ console.error("hranica príjmov:", e); return null; }
+}
+function sadzbaPct(s){ return String(Math.round(s*1000)/10).replace(".",",")+" %"; }
+// Druhá suma jedným riadkom pod dlaždicu „Odložiť“ (pole "odlozit") alebo
+// „Daň z príjmov“ (pole "dan") — len tesne pri hranici.
+function danHranicaAltText(rok, cele, pole){
+  const H=danHranicaBezpecne(rok); if(!H || !H.tesne) return "";
+  const f=cele ? eur : eur0, k=pole||"odlozit";
+  return H.pasma ? `pri pásmach · do ${eur0(H.hranica)} príjmov (15 %): ${f(H.s15[k])}`
+                 : `pri 15 % · nad ${eur0(H.hranica)} príjmov (pásma): ${f(H.sPasma[k])}`;
+}
+// To isté celou vetou — rozpis pod „Odlož si“ v Prehľade.
+function danHranicaVeta(rok){
+  const H=danHranicaBezpecne(rok); if(!H || !H.tesne) return "";
+  return H.pasma
+    ? `⚠ Tesne pri hranici ${eur0(H.hranica)} príjmov: suma je pri pásmach. Ak príjmy ${rok} ostanú do hranice, stačí ${eur0(H.s15.odlozit)} (15 %).`
+    : `⚠ Tesne pri hranici ${eur0(H.hranica)} príjmov: suma je pri 15 %. Ak príjmy ${rok} hranicu prekročia, treba ${eur0(H.sPasma.odlozit)} (pásma).`;
+}
+// Rámček s oboma sumami a vysvetlením — karta Dane a odvody, Štatistiky.
+function danHranicaHtml(rok){
+  const H=danHranicaBezpecne(rok); if(!H || !(H.tesne || H.prekrocene)) return "";
+  const riadok=(l,v,hl)=>`<div class="dphline"><span>${hl?"<b>"+l+"</b>":l}</span><b>${eur(v)}</b></div>`;
+  return `<div style="background:var(--sfc-warn);border-left:3px solid var(--warn);border-radius:0 10px 10px 0;padding:11px 14px;margin:12px 0;font-size:12.5px;line-height:1.5">
+    <b>⚠ ${H.prekrocene ? `Príjmy ${rok} prekročili ${eur0(H.hranica)} — celý základ sa zdaňuje pásmami`
+                         : `Ste tesne pri hranici ${eur0(H.hranica)} príjmov — rezerva závisí od toho, či ju prekročíte`}</b>
+    ${H.prekrocene ? "" : riadok(`Odložiť, ak príjmy ${rok} ostanú do ${eur0(H.hranica)} (15 %)`, H.s15.odlozit, !H.pasma)
+      + riadok(`Odložiť, ak hranicu prekročíte (pásma, efektívne ${sadzbaPct(H.sPasma.sadzba)})`, H.sPasma.odlozit, H.pasma)}
+    <div style="margin-top:6px">Zaplatené príjmy ${rok} bez DPH: <b>${eur(H.doteraz)}</b>${H.prekrocene ? "" : `, do hranice chýba <b>${eur(H.chyba)}</b>.
+      Odhad celého roka (priemer mesiacov × 12) je ${eur(H.odhad)}, preto appka v hlavnej sume počíta ${H.pasma ? "pásmami — radšej odložiť viac" : "15 %"}`}.</div>
+    <div style="margin-top:6px;color:var(--ink-soft)">${danHranicaVysvetlenieHtml(rok, H.hranica)}</div>
+  </div>`;
 }
 
 // ═══════════════════════════════════════════════════
@@ -5212,6 +5298,9 @@ function calcDanRow(mesiacIdx, rok, S, opt){
   // istá suma, takže chýbajúca platba znamená skôr „výpis ešte nemám" než „neplatil".
   // Predpokladá sa LEN v mesiaci, ktorý bankový výpis nepokrýva.
   const preddavokZP = U.zp>0 ? U.zp : (zpPredpoklad(mesiacIdx, rok, S));
+  // Januárový preddavok za december minulého roka: v mesiaci zaplatený je,
+  // ale povinnosť tohto roka neznižuje — ani rezervu, ani „Zaplatené“.
+  const zpZaMinulyRok = (mesiacIdx===0 && jeAktivny) ? zpJanuarZaDecember(rok, preddavokZP) : 0;
   // Sociálne odvody rovnako ako zdravotné: SKUTOČNE zaplatené má prednosť pred
   // nastavením. Zdroj je ten istý ako v ročnom súhrne — klasifikované pohyby
   // z banky plus doklady —, takže sa mesiac a rok nemôžu rozísť (kap. 83).
@@ -5234,7 +5323,7 @@ function calcDanRow(mesiacIdx, rok, S, opt){
   // čo sa zaplatí (alebo pravidelne zaplatí), je konečné, rovnako ako preddavok
   // ZP sa tu odpočíta aj predpokladaný. Bez toho appka v októbri 2026 kázala
   // Romanovi odložiť aj 1 170,24 €, ktoré už z účtu odišli (spec 156.13).
-  const odlozit=r2(odvodyDan-preddavokZP-danPreddMes-soc);
+  const odlozit=r2(odvodyDan-(preddavokZP-zpZaMinulyRok)-danPreddMes-soc);
   // Čistý príjem = fakturované mínus odvody a daň. Náklady sa zámerne
   // neodpočítavajú — väčšinu z nich tvoria odpisy, čo nie je odliv peňazí.
   // Všade, kde sa toto číslo zobrazuje, musí byť povedané, že je pred nákladmi;
@@ -5253,8 +5342,8 @@ function calcDanRow(mesiacIdx, rok, S, opt){
   let uhradene=0, neuhradene=0;
   faktMes.forEach(f=>{ if(faktJeUhradena(f)) uhradene++; else neuhradene++; });
   const uhradaStav = faktMes.length===0 ? "" : (neuhradene===0 ? "zapl" : (uhradene===0 ? "platba" : "ciast"));
-  return {mesiacIdx, mk, faktB, odpis, vyradenie, nahrady, ostatne, nakladySpolu, ciastkZaklad, vymZaklad, zdrav, preddavokZP, zpZaplatene, danPreddavok:danPreddMes, soc, vyslZaklad, dan, odvodyDan, odlozit, cisty, aktivny:jeAktivny, odprac, uhradaStav,
-          zaplateneMes:r2(preddavokZP+danPreddMes+soc)};
+  return {mesiacIdx, mk, faktB, odpis, vyradenie, nahrady, ostatne, nakladySpolu, ciastkZaklad, vymZaklad, zdrav, preddavokZP, zpZaMinulyRok, zpZaplatene, danPreddavok:danPreddMes, soc, vyslZaklad, dan, odvodyDan, odlozit, cisty, aktivny:jeAktivny, odprac, uhradaStav,
+          zaplateneMes:r2(preddavokZP-zpZaMinulyRok+danPreddMes+soc)};
 }
 // ═══════════════════════════════════════════════════════════════
 //  ROZPIS HERO DLAŽDICE
@@ -5273,7 +5362,8 @@ function calcDanRow(mesiacIdx, rok, S, opt){
 // aj kartu v DPH a daniach — tie dve karty písali „ZP + daň“ a sa nesčítali.
 function odlozZaplatene(t){
   const soc=+(t&&t.soc)||0;
-  return {suma:r2((+t.preddavokZP||0)+(+t.danPreddavok||0)+soc),
+  // bez januárového preddavku ZP za december minulého roka (zpJanuarZaDecember)
+  return {suma:r2((+t.preddavokZP||0)-(+t.zpZaMinulyRok||0)+(+t.danPreddavok||0)+soc),
           label:soc ? "Zaplatené preddavky a sociálne (ZP, daň, SP)" : "Zaplatené preddavky (ZP + daň)"};
 }
 function heroRozpis(t){
@@ -5300,7 +5390,7 @@ function danTotals(rok, S){
   return memoRok("danTotals·"+rok, ()=>_danTotalsVypocet(rok, S));
 }
 function _danTotalsVypocet(rok, S){
-  const t={faktB:0,odpis:0,vyradenie:0,ostatne:0,nakladySpolu:0,ciastkZaklad:0,zdrav:0,preddavokZP:0,dan:0,danPreddavok:0,soc:0,odvodyDan:0,odlozit:0,cisty:0,zaplateneMes:0,zpZaplatene:0};
+  const t={faktB:0,odpis:0,vyradenie:0,ostatne:0,nakladySpolu:0,ciastkZaklad:0,zdrav:0,preddavokZP:0,zpZaMinulyRok:0,dan:0,danPreddavok:0,soc:0,odvodyDan:0,odlozit:0,cisty:0,zaplateneMes:0,zpZaplatene:0};
   const rows=[];  for(let mi=0;mi<12;mi++) rows.push(calcDanRow(mi,rok,S));
   // ── ROČNÝ MODEL (15. 10. 2026, kontrola štatistík M1/M5) ──────────────────
   // Zdravotné aj daň sa počítajú z KUMULATÍVNEHO základu roka k danému mesiacu
@@ -5325,10 +5415,10 @@ function _danTotalsVypocet(rok, S){
     const danCum=danSadzbou(Math.max(0, c.vyslZaklad), sadzba);
     c.dan=r2(danCum-danCumPred); danCumPred=danCum;
     c.odvodyDan=r2(c.zdrav+c.dan+c.soc);
-    c.odlozit=r2(c.odvodyDan-c.preddavokZP-c.danPreddavok-c.soc);
+    c.odlozit=r2(c.odvodyDan-(c.preddavokZP-c.zpZaMinulyRok)-c.danPreddavok-c.soc);
     rezerva=r2(rezerva+c.odlozit); c.rezerva=rezerva;      // koľko má byť odložené ku koncu mesiaca
     c.cisty=r2(c.faktB-c.odvodyDan);
-    ["faktB","odpis","vyradenie","ostatne","nakladySpolu","ciastkZaklad","zdrav","preddavokZP","dan","danPreddavok","soc","odvodyDan","odlozit","cisty","zaplateneMes","zpZaplatene"].forEach(k=>t[k]=r2(t[k]+(+c[k]||0)));
+    ["faktB","odpis","vyradenie","ostatne","nakladySpolu","ciastkZaklad","zdrav","preddavokZP","zpZaMinulyRok","dan","danPreddavok","soc","odvodyDan","odlozit","cisty","zaplateneMes","zpZaplatene"].forEach(k=>t[k]=r2(t[k]+(+c[k]||0)));
   });
   t.vyslZaklad=r2(K-zpZaplCum-socCum);
   // paušál je ročná záležitosť (60 %, max 20 000 €) — pri zvolenom paušále
@@ -8127,7 +8217,10 @@ function prehladRokZonaHtml(){
   if(!pocet && !H.spolu) return "";
   const odvody=r2(t.dan+t.zdrav+t.soc);
   const D={spolu, dph, odvody, tvoje:r2(spolu-dph-odvody), neznameOdvody:false};
-  const pozn=danSadzbaEfektivna(rok)>sadzbaFirmy("danPrijem", rok, firmaData.settings||{})
+  // tesne pri hranici 100 000 € príjmov obe sumy — o sadzbe rozhoduje odhad roka
+  const alt=danHranicaVeta(rok);
+  const pozn=alt ? esc(alt)
+    : danSadzbaEfektivna(rok)>sadzbaFirmy("danPrijem", rok, firmaData.settings||{})
     ? "daň sadzbou "+danSadzbaPctText(rok)+" — príjmy nad hranicou progresie, bez NČZD" : "";
   return '<div class="pasSumy">'
     +'<div class="pasSumy-lavo">'
@@ -8431,7 +8524,7 @@ function sdPohladRok(rok){
     <div class="amini" style="margin-bottom:16px">
       ${spol ? `<div class="aminbox"><div class="al">Príjmy − náklady</div><div class="av ${R.strata?"neg":"pos"}">${eur0(R.vysledok)}</div><div class="as">pred zdanením · podľa evidencie v appke</div></div>
       <div class="aminbox"><div class="al">Fakturované</div><div class="av">${eur0(t.faktB)}</div><div class="as">bez DPH · náklady ${eur0(t.nakladySpolu)}</div></div>` : `
-      <div class="aminbox"><div class="al">Odložiť na dane</div><div class="av" style="color:var(--accent-deep)">${eur0(t.odlozit)}</div><div class="as">mať bokom (rok)</div></div>
+      <div class="aminbox"><div class="al">Odložiť na dane</div><div class="av" style="color:var(--accent-deep)">${eur0(t.odlozit)}</div><div class="as">${(a=>a ? esc(a) : "mať bokom (rok)")(danHranicaAltText(rok))}</div></div>
       <div class="aminbox"><div class="al">Čistý príjem</div><div class="av pos">${eur0(t.cisty)}</div><div class="as">pred nákladmi · fakturované ${eur0(t.faktB)}</div></div>`}
       <div class="aminbox"><div class="al">Dovolenka ${rok}</div><div class="av">${dovZost} dní</div><div class="as">nárok ${dovNarok} · čerp. ${dovCerp}</div></div>
       <div class="aminbox"><div class="al">Najazdené ${rok}</div><div class="av">${Math.round(kmRok).toLocaleString('sk')} km</div><div class="as">${jazdyRok.length} jázd${kmSukr>0?` · súkromne ${Math.round(kmSukr).toLocaleString('sk')} km`:""}</div></div>
@@ -13199,6 +13292,12 @@ function appFaktury(){
   if(fFilter==="uhradene") list=fak.filter(faktJeUhradena);
   else if(fFilter==="neuhradene") list=fak.filter(f=>!faktJeUhradena(f));
   if((_hladaj.faktury||"").trim()) list=list.filter(f=>hladajZhoda(_hladaj.faktury, f.cislo, f.odberatel, f.vs, f.popis, f.spolu));
+  // Súčet toho, čo zoznam práve ukazuje — obdobie, čip aj hľadanie. Dlaždice
+  // vyššie sú za celé obdobie a s DPH; hranicu 100 000 € príjmov treba
+  // porovnať so sumou BEZ DPH podľa úhrady, presne s týmto zoznamom.
+  const sucBez=r2(list.reduce((a,f)=>a+(+f.bez||0),0)), sucSpolu=r2(list.reduce((a,f)=>a+(+f.spolu||0),0));
+  const celyRok=fRok===String(new Date().getFullYear()) && !fMesiac && fFilter==="vsetky" && !(_hladaj.faktury||"").trim();
+  const Hf=celyRok ? danHranicaBezpecne(+fRok) : null;
   // Kľúče, nie čísla — rovnako ako pri výdavkoch (FB). Faktúra bez čísla by
   // sa inak vybrala spolu so všetkými ostatnými bez čísla.
   fakPoslednyList=list.map(dokladKluc).filter(Boolean);
@@ -13221,6 +13320,8 @@ function appFaktury(){
       </select>
       <div style="flex-basis:100%;height:0"></div>
       ${['vsetky|Všetky','uhradene|Uhradené','neuhradene|Neuhradené'].map(x=>{const[k,l]=x.split('|');return `<span class="achip ${fFilter===k?'on':''}" onclick="fFilter='${k}';appFaktury()">${l}</span>`}).join('')}${hladatkoHtml('faktury','appFaktury','🔍 Číslo, odberateľ, VS, suma…')}
+      <div style="flex-basis:100%;font-size:12.5px;color:var(--ink-soft)">Súčet zobrazených (${list.length}): <b style="color:var(--ink)">${eur(sucBez)}</b>${sucBez!==sucSpolu?` bez DPH · ${eur(sucSpolu)} s DPH`:""}${Hf && (Hf.tesne || Hf.prekrocene)
+        ? (Hf.prekrocene ? ` · hranicu ${eur0(Hf.hranica)} príjmov ste prekročili` : ` · do hranice ${eur0(Hf.hranica)} príjmov chýba <b style="color:var(--ink)">${eur(Hf.chyba)}</b>`) : ""}</div>
     </div>
     <div style="background:var(--sfc-info);border-left:3px solid var(--brand);border-radius:8px;padding:10px 13px;margin:0 2px 12px;font-size:12px">
       <b>Od 1.1.2027 povinná e-fakturácia.</b> Platitelia DPH budú musieť tuzemské faktúry vystavovať v štruktúrovanom formáte (UBL 2.1 / Peppol) a posielať cez Digitálneho poštára. Tlačidlom <b>e-faktúra</b> vygenerujete XML už teraz — v 2026 dobrovoľne na testovanie. <span onclick="efakturaInfo()" style="color:var(--brand);cursor:pointer;text-decoration:underline">Viac</span></div>
@@ -18699,9 +18800,9 @@ function appDPH(){
       <div class="aminbox"><div class="al">DPH na úhradu</div><div class="av warn">${eur(dph.saldo)}</div></div>
       ${spol ? `<div class="aminbox"><div class="al">DPH vo faktúrach</div><div class="av">${eur(dph.out)}</div></div>
       <div class="aminbox"><div class="al">DPH na odpočet</div><div class="av">${eur(dph.inp)}</div></div>` : `
-      <div class="aminbox"><div class="al">Odložiť na dane a odvody</div><div class="av warn">${eur(t.odlozit)}</div></div>
+      <div class="aminbox"><div class="al">Odložiť na dane a odvody</div><div class="av warn">${eur(t.odlozit)}</div>${(a=>a ? `<div class="as">${esc(a)}</div>` : "")(danHranicaAltText(rok, true))}</div>
       <div class="aminbox"><div class="al">Skutočné odvody (rok)</div><div class="av">${eur(t.zdrav+t.soc)}</div></div>
-      <div class="aminbox"><div class="al">Daň z príjmov</div><div class="av">${eur(t.dan)}</div></div>`}
+      <div class="aminbox"><div class="al">Daň z príjmov</div><div class="av">${eur(t.dan)}</div>${(a=>a ? `<div class="as">${esc(a)}</div>` : "")(danHranicaAltText(rok, true, "dan"))}</div>`}
     </div>
     <div class="atool atabs" style="flex-wrap:wrap;margin-bottom:14px">
       ${[["vykaz","🧾 Kontrolný výkaz a priznanie"],
@@ -18735,6 +18836,7 @@ function appDPH(){
       <div class="dphline"><span>${odlozZaplatene(t).label}</span><b>−${eur(odlozZaplatene(t).suma)}</b></div>
       ${t.dzmv?`<div class="dphline"><span>Daň z motorových vozidiel (splatná ${(()=>{const d=dmvTermin(rok);return d.getDate()+". "+(d.getMonth()+1)+". "+d.getFullYear();})()})</span><b>${eur(t.dzmv)}</b></div>`:""}
       <div class="dphline" style="border-top:2px solid var(--line);font-size:15px"><span><b>Odložiť na dane a odvody</b></span><b style="color:var(--accent-deep)">${eur(t.odlozit)}</b></div>
+      ${danHranicaHtml(rok)}
     </div>
     ${dmvHtml(rok)}
     <div class="card" style="margin-bottom:14px">
@@ -18747,6 +18849,9 @@ function appDPH(){
       <div class="dphline"><span>Nezdaniteľná časť (NČZD)${nczdRozpad(rok)}</span><b>−${eur(dan.nczd)}</b></div>
       <div class="dphline"><span>Zdaniteľný základ</span><b>${eur(dan.zdanitelny)}</b></div>
       <div class="dphline" style="border-top:2px solid var(--line);font-size:15px"><span><b>Odhad dane (${Math.round(dan.sadzba*100)} %)</b></span><b style="color:var(--warn)">${eur(dan.dan)}</b></div>
+      ${(H=>{ if(!H || !H.tesne) return "";   // tesne pri hranici aj druhá daň — tým istým zdaniteľným základom
+        const A=danZoZakladu(dan.zdanitelny, rok, dan.progresia ? H.hranica : Infinity, S);
+        return `<div class="dphline"><span>${dan.progresia ? `Ak príjmy ${rok} ostanú do ${eur0(H.hranica)} (15 %)` : `Ak príjmy ${rok} prekročia ${eur0(H.hranica)} (pásma)`}</span><b>${eur(A.dan)}</b></div>`; })(danHranicaBezpecne(rok))}
     </div>`}`;
   const nazvyTabov={vykaz:"kontrolný výkaz", podania:"odoslané podania", dane:"dane a odvody", dovolenka:"dovolenka"};
   setCrumb(`platiteľ DPH · ${rok} · ${nazvyTabov[dphTabPlatny()]||""}`);
@@ -25618,6 +25723,7 @@ function sdPohladDane(rok){
   const {rows, t}=danTotals(rok, S);
   const P=dePrognoza(rok);
   const zaplatene=odlozZaplatene(t), zaplatenePreddavky=zaplatene.suma;
+  const zpZaRok=zpPreddavkyZaRok(rok, rows, t);
 
   return strazcaBanner()+`
     <div class="atool">
@@ -25634,6 +25740,8 @@ function sdPohladDane(rok){
     ${odvodyPredpovedHtml(rok)}
 
     ${odpisPrerusenieHtml(rok)}
+
+    ${danHranicaHtml(rok)}
 
     <div class="card" style="margin-bottom:14px">
       <h2 style="font-size:16px;margin-bottom:4px">Daň po mesiacoch ${rok}</h2>
@@ -25675,6 +25783,7 @@ function sdPohladDane(rok){
         </tr></tfoot>
       </table>
       </div>
+      ${t.zpZaMinulyRok?`<div class="ocr-hint" style="margin-top:8px">Preddavok zdravotného ${eur(t.zpZaMinulyRok)} zaplatený v januári je za december ${rok-1} — patrí do zúčtovania ${rok-1}, preto nie je v stĺpci Zaplatené a rezervu neznižuje. Základ dane ${rok} znižuje, lebo poistné je výdavkom v roku úhrady.</div>`:""}
     </div>
 
     <div class="card" style="margin-bottom:14px">
@@ -25696,8 +25805,8 @@ function sdPohladDane(rok){
       <h2 style="font-size:16px;margin-bottom:4px">🏥 Ročné zúčtovanie zdravotného poistenia</h2>
       <div class="csub" style="margin-bottom:12px">Preddavky sú len záloha. Skutočné poistné sa vypočíta z vymeriavacieho základu. Rozdiel je nedoplatok alebo preplatok.</div>
       <div class="dphline"><span>Skutočné zdravotné poistné (rok)</span><b>${eur(t.zdrav)}</b></div>
-      <div class="dphline"><span>Zaplatené preddavky ZP (rok)</span><b>−${eur(t.preddavokZP)}</b></div>
-      <div class="dphline" style="border-top:1px solid var(--line);font-size:15px"><span><b>${t.zdrav-t.preddavokZP>=0?'Nedoplatok ZP (doplatíte)':'Preplatok ZP (vrátia vám)'}</b></span><b style="color:${t.zdrav-t.preddavokZP>=0?'var(--accent-deep)':'var(--pos)'}">${eur(Math.abs(t.zdrav-t.preddavokZP))}</b></div>
+      <div class="dphline"><span>Zaplatené preddavky ZP za ${rok}${t.zpZaMinulyRok?` <span style="font-size:11.5px;color:var(--ink-soft)">(bez ${eur(t.zpZaMinulyRok)} za december ${rok-1})</span>`:""}</span><b>−${eur(zpZaRok)}</b></div>
+      <div class="dphline" style="border-top:1px solid var(--line);font-size:15px"><span><b>${t.zdrav-zpZaRok>=0?'Nedoplatok ZP (doplatíte)':'Preplatok ZP (vrátia vám)'}</b></span><b style="color:${t.zdrav-zpZaRok>=0?'var(--accent-deep)':'var(--pos)'}">${eur(Math.abs(r2(t.zdrav-zpZaRok)))}</b></div>
     </div>
 
     ${P?`<div class="card">
@@ -33070,13 +33179,23 @@ function exportVsetkoXlsx(){
 function danEvidenciaAoa(rok, SET, D, S){
   const head=["Mesiac","Fakt. bez DPH","Odpis","Ostatné nákl.","Náklady spolu","Čiastk. základ","Zdravotné","Preddavok ZP","Daň","Predd. daň","Sociálne","Odvody+daň","Zaplatené","Rezerva","Čistý príjem"];
   const aoa=[[xkCell("Daňová evidencia "+rok,S.title)],[xkCell((D.meta&&D.meta.nazov||"")+" · IČO "+(D.meta&&D.meta.ico||""),S.sub)],[],head.map(h=>xkCell(h,S.hdr))];
-  const {rows}=danTotals(+rok, SET);
+  const {rows, t}=danTotals(+rok, SET);
   const sum=Array(head.length-1).fill(0); let posl=0;
   rows.filter(c=>c.aktivny).forEach(c=>{ const z=c.mesiacIdx%2===1; const sc=z?S.cellZ:S.cell, se=z?S.eurZ:S.eur;
     const vals=[c.faktB,c.odpis,c.ostatne,c.nakladySpolu,c.ciastkZaklad,c.zdrav,c.preddavokZP,c.dan,c.danPreddavok,c.soc,c.odvodyDan,c.zaplateneMes,c.rezerva,c.cisty];
     aoa.push([xkCell(XK_MONTHS[c.mesiacIdx],sc),...vals.map(v=>xkCell(r2(+v||0),se))]); vals.forEach((v,k)=>{ sum[k]+=(+v||0); }); posl=+c.rezerva||0; });
   sum[12]=posl;   // Rezerva: stav ku koncu roka, nie súčet
   aoa.push([xkCell("Spolu",S.foot),...sum.map(v=>xkCell(r2(v),S.footE))]);
+  // Preddavok ZP stĺpca je platba v mesiaci; Zaplatené a Rezerva sú povinnosti roka
+  if(t.zpZaMinulyRok) aoa.push([], [xkCell("Január: preddavok ZP "+eur(t.zpZaMinulyRok)+" je za december "+(rok-1)
+    +" — patrí do zúčtovania "+(rok-1)+", preto nie je v stĺpcoch Zaplatené a Rezerva. Základ dane "+rok+" znižuje (poistné je výdavkom v roku úhrady).",S.sub)]);
+  // tesne pri hranici 100 000 € príjmov obe rezervy, ako na obrazovke
+  const H=danHranicaBezpecne(rok);
+  if(H && H.tesne) aoa.push([], [xkCell("Hranica "+eur0(H.hranica)+" príjmov: zaplatené "+eur(H.doteraz)+", odhad roka "+eur(H.odhad)
+    +". Odložiť na dane a odvody pri 15 % (príjmy do hranice): "+eur(H.s15.odlozit)+" · pri pásmach (nad hranicou): "+eur(H.sPasma.odlozit)
+    +". Tabuľka počíta "+(H.pasma?"pásmami":"15 %")+".",S.sub)],
+    [xkCell("Nad hranicou, hoci o 1 €, sa 15 % nepoužije vôbec a celý základ sa zdaní pásmami: "+danPasmaText(rok)
+    +" — každé pásmo len na svoju časť základu dane (§ 15 písm. a) body 2 a 3 ZDP).",S.sub)]);
   return aoa;
 }
 // export daňovej tabuľky do XLS
