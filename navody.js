@@ -1336,6 +1336,8 @@ b2b_vykaz: {
           html: "<p>Záznamy a kalendár ukazujú, čo sa v ten deň robilo; odpracované hodiny dňa nastavíte pri dni — <b>Na 8 h</b> alebo <b>Upraviť hodiny dňa</b> — a pre celý mesiac či obdobie cez <b>Dni na 8 h…</b>. Nahradia súčet záznamov vo výkaze aj vo faktúre.</p>" },
         { nadpis: "Zmazať záznamy alebo celé dni",
           html: "<p>V Mojom mesiaci zaškrtnite políčko pri zázname, alebo pri dátume celý deň, a dole ťuknite na <b>🗑 Zmazať vybrané</b>. Celý deň zmaže záznamy aj ručne zadané hodiny dňa; deň, z ktorého vyberiete len niektoré záznamy, si ručné hodiny nechá. Jeden záznam zmažete aj v jeho okne tlačidlom <b>Zmazať</b>.</p>" },
+        { nadpis: "Interné záznamy",
+          html: "<p>Záznam, ktorý nejde do výkazu pre klienta (napríklad interná porada dodávateľa), označte v jeho okne políčkom <b>Interné</b> — alebo viac naraz: zaškrtnite ich v Mojom mesiaci a dole ťuknite na <b>⊘ Interné</b>. Ostanú v Mojom mesiaci so štítkom, do spoločného výkazu ani čerpania nejdú; ručne zadané hodiny dňa sa nemenia. Pri importe z kalendára vyberte namiesto aktivity <b>⊘ Interné</b> — predmet si appka zapamätá. <b>→ Do Výkazov</b> sa pri interných opýta, či majú ísť aj do vašej faktúry.</p>" },
       ],
     },
     {
