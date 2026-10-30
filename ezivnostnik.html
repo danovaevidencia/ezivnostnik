@@ -12830,10 +12830,11 @@ function kalBunkaHodiny(v){
   if(m) return +m[1] + (+m[2])/60;
   const n=parseFloat(s.replace(",", ".")); return isFinite(n)? n : null;
 }
-// Riadky tabuľky (pole polí) → {udalosti, vynechane: čísla riadkov v hárku, riadok hlavičky}
-// alebo null, keď tabuľka nemá stĺpce kalendára (aspoň začiatok a predmet).
-function kalendarZRiadkov(rows){
-  rows=rows||[];
+// Riadky tabuľky (pole polí) → {udalosti, vynechane: čísla riadkov v hárku, riadok hlavičky,
+// maStav} alebo null, keď tabuľka nemá stĺpce kalendára (aspoň začiatok a predmet).
+// `posun` = koľko riadkov hárka je nad prvým prečítaným (rozsah hárka nemusí začínať v A1).
+function kalendarZRiadkov(rows, posun){
+  rows=rows||[]; posun=posun||0;
   for(let hi=0; hi<Math.min(rows.length, 15); hi++){
     const H=(rows[hi]||[]).map(kalNormHlavicka), c={};
     Object.keys(KAL_STLPCE).forEach(k=>{ c[k]=-1; for(const s of KAL_STLPCE[k]){ const i=H.indexOf(s); if(i>=0){ c[k]=i; break; } } });
@@ -12845,7 +12846,7 @@ function kalendarZRiadkov(rows){
       if(!r.some(x=>String(x==null?"":x).trim())) return;               // prázdny riadok
       const iso=kalBunkaDatum(bunka(r,"datum")) || kalBunkaDatum(bunka(r,"od"));
       const summary=text(r,"predmet");
-      if(!iso){ if(summary || text(r,"od")) vynechane.push(hi+j+2); return; }   // súčet pod tabuľkou nie je udalosť
+      if(!iso){ if(summary || text(r,"od")) vynechane.push(posun+hi+j+2); return; }   // súčet pod tabuľkou nie je udalosť
       const [y,mo,d]=iso.split("-").map(Number);
       const a=kalBunkaMinuty(bunka(r,"od"));
       const ev={summary, location:text(r,"miesto")||undefined, organizer:text(r,"organizator")||undefined};
@@ -12870,14 +12871,15 @@ function kalendarZRiadkov(rows){
       }
       udalosti.push(ev);
     });
-    return {udalosti, vynechane, riadok:hi+1};
+    return {udalosti, vynechane, riadok:posun+hi+1, maStav:c.stav>=0};
   }
   return null;
 }
 // Zošit XLSX → prvý hárok s tabuľkou kalendára ({…, harok}) alebo null.
 function kalendarZXlsx(X, wb){
   for(const n of (wb&&wb.SheetNames)||[]){
-    const r=kalendarZRiadkov(X.utils.sheet_to_json(wb.Sheets[n],{header:1, raw:true, defval:""}));
+    const ws=wb.Sheets[n], od=ws && ws["!ref"] && X.utils.decode_range? X.utils.decode_range(ws["!ref"]).s.r : 0;
+    const r=kalendarZRiadkov(X.utils.sheet_to_json(ws,{header:1, raw:true, defval:""}), od);
     if(r) return Object.assign(r, {harok:n});
   }
   return null;
@@ -12893,7 +12895,8 @@ const KAL_XLSX_BEZ_STLPCOV="Tabuľka nemá stĺpce kalendára — treba aspoň D
 function kalTabulkaPozn(t){
   if(!t || typeof t!=="object") return "";
   const v=t.vynechane||[];
-  return `Z tabuľky (hárok „${esc(t.harok||"")}“): ${t.udalosti.length} ${sklon(t.udalosti.length,"udalosť","udalosti","udalostí")}. Tabuľka nehovorí, či ste stretnutie odmietli — skontrolujte výber.`
+  return `Z tabuľky (hárok „${esc(t.harok||"")}“): ${t.udalosti.length} ${sklon(t.udalosti.length,"udalosť","udalosti","udalostí")}.`
+    + (t.maStav? "" : " Tabuľka nehovorí, či ste stretnutie odmietli — skontrolujte výber.")
     + (v.length? ` Preskočené riadky bez dátumu: ${v.slice(0,12).join(", ")}${v.length>12? " …" : ""}.` : "");
 }
 
