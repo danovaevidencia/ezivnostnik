@@ -132,8 +132,10 @@ vykazy: {
         { text: "Vyplňte projekt a obdobie.", snimka: "vykazy-novy-2" },
         { text: "Pridávajte odpracované dni cez <b>＋ Pridať deň</b> a ťuknite na <b>Uložiť</b>.", tlacidlo: "Pridať deň", snimka: "vykazy-novy-3" },
       ],
-      tip: "Máte dni v Google alebo Outlook kalendári? <b>📅 Import z kalendára</b> ich načíta zo súboru .ics — len vyberiete, ktoré boli práca pre klienta.",
+      tip: "Máte dni v Google alebo Outlook kalendári? <b>📅 Import z kalendára</b> ich načíta zo súboru .ics, z tabuľky v Exceli alebo z CSV z Outlooku — len vyberiete, ktoré boli práca pre klienta.",
       podrobnosti: [
+        { nadpis: "Kalendár e-mailom alebo z mobilu",
+          html: "<p>Súbor kalendára môžete aj preposlať na adresu firmy z [[app:data#dmKarta|nastavení — Doklady e-mailom]]. V schránke dokladov ho ťuknutím na <b>Importovať →</b> otvoríte rovno v importe z kalendára; mail sa odbaví, keď výkaz uložíte. Bez počítača vám tabuľku udalostí v Exceli vytvorí Microsoft 365 Copilot (napríklad <i>„exportuj udalosti môjho kalendára za október do Excelu“</i>).</p>" },
         { nadpis: "Človekodeň podľa hodín alebo pevná sadzba",
           html: "<p>Vo výkaze si vyberiete, či sa človekodeň počíta z hodín (napr. 8 hodín = 1 deň), alebo platí pevná denná sadzba bez ohľadu na hodiny.</p>" },
         { nadpis: "Zmazať deň alebo činnosť dňa",
