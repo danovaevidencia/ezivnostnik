@@ -1347,8 +1347,8 @@ b2b_vykaz: {
       nazov: "Načítať hodiny z kalendára",
       kedy: "Stretnutia a práca na projekte sú v Outlooku a nechcete ich prepisovať ručne.",
       kroky: [
-        { text: "Uložte si kalendár za mesiac ako súbor .ics (návod pre Outlook je nižšie v podrobnostiach)." },
-        { text: "V záložke <b>Môj mesiac</b> ťuknite na <b>📅 Z kalendára (.ics)</b> a vyberte súbor.", tlacidlo: "📅 Z kalendára (.ics)", snimka: "b2b_vykaz-kalendar-1" },
+        { text: "Uložte si kalendár za mesiac ako súbor .ics, alebo bez počítača ako tabuľku udalostí v Exceli (návod je nižšie v podrobnostiach)." },
+        { text: "V záložke <b>Môj mesiac</b> ťuknite na <b>📅 Z kalendára (.ics, .xlsx)</b> a vyberte súbor.", tlacidlo: "📅 Z kalendára (.ics, .xlsx)", snimka: "b2b_vykaz-kalendar-1" },
         { text: "Označte udalosti, ktoré patria projektu (alebo <b>Označiť všetky</b>), a každej vyberte aktivitu.", tlacidlo: "Označiť všetky", snimka: "b2b_vykaz-kalendar-2",
           tip: "Výber aktivity riadok sám označí. Nový projekt aktivity ešte nemá — vo výbere zvoľte ＋ Nová aktivita…. Odmietnuté a zrušené stretnutia appka sama neoznačí." },
         { text: "Ťuknite na <b>Importovať označené</b>.", tlacidlo: "Importovať označené", snimka: "b2b_vykaz-kalendar-3" },
@@ -1357,10 +1357,12 @@ b2b_vykaz: {
       podrobnosti: [
         { nadpis: "Ako dostať .ics z Outlooku",
           html: "<p>V Outlooku pre Windows: <b>Súbor → Uložiť kalendár</b>, v <b>Ďalšie možnosti</b> nastavte rozsah dátumov na mesiac a uložte. Z Google kalendára: <b>Nastavenia → Import a export → Exportovať</b>.</p>" },
+        { nadpis: "Bez počítača: tabuľka z Copilota",
+          html: "<p>V mobile sa .ics z Outlooku uložiť nedá. Microsoft 365 Copilot vie z kalendára vytvoriť tabuľku v Exceli — požiadajte ho napríklad <i>„exportuj udalosti môjho kalendára za október do Excelu“</i>. Tabuľku so stĺpcami Dátum, Začiatok, Koniec (alebo Trvanie) a Predmet appka načíta rovnako ako .ics. Tabuľka nehovorí, ktoré stretnutia ste odmietli; tie odškrtnite sami.</p>" },
         { nadpis: "Čo sa z kalendára ukladá",
           html: "<p>Len dátum, čas a predmet označených udalostí. Účastníci ani text pozvánky do projektu nejdú a neoznačené udalosti sa neukladajú vôbec.</p>" },
         { nadpis: "Ten istý súbor dvakrát",
-          html: "<p>Udalosť, ktorá už v projekte je, ostane v zozname sivá s poznámkou „už v projekte“ — druhýkrát sa nenačíta. Stretnutie, ktoré ste zo svojich hodín zmazali, appka pri ďalšom importe neoznačí sama (poznámka „zmazané z vašich hodín“); keď ho predsa chcete, zaškrtnite ho.</p>" },
+          html: "<p>Udalosť, ktorá už v projekte je, ostane v zozname sivá s poznámkou „už v projekte“ — druhýkrát sa nenačíta, ani keď ten istý mesiac načítate raz z tabuľky a raz z .ics (spozná ju deň, čas začiatku a predmet). Stretnutie, ktoré ste zo svojich hodín zmazali, appka pri ďalšom importe neoznačí sama (poznámka „zmazané z vašich hodín“); keď ho predsa chcete, zaškrtnite ho.</p>" },
         { nadpis: "Kategórie z Outlooku",
           html: "<p>Ak projektovým stretnutiam dávate kategóriu, ťuknite na ňu hore v okne — označí všetky udalosti s ňou a appka si ju zapamätá.</p>" },
         { nadpis: "Úprava pred importom",
@@ -1466,7 +1468,7 @@ b2b_vykaz: {
         { nadpis: "Výkaz za iný mesiac",
           html: "<p>Keď je výkaz za iný mesiac, než máte otvorený, okno importu ponúkne <b>Prepnúť</b> na mesiac súboru a importuje ho tam.</p>" },
         { nadpis: "Kalendár a výkaz podľa odosielateľa",
-          html: "<p>Pri exporte kalendára (.ics) ťuknite na <b>Importovať z kalendára</b> — otvorí sa ten istý import ako v Mojom mesiaci. Hodiny idú osobe, ktorej kontaktný e-mail sa zhoduje s odosielateľom (dá sa zmeniť); výkaz v Exceli sa jej predvyberie rovnako. Osoba s účtom si svoj kalendár importuje sama. Stretnutia sa čítajú za otvorený mesiac — keď ich súbor má za iný, appka povie za ktorý.</p>" },
+          html: "<p>Pri exporte kalendára (.ics alebo tabuľka udalostí v Exceli) ťuknite na <b>Importovať z kalendára</b> — otvorí sa ten istý import ako v Mojom mesiaci. Hodiny idú osobe, ktorej kontaktný e-mail sa zhoduje s odosielateľom (dá sa zmeniť); výkaz v Exceli sa jej predvyberie rovnako. Osoba s účtom si svoj kalendár importuje sama. Stretnutia sa čítajú za otvorený mesiac — keď ich súbor má za iný, appka povie za ktorý.</p>" },
       ],
     },
     {
