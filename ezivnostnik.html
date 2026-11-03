@@ -27413,6 +27413,8 @@ async function b2bZmazZaznam(id){ await b2bZmazZaznamy([id]); b2bObnov(); }
 // importe .ics už neoznačí samo (spec 43.27: automatika, ktorá nevie o zmazaní,
 // s používateľom bojuje). Kľúč = zdroj + deň ako „už v projekte“; pamäť je
 // súkromná (b2b_moje), záznamy osoby bez účtu sa nepamätajú.
+// Zdroj a deň číta z d.zaznamy — volať PO zmazaní na serveri, ale PRED b2bObnov
+// (po obnovení tam zmazané záznamy už nie sú a pamäť by ostala prázdna).
 async function b2bZapamatajZmazaneIcs(ids){
   const d=B2B.d, os=b2bMojaOsoba(); if(!d || !os || !ids || !ids.length) return;
   const set=new Set(ids), nove=d.zaznamy.filter(z=>set.has(z.id) && z.osoba_id===os.id && /^ics:/.test(z.zdroj||"")).map(z=>z.zdroj+"|"+String(z.datum).slice(0,10));
@@ -27430,7 +27432,11 @@ async function b2bMojeUloz(zmena, co){
 }
 // Kto smie zmazať záznam — podmienka b2b_mozem_pisat_za (admin_89) pre zobrazenie:
 // vlastný záznam, alebo záznam osoby bez účtu. Rozhoduje server (RLS); appka len
-// neponúkne políčko tam, kde by zmazanie odmietol.
+// neponúkne políčko tam, kde by zmazanie odmietol. Kópia NIE je doslovná: server
+// žiada aj modul výkaz (projekt aj osoba, alebo správca; za osobu bez účtu člena
+// s modulom výkaz). Tu chýba, lebo Detail aj Môj mesiac sú v module Pracovný výkaz
+// a ten osobe bez modulu brána nepustí (b2bMaModul) — keby sa políčko objavilo
+// mimo neho, podmienku modulu treba doplniť aj sem.
 function b2bMozemZmazatZaznam(osobaId){
   const d=B2B.d, o=d && (d.osoby||[]).find(x=>x.id===osobaId);
   if(!o || o.aktivny===false) return false;
@@ -28718,7 +28724,7 @@ function b2bVykazPredloha(d, os, ajInterne, vyber){
   const D=d.projekt.data||{}, akt=Object.fromEntries(d.aktivity.map(a=>[a.id,a]));
   const poc={}; d.zaznamy.filter(z=>z.osoba_id===os.id && String(z.datum).slice(0,7)===d.mesiac).forEach(z=>{ const k=(akt[z.aktivita_id]||{}).zakazka; if(k) poc[k]=(poc[k]||0)+(+z.minuty||0); });
   const org=(D.organizacie||[]).find(o=>o.id===os.organizacia)||{}, zo=(org.zakazky||[])[0];
-  // Číslo zákazky = interné číslo dodávateľa (rozhodnutie 13): najčastejšie z aktivít mesiaca, inak prvé zákazky organizácie.
+  // Číslo zákazky = interné číslo dodávateľa (NAVRH_B2B_VYKAZ §17, rozhodnutie 15): najčastejšie z aktivít mesiaca, inak prvé zákazky organizácie.
   // Projekt = jedna zmluva a jedna zákazka (Roman 18. 10. 2026) — číslo z nastavení projektu
   // má prednosť; zákazky z aktivít a organizácie ostávajú len pre staršie projekty.
   const zakazka=String(D.zakazka||"").trim() || Object.keys(poc).sort((a,b)=>poc[b]-poc[a])[0] || (zo? String(zo.cislo||zo) : "");
@@ -28848,6 +28854,8 @@ function b2bMostUloz(){
   if(!strazZapis("vykazy")) return false;
   const w=b2bMostPredloha(), upoz=b2bMostUpoz(w);
   if(!w.polozky.length) return b2bVOkne("Nie je vybraný žiadny deň.");
+  // Editor až v ďalšom kroku: modalConfirm po návrate z uloženia volá closeModal()
+  // a editor otvorený synchrónne by zavrel (rovnako robí import kalendára vo Výkazoch).
   if(M.ciel==null){ B2B._most=null; if(upoz) oznamPas(upoz); setTimeout(()=>editVykaz(null, w), 0); return; }
   const cur=(firmaData.vykazy||[])[M.ciel];
   if(!cur || (M.i!=null? cur.povod!==w.povod : !!cur.povod)) return alert("Výkazy sa medzitým zmenili — skúste to znova.");
