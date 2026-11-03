@@ -725,7 +725,7 @@ window.NAVODY_SNIMKY = {
  },
  "b2b_vykaz-vystupy-1": {
   "m": {
-   "subor": "navody/b2b_vykaz-vystupy-1.m.ed607cac.webp",
+   "subor": "navody/b2b_vykaz-vystupy-1.m.f8e5d633.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -736,7 +736,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/b2b_vykaz-vystupy-1.d.b79e3deb.webp",
+   "subor": "navody/b2b_vykaz-vystupy-1.d.4c9c3f90.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -749,23 +749,23 @@ window.NAVODY_SNIMKY = {
  },
  "b2b_vykaz-vystupy-2": {
   "m": {
-   "subor": "navody/b2b_vykaz-vystupy-2.m.8e9bd8ce.webp",
+   "subor": "navody/b2b_vykaz-vystupy-2.m.c134a5e0.webp",
    "w": 390,
    "h": 600,
    "ciel": {
     "x": 42,
-    "y": 264,
+    "y": 228,
     "w": 306,
     "h": 41
    }
   },
   "d": {
-   "subor": "navody/b2b_vykaz-vystupy-2.d.65beae37.webp",
+   "subor": "navody/b2b_vykaz-vystupy-2.d.90813de1.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
     "x": 294,
-    "y": 234,
+    "y": 190,
     "w": 436,
     "h": 41
    }
@@ -773,23 +773,23 @@ window.NAVODY_SNIMKY = {
  },
  "b2b_vykaz-vystupy-3": {
   "m": {
-   "subor": "navody/b2b_vykaz-vystupy-3.m.53ca1edf.webp",
+   "subor": "navody/b2b_vykaz-vystupy-3.m.04060bfb.webp",
    "w": 390,
    "h": 600,
    "ciel": {
-    "x": 103,
+    "x": 185,
     "y": 281,
     "w": 122,
     "h": 37
    }
   },
   "d": {
-   "subor": "navody/b2b_vykaz-vystupy-3.d.6bd5b93f.webp",
+   "subor": "navody/b2b_vykaz-vystupy-3.d.6b3e8677.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
-    "x": 339,
-    "y": 281,
+    "x": 421,
+    "y": 291,
     "w": 122,
     "h": 37
    }
@@ -797,7 +797,7 @@ window.NAVODY_SNIMKY = {
  },
  "b2b_vykaz-vystupy-4": {
   "m": {
-   "subor": "navody/b2b_vykaz-vystupy-4.m.aacc1725.webp",
+   "subor": "navody/b2b_vykaz-vystupy-4.m.1c9ab8a0.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -808,12 +808,12 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/b2b_vykaz-vystupy-4.d.daba7109.webp",
+   "subor": "navody/b2b_vykaz-vystupy-4.d.b0e5753e.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
     "x": 294,
-    "y": 330,
+    "y": 328,
     "w": 436,
     "h": 16
    }
