@@ -3850,7 +3850,13 @@ function repVystupyProjektuHtml(K){
     '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:6px">' + Object.keys(REP_VYSTUP_NAZVY).filter(d => d !== "qa" || qa).map(d =>
       '<label style="display:flex;gap:4px;align-items:center"><input type="checkbox"' + (V[d] ? " checked" : "") + ' onchange="REP.vystupyVyber.' + d + '=this.checked"> ' + esc(REP_VYSTUP_NAZVY[d]) + "</label>").join("") + "</div>" +
     (uz.length ? '<div class="csub" style="margin:0 0 6px">K tejto verzii už sú vo Výstupoch: ' + esc(uz.map(v => v.cislo + " " + v.nazov).join(" · ")) + "</div>" : "") +
+    (repVystupD() ? b2bVystupTypHtml("repVystupTyp", REP.vystupyTyp || "", repVystupD()) : "") +
     '<button class="aabtn" onclick="repUlozDoVystupov()">Uložiť do Výstupov</button></div>';
+}
+// Typ výstupu zo zmluvy je povinný aj tu (č. 326) — pravidlo appky b2bVystupTypChyba.
+// Typy sú v zmluve projektu výkazu (B2B.d), keď je načítaný pre ten istý projekt.
+function repVystupD(){
+  return typeof B2B !== "undefined" && B2B.d && B2B.d.pid === REP.pid && B2B.d.projekt ? (B2B.d.projekt.data || {}) : null;
 }
 // Výstupy projektu, ktoré už nesú väzbu na otvorenú verziu cyklu (zoznam B2B).
 function repVystupyVerzie(){
@@ -3866,6 +3872,10 @@ async function repUlozDoVystupov(){
   const K = repKontextCyklu(), V = REP.vystupyVyber || {}, qa = repLayout(K.view, K.tema, null, { balik: "qa" }).strany.length > 0;
   const druhy = Object.keys(REP_VYSTUP_NAZVY).filter(d => V[d] && (d !== "qa" || qa));
   if (!druhy.length) return alert("Vyberte aspoň jeden súbor.");
+  const D = repVystupD(), typEl = document.getElementById("repVystupTyp");
+  const typ = (typEl ? String(typEl.value || "") : String(REP.vystupyTyp || "")) || null;
+  if (D) { const ch = b2bVystupTypChyba(typ, D); if (ch) return alert(ch); }
+  REP.vystupyTyp = typ;
   const uz = repVystupyVerzie();
   if (uz.length && !confirm("K tejto verzii cyklu už sú vo Výstupoch " + uz.map(v => v.cislo).join(", ") + ". Uložiť ďalšie?")) return;
   const ulozene = [];
@@ -3876,7 +3886,7 @@ async function repUlozDoVystupov(){
       const s = await repSubor(d, K);
       if (s.blob.size > 25 * 1024 * 1024) throw new Error(s.nazov + " má viac než 25 MB");
       const nazov = REP_VYSTUP_NAZVY[d] + " " + (REP.program.kod || REP.program.nazov || "") + " k " + repDMR(REP.cyklus.stav_ku_dnu);
-      const r = await sb.rpc("b2b_vystup_zaloz", { p_projekt: REP.pid, p_typ: null, p_nazov: nazov, p_datum: REP.cyklus.stav_ku_dnu, p_autori: [os.id] });
+      const r = await sb.rpc("b2b_vystup_zaloz", { p_projekt: REP.pid, p_typ: typ, p_nazov: nazov, p_datum: REP.cyklus.stav_ku_dnu, p_autori: [os.id] });
       if (r.error) throw r.error;
       const v = r.data || {};
       rozpracovany = v.cislo;
@@ -3885,7 +3895,7 @@ async function repUlozDoVystupov(){
       if (p.error) throw p.error;
       rozpracovany = null;
       ulozene.push(v.cislo);
-      if (typeof B2B !== "undefined" && B2B.d) B2B.d.vystupy = (B2B.d.vystupy || []).concat([{ id: v.id, projekt_id: REP.pid, cislo: v.cislo, nazov, datum: REP.cyklus.stav_ku_dnu, typ: null,
+      if (typeof B2B !== "undefined" && B2B.d) B2B.d.vystupy = (B2B.d.vystupy || []).concat([{ id: v.id, projekt_id: REP.pid, cislo: v.cislo, nazov, datum: REP.cyklus.stav_ku_dnu, typ,
         autori: [os.id], zmazane: null, rep_cyklus_verzia: REP.verziaId }]);
     }
     REP.pracuje = "";
