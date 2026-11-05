@@ -725,18 +725,18 @@ window.NAVODY_SNIMKY = {
  },
  "b2b_vykaz-vystupy-1": {
   "m": {
-   "subor": "navody/b2b_vykaz-vystupy-1.m.f8e5d633.webp",
+   "subor": "navody/b2b_vykaz-vystupy-1.m.0409971c.webp",
    "w": 390,
    "h": 600,
    "ciel": {
-    "x": 270,
+    "x": 31,
     "y": 281,
     "w": 89,
     "h": 37
    }
   },
   "d": {
-   "subor": "navody/b2b_vykaz-vystupy-1.d.4c9c3f90.webp",
+   "subor": "navody/b2b_vykaz-vystupy-1.d.27785e4b.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -749,7 +749,7 @@ window.NAVODY_SNIMKY = {
  },
  "b2b_vykaz-vystupy-2": {
   "m": {
-   "subor": "navody/b2b_vykaz-vystupy-2.m.c134a5e0.webp",
+   "subor": "navody/b2b_vykaz-vystupy-2.m.46a5e714.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -760,7 +760,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/b2b_vykaz-vystupy-2.d.90813de1.webp",
+   "subor": "navody/b2b_vykaz-vystupy-2.d.3392c03d.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -773,7 +773,7 @@ window.NAVODY_SNIMKY = {
  },
  "b2b_vykaz-vystupy-3": {
   "m": {
-   "subor": "navody/b2b_vykaz-vystupy-3.m.04060bfb.webp",
+   "subor": "navody/b2b_vykaz-vystupy-3.m.8020a4aa.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -784,7 +784,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/b2b_vykaz-vystupy-3.d.6b3e8677.webp",
+   "subor": "navody/b2b_vykaz-vystupy-3.d.359ec397.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
