@@ -1329,7 +1329,7 @@ b2b_vykaz: {
       tip: "Aktivity, ktoré používate najčastejšie, sa ukážu ako <b>Časté:</b> — ťuknutím otvoríte nový záznam s vybranou aktivitou.",
       podrobnosti: [
         { nadpis: "Aktivita nie je v zozname",
-          html: "<p>Pridajte ju cez <b>＋ Aktivita</b>: konkrétna úloha projektu (napríklad „Riadiaci výbor — podklady“) patrí pod oblasť zo zmluvy alebo pod činnosť vašej pozície; činnosti iných pozícií ukáže voľba pod výberom. Z aktivít mesiaca appka skladá popis pracovnej činnosti vo výkaze.</p>" },
+          html: "<p>Aktivity projektu pridáva správca projektu — napíšte mu, ktorá chýba. Dovtedy záznam uložte bez aktivity a prácu opíšte v <b>Popise</b>; aktivitu doplníte neskôr v úprave záznamu. Aktivity zo zmluvy sú vo výbere vždy. Názvy aktivít idú klientovi do popisu pracovnej činnosti vo výkaze, preto ich nezakladá každý zvlášť.</p>" },
         { nadpis: "Kto vidí moje záznamy",
           html: "<p>Všetci členovia projektu. Súkromné ostáva len to, čo do projektu nevošlo — napríklad udalosti kalendára, ktoré ste pri importe neoznačili.</p>" },
         { nadpis: "Len moje hodiny v súbore",
@@ -1523,6 +1523,8 @@ b2b_vykaz: {
           html: "<p>Zmluvu prečíta asistent aj z PDF — <b>vybrať PDF</b> v okne nového projektu. Pred odoslaním sa appka opýta, lebo súbor pôjde k poskytovateľovi jazykového modelu.</p>" },
         { nadpis: "Správcovia",
           html: "<p>Správca mení projekt a osoby a pozýva. Ďalšieho správcu určíte pri osobe s účtom — <b>urobiť správcom</b>. Projekt má vždy aspoň jedného.</p>" },
+        { nadpis: "Aktivity projektu",
+          html: "<p>Opakované úlohy projektu (napríklad „Riadiaci výbor“), ktoré tím vyberá pri zázname, spravuje správca v záložke Projekt, časť <b>Aktivity</b>: <b>＋ Aktivita</b>, <b>upraviť</b> a <b>skryť</b>. Názvy aktivít mesiaca idú klientovi do popisu pracovnej činnosti vo výkaze. Skrytá aktivita sa vo výbere neponúka, záznamy na ňu ostanú.</p>" },
         { nadpis: "Údaje projektu zo súboru",
           html: "<p>Pozície, miesta a činnosti sa dajú nahrať aj z JSON vo formáte eživnostníka — v záložke Projekt <b>⬆ Nahradiť z JSON</b>.</p>" },
         { nadpis: "Report o stave programu",
