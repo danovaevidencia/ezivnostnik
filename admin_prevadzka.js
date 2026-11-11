@@ -59,7 +59,20 @@ function dnesPolozky(d){
   // odsekol výstup (kód v asistent_volania.chyba) — čísla dňa sú v riadku príjmu.
   const as = d.asistent || {};
   if(as.chyby) p.push({ sekcia:"automatika", vaha:"neg", text: as.chyby + " × asistent: volanie modelu skončilo chybou (" + (as.volania || 0) + " volaní dnes)" });
+  // Pošta (admin_100, spec 161 R4): Resend Free má 100 e-mailov za deň. Od 80 %
+  // práca na dnes, pri vyčerpaní červená — upozornenia BUGstation a hromadná
+  // kampaň sa od 90 % odkladajú samy, faktúry a pozvánky idú ďalej.
+  const po = d.posta || {};
+  if(po.limit && po.pocet >= po.limit) p.push({ sekcia:"automatika", vaha:"neg", text: "Pošta: dnes odišlo " + po.pocet + "/" + po.limit + " e-mailov — limit Resend vyčerpaný, ďalšie faktúry a pozvánky neodídu" });
+  else if(po.limit && po.pocet >= Math.floor(po.limit * 0.8)) p.push({ sekcia:"automatika", vaha:"warn", text: "Pošta: dnes odišlo " + po.pocet + "/" + po.limit + " e-mailov cez Resend" + (po.odlozit ? " — upozornenia a kampane sa odkladajú" : "") });
   return p;
+}
+// Pošta za dnešok pod riadkom príjmu: koľko e-mailov odišlo cez Resend a z akého limitu.
+function dnesPostaHtml(po){
+  po = po || {};
+  if(!po.limit) return "";
+  const f = Object.entries(po.funkcie || {}).map(([k, v]) => esc(k) + " " + (+v || 0)).join(", ");
+  return "<br>pošta dnes: " + (+po.pocet || 0) + "/" + (+po.limit) + " e-mailov" + (f ? " (" + f + ")" : "");
 }
 // Spotreba asistenta za dnešok pod riadkom príjmu: vety, volania, firmy, cena.
 function dnesAsistentHtml(a){
@@ -101,7 +114,7 @@ async function adminDnes(){
   }
   const n = document.getElementById("kFakt"), l = document.getElementById("kFaktL");
   if(n) n.textContent = penaz((_dnes.prijem || {}).cennik);
-  if(l) l.innerHTML = dnesPrijemHtml(_dnes.prijem) + dnesAsistentHtml(_dnes.asistent);
+  if(l) l.innerHTML = dnesPrijemHtml(_dnes.prijem) + dnesAsistentHtml(_dnes.asistent) + dnesPostaHtml(_dnes.posta);
 }
 
 // ═══ AUTOMATIKA ═════════════════════════════════════════════════════════════
