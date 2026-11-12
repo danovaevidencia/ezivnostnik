@@ -1805,7 +1805,7 @@ window.NAVODY_SNIMKY = {
  },
  "faktury-oprava-1": {
   "m": {
-   "subor": "navody/faktury-oprava-1.m.c135fad5.webp",
+   "subor": "navody/faktury-oprava-1.m.dacfa0cd.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -1816,7 +1816,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/faktury-oprava-1.d.9f95d9c0.webp",
+   "subor": "navody/faktury-oprava-1.d.30667d1f.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1829,18 +1829,18 @@ window.NAVODY_SNIMKY = {
  },
  "faktury-oprava-2": {
   "m": {
-   "subor": "navody/faktury-oprava-2.m.9d28f549.webp",
+   "subor": "navody/faktury-oprava-2.m.818bff9f.webp",
    "w": 390,
    "h": 600,
    "ciel": {
     "x": 11,
-    "y": 525,
+    "y": 563,
     "w": 378,
-    "h": 45
+    "h": 37
    }
   },
   "d": {
-   "subor": "navody/faktury-oprava-2.d.e1703e40.webp",
+   "subor": "navody/faktury-oprava-2.d.da3e2fbb.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1853,7 +1853,7 @@ window.NAVODY_SNIMKY = {
  },
  "faktury-oprava-3": {
   "m": {
-   "subor": "navody/faktury-oprava-3.m.6aaf3ee2.webp",
+   "subor": "navody/faktury-oprava-3.m.967591f7.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -1864,7 +1864,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/faktury-oprava-3.d.d958b308.webp",
+   "subor": "navody/faktury-oprava-3.d.ae7ebae8.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
