@@ -222,9 +222,9 @@ efaktury: {
       tip: "Ak odberateľ v sieti nie je, okno to povie ešte pred odoslaním — vtedy mu [[navod:faktury/poslat|pošlite PDF ako doteraz]].",
       podrobnosti: [
         { nadpis: "Odoslanie sa nedá vrátiť",
-          html: "<p>Doklad dostane odberateľ a poštár ho nahlási Finančnej správe. Faktúra sa v appke zamkne — opraviť ju môžete už len [[navod:faktury/oprava|dobropisom alebo ťarchopisom]].</p>" },
+          html: "<p>Doklad dostane odberateľ a faktúra sa v appke zamkne — opraviť ju môžete už len [[navod:faktury/oprava|dobropisom alebo ťarchopisom]].</p>" },
         { nadpis: "Odberateľ v sieti ešte nie je",
-          html: "<p>Keď faktúru odošlete aj tak, poštár ju prevezme a nahlási Finančnej správe, ale odberateľovi sa nedoručí. V [[app:faktury|zozname faktúr]] má značku <b>📮⚠</b> a v [[app:efaktury|E-faktúrach]] stav <b>nedoručiteľná</b>.</p><p>Keď sa odberateľ do siete zaregistruje, ťuknite v E-faktúrach pri faktúre na <b>Odoslať znova</b> (alebo na značku 📮⚠ v zozname faktúr, prípadne v menu faktúry na <b>Odoslať znova sieťou Peppol</b>). Odíde ten istý doklad a faktúra ostáva zamknutá; predošlé odoslanie ostáva pri faktúre zapísané.</p>" },
+          html: "<p>Keď faktúru odošlete aj tak, poštár ju prevezme, ale odberateľovi sa nedoručí. V [[app:faktury|zozname faktúr]] má značku <b>📮⚠</b> a v [[app:efaktury|E-faktúrach]] stav <b>nedoručiteľná</b>.</p><p>Keď sa odberateľ do siete zaregistruje, ťuknite v E-faktúrach pri faktúre na <b>Odoslať znova</b> (alebo na značku 📮⚠ v zozname faktúr, prípadne v menu faktúry na <b>Odoslať znova sieťou Peppol</b>). Odíde ten istý doklad a faktúra ostáva zamknutá; predošlé odoslanie ostáva pri faktúre zapísané.</p>" },
         { nadpis: "Čo pri overení odchádza",
           html: "<p>Pri otvorení okna ide poštárovi doklad na kontrolu a DIČ odberateľa na vyhľadanie v sieti. Nikomu sa tým nedoručí — doručí sa až po stlačení <b>Odoslať</b>.</p>" },
       ],

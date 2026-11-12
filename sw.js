@@ -22,7 +22,7 @@
 //
 //  Pri zmene appky staci zvysit VERZIA — stary cache sa vymaze pri aktivacii.
 // ═══════════════════════════════════════════════════════════════════════════
-const VERZIA = "2026.11.11-VK";
+const VERZIA = "2026.11.12-VL";
 const CACHE  = "ezivnostnik-" + VERZIA;
 // Odkladisko pre súbor zo systémového „Zdieľať". Nemá verziu v mene — obsah je
 // dočasný a musí prežiť aj aktualizáciu workera medzi zdieľaním a vyzdvihnutím.
@@ -33,6 +33,12 @@ const ZAKLAD = [
   "/ezivnostnik.html",
   "/sadzby.js",
   "/faktura_pdf.js",
+  // Lenivé skripty, bez ktorých modul offline nenaštartuje ani raz (R9, spec 161.8):
+  // model UBL/ISDOC pre e-faktúry a obsah návodov so snímkami. Uložené bez `?v=`,
+  // preto offline záloha hľadá bez query (ignoreSearch).
+  "/efaktura_xml.js",
+  "/navody.js",
+  "/navody_snimky.js",
   "/site.webmanifest",
   "/icon-192.png",
   "/icon-512.png",
@@ -126,7 +132,9 @@ self.addEventListener("fetch", e => {
         return odpoved;
       } catch (_) {
         // offline → posledná známa verzia
-        const z = await caches.match(req) || await caches.match("/ezivnostnik.html");
+        // ignoreSearch: `navody.js?v=…` nájde aj kópiu zo ZAKLAD uloženú bez query;
+        // v jednej verzii cache je jedno `?v=`, staršie zmaže aktivácia.
+        const z = await caches.match(req, { ignoreSearch: true }) || await caches.match("/ezivnostnik.html");
         return z || new Response("eživnostník je offline a nemá uloženú kópiu.", {
           status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" },
         });
