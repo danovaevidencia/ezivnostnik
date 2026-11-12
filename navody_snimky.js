@@ -1685,7 +1685,7 @@ window.NAVODY_SNIMKY = {
  },
  "efaktury-odoslat-1": {
   "m": {
-   "subor": "navody/efaktury-odoslat-1.m.04375234.webp",
+   "subor": "navody/efaktury-odoslat-1.m.5ca24725.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -1696,7 +1696,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/efaktury-odoslat-1.d.efcc2753.webp",
+   "subor": "navody/efaktury-odoslat-1.d.6d39273e.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1709,18 +1709,18 @@ window.NAVODY_SNIMKY = {
  },
  "efaktury-odoslat-2": {
   "m": {
-   "subor": "navody/efaktury-odoslat-2.m.5df7d327.webp",
+   "subor": "navody/efaktury-odoslat-2.m.8c4abbf2.webp",
    "w": 390,
    "h": 600,
    "ciel": {
     "x": 20,
-    "y": 18,
+    "y": 11,
     "w": 350,
-    "h": 564
+    "h": 578
    }
   },
   "d": {
-   "subor": "navody/efaktury-odoslat-2.d.a70a941e.webp",
+   "subor": "navody/efaktury-odoslat-2.d.2d566b20.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1733,18 +1733,18 @@ window.NAVODY_SNIMKY = {
  },
  "efaktury-odoslat-3": {
   "m": {
-   "subor": "navody/efaktury-odoslat-3.m.5082eddf.webp",
+   "subor": "navody/efaktury-odoslat-3.m.1659fa6e.webp",
    "w": 390,
    "h": 600,
    "ciel": {
     "x": 249,
-    "y": 404,
+    "y": 411,
     "w": 99,
     "h": 37
    }
   },
   "d": {
-   "subor": "navody/efaktury-odoslat-3.d.7fa7cbeb.webp",
+   "subor": "navody/efaktury-odoslat-3.d.a5d56627.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1757,7 +1757,7 @@ window.NAVODY_SNIMKY = {
  },
  "efaktury-zapnut-1": {
   "m": {
-   "subor": "navody/efaktury-zapnut-1.m.70b47fba.webp",
+   "subor": "navody/efaktury-zapnut-1.m.174d10b6.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -1768,7 +1768,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/efaktury-zapnut-1.d.c5aab718.webp",
+   "subor": "navody/efaktury-zapnut-1.d.3c94983a.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -1781,7 +1781,7 @@ window.NAVODY_SNIMKY = {
  },
  "efaktury-zapnut-2": {
   "m": {
-   "subor": "navody/efaktury-zapnut-2.m.9f0e3d25.webp",
+   "subor": "navody/efaktury-zapnut-2.m.35ad0638.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -1792,7 +1792,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/efaktury-zapnut-2.d.aa7f5cb8.webp",
+   "subor": "navody/efaktury-zapnut-2.d.91f881ee.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
