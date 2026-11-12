@@ -19,8 +19,8 @@
 //    Test overí, že cieľ existuje, a spadne na názve modulu bez odkazu.
 //  • Tip (`tip` pri kroku alebo pri úlohe) je jedna veta, ktorá ušetrí prácu
 //    alebo predíde omylu. Nie opakovanie kroku.
-//  • Nesľubovať, čo appka nerobí. (Faktúru e-mailom neposiela; z výkazu
-//    faktúru nevystaví — preto to návod hovorí priamo.)
+//  • Nesľubovať, čo appka nerobí. (Z výkazu faktúru nevystaví — preto to
+//    návod hovorí priamo. Faktúru e-mailom posiela od VM, spec 161.9.)
 //  • `snimka` je id scenára v dev/navody/scenare.js. Krok bez snímky sa
 //    v ukážke vynechá, v zozname krokov ostane.
 
@@ -58,13 +58,13 @@ faktury: {
       nazov: "Poslať faktúru odberateľovi",
       kedy: "Faktúra je hotová a treba ju dostať k odberateľovi.",
       kroky: [
-        { text: "Pri faktúre ťuknite na <b>PDF</b> — stiahne sa hotová faktúra.", tlacidlo: "PDF", snimka: "faktury-poslat-1" },
-        { text: "Pošlite ju odberateľovi zo svojej e-mailovej schránky ako prílohu." },
+        { text: "V riadku faktúry ťuknite na <b>⋯</b> a vyberte <b>Poslať e-mailom</b>. Skontrolujte adresu, predmet a text a ťuknite na <b>Odoslať</b>.", tlacidlo: "Poslať e-mailom" },
+        { text: "Alebo ťuknite na <b>PDF</b> — stiahne sa hotová faktúra, ktorú pošlete zo svojej e-mailovej schránky ako prílohu.", tlacidlo: "PDF", snimka: "faktury-poslat-1" },
       ],
       tip: "Keď máte v [[app:data#set_iban|nastaveniach firmy IBAN]], PDF nesie QR kód — odberateľ zaplatí naskenovaním v banke.",
       podrobnosti: [
-        { nadpis: "Prečo appka neposiela e-mail sama",
-          html: "<p>Faktúra odchádza z vašej schránky, takže odberateľ vidí známu adresu a odpoveď príde vám. Appka e-maily odberateľom neposiela.</p>" },
+        { nadpis: "Odkiaľ e-mail odíde",
+          html: "<p>Z adresy faktury@ezivnostnik.eu v mene vašej firmy; odpoveď odberateľa príde na e-mail firmy z nastavení, inak na e-mail vášho účtu. V prílohe je PDF a e-faktúra XML, keď sa dá zložiť. Pri faktúre ostane značka ✉ s dátumom a adresátom; adresa odberateľa sa zapamätá na nabudúce. Plán Free pošle 3 faktúry za deň, platené plány 30.</p>" },
         { nadpis: "Od roku 2027: e-faktúra",
           html: "<p>Platitelia DPH budú od 1. 1. 2027 posielať faktúry sieťou Peppol, nie e-mailom — [[navod:efaktury/odoslat|ako odoslať faktúru sieťou Peppol]].</p>" },
       ],
