@@ -725,18 +725,18 @@ window.NAVODY_SNIMKY = {
  },
  "b2b_vykaz-vystupy-1": {
   "m": {
-   "subor": "navody/b2b_vykaz-vystupy-1.m.0409971c.webp",
+   "subor": "navody/b2b_vykaz-vystupy-1.m.596c27a9.webp",
    "w": 390,
    "h": 600,
    "ciel": {
-    "x": 31,
+    "x": 199,
     "y": 281,
     "w": 89,
     "h": 37
    }
   },
   "d": {
-   "subor": "navody/b2b_vykaz-vystupy-1.d.27785e4b.webp",
+   "subor": "navody/b2b_vykaz-vystupy-1.d.9cfb401d.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -760,7 +760,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/b2b_vykaz-vystupy-2.d.3392c03d.webp",
+   "subor": "navody/b2b_vykaz-vystupy-2.d.8adcfb66.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -773,7 +773,7 @@ window.NAVODY_SNIMKY = {
  },
  "b2b_vykaz-vystupy-3": {
   "m": {
-   "subor": "navody/b2b_vykaz-vystupy-3.m.8020a4aa.webp",
+   "subor": "navody/b2b_vykaz-vystupy-3.m.1de67a8e.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -784,7 +784,7 @@ window.NAVODY_SNIMKY = {
    }
   },
   "d": {
-   "subor": "navody/b2b_vykaz-vystupy-3.d.359ec397.webp",
+   "subor": "navody/b2b_vykaz-vystupy-3.d.88a6df3f.webp",
    "w": 1024,
    "h": 600,
    "ciel": {
@@ -797,7 +797,7 @@ window.NAVODY_SNIMKY = {
  },
  "b2b_vykaz-vystupy-4": {
   "m": {
-   "subor": "navody/b2b_vykaz-vystupy-4.m.7826de5a.webp",
+   "subor": "navody/b2b_vykaz-vystupy-4.m.2556778c.webp",
    "w": 390,
    "h": 600,
    "ciel": {
@@ -816,6 +816,54 @@ window.NAVODY_SNIMKY = {
     "y": 337,
     "w": 436,
     "h": 16
+   }
+  }
+ },
+ "b2b_vykaz-vystupy-5": {
+  "m": {
+   "subor": "navody/b2b_vykaz-vystupy-5.m.596c27a9.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 31,
+    "y": 281,
+    "w": 162,
+    "h": 37
+   }
+  },
+  "d": {
+   "subor": "navody/b2b_vykaz-vystupy-5.d.9cfb401d.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 735,
+    "y": 265,
+    "w": 162,
+    "h": 37
+   }
+  }
+ },
+ "b2b_vykaz-vystupy-6": {
+  "m": {
+   "subor": "navody/b2b_vykaz-vystupy-6.m.d95404af.webp",
+   "w": 390,
+   "h": 600,
+   "ciel": {
+    "x": 42,
+    "y": 279,
+    "w": 306,
+    "h": 41
+   }
+  },
+  "d": {
+   "subor": "navody/b2b_vykaz-vystupy-6.d.b0a93d45.webp",
+   "w": 1024,
+   "h": 600,
+   "ciel": {
+    "x": 294,
+    "y": 279,
+    "w": 436,
+    "h": 41
    }
   }
  },
