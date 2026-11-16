@@ -29301,9 +29301,11 @@ function b2bVystupyXlsx(m, X, F){
   const MARGINY={left:0.5,right:0.5,top:0.6,bottom:0.6,header:0.3,footer:0.3};
   const mesTxt=B2B_MESIACE[+m.mesiac.slice(5)-1]+" "+m.mesiac.slice(0,4), datumTxt=x=>x? (+x.slice(8))+". "+(+x.slice(5,7))+"." : "";
   // Prehľad — stĺpce A (štítok), B (počet), C (výstupy); hodnota v hlavičke cez B:C.
-  const p={}, mg=[]; let R=1;
+  // Zlúčenej bunke Excel výšku riadku nedopočíta (157.44) — dlhý text dostane výšku z dĺžky.
+  const p={}, mg=[], vysky=[]; let R=1;
   const zluc=(r,c1,c2)=>mg.push({s:{r:r-1,c:c1},e:{r:r-1,c:c2}});
-  const kv=(a,b,st)=>{ p[A(0,R)]=cel(a,S.stitok); p[A(1,R)]=cel(b,st||S.hodnota); p[A(2,R)]=cel("",st||S.hodnota); zluc(R,1,2); R++; };
+  const vyska=(r,text,sirka)=>{ const h=b2bXlsxVyskaTextu(text, b2bXlsxZnakov(sirka,10,false)); if(h>B2B_XLSX_RIADOK_PT+4.5) vysky[r-1]={hpt:h}; };
+  const kv=(a,b,st)=>{ p[A(0,R)]=cel(a,S.stitok); p[A(1,R)]=cel(b,st||S.hodnota); p[A(2,R)]=cel("",st||S.hodnota); zluc(R,1,2); vyska(R,String(b),92); R++; };
   const sekcia=t=>{ R++; [0,1,2].forEach(c=>{ p[A(c,R)]=cel(c? "" : t, S.nSekcia); }); zluc(R,0,2); R++; };
   const hlavicka=h=>{ h.forEach((t,c)=>{ p[A(c,R)]=cel(t,S.detHl); }); R++; };
   [0,1,2].forEach(c=>{ p[A(c,R)]=cel(c? "" : "VÝSTUPY PROJEKTU — "+mesTxt.toUpperCase(), S.titul); }); zluc(R,0,2); R+=2;
@@ -29329,8 +29331,9 @@ function b2bVystupyXlsx(m, X, F){
   if(m.interny){ sekcia("Kontroly"); hlavicka(["Kód","Výstup","Popis"]);
     if(!sm.kontroly.length){ p[A(0,R)]=cel("Bez nálezov.",S.det); p[A(1,R)]=cel("",S.det); p[A(2,R)]=cel("",S.det); R++; }
     sm.kontroly.forEach(x=>{ p[A(0,R)]=cel(x.kod,S.det); p[A(1,R)]=cel(x.cislo,S.det); p[A(2,R)]=cel(x.text, x.kod==="VYSTUP_NESTIAHNUTY"? ST.zle : S.det); R++; });
-    R++; p[A(0,R)]=cel("Hodiny záznamov = súčet záznamov mesiaca, ktoré na výstup odkazujú; záznam s viacerými výstupmi sa ráta pri každom. Hodiny vo výkaze môžu byť iné (hodiny dňa, úpravy verzie PV).", zo(S.det,{border:{}})); zluc(R,0,2); R++; }
-  p["!ref"]="A1:C"+(R-1); p["!merges"]=mg; p["!cols"]=[{width:30},{width:12},{width:80}]; p["!margins"]=MARGINY;
+    R++; const pozn="Hodiny záznamov = súčet záznamov mesiaca, ktoré na výstup odkazujú; záznam s viacerými výstupmi sa ráta pri každom. Hodiny vo výkaze môžu byť iné (hodiny dňa, úpravy verzie PV).";
+    p[A(0,R)]=cel(pozn, zo(S.det,{border:{}})); zluc(R,0,2); vyska(R,pozn,122); R++; }
+  p["!ref"]="A1:C"+(R-1); p["!merges"]=mg; p["!rows"]=vysky; p["!cols"]=[{width:30},{width:12},{width:80}]; p["!margins"]=MARGINY;
   X.utils.book_append_sheet(wb,p,"Prehľad");
   // Výstupy — stĺpce podľa variantu; v balíku vedie „Súbor v balíku“ na súbor vedľa reportu (relatívna cesta).
   const st=[["ID",17,r=>r.cislo], ["Názov",42,r=>r.nazov], ["Typ zo zmluvy",24,r=>r.typ||"—"], ["Dátum",11,r=>r.datum? b2bSerial(r.datum) : "","d"],
@@ -29356,6 +29359,9 @@ function b2bVystupyXlsx(m, X, F){
   v["!ref"]="A1:"+A(st.length-1, Math.max(1, 1+m.riadky.length)); v["!cols"]=st.map(s=>({width:s[1]})); v["!margins"]=MARGINY;
   v["!autofilter"]={ref:"A1:"+A(st.length-1, Math.max(1, 1+m.riadky.length))};
   X.utils.book_append_sheet(wb,v,"Výstupy");
+  // Tlač: hlavné stĺpce (ID … Súbor v balíku, bez balíka po Stav) — všetkých 19 na šírku strany by bolo nečitateľných.
+  const poslTlac=Math.max(st.findIndex(s=>s[0]==="Súbor v balíku"), st.findIndex(s=>s[0]==="Stav"));
+  wb.Workbook={Names:[{Name:"_xlnm.Print_Area", Sheet:1, Ref:"'Výstupy'!$A$1:$"+X.utils.encode_col(poslTlac)+"$"+Math.max(1, 1+m.riadky.length)}]};
   if(m.interny){
     const z={}, zh=["Dátum","Osoba","Aktivita","Popis záznamu","Hodiny","Pre klienta","ID výstupu","Názov výstupu"];
     zh.forEach((t,c)=>{ z[A(c,1)]=cel(t,S.detHl); });
@@ -29367,12 +29373,13 @@ function b2bVystupyXlsx(m, X, F){
     X.utils.book_append_sheet(wb,z,"Väzby");
   }
   const buf=X.write(wb,{type:"array",bookType:"xlsx",bookSST:true});
-  // Ukotvená hlavička zoznamov a tlač na šírku strany — SheetJS CE to nezapíše, doplní sa do XML hárku.
+  // Ukotvená hlavička zoznamov a tlač na šírku strany (Prehľad na výšku, zoznamy na šírku) — SheetJS CE
+  // to nezapíše, doplní sa do XML hárku.
   const files=F.unzipSync(new Uint8Array(buf)), dec=new TextDecoder(), enc=new TextEncoder();
   wb.SheetNames.forEach((n,i)=>{ const cesta="xl/worksheets/sheet"+(i+1)+".xml"; if(!files[cesta]) return;
     let sx=dec.decode(files[cesta]);
     if(i>0) sx=sx.replace('<sheetView workbookViewId="0"/>','<sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft"/></sheetView>');
-    sx=sx.replace(/(<pageMargins[^>]*\/>)/,'$1<pageSetup paperSize="9" fitToHeight="0" orientation="landscape"/>');
+    sx=sx.replace(/(<pageMargins[^>]*\/>)/,'$1<pageSetup paperSize="9" fitToHeight="0" orientation="'+(i? "landscape" : "portrait")+'"/>');   // Prehľad (3 stĺpce) na výšku
     sx=sx.includes("<sheetPr")? sx.replace(/<sheetPr([^>]*)\/>/,'<sheetPr$1><pageSetUpPr fitToPage="1"/></sheetPr>') : sx.replace(/(<worksheet[^>]*>)/,'$1<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>');
     files[cesta]=enc.encode(sx); });
   return F.zipSync(files);
@@ -29383,7 +29390,7 @@ function b2bVystupyBalikOkno(){
   const V=B2B.vbVolby=Object.assign({variant:"interny", verzie:false}, B2B.vbVolby||{});
   const mesTxt=B2B_MESIACE[+d.mesiac.slice(5)-1]+" "+d.mesiac.slice(0,4);
   openModal("Výstupy mesiaca — "+mesTxt, `<div class="csub" style="margin:0 0 8px">ZIP so súbormi výstupov mesiaca (dátum v mesiaci alebo naň odkazuje záznam mesiaca — to isté, čo ukazuje zoznam) a report XLSX s prehľadom. Súbory dešifruje server a každé stiahnutie zapíše do logu projektu; výstup s odkazom dostane skratku .url.</div>
-    <div class="mfield"><label>Report</label><select id="b2bVbVar" onchange="b2bVystupyBalikVolba()"><option value="interny"${V.variant!=="odoslanie"? " selected" : ""}>interný — väzby na záznamy, hodiny, kto nahral</option><option value="odoslanie"${V.variant==="odoslanie"? " selected" : ""}>na odoslanie — bez záznamov a hodín</option></select></div>
+    <div class="mfield"><label>Report</label><select id="b2bVbVar" onchange="b2bVystupyBalikVolba()"><option value="interny"${V.variant!=="odoslanie"? " selected" : ""}>interný (záznamy a hodiny)</option><option value="odoslanie"${V.variant==="odoslanie"? " selected" : ""}>na odoslanie (bez záznamov)</option></select></div>
     <label style="display:flex;gap:6px;align-items:center;font-size:13px;margin:0 0 10px"><input type="checkbox" id="b2bVbVerzie" style="width:auto" onchange="b2bVystupyBalikVolba()"${V.verzie? " checked" : ""}> aj staršie verzie súborov</label>
     <div id="b2bVbZoz">${b2bVystupyBalikZoznamHtml(d)}</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px"><button class="aabtn" onclick="closeModal();b2bVystupyBalikStiahni(false)">Len report XLSX</button><span class="csub" style="margin:0">bez súborov — nič sa nesťahuje ani nezapisuje do logu</span></div>`,
