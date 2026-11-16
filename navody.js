@@ -1436,7 +1436,7 @@ b2b_vykaz: {
       nazov: "Stiahnuť všetky výstupy mesiaca s prehľadom",
       kedy: "Výstupy za mesiac treba odovzdať alebo odložiť naraz — so zoznamom v Exceli.",
       kroky: [
-        { text: "V záložke <b>Výstupy</b> vyberte mesiac a ťuknite na <b>⬇ Stiahnuť mesiac</b>.", tlacidlo: "Stiahnuť mesiac", snimka: "b2b_vykaz-vystupy-5" },
+        { text: "V záložke <b>Výstupy</b> vyberte mesiac a ťuknite na <b>⬇ Stiahnuť mesiac</b> — je vedľa <b>＋ Výstup</b>.", tlacidlo: "Stiahnuť mesiac" },
         { text: "Okno ukáže, čo pôjde do ZIP, a veľkosť. Vyberte report — <b>interný</b> (s väzbami na záznamy a hodinami) alebo <b>na odoslanie</b> (bez nich) — a ťuknite na <b>Stiahnuť ZIP</b>.", tlacidlo: "Stiahnuť ZIP", snimka: "b2b_vykaz-vystupy-6" },
       ],
       tip: "Len prehľad bez súborov dá Len report XLSX — nič sa pri ňom nesťahuje ani nezapisuje do logu.",

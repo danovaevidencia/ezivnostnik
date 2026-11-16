@@ -819,30 +819,6 @@ window.NAVODY_SNIMKY = {
    }
   }
  },
- "b2b_vykaz-vystupy-5": {
-  "m": {
-   "subor": "navody/b2b_vykaz-vystupy-5.m.596c27a9.webp",
-   "w": 390,
-   "h": 600,
-   "ciel": {
-    "x": 31,
-    "y": 281,
-    "w": 162,
-    "h": 37
-   }
-  },
-  "d": {
-   "subor": "navody/b2b_vykaz-vystupy-5.d.9cfb401d.webp",
-   "w": 1024,
-   "h": 600,
-   "ciel": {
-    "x": 735,
-    "y": 265,
-    "w": 162,
-    "h": 37
-   }
-  }
- },
  "b2b_vykaz-vystupy-6": {
   "m": {
    "subor": "navody/b2b_vykaz-vystupy-6.m.d95404af.webp",
