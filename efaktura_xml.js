@@ -76,16 +76,33 @@ export function peppolUcastnik(dic, icdph) {
   const cistit = (v) => String(v || "").replace(/\s/g, "");
   return (cistit(dic) || cistit(icdph)).replace(/^SK/i, "");
 }
+// Merná jednotka → kód UN/ECE Rec 20/21; najprv presná zhoda skratky (do VP
+// regex `/l\b/` robil z „kpl“ liter). Kópia `UBL_JEDNOTKY` a `ublJednotka` appky.
+const UBL_JEDNOTKY = { ks:"H87", kus:"H87", kusy:"H87", kusov:"H87", pcs:"H87", piece:"H87",
+  hod:"HUR", h:"HUR", hd:"HUR", hodina:"HUR", hodiny:"HUR", "hodín":"HUR", hour:"HUR", hours:"HUR",
+  "deň":"DAY", den:"DAY", "dni":"DAY", "dní":"DAY", "dňa":"DAY", md:"DAY", day:"DAY", days:"DAY",
+  mes:"MON", mesiac:"MON", mesiace:"MON", mesiacov:"MON", month:"MON", rok:"ANN", roky:"ANN", year:"ANN",
+  kg:"KGM", g:"GRM", t:"TNE", tona:"TNE", "tón":"TNE", l:"LTR", liter:"LTR", litre:"LTR", litrov:"LTR", ml:"MLT",
+  m:"MTR", bm:"MTR", meter:"MTR", km:"KMT", m2:"MTK", "m²":"MTK", m3:"MTQ", "m³":"MTQ", kwh:"KWH", mwh:"MWH",
+  kpl:"SET", komplet:"SET", sada:"SET", set:"SET", "súprava":"SET", "paušál":"LS", pausal:"LS", bal:"XPK", balenie:"XPK" };
 export function ublJednotka(mj) {
-  const m = String(mj || "").toLowerCase();
-  if (/člov|clov|deň|den|md|day/.test(m)) return "DAY";
-  if (/hod|hour|hd/.test(m)) return "HUR";
-  if (/ks|kus|pcs|piece/.test(m)) return "H87";
-  if (/kg/.test(m)) return "KGM";
-  if (/l\b|liter|litr/.test(m)) return "LTR";
-  if (/m2|m²/.test(m)) return "MTK";
+  const m = String(mj || "").trim().toLowerCase().replace(/\.$/, "");
+  if (UBL_JEDNOTKY[m]) return UBL_JEDNOTKY[m];
+  if (/člov|clov|deň|day/.test(m)) return "DAY";
+  if (/hod|hour/.test(m)) return "HUR";
   if (/mesiac|month/.test(m)) return "MON";
+  if (/kus|piece/.test(m)) return "H87";
   return "C62";
+}
+// VS pre platbu: len číslice, najviac 10 (FS BT-83). Kópia `vsPlatby` appky.
+export function vsPlatby(v) {
+  const d = String(v == null ? "" : v).replace(/\D/g, "");
+  return (d.length >= 1 && d.length <= 10) ? d : "";
+}
+// Cena za položku bez straty presnosti (PEPPOL-EN16931-R120). Kópia `ublCena` appky.
+export function ublCena(x) {
+  const v = +x || 0, s = v.toFixed(8).replace(/0+$/, ""), d = (s.split(".")[1] || "");
+  return d.length < 2 ? v.toFixed(2) : s;
 }
 export function ublKrajina(icdph) {
   const m = String(icdph || "").trim().toUpperCase().match(/^([A-Z]{2})/);
@@ -130,10 +147,14 @@ export function ublXml(M) {
   const sadzba = +M.sadzba || 0, sadzbaPct = Math.round(sadzba * 100);
   const jeDobropis = M.doklad === "381";
   const KOREN = jeDobropis ? "CreditNote" : "Invoice";
+  // Dobropis ide do siete KLADNE — znamienko nesie typ dokladu (PLAN §17.5,
+  // rozhodnuté 17. 11. 2026; FS_EFAKTURA_2026-11 Z10). Model ho nesie záporne.
+  const zn = jeDobropis ? -1 : 1;
   const katPercent = kat.bezSadzby ? "" : `
         <cbc:Percent>${sadzbaPct}</cbc:Percent>`;
-  const katDovod = kat.dovod ? `
-        <cbc:TaxExemptionReason>${ubl(kat.dovod)}</cbc:TaxExemptionReason>` : "";
+  const katDovod = (kat.vatex ? `
+        <cbc:TaxExemptionReasonCode>${ubl(kat.vatex)}</cbc:TaxExemptionReasonCode>` : "") + (kat.dovod ? `
+        <cbc:TaxExemptionReason>${ubl(kat.dovod)}</cbc:TaxExemptionReason>` : "");
   const dodIcDph = String(D.icdph || "").replace(/\s/g, "");
   const odbIcDph = O.icdph || "";
   const oa = rozlozAdresu(O.adresa), da = rozlozAdresu(D.adresa);
@@ -143,7 +164,12 @@ export function ublXml(M) {
   const datSplat = M.splatnost ? datum(M.splatnost) : "";
   let lineXml = "", lineTotal = 0;
   (M.riadky || []).forEach((p, i) => {
-    const mn = +p.mn || 1, cena = +p.cena || 0, sumaR = r2(mn * cena); lineTotal = r2(lineTotal + sumaR);
+    // Ako appka: množstvo 0 ostáva 0, záporná cena prejde do množstva (BR-27),
+    // dobropis sa otočí na kladný.
+    let mn = +p.mn || 0, cena = +p.cena || 0;
+    if (cena < 0) { cena = -cena; mn = -mn; }
+    mn = zn * mn;
+    const sumaR = r2(mn * cena); lineTotal = r2(lineTotal + sumaR);
     lineXml += `
   <cac:${KOREN}Line>
     <cbc:ID>${i + 1}</cbc:ID>
@@ -156,20 +182,38 @@ export function ublXml(M) {
         <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
       </cac:ClassifiedTaxCategory>
     </cac:Item>
-    <cac:Price><cbc:PriceAmount currencyID="${MENA}">${cena.toFixed(2)}</cbc:PriceAmount></cac:Price>
+    <cac:Price><cbc:PriceAmount currencyID="${MENA}">${ublCena(cena)}</cbc:PriceAmount></cac:Price>
   </cac:${KOREN}Line>`;
   });
   const S = M.sumy || {};
-  const bez = r2(lineTotal || S.bez), dph = S.dph != null ? r2(S.dph) : r2(bez * sadzba), spolu = r2(bez + dph);
+  // Základ zo súm modelu (= PDF), rozdiel voči súčtu zaokrúhlených riadkov ide
+  // do prirážky/zrážky dokladu (príručka FS, BT-116/117) — ako `efakturaXml` appky.
+  const bez = S.bez != null ? r2(zn * S.bez) : lineTotal;
+  const dph = S.dph != null ? r2(zn * S.dph) : r2(bez * sadzba), spolu = r2(bez + dph);
+  const korekcia = r2(bez - lineTotal);
   const karta = String((M.platba || {}).kod) === "48";
   // Karta: celá suma je zaplatená — PrepaidAmount = spolu, na úhradu 0
   // (BR-CO-16). Inak zaplatené vopred len to, čo model povie.
-  const prepaid = karta ? spolu : r2(S.prepaid || 0);
+  const prepaid = karta ? spolu : r2(zn * (S.prepaid || 0));
   const splatit = r2(spolu - prepaid);
-  // `!== 0`, nie `> 0`: dobropis zaplatený (vrátený) kartou má zápornú sumu
-  // a teda aj záporné „zaplatené vopred“ — inak by na úhradu ostalo 0 bez
-  // PrepaidAmount a doklad by porušil BR-CO-16 (úhrada = spolu − zaplatené).
+  // `!== 0`, nie `> 0`: zaplatené vopred môže byť aj záporné (vyúčtovanie
+  // s preplatkom) — bez PrepaidAmount by doklad porušil BR-CO-16.
   const prepaidXml = prepaid !== 0 ? "\n    <cbc:PrepaidAmount currencyID=\"" + MENA + "\">" + prepaid.toFixed(2) + "</cbc:PrepaidAmount>" : "";
+  const korekciaXml = korekcia ? `
+  <cac:AllowanceCharge>
+    <cbc:ChargeIndicator>${korekcia > 0 ? "true" : "false"}</cbc:ChargeIndicator>${korekcia > 0 ? `
+    <cbc:AllowanceChargeReasonCode>ZZZ</cbc:AllowanceChargeReasonCode>` : ""}
+    <cbc:AllowanceChargeReason>Zaokrúhlenie základu dane</cbc:AllowanceChargeReason>
+    <cbc:Amount currencyID="${MENA}">${Math.abs(korekcia).toFixed(2)}</cbc:Amount>
+    <cac:TaxCategory>
+      <cbc:ID>${kat.kod}</cbc:ID>${katPercent}
+      <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
+    </cac:TaxCategory>
+  </cac:AllowanceCharge>` : "";
+  const korekciaSucet = korekcia < 0 ? `
+    <cbc:AllowanceTotalAmount currencyID="${MENA}">${(-korekcia).toFixed(2)}</cbc:AllowanceTotalAmount>`
+    : korekcia > 0 ? `
+    <cbc:ChargeTotalAmount currencyID="${MENA}">${korekcia.toFixed(2)}</cbc:ChargeTotalAmount>` : "";
   const odbKrajina = ublKrajina(odbIcDph);
   const dodavka = (kat.kod === "K") ? `
   <cac:Delivery>
@@ -184,25 +228,27 @@ export function ublXml(M) {
   <cbc:Note>${ubl(String(M.poznamka).trim())}</cbc:Note>` : "";
   // Faktúra zaplatená kartou splatnosť nemá — DueDate sa vynechá (je
   // nepovinný, keď je na úhradu 0, BR-CO-25).
+  // BT-7 len pri rozdiele oproti BT-2 (transpozície FS v1.13).
+  const tpd = datDod !== datVyst ? `
+  <cbc:TaxPointDate>${datDod}</cbc:TaxPointDate>` : "";
   const hlavicka = jeDobropis ? `
-  <cbc:IssueDate>${datVyst}</cbc:IssueDate>
-  <cbc:TaxPointDate>${datDod}</cbc:TaxPointDate>
+  <cbc:IssueDate>${datVyst}</cbc:IssueDate>${tpd}
   <cbc:CreditNoteTypeCode>381</cbc:CreditNoteTypeCode>${poznamka}` : `
   <cbc:IssueDate>${datVyst}</cbc:IssueDate>${datSplat ? `
   <cbc:DueDate>${datSplat}</cbc:DueDate>` : ""}
-  <cbc:InvoiceTypeCode>${ubl(M.doklad || "380")}</cbc:InvoiceTypeCode>${poznamka}
-  <cbc:TaxPointDate>${datDod}</cbc:TaxPointDate>`;
+  <cbc:InvoiceTypeCode>${ubl(M.doklad || "380")}</cbc:InvoiceTypeCode>${poznamka}${tpd}`;
   const P = M.platba || {};
-  const vs = String(P.vs || "").replace(/\s/g, "");
+  const vs = vsPlatby(P.vs);
+  const iban = String(P.iban || D.iban || "").replace(/\s/g, "");
   const platbaXml = karta ? `
   <cac:PaymentMeans>
     <cbc:PaymentMeansCode>48</cbc:PaymentMeansCode>${vs ? `
-    <cbc:PaymentID>/VS${ubl(vs)}/</cbc:PaymentID>` : ""}
-  </cac:PaymentMeans>` : `
+    <cbc:PaymentID>${vs}</cbc:PaymentID>` : ""}
+  </cac:PaymentMeans>` : (jeDobropis && !iban) ? "" : `
   <cac:PaymentMeans>
-    <cbc:PaymentMeansCode>30</cbc:PaymentMeansCode>
-    <cbc:PaymentID>/VS${ubl(vs)}/</cbc:PaymentID>
-    <cac:PayeeFinancialAccount><cbc:ID>${ubl(String(P.iban || D.iban || "").replace(/\s/g, ""))}</cbc:ID></cac:PayeeFinancialAccount>
+    <cbc:PaymentMeansCode>30</cbc:PaymentMeansCode>${vs ? `
+    <cbc:PaymentID>${vs}</cbc:PaymentID>` : ""}
+    <cac:PayeeFinancialAccount><cbc:ID>${ubl(iban)}</cbc:ID></cac:PayeeFinancialAccount>
   </cac:PaymentMeans>`;
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <${KOREN} xmlns="urn:oasis:names:specification:ubl:schema:xsd:${KOREN}-2"
@@ -253,7 +299,7 @@ export function ublXml(M) {
         ${O.ico ? `<cbc:CompanyID>${ubl(String(O.ico).replace(/\s/g, ""))}</cbc:CompanyID>` : ""}
       </cac:PartyLegalEntity>
     </cac:Party>
-  </cac:AccountingCustomerParty>${dodavka}${platbaXml}
+  </cac:AccountingCustomerParty>${dodavka}${platbaXml}${korekciaXml}
   <cac:TaxTotal>
     <cbc:TaxAmount currencyID="${MENA}">${dph.toFixed(2)}</cbc:TaxAmount>
     <cac:TaxSubtotal>
@@ -267,9 +313,9 @@ export function ublXml(M) {
     </cac:TaxSubtotal>
   </cac:TaxTotal>
   <cac:LegalMonetaryTotal>
-    <cbc:LineExtensionAmount currencyID="${MENA}">${bez.toFixed(2)}</cbc:LineExtensionAmount>
+    <cbc:LineExtensionAmount currencyID="${MENA}">${lineTotal.toFixed(2)}</cbc:LineExtensionAmount>
     <cbc:TaxExclusiveAmount currencyID="${MENA}">${bez.toFixed(2)}</cbc:TaxExclusiveAmount>
-    <cbc:TaxInclusiveAmount currencyID="${MENA}">${spolu.toFixed(2)}</cbc:TaxInclusiveAmount>${prepaidXml}
+    <cbc:TaxInclusiveAmount currencyID="${MENA}">${spolu.toFixed(2)}</cbc:TaxInclusiveAmount>${korekciaSucet}${prepaidXml}
     <cbc:PayableAmount currencyID="${MENA}">${splatit.toFixed(2)}</cbc:PayableAmount>
   </cac:LegalMonetaryTotal>${lineXml}
 </${KOREN}>`;

@@ -263,7 +263,9 @@ export function vykresliFakturu(jsPDF, model, opts = {}) {
   const T   = TEXTY[model.jazyk] || TEXTY.sk;
   const num = v => T.cislo(v);
   const suma = v => cur === "EUR" ? num(v) + " €" : num(v) + " " + cur;
-  const sadzbaPct = Math.round((s.sadzba || 0.23) * 100);
+  // `?? 0.23`, nie `|| 0.23`: nula je odpoveď (neplatiteľ, prenos, oslobodené).
+  // Do VP mal neplatiteľ na PDF stĺpec „23“ a riadok „DPH 23 %“ pri dani 0,00 €.
+  const sadzbaPct = Math.round((s.sadzba ?? 0.23) * 100);
 
   let y = 20;
 
