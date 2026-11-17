@@ -132,7 +132,7 @@ h2{margin:0;font-size:28px;line-height:1.1}
 .cinfo{margin-top:6px;font-size:14px;font-weight:700;display:grid;grid-template-columns:1fr 1fr;gap:0 10px;color:#4b5563}
 .cinfo b{grid-column:1/-1;font-size:17px;color:#1f2937}
 </style>
-<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
 </head>
 <body>
 <div id="app"></div>
@@ -213,35 +213,65 @@ function modal(html,buttons){
 function closeModal(){$('#modal').style.display='none';}
 function show(html){app.innerHTML=html;window.scrollTo(0,0);}
 
-/* =================== SIEŤ (PeerJS) – 2 až 4 telefóny ===================
+/* =================== SIEŤ – 2 až 4 telefóny ===================
    Hviezda: hostiteľ (hráč 0) drží spojenie s každým hosťom a všetko preposiela. */
 const MAXP=4;
-const NET={peer:null,conn:null,conns:[],role:null,me:0,myName:'',started:false,lobby:[],ready:{},finals:{},round:0,live:[],leaving:false,joinTimer:null};
+const NET={relay:null,vconns:{},conn:null,conns:[],role:null,me:0,myName:'',started:false,lobby:[],ready:{},finals:{},round:0,live:[],leaving:false,joinTimer:null};
 const online=()=>!!(NET.role&&NET.started);
 const isHost=()=>NET.role==='host';
 let CUR=null;
 
-function peerOpts(){
-  const q=new URLSearchParams(location.search),o={debug:0};
-  if(q.get('peerhost')){o.host=q.get('peerhost');o.port=+(q.get('peerport')||9000);o.path='/';o.secure=false;}
-  return o;
+/* ---- prenos: MQTT cez 2 verejné servery naraz (bez priameho spojenia telefónov) ----
+   Každá správa ide cez oba servery; príjemca ich zoradí podľa poradového čísla a duplikáty zahodí. */
+const BROKERS=(()=>{const q=new URLSearchParams(location.search).get('broker');
+  return q?q.split(','):['wss://broker.hivemq.com:8884/mqtt','wss://broker.emqx.io:8084/mqtt'];})();
+const TP='ezvhry1/';
+function Relay(subTopic,onRaw){
+  let first=null,firstDone=false;
+  const cls=BROKERS.map(u=>{
+    const c=mqtt.connect(u,{clientId:'hpp_'+Math.random().toString(36).slice(2,12),clean:true,keepalive:15,reconnectPeriod:1500,connectTimeout:8000});
+    c.on('connect',()=>{c.subscribe(subTopic,{qos:1});if(!firstDone){firstDone=true;first&&first();}});
+    c.on('message',(t,b)=>{try{onRaw(JSON.parse(b.toString()));}catch(e){}});
+    c.on('error',()=>{});
+    return c;
+  });
+  return {
+    pub(t,o){const s=JSON.stringify(o);cls.forEach(c=>{try{c.publish(t,s,{qos:1});}catch(e){}});},
+    end(){cls.forEach(c=>{try{c.end(true);}catch(e){}});},
+    connected:()=>cls.some(c=>c.connected),
+    onConnect(fn){first=fn;if(firstDone)fn();}
+  };
+}
+function Inbox(deliver){
+  const st={};
+  return raw=>{
+    if(!raw||raw.f==null||typeof raw.s!=='number')return;
+    const q=st[raw.f]=st[raw.f]||{n:0,buf:new Map(),timer:null};
+    if(raw.s<q.n||q.buf.has(raw.s))return;
+    q.buf.set(raw.s,raw.m);
+    const flush=()=>{
+      while(q.buf.has(q.n)){const m=q.buf.get(q.n);q.buf.delete(q.n);q.n++;deliver(raw.f,m);}
+      clearTimeout(q.timer);
+      if(q.buf.size)q.timer=setTimeout(()=>{q.n=Math.min(...q.buf.keys());flush();},1500);
+    };
+    flush();
+  };
 }
 function sendTo(c,m){try{c&&c.open&&c.send(m);}catch(e){}}
 function send(m){if(isHost())NET.conns.forEach(c=>sendTo(c,m));else sendTo(NET.conn,m);}
 function netStatus(t,err){const el=$('#nstatus');if(el){el.textContent=t;el.className='nstatus'+(err?' err':'');}}
 
 function resetNet(){
-  clearTimeout(NET.joinTimer);
-  try{NET.conn&&NET.conn.close();}catch(e){}
-  NET.conns.forEach(c=>{try{c.close();}catch(e){}});
-  try{NET.peer&&NET.peer.destroy();}catch(e){}
-  Object.assign(NET,{peer:null,conn:null,conns:[],role:null,me:0,started:false,lobby:[],ready:{},finals:{},round:0,live:[],leaving:false,players_ok:false,code:null});
+  clearTimeout(NET.joinTimer);clearInterval(NET.hb);clearInterval(NET.helloT);
+  try{NET.relay&&NET.relay.end();}catch(e){}
+  Object.assign(NET,{relay:null,conn:null,conns:[],vconns:{},role:null,me:0,started:false,lobby:[],ready:{},finals:{},round:0,live:[],leaving:false,players_ok:false,code:null,hb:null,helloT:null,hostSeen:0});
 }
-function leave(){NET.leaving=true;send({t:'bye'});setTimeout(resetNet,200);if(CUR){CUR.abort();CUR=null;}S.players=[];home();}
+document.addEventListener('visibilitychange',()=>{if(document.hidden)return;const now=Date.now();NET.hostSeen=now;(NET.conns||[]).forEach(c=>c.seen=now);});
+function leave(){NET.leaving=true;send({t:'bye'});setTimeout(resetNet,600);if(CUR){CUR.abort();CUR=null;}S.players=[];home();}
 function endAll(text){
   if(NET.leaving)return;
   NET.leaving=true;if(CUR){CUR.abort();CUR=null;}
-  setTimeout(resetNet,200);
+  setTimeout(resetNet,600);
   modal(text,[{t:'OK',cls:'primary',fn:()=>{S.players=[];home();}}]);
 }
 function askLeave(){modal('Odpojiť sa a ukončiť hru na viacerých telefónoch?',[{t:'Zostať',cls:'primary',fn:()=>{}},{t:'Odpojiť',cls:'danger',fn:leave}]);}
@@ -269,7 +299,7 @@ function onlineScreen(){
   </div>`);
   $('#back').onclick=home;
   const nameOk=()=>{NET.myName=($('#myname').value||'').trim()||'Hráč';S.names[0]=NET.myName;};
-  if(typeof Peer==='undefined'){netStatus('Nepodarilo sa načítať knižnicu na spojenie. Skontroluj internet a obnov stránku.',true);return;}
+  if(typeof mqtt==='undefined'){netStatus('Nepodarilo sa načítať knižnicu na spojenie. Skontroluj internet a obnov stránku.',true);return;}
   $('#host').onclick=()=>{ensureAudio();nameOk();hostGame();};
   $('#join').onclick=()=>{
     ensureAudio();nameOk();const code=($('#code').value||'').replace(/\D/g,'');
@@ -293,7 +323,7 @@ function lobbyScreen(){
     ${pl.length<MAXP?'<div class="spin"></div>':''}</div>
     ${isHost()?`<button class="primary" id="start" ${pl.length<2?'disabled':''}>Začať (${pl.length} ${pl.length<5&&pl.length>1?'hráči':'hráč'}) ▶</button>`:''}
     <button class="link" id="cancel">${isHost()?'Zrušiť hru':'Odpojiť sa'}</button></div>`);
-  $('#cancel').onclick=()=>{if(isHost()){send({t:'abort',text:'Hostiteľ zrušil hru.'});setTimeout(resetNet,200);onlineScreen();}else leave();};
+  $('#cancel').onclick=()=>{if(isHost()){send({t:'abort',text:'Hostiteľ zrušil hru.'});const r=NET.relay;NET.relay=null;setTimeout(()=>{try{r&&r.end();}catch(e){}},800);onlineScreen();}else leave();};
   if(isHost())$('#start').onclick=()=>{
     NET.started=true;S.players=lobbyPlayers();
     S.tpoints=S.players.map(()=>0);S.totals=S.players.map(()=>0);
@@ -307,23 +337,26 @@ function hostGame(){
   const code=String(1000+Math.floor(Math.random()*9000));NET.code=code;
   NET.lobby=[{name:NET.myName,conn:null}];
   lobbyScreen();netStatus('Pripájam sa na server…');
-  const peer=new Peer('jhry-'+code,peerOpts());NET.peer=peer;
-  peer.on('open',()=>{if(NET.peer===peer)lobbyScreen();});
-  peer.on('connection',c=>{
-    c.on('open',()=>{
-      if(NET.started){sendTo(c,{t:'reject',text:'Táto hra už začala.'});setTimeout(()=>c.close(),400);return;}
-      if(NET.lobby.length>=MAXP){sendTo(c,{t:'reject',text:'Hra je plná (max. 4 telefóny).'});setTimeout(()=>c.close(),400);return;}
-    });
-    c.on('data',m=>hostMsg(c,m));
-    c.on('close',()=>guestGone(c));
-    c.on('error',()=>guestGone(c));
-  });
-  peer.on('error',e=>{
-    if(e.type==='unavailable-id'){hostGame();return;}
-    if(NET.lobby.length>1||NET.started)return;
-    netStatus('Chyba spojenia ('+e.type+'). Skús to znova.',true);
-  });
-  peer.on('disconnected',()=>{if(!NET.leaving&&NET.peer===peer){try{peer.reconnect();}catch(e){}}});
+  const mk=id=>{const c={id,open:true,seen:Date.now(),s:0,send(m){NET.relay.pub(TP+code+'/g/'+id,{f:'H',s:c.s++,m});}};return c;};
+  NET.relay=Relay(TP+code+'/h',Inbox((from,m)=>{
+    if(NET.role!=='host')return;
+    let c=NET.vconns[from];
+    if(!c){
+      if(m.t!=='hello')return;
+      c=NET.vconns[from]=mk(from);
+      if(NET.started){sendTo(c,{t:'reject',text:'Táto hra už začala.'});c.open=false;return;}
+      if(NET.lobby.length>=MAXP){sendTo(c,{t:'reject',text:'Hra je plná (max. 4 telefóny).'});c.open=false;return;}
+    }
+    if(!c.open)return;
+    c.seen=Date.now();
+    if(m.t!=='hb')hostMsg(c,m);
+  }));
+  NET.relay.onConnect(()=>{if(NET.role==='host'&&!NET.started&&NET.lobby.length<2)lobbyScreen();});
+  NET.joinTimer=setTimeout(()=>{if(NET.role==='host'&&NET.relay&&!NET.relay.connected())netStatus('Nepodarilo sa pripojiť na server. Skontroluj internet a skús znova.',true);},10000);
+  NET.hb=setInterval(()=>{
+    const now=Date.now();
+    NET.conns.slice().forEach(c=>{sendTo(c,{t:'hb'});if(now-c.seen>25000){c.open=false;guestGone(c);}});
+  },3000);
 }
 
 function broadcastLobby(){
@@ -350,7 +383,8 @@ function hostMsg(c,m){
   const i=idxOf(c);
   switch(m.t){
     case 'hello':
-      if(NET.started||NET.lobby.length>=MAXP||i>=0)return;
+      if(i>=0){broadcastLobby();return;}
+      if(NET.started||NET.lobby.length>=MAXP)return;
       NET.lobby.push({name:(m.name||'Hráč').slice(0,12),conn:c});NET.conns.push(c);
       tone(660,990,.15,'triangle',.1);broadcastLobby();break;
     case 'bye': guestGone(c);break;
@@ -361,23 +395,31 @@ function hostMsg(c,m){
 }
 
 function joinGame(code){
-  resetNet();NET.role='guest';
+  resetNet();NET.role='guest';NET.code=code;
+  const myId='g'+Math.random().toString(36).slice(2,10);
   netStatus('Pripájam sa k hre '+code+'…');
-  const peer=new Peer(peerOpts());NET.peer=peer;
-  peer.on('open',()=>{
-    const c=peer.connect('jhry-'+code,{reliable:true});NET.conn=c;
-    c.on('open',()=>sendTo(c,{t:'hello',name:NET.myName}));
-    c.on('data',guestMsg);
-    c.on('close',()=>{if(NET.role==='guest'&&NET.players_ok)endAll('📵 Spojenie s hostiteľom sa prerušilo.');});
-    c.on('error',()=>{if(NET.role==='guest'&&NET.players_ok)endAll('📵 Spojenie s hostiteľom sa prerušilo.');});
-  });
-  peer.on('error',e=>{
+  NET.hostSeen=Date.now();
+  NET.relay=Relay(TP+code+'/g/'+myId,Inbox((from,m)=>{
+    if(from!=='H'||NET.role!=='guest')return;
+    NET.hostSeen=Date.now();
+    if(m.t!=='hb')guestMsg(m);
+  }));
+  const c={open:true,s:0,send(m){NET.relay.pub(TP+code+'/h',{f:myId,s:c.s++,m});}};
+  NET.conn=c;
+  const hello=()=>{if(!NET.players_ok&&NET.role==='guest')sendTo(c,{t:'hello',name:NET.myName});};
+  NET.relay.onConnect(hello);
+  NET.helloT=setInterval(hello,2000);
+  NET.joinTimer=setTimeout(()=>{
     if(NET.players_ok)return;
-    clearTimeout(NET.joinTimer);
-    netStatus(e.type==='peer-unavailable'?'Hra s kódom '+code+' sa nenašla. Skontroluj kód.':'Chyba spojenia ('+e.type+'). Skús to znova.',true);
-    NET.role=null;
-  });
-  NET.joinTimer=setTimeout(()=>{if(!NET.players_ok){netStatus('Nepodarilo sa spojiť. Skús to znova (najlepšie na rovnakej Wi-Fi).',true);try{peer.destroy();}catch(e){}NET.role=null;}},20000);
+    const ok=NET.relay&&NET.relay.connected();
+    resetNet();
+    netStatus(ok?'Hra s kódom '+code+' sa nenašla. Skontroluj kód a či má hostiteľ otvorenú čakáreň.':'Nepodarilo sa pripojiť na server. Skontroluj internet.',true);
+  },15000);
+  NET.hb=setInterval(()=>{
+    if(!NET.players_ok)return;
+    sendTo(c,{t:'hb'});
+    if(Date.now()-NET.hostSeen>25000)endAll('📵 Spojenie s hostiteľom sa prerušilo.');
+  },3000);
 }
 
 function guestMsg(m){
