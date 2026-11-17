@@ -1,5 +1,5 @@
 // Offline cache pre "Hry pre partiu". Pri zmene hry zvýš VERZIU.
-const VERSION='hry-v1';
+const VERSION='hry-v2';
 const CORE=['./','./index.html','./manifest.webmanifest','./icon-192.png','./icon-512.png','./maskable-192.png','./maskable-512.png','./apple-touch-icon.png'];
 const EXTRA=['https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js'];
 self.addEventListener('install',e=>{
