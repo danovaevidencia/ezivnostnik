@@ -221,7 +221,7 @@ function show(html){app.innerHTML=html;window.scrollTo(0,0);}
 
 /* =================== SIEŤ – 2 až 4 telefóny ===================
    Hviezda: hostiteľ (hráč 0) drží spojenie s každým hosťom a všetko preposiela. */
-const MAXP=4;
+const MAXP=4,VER=6;
 const NET={relay:null,vconns:{},conn:null,conns:[],role:null,me:0,myName:'',started:false,lobby:[],ready:{},finals:{},round:0,live:[],leaving:false,joinTimer:null};
 const online=()=>!!(NET.role&&NET.started);
 const isHost=()=>NET.role==='host';
@@ -390,6 +390,7 @@ function hostMsg(c,m){
   switch(m.t){
     case 'hello':
       if(i>=0){broadcastLobby();return;}
+      if(m.v!==VER){sendTo(c,{t:'reject',text:(m.v||0)<VER?'Máš staršiu verziu hry. Zatvor aplikáciu a otvor ju znova s internetom.':'Hostiteľ má staršiu verziu hry. Nech zatvorí aplikáciu a otvorí ju znova.'});c.open=false;return;}
       if(NET.started||NET.lobby.length>=MAXP)return;
       NET.lobby.push({name:(m.name||'Hráč').slice(0,12),conn:c});NET.conns.push(c);
       tone(660,990,.15,'triangle',.1);broadcastLobby();break;
@@ -415,7 +416,7 @@ function joinGame(code){
   }));
   const c={open:true,s:0,send(m){NET.relay.pub(TP+code+'/h',{f:myId,s:c.s++,m});}};
   NET.conn=c;
-  const hello=()=>{if(!NET.players_ok&&NET.role==='guest')sendTo(c,{t:'hello',name:NET.myName});};
+  const hello=()=>{if(!NET.players_ok&&NET.role==='guest')sendTo(c,{t:'hello',name:NET.myName,v:VER});};
   NET.relay.onConnect(hello);
   NET.helloT=setInterval(hello,2000);
   NET.joinTimer=setTimeout(()=>{
@@ -549,6 +550,7 @@ function home(){
    <div class="or"><span>alebo</span></div>
    <button class="secondary" id="online">📱 Hrať na viacerých telefónoch (2–4)</button>
    ${installBtnHtml()}
+   <p class="note">verzia ${VER}</p>
   </div>`);
   bindInstall();
   app.querySelectorAll('.cnt').forEach(b=>b.onclick=()=>{S.n=+b.dataset.n;home();});
@@ -2069,7 +2071,13 @@ function runHokej(entries,done,opts={}){
 let installEvt=null;
 const isStandalone=()=>matchMedia('(display-mode: fullscreen)').matches||matchMedia('(display-mode: standalone)').matches||navigator.standalone;
 if('serviceWorker' in navigator&&location.protocol.startsWith('http')){
-  addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
+  const hadSW=!!navigator.serviceWorker.controller;
+  addEventListener('load',()=>navigator.serviceWorker.register('sw.js',{updateViaCache:'none'}).then(r=>r.update()).catch(()=>{}));
+  let reloaded=false;
+  navigator.serviceWorker.addEventListener('controllerchange',()=>{
+    if(!hadSW||reloaded||document.body.classList.contains('playing')||NET.role)return;
+    reloaded=true;location.reload();
+  });
 }
 addEventListener('beforeinstallprompt',e=>{e.preventDefault();installEvt=e;const b=$('#install');if(b)b.style.display='';});
 addEventListener('appinstalled',()=>{installEvt=null;const b=$('#install');if(b)b.style.display='none';});
