@@ -23,7 +23,10 @@
 //
 //  MODEL:
 //  {
-//    doklad: "380" | "381" | "383" | "388",   // faktúra, dobropis, ťarchopis, k platbe
+//    doklad: "380" | "381" | "383" | "384" | "388",   // faktúra, dobropis, ťarchopis, opravná, k platbe
+//    // 384 = opravná faktúra (nefinančná oprava, FAQ FS I.91): Invoice so
+//    // sumami pôvodnej a `opravuje` (BT-25 povinné). ISDOC pre ňu typ nemá —
+//    // `isdocXml` ju nepíše (appka ju do ISDOC nedáva, spec 162.4).
 //    cislo, uuid?, vystavene, dodanie, splatnost?, mena:"EUR",
 //    poznamka?, buyerRef?, opravuje?,
 //    dodavatel: { nazov, ico, dic, icdph, adresa, orVeta?, iban?, swift? },
@@ -330,6 +333,9 @@ export function ublXml(M) {
 // bankových údajov (Details je v XSD nepovinné), prevod = 42 s účtom.
 const ISDOC_DRUH = { "380": "1", "381": "2", "383": "3", "388": "5" };
 export function isdocXml(M) {
+  // Opravná faktúra (384) by ako ISDOC typ 1 prišla do účtovného programu ako
+  // druhá faktúra s plnými sumami — nepíše sa (rovnako ako v appke, spec 162.4).
+  if (M && M.doklad === "384") return null;
   const esc = xmlEsc;
   const D = M.dodavatel || {}, O = M.odberatel || {};
   const sadzba = +M.sadzba || 0, sadzbaPct = Math.round(sadzba * 100);
