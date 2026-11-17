@@ -177,7 +177,7 @@ const GAMES=[
  {id:'auta',name:'Autíčka',icon:'🏎️',desc:'Preteky – 2 hráči naraz',ready:true,
   rules:`<ul class="rules"><li><b>👆</b>Ťahaj prstom doľava a doprava – auto ide za prstom.</li><li><b>⭐</b>Hviezda = <span class="g">+1</span>, veľká hviezda = <span class="g">+3</span></li><li><b>🚩</b>Brána = <span class="g">+2 body</span></li><li><b>⚡</b>Nitro ťa zrýchli.</li><li><b>🚗</b>Náraz do auta = <span class="r">−1 bod</span></li><li><b>🛢</b>Olej = šmyk, mimo cesty ideš pomaly.</li><li><b>📱</b>Dvaja hráči: obrazovka sa rozdelí, jeden hrá dole a druhý hore oproti nemu.</li><li><b>⏱</b>Jazda trvá 40 sekúnd.</li></ul>`},
  {id:'hokej',name:'Hokejové nájazdy',icon:'🏒',desc:'Útočník proti brankárovi',ready:true,
-  rules:`<ul class="rules"><li><b>🏒</b>Útočník: drž prst a ťahaj doľava a doprava, hráč korčuľuje sám dopredu.</li><li><b>👆</b>Pusť prst = strela rovno. Švihni prstom šikmo dopredu = strela do rohu.</li><li><b>🥅</b>Brankár: ťahaj prstom a postav sa puku do cesty.</li><li><b>🚨</b>Gól = <span class="g">+1 bod</span> pre útočníka.</li><li><b>🧤</b>Bez gólu = <span class="g">+1 bod</span> pre brankára.</li><li><b>🔁</b>10 nájazdov, po každom sa úlohy vymenia.</li><li><b>📱</b>Dvaja hráči: jeden hrá dole, druhý hore. Obaja vidia ten istý nájazd.</li></ul>`},
+  rules:`<ul class="rules"><li><b>🏒</b>Útočník: drž prst a ťahaj doľava a doprava, hráč korčuľuje sám dopredu.</li><li><b>👆</b>Pusť prst = strela rovno. Švihni prstom šikmo dopredu = strela do rohu.</li><li><b>🥅</b>Brankár: ťahaj prstom a postav sa puku do cesty.</li><li><b>🚨</b>Gól = <span class="g">+1 bod</span> pre útočníka.</li><li><b>🧤</b>Bez gólu = <span class="g">+1 bod</span> pre brankára.</li><li><b>🔁</b>10 nájazdov, po každom sa úlohy vymenia.</li><li><b>📱</b>Dvaja na jednom telefóne: jeden hrá dole, druhý hore. Na viacerých telefónoch hráte proti sebe, každý na svojom.</li></ul>`},
 ];
 const GAME=id=>GAMES.find(g=>g.id===id);
 const RUNNERS={jasterica:runJasterica,
@@ -394,6 +394,9 @@ function hostMsg(c,m){
       NET.lobby.push({name:(m.name||'Hráč').slice(0,12),conn:c});NET.conns.push(c);
       tone(660,990,.15,'triangle',.1);broadcastLobby();break;
     case 'bye': guestGone(c);break;
+    case 'pp': if(i<0)break;
+      if(m.to===0)onPeer(i,m.d);else{const l=NET.lobby[m.to];if(l&&l.conn)sendTo(l.conn,{t:'pp',from:i,d:m.d});}
+      break;
     case 'ready': if(i>=0){(NET.ready[m.r]=NET.ready[m.r]||new Set()).add(i);maybeGo();}break;
     case 'sc': if(i>=0){NET.live[i]=m.v;send({t:'live',a:NET.live});}break;
     case 'final': if(i>=0)storeFinal(m.round,i,m.score,m.stats);break;
@@ -447,6 +450,7 @@ function guestMsg(m){
       startGame();break;
     case 'go': launchOnline(m.seed);break;
     case 'live': NET.live=m.a;break;
+    case 'pp': onPeer(m.from,m.d);break;
     case 'results': applyResults(m);break;
     case 'nav':
       if(m.a==='next'){S.gi++;startGame();}
@@ -456,6 +460,12 @@ function guestMsg(m){
       break;
   }
 }
+
+function sendPeer(to,d){
+  if(isHost()){const l=NET.lobby[to];if(l&&l.conn)sendTo(l.conn,{t:'pp',from:0,d});}
+  else sendTo(NET.conn,{t:'pp',to,d});
+}
+function onPeer(from,d){if(CUR&&CUR.onPeer)CUR.onPeer(from,d);}
 
 function waitScreen(title,sub){
   show(`<div class="screen"><div class="panel center"><div class="big">⏳</div><h2>${title}</h2>
@@ -1801,7 +1811,7 @@ function hokejReady(g){
    ${S.isTour?`<div class="badge">Hra ${S.gi+1} z ${S.queue.length}</div>`:''}
    ${!on&&heats>1?`<div class="badge">Zápas ${heat} z ${heats}</div>`:''}
    <div class="panel center"><div class="big">${g.icon}</div><h2>${g.name}</h2>${g.rules}
-     ${idxs.length<2?'<p class="note">Hráš proti počítaču: striedavo útočíš a chytáš.</p>':''}</div>
+     ${on&&(NET.me^1)<n?`<p class="note">Hráš proti: ${S.players[NET.me^1].avatar} ${esc(S.players[NET.me^1].name)}. Každý na svojom telefóne, striedavo útočíte a chytáte.</p>`:idxs.length<2?'<p class="note">Hráš proti počítaču: striedavo útočíš a chytáš.</p>':''}</div>
    ${idxs.map((pi,k)=>{const p=S.players[pi];return `<div class="pick" style="--c:${p.color}">
      <h3>${p.avatar} ${esc(p.name)}${idxs.length>1?` <small>– hrá ${k?'hore':'dole'}</small>`:''}: vyber si tím</h3>
      <div class="teams">${TEAMS.map((t,ti)=>`<button class="team ${S.teams[pi]===ti?'on':''}" data-p="${pi}" data-c="${ti}">
@@ -1823,7 +1833,11 @@ function hokejReady(g){
     },{seed:S.heatSeed});
   };
 }
-RUNNERS.hokej=(p,d,o)=>runHokej([{p,team:S.teams[Math.max(0,S.players.indexOf(p))]}],r=>d(r[0]),o);
+RUNNERS.hokej=(p,d,o)=>{
+  const me=Math.max(0,S.players.indexOf(p));
+  if(o&&o.online){const pt=me^1;if(pt<S.players.length)o=Object.assign({},o,{duel:{p:S.players[pt],first:me<pt,send:x=>sendPeer(pt,x)}});}
+  return runHokej([{p,team:S.teams[me]}],r=>d(r[0]),o);
+};
 STATLINE.hokej=s=>`🚨 góly ${s.goal||0} · 🧤 zákroky ${s.save||0}`;
 
 function runHokej(entries,done,opts={}){
@@ -1832,7 +1846,9 @@ function runHokej(entries,done,opts={}){
   const dpr=Math.min(2,window.devicePixelRatio||1),STEP=1/60,split=entries.length>1,N=10,R=rngFrom(opts.seed||1);
   const cl=(v,a,b)=>Math.max(a,Math.min(b,v));
   const Hs=entries.map((e,i)=>({i,p:e.p,team:TEAMS[e.team]||TEAMS[0],score:0,stats:{goal:0,save:0},pid:null,target:null,smp:[],res:[]}));
-  const Q=split?Hs:[Hs[0],{bot:true,p:{name:'Počítač',avatar:'🤖',color:'#6b7280'},team:TEAMS[(TEAMS.indexOf(Hs[0].team)+2+Math.floor(R()*5))%8],score:0,stats:{goal:0,save:0},res:[]}];
+  const D=opts.duel,myTeam=entries[0].team;
+  const rem=D?{remote:true,p:D.p,team:TEAMS[(myTeam+4)%8],score:0,stats:{goal:0,save:0},res:[],gx:200,ax:200,ay:545}:null;
+  const Q=split?Hs:D?(D.first?[Hs[0],rem]:[rem,Hs[0]]):[Hs[0],{bot:true,p:{name:'Počítač',avatar:'🤖',color:'#6b7280'},team:TEAMS[(TEAMS.indexOf(Hs[0].team)+2+Math.floor(R()*5))%8],score:0,stats:{goal:0,save:0},res:[]}];
   const AT=[];for(let i=0;i<N;i++)AT.push({A:35+R()*75,w:1.6+R()*1.6,ph:R()*6.28,sy:270+R()*150,tr:R(),tb:R(),ae:(R()-.5)*.14,off:(R()-.5)*40,err:(R()-.5)*110,delay:.08+R()*.14});
   let W,H,VW,VH,hudTop;
   function resize(){
@@ -1841,14 +1857,17 @@ function runHokej(entries,done,opts={}){
     if(split){quitBtn.style.left=(W/2-22)+'px';quitBtn.style.right='auto';quitBtn.style.top=(H/2-22)+'px';}
   }
   resize();addEventListener('resize',resize);
-  let n=0,phase='intro',t=0,att,gol,puck,shootReq=null,out=null,clock=0,last=performance.now(),acc=0,raf,paused=false,finished=false,shake=0;
+  let n=0,phase='intro',t=0,att,gol,puck,shootReq=null,out=null,clock=0,last=performance.now(),acc=0,raf,paused=false,finished=false,shake=0,hold=false,sv=null,netT=0;
   const attacker=()=>Q[Math.min(n,N-1)%2],goalie=()=>Q[1-Math.min(n,N-1)%2];
-  function reset(){att={x:200,y:545,vy:0};gol={x:200};puck={x:208,y:525,vx:0,vy:0,fly:false,pass:false,px:200};shootReq=null;out=null;Hs.forEach(h=>h.target=null);}
+  function reset(){att={x:200,y:545,vy:0};gol={x:200};puck={x:208,y:525,vx:0,vy:0,fly:false,pass:false,px:200};shootReq=null;out=null;hold=false;sv=null;Hs.forEach(h=>h.target=null);if(rem){rem.ax=200;rem.ay=545;rem.gx=200;}}
   reset();
   const vp=h=>{const bot=VH-26,k=Math.min(VW/400,(bot-hudTop)/552);return{cx:VW/2,cy:(hudTop+bot)/2,k,flip:goalie()===h};};
 
-  function finish(kind){
-    const a=attacker(),g=goalie();phase='result';t=0;out=kind;
+  function finish(kind,fromNet){
+    const a=attacker(),g=goalie();
+    if(hold&&sv){puck.vx=sv.x;puck.vy=sv.y;}hold=false;
+    if(D&&a===rem&&!fromNet)D.send({k:'res',n,r:kind,gx:gol.x});
+    phase='result';t=0;out=kind;
     if(kind==='goal'){a.score++;a.stats.goal++;a.res.push(1);puck.vx*=.3;puck.vy*=.3;shake=.35;
       tone(392,392,.18,'sawtooth',.1);tone(523,523,.18,'sawtooth',.1,.18);tone(659,659,.4,'sawtooth',.1,.36);try{navigator.vibrate&&navigator.vibrate(200)}catch(e){}}
     else{g.score++;g.stats.save++;a.res.push(0);
@@ -1862,11 +1881,13 @@ function runHokej(entries,done,opts={}){
     if(phase==='end')return;
     const a=attacker(),g=goalie(),P=AT[n];
     let gt=null,gs=220;
-    if(g.bot){if(puck.fly){if(t>P.delay||phase!=='shot'){gt=puck.px+P.err;gs=215;}}else{gt=puck.x+P.off;gs=140;}}
+    if(g.remote){gt=rem.gx;gs=330;}
+    else if(g.bot){if(puck.fly){if(t>P.delay||phase!=='shot'){gt=puck.px+P.err;gs=215;}}else{gt=puck.x+P.off;gs=140;}}
     else gt=g.target;
     if(gt!=null){const m=gs*dt;gol.x+=cl(cl(gt,137,263)-gol.x,-m,m);}
-    if(phase==='intro'){if(t>=(n?1.6:2.6)){phase='skate';t=0;}}
+    if(phase==='intro'){if(!a.remote&&t>=(n?1.6:2.6)){phase='skate';t=0;}}
     else if(phase==='skate'){
+      if(a.remote){const q=Math.min(1,dt*14);att.x+=(rem.ax-att.x)*q;att.y+=(rem.ay-att.y)*q;puck.x=att.x+8;puck.y=att.y-20;return;}
       att.vy+=(88-att.vy)*Math.min(1,dt*2.5);att.y-=att.vy*dt;
       const at=a.bot?200+P.A*Math.sin(P.w*t+P.ph):a.target;
       if(at!=null){const m=240*dt;att.x+=cl(at-att.x,-m,m);}
@@ -1877,10 +1898,12 @@ function runHokej(entries,done,opts={}){
       shootReq=null;
       if(ang==null&&att.y<=235)ang=0;
       if(ang!=null){ang=cl(ang,-1,1);puck.fly=true;puck.vx=Math.sin(ang)*520;puck.vy=-Math.cos(ang)*520;
-        puck.px=puck.x+puck.vx*((puck.y-116)/-puck.vy);phase='shot';t=0;tone(700,200,.08,'square',.1);}
+        puck.px=puck.x+puck.vx*((puck.y-116)/-puck.vy);phase='shot';t=0;tone(700,200,.08,'square',.1);
+        if(g.remote){sv={x:puck.vx,y:puck.vy};D.send({k:'shot',n,x:puck.x,y:puck.y,a:ang});}}
     }else if(phase==='shot'){
       att.vy*=.96;att.y=Math.max(150,att.y-att.vy*dt);
       const py=puck.y;puck.x+=puck.vx*dt;puck.y+=puck.vy*dt;
+      if(g.remote){if(puck.y<=118&&!hold){puck.y=118;hold=true;puck.vx=puck.vy=0;}if(t>5)finish('miss',true);return;}
       if(!puck.pass&&py>116&&puck.y<=116){puck.pass=true;if(Math.abs(puck.x-gol.x)<31){puck.y=118;finish('save');return;}}
       if(puck.y<=90){const x=puck.x;if(x>131&&x<269)finish('goal');else if(Math.abs(x-125)<=6||Math.abs(x-275)<=6)finish('post');else finish('miss');}
       else if(puck.x<24||puck.x>376||t>2)finish('miss');
@@ -1892,6 +1915,21 @@ function runHokej(entries,done,opts={}){
     }
   }
 
+  function onPeerMsg(from,d){
+    if(!D||finished||!d||phase==='end')return;
+    if(d.tm!=null&&TEAMS[d.tm])rem.team=TEAMS[d.tm];
+    if(d.n>n&&d.n<N){n=d.n;reset();phase='intro';t=0;}
+    if(d.n!==n)return;
+    const ra=attacker()===rem;
+    if(d.k==='st'&&ra){rem.ax=d.ax;rem.ay=d.ay;if((phase==='intro'&&d.ph==='skate')){phase='skate';t=0;}}
+    else if(d.k==='g'&&!ra)rem.gx=d.x;
+    else if(d.k==='shot'&&ra&&(phase==='intro'||phase==='skate')){
+      const ang=cl(d.a,-1,1);att.x=d.x-8;att.y=d.y+20;puck.x=d.x;puck.y=d.y;puck.fly=true;puck.pass=false;
+      puck.vx=Math.sin(ang)*520;puck.vy=-Math.cos(ang)*520;puck.px=puck.x+puck.vx*((puck.y-116)/-puck.vy);
+      phase='shot';t=0;tone(700,200,.08,'square',.1);
+    }
+    else if(d.k==='res'&&!ra&&(phase==='shot'||phase==='skate')){gol.x=d.gx;finish(d.r,true);}
+  }
   function emo(x,y,e,flip,sz){ctx.save();ctx.translate(x,y);if(flip)ctx.rotate(Math.PI);ctx.font=sz+'px system-ui,"Noto Color Emoji",sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillStyle='#000';ctx.fillText(e,0,0);ctx.restore();}
   function world(flip,showAim){
     const a=attacker(),g=goalie();
@@ -1944,7 +1982,7 @@ function runHokej(entries,done,opts={}){
     const lab=h.p.avatar+' '+h.p.name+' '+h.team.e,w=ctx.measureText(lab).width+(big?28:20);
     ctx.fillStyle=h.p.color;rr(big?10:6,big?10:5,w,ch,big?14:10);ctx.fill();ctx.fillStyle='#fff';ctx.fillText(lab,big?24:16,(big?10:5)+ch/2+1);
     ctx.font=FONT(big?40:28);ctx.lineWidth=big?6:5;txt(h.score,w+(big?26:16),(big?10:5)+ch/2+1,'#1f2937');
-    ctx.font=FONT(big?18:15);ctx.lineWidth=4;ctx.textAlign='right';txt('Nájazd '+Math.min(n+1,N)+'/'+N,VW-(big?64:8),(big?10:5)+ch/2+1,'#1f2937');
+    ctx.font=FONT(big?18:15);ctx.lineWidth=4;ctx.textAlign='right';txt('Nájazd '+Math.min(n+1,N)+'/'+N,big&&opts.opp?VW-10:VW-(big?64:8),big&&opts.opp?97:(big?10:5)+ch/2+1,'#1f2937');
     if(big&&opts.opp)drawOppHud(h.score,opts.opp());
     // spodný riadok: rola + séria
     ctx.fillStyle='rgba(15,23,42,.82)';ctx.fillRect(0,VH-26,VW,26);
@@ -1999,6 +2037,9 @@ function runHokej(entries,done,opts={}){
     acc+=Math.min(dt,.05);
     let k=0;while(acc>=STEP&&k<10){step(STEP);acc-=STEP;k++;}
     const f=Math.min(dt,.05);clock+=f;shake=Math.max(0,shake-f);
+    if(D&&!finished&&phase!=='end'){netT+=f;if(netT>=.08){netT=0;
+      if(attacker()===Hs[0]){if(phase==='intro'||phase==='skate')D.send({k:'st',n,ph:phase,ax:Math.round(att.x),ay:Math.round(att.y),tm:myTeam});}
+      else D.send({k:'g',n,x:Math.round(gol.x),tm:myTeam});}}
     if(phase==='end'&&t>=2.4&&!finished){finished=true;cleanup();done(Hs.map(h=>({score:h.score,stats:h.stats})));return;}
     if(!finished)draw();
   }
@@ -2021,7 +2062,7 @@ function runHokej(entries,done,opts={}){
   document.addEventListener('visibilitychange',onVis);
   quitBtn.onclick=askQuit;
   raf=requestAnimationFrame(loop);
-  return {abort(){if(!finished){finished=true;cleanup();}closeModal();}};
+  return {onPeer:onPeerMsg,abort(){if(!finished){finished=true;cleanup();}closeModal();}};
 }
 
 /* ---------- aplikácia (PWA) ---------- */

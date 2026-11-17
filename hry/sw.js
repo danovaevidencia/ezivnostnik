@@ -1,5 +1,5 @@
 // Offline cache pre "Hry pre partiu". Pri zmene hry zvýš VERZIU.
-const VERSION='hry-v4';
+const VERSION='hry-v5';
 const CORE=['./','./index.html','./manifest.webmanifest','./icon-192.png','./icon-512.png','./maskable-192.png','./maskable-512.png','./apple-touch-icon.png'];
 const EXTRA=['https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js'];
 self.addEventListener('install',e=>{
